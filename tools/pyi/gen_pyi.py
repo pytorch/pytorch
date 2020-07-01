@@ -445,7 +445,7 @@ def gen_pyi(declarations_path, out):
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
         # SKIP_PYTHON_BINDINGS because they are hand bound.
-        # Correspondingly, we must hand-write their signatures.
+        # Corespondingly, we must hand-write their signatures.
         'tensor': ["def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
@@ -460,9 +460,11 @@ def gen_pyi(declarations_path, out):
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
-        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+        'randint': ['def randint(low: _int, high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
-                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    'def randint(high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
                  ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
