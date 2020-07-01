@@ -445,7 +445,7 @@ def gen_pyi(declarations_path, out):
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
         # SKIP_PYTHON_BINDINGS because they are hand bound.
-        # Corespondingly, we must hand-write their signatures.
+        # Correspondingly, we must hand-write their signatures.
         'tensor': ["def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
