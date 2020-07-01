@@ -22,6 +22,8 @@ RecordFunctionHandle next_unique_record_function_handle() {
 // must be sorted in increasing handles order
 thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
 
+std::atomic<int64_t> defaultNodeId(-1);
+
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
@@ -210,14 +212,56 @@ inline CallbackManager& manager() {
   return _manager;
 }
 
-} // namespace
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
 
-/* static */
-double RecordFunctionCallback::sample_zero_one() {
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
   static thread_local auto gen =
       std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
+}
+
+} // namespace
+
+bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
+  // first check whether this callback is interested in
+  // the given scope type
+  if (!checkScope(scope)) {
+    return false;
+  }
+  // if we have registered should_run_ function, use it
+  if (should_run_) {
+    return should_run_(*this);
+  }
+  // otherwise potentially do the uniform sampling
+  if (sampling_prob_ != 1.0) {
+    // model the low probability events as events happening
+    // with prob. kLowProb followed by another sampling with
+    // prob. (sampling_prob_ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution
+    if (sampling_prob_ < kLowProb) {
+      if (tries_left_ == 0) {
+        tries_left_ = sample_geometric();
+        return (sample_zero_one() < sampling_prob_ / kLowProb);
+      } else {
+        --tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < sampling_prob_);
+    }
+  }
+  return true;
 }
 
 RecordFunctionCallbacks _getTLSCallbacks() {
@@ -326,6 +370,15 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   thread_id_ = currentThreadId();
 
   manager().runStartCallbacks(*this);
+}
+
+/* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
+  TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
+  defaultNodeId = newDefaultNodeId;
+}
+
+/* static */ int64_t RecordFunction::getDefaultNodeId() {
+  return defaultNodeId;
 }
 
 RecordFunction::~RecordFunction() {

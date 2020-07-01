@@ -1,6 +1,6 @@
 // Warning: this file is included twice in aten/src/ATen/test/cuda_complex_math_test.cu
 
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <gtest/gtest.h>
 
 #ifndef PI

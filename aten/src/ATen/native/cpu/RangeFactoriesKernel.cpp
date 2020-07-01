@@ -18,7 +18,8 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
     using step_t = std::conditional_t<std::is_integral<scalar_t>::value, double, scalar_t>;
     const scalar_t start = scalar_start.to<scalar_t>();
     const scalar_t end = scalar_end.to<scalar_t>();
-    const step_t step = static_cast<step_t>(end - start) / (steps - 1);
+    // Cast `end` and `start` to `step_t`, since range can be larger than scalar_t for integral types
+    const step_t step = (static_cast<step_t>(end) - static_cast<step_t>(start)) / (steps - 1);
     int64_t halfway = steps / 2;
     at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       int64_t idx(p_begin);

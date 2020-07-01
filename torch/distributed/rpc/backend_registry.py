@@ -18,9 +18,18 @@ def _backend_type_repr(self):
     return "BackendType." + self.name
 
 
+_backend_type_doc = """
+    An enum class of available backends.
+
+    PyTorch ships with two builtin backends: ``BackendType.PROCESS_GROUP`` and
+    ``BackendType.TENSORPIPE``. Additional ones can be registered using the
+    :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
+"""
+
 # Create an enum type, `BackendType`, with empty members.
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
+BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
     """
@@ -65,6 +74,7 @@ def register_backend(
     )
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
     BackendType.__repr__ = _backend_type_repr
+    BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
 
@@ -145,14 +155,20 @@ register_backend(
 def _tensorpipe_construct_rpc_backend_options_handler(
     rpc_timeout,
     init_method,
+    num_worker_threads=rpc_constants.DEFAULT_NUM_WORKER_THREADS,
+    _transports=None,
+    _channels=None,
     **kwargs
 ):
     from . import TensorPipeRpcBackendOptions
 
-    rpc_backend_options = TensorPipeRpcBackendOptions()
-    rpc_backend_options.rpc_timeout = rpc_timeout
-    rpc_backend_options.init_method = init_method
-    return rpc_backend_options
+    return TensorPipeRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_worker_threads=num_worker_threads,
+        _transports=_transports,
+        _channels=_channels,
+    )
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):

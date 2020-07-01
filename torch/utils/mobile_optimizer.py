@@ -5,7 +5,7 @@ This module contains utility method for mobile model optimization and lint.
 import torch
 from enum import Enum
 from torch._C import MobileOptimizerType
-from typing import Set
+from typing import Set, List, AnyStr
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -13,7 +13,10 @@ class LintCode(Enum):
     DROPOUT = 3
     BATCHNORM = 4
 
-def optimize_for_mobile(script_module, optimization_blacklist: Set[MobileOptimizerType] = None):
+def optimize_for_mobile(
+        script_module,
+        optimization_blacklist: Set[MobileOptimizerType] = None,
+        preserved_methods: List[AnyStr] = None):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule
@@ -30,7 +33,10 @@ def optimize_for_mobile(script_module, optimization_blacklist: Set[MobileOptimiz
     if optimization_blacklist is None:
         optimization_blacklist = set()
 
-    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blacklist)
+    if preserved_methods is None:
+        preserved_methods = []
+
+    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blacklist, preserved_methods)
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
 
 
