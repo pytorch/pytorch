@@ -41,6 +41,7 @@ run_tests() {
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat && \
+        $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
@@ -48,6 +49,7 @@ run_tests() {
             $SCRIPT_HELPERS_DIR/test_libtorch.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
+            $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         fi
     fi
