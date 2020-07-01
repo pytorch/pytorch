@@ -13,51 +13,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
-{
-  std::atomic<int> equal{1};
-  if(!THTensor_(isSameSizeAs)(ta, tb))
-    return 0;
-
-  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    scalar_t *tap = ta->data<scalar_t>();
-    scalar_t *tbp = tb->data<scalar_t>();
-    ptrdiff_t sz = THTensor_(nElement)(ta);
-    ptrdiff_t i;
-    at::parallel_for(
-        0,
-        sz,
-        TH_OMP_OVERHEAD_THRESHOLD,
-        [&](int64_t begin, int64_t end) {
-          for (auto iter = begin; iter < end; iter++) {
-            if (!equal) {
-              break;
-            }
-            if (tap[iter] != tbp[iter]) {
-              equal = 0;
-              break;
-            }
-          }
-        });
-  } else {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
-                     if (equal && *ta_data != *tb_data) {
-                        equal = 0;
-                        TH_TENSOR_APPLY_hasFinished = 1; break;
-                     })
-  }
-  return equal.load();
-}
-
-int THTensor_(equal)(THTensor *ta, THTensor* tb) {
-  if (!at::namedinference::are_names_equal(ta, tb)) {
-    return 0;
-  }
-  at::NoNamesGuard guard;
-  return THTensor_(equalImpl)(ta, tb);
-}
-
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_BOOL)
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article

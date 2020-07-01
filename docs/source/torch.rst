@@ -333,6 +333,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -421,6 +422,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations

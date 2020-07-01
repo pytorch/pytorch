@@ -38,7 +38,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
     .add_input(self)
@@ -122,15 +122,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
       }, /*init_val=*/ -std::numeric_limits<scalar_t>::infinity()
     );
   });
-}
-
-static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::BFloat16, ScalarType::Half, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
-        binary_kernel_reduce_vec(
-            iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-            [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
-      });
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {
@@ -304,7 +295,6 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);

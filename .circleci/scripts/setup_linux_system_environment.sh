@@ -33,7 +33,7 @@ systemctl list-units --all | cat
 sudo pkill apt-get || true
 
 # For even better luck, purge unattended-upgrades
-sudo apt-get purge -y unattended-upgrades
+sudo apt-get purge -y unattended-upgrades || true
 
 cat /etc/apt/sources.list
 
