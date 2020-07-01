@@ -570,30 +570,70 @@ class TestTracer(JitTestCase):
         with self.assertRaises(RuntimeError):
             self.checkTrace(test, {})
 
-    def test_input_dict_flattens(self):
-        class Test(torch.nn.Module):
-            def forward(self, d):
-                return d['x'] + d['y']
+    def test_input_dict_remembers_keys(self):
+        """Check that the trace remembers which keys were in a dict input"""
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
 
-        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
-        module = torch.jit.trace(Test(), inputs)
+            def forward(self, dict_input):
+                return dict_input['x']
 
-        FileCheck().check('aten::values').check('prim::ListUnpack').run(str(module.graph))
+        input_1 = {'x': torch.tensor(1)}
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_1, ))
+        self.assertEqual(m_traced(input_1), torch.tensor(1))
 
-    def test_input_dict_flattens_recursive(self):
-        class Test(torch.nn.Module):
-            def forward(self, d):
-                # Use both to avoid getting optimized away
-                a = d['x'][0]
-                b, c = d['y']
-                return a + b
+        # should work to change the values and not the keys
+        input_same_key_different_value = {'x': torch.tensor(2)}
+        self.assertEqual(m_traced(input_same_key_different_value), torch.tensor(2))
 
-        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2)), 'y': (torch.ones(1, 1), torch.ones(2, 1))}
-        module = torch.jit.trace(Test(), inputs)
-        FileCheck().check('aten::values') \
-                   .check('prim::ListUnpack') \
-                   .check_count('prim::TupleUnpack', 2) \
-                   .run(str(module.graph))
+        # error to use something that doesn't have `x`
+        input_different_key = {'y': torch.tensor(3)}
+        with self.assertRaises(RuntimeError):
+            m_traced(input_different_key)
+
+        # it's okay to have additional elements in the dictionary, so long as 'x' is there
+        input_additional_key = {'x': torch.tensor(4), 'y': torch.tensor(3)}
+        self.assertEqual(m_traced(input_additional_key), torch.tensor(4))
+
+    def test_input_dict_insertion_order(self):
+        """Check that dictionary access doesn't care about insertion order"""
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, dict_input):
+                return dict_input['x'], dict_input['y']
+        input_x_then_y = {}
+        input_x_then_y['x'] = torch.tensor(1)
+        input_x_then_y['y'] = torch.tensor(2)
+
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_x_then_y, ))
+
+        self.assertEqual(m_traced(input_x_then_y), (torch.tensor(1), torch.tensor(2)))
+
+        input_y_then_x = {}
+        input_y_then_x['y'] = torch.tensor(4)
+        input_y_then_x['x'] = torch.tensor(3)
+
+        self.assertEqual(m_traced(input_y_then_x), (torch.tensor(3), torch.tensor(4)))
+
+    def test_input_dict_recursive(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, dict_input):
+                return dict_input['x'][1]
+
+        input_1 = {'x': {1: torch.tensor(1)}}
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_1, ))
+
+        input_2 = {'x': {1: torch.tensor(2)}}
+        self.assertEqual(m_traced(input_2), torch.tensor(2))
 
     def test_input_dict_checkTrace_mut(self):
         def test(d):
@@ -2074,8 +2114,5 @@ class TestMixTracingScripting(JitTestCase):
         input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
         model = testA()
         traced_model = torch.jit.trace(model, input_map)
-        # the dict should not be inlined as constants in the IR
-        self.assertFalse("CONSTANTS" in str(traced_model.code))
-
-        new_input_map = {"new1" : [torch.rand(2, 2), torch.randn(2, 2)], "new3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        new_input_map = {"1" : [torch.rand(2, 2), torch.randn(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
         self.assertEqual(model(new_input_map), traced_model(new_input_map))

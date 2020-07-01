@@ -23,7 +23,9 @@ constexpr int64_t kBatchDimsStackSize = 5;
 // a BatchDim represents a "private" dimension on a Tensor created inside of
 // vmap. It is a (level, dim) tuple, with the `dim` indicating which dimension
 // is being vmap'ed over and the `level` being an identifier for which vmap
-// said dimension was created inside.
+// said dimension was created inside. The `dim` corresponds to a "physical
+// dim" - it is a dimension index on the underlying physical tensor that is being
+// vmapped over.
 struct BatchDim {
   BatchDim(int64_t level, int64_t dim) : dim_(dim), level_(level) {}
   int64_t dim() const {

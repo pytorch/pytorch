@@ -334,13 +334,17 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
 
     Args:
         obj: saved object
-        f: a file-like object (has to implement write and flush) or a string
-           containing a file name
+        f: a file-like object (has to implement write and flush) or a string or
+           os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
+
+    .. note::
+        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
+        for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
@@ -358,12 +362,11 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
     """
     _check_dill_version(pickle_module)
 
-    if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f) as opened_file:
-            _save(obj, opened_file, pickle_module, pickle_protocol)
-            return
-
     with _open_file_like(f, 'wb') as opened_file:
+        if _use_new_zipfile_serialization:
+            with _open_zipfile_writer(opened_file) as opened_zipfile:
+                _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+                return
         _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
@@ -518,7 +521,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     Args:
         f: a file-like object (has to implement :meth:`read`, :meth`readline`, :meth`tell`, and :meth`seek`),
-            or a string containing a file name
+            or a string or os.PathLike object containing a file name
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
@@ -571,7 +574,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
-            with _open_zipfile_reader(f) as opened_zipfile:
+            with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
@@ -769,6 +772,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         if offset is not None:
             offset = f.tell()
 
+    torch._utils._validate_loaded_sparse_tensors()
+
     return result
 
 
@@ -836,6 +841,8 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
+
+    torch._utils._validate_loaded_sparse_tensors()
 
     return result
 
