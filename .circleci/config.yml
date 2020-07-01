@@ -1853,8 +1853,7 @@ jobs:
   pytorch_doc_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
-      # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:fff7795428560442086f7b2bb6004b65245dc11a"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: medium
     machine:
       image: ubuntu-1604:201903-01
