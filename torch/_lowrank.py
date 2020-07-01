@@ -120,7 +120,7 @@ def svd_lowrank(A, q=6, niter=2, M=None):
           structure with randomness: probabilistic algorithms for
           constructing approximate matrix decompositions,
           arXiv:0909.4061 [math.NA; math.PR], 2009 (available at
-          `arXiv <http://arxiv.org/abs/0909.4061>`_).
+          `arXiv <https://arxiv.org/abs/0909.4061>`_).
 
     """
     if not torch.jit.is_scripting():

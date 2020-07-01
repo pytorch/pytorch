@@ -41,7 +41,7 @@ class Stream(torch._C._CudaStreamBase):
            operations are affected.
 
         .. _CUDA Stream documentation:
-           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
+           https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         event.wait(self)
 

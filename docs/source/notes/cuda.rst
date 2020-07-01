@@ -119,7 +119,7 @@ necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
 ensure proper synchronization.
 
-.. _CUDA stream: http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
+.. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
 .. _cuda-memory-management:
 
