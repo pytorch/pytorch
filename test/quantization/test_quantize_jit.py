@@ -2952,6 +2952,7 @@ class TestQuantizeQATJit(QuantizationTestCase):
 
     def test_prepare_qat(self):
 
+        # TODO(future PR): add more complicated cases
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -2963,39 +2964,37 @@ class TestQuantizeQATJit(QuantizationTestCase):
                 x = self.bn11(x)
                 return x
 
-        if False:
-            # debug only - eager mode
-            eager = M()
-            torch.quantization.fuse_modules(eager, [['conv11', 'bn11']], inplace=True)
-            eager.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
-            torch.quantization.prepare_qat(eager, inplace=True)
-            # print(eager)
-            eager_scripted = torch.jit.script(eager)
-            # print(eager_scripted)
-            # print(eager_scripted.conv1._forward.graph)
-            # print(type(eager_scripted.conv1._forward.graph))
-            # print(eager_scripted.conv1._forward.code)
-            # scripted_func = torch.jit.script(torch.nn.intrinsic.qat.modules.conv_fused._conv_forward_and_unscale_2)
-            # print(scripted_func.graph)
-            # print(scripted_func.code)
-            # print(eager_scripted.conv1._conv_forward_and_unscale_2.graph)
-            # print(eager_scripted.conv1._conv_forward_and_unscale.code)
-
-        m = torch.jit.script(M())
-        m = prepare_qat_jit(m, {'': default_qat_qconfig})
-
-        # run an image through
-        # TODO (next): fix the error (most likely need to fix the types on self.conv and self.bn in the IR)
         data = torch.rand(4, 1, 1, 1)
-        result = m(data)
-        print(result)
 
-        # TODO(future PR): modify this as needed after we add QAT conv-bn logic
-        if False:
-            assert len(attrs_with_prefix(m, '_observer_')) == 2
-            assert len(attrs_with_prefix(m.conv1, '_observer_')) == 1
-            FileCheck().check('FakeQuantize = prim::GetAttr[name="_observer_') \
-                       .check('prim::GetAttr[name="conv1"]') \
-                       .check('prim::CallMethod') \
-                       .check_not('Observer = prim::GetAttr[name="_observer_') \
-                       .run(m.graph)
+        eager_mod = M()
+        graph_orig = M()
+        # ensure all params and buffers are equivalent
+        graph_orig.load_state_dict(eager_mod.state_dict())
+
+        # create a reference fused conv-bn using eager_mod mode QAT
+
+        torch.quantization.fuse_modules(eager_mod, [['conv11', 'bn11']], inplace=True)
+        eager_mod.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(eager_mod, inplace=True)
+        eager_mod.apply(torch.quantization.disable_fake_quant)
+
+        # create a conv-bn using graph mode QAT
+
+        graph_mod = torch.jit.script(graph_orig)
+        graph_mod = prepare_qat_jit(graph_mod, {'': default_qat_qconfig})
+
+        FileCheck().check('aten::qat_conv2d_and_unscale') \
+                   .run(graph_mod.graph)
+
+        # Disable fake quant so we can match numerics with unmodified conv-bn.
+        # TODO(future PR): make this work on a model level instead.
+        # Things like m.apply(torch.quantization.disable_fake_quant) not working at the moment.
+        graph_mod._observer_0.disable_fake_quant()
+
+        # ensure that numerics match between original module and combined-convbn
+        # with fake_quant disabled
+        self.assertTrue(torch.allclose(graph_orig(data), graph_mod(data)))
+
+        # ensure that numerics match between eager_mod and graph conv-bn after prepare
+        # TODO(future PR): enable fake_quant (after modifying observer pass)
+        self.assertTrue(torch.allclose(graph_mod(data), eager_mod(data)))

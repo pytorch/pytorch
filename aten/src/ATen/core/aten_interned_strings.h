@@ -549,7 +549,6 @@ _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
-_(aten, qat_conv2d_and_unscale) \
 _(aten, qr) \
 _(aten, rad2deg) \
 _(aten, rand) \
