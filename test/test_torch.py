@@ -8439,7 +8439,7 @@ class TestTorchDeviceType(TestCase):
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_broadcast_batched_matmul(self, device, rtol, atol):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
@@ -10429,7 +10429,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_qr(self, device, rtol, atol):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
@@ -11516,7 +11516,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
     @slowTest
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_cdist_large_batch(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -11525,7 +11525,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_cdist_non_contiguous(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).transpose(-1, -2)
@@ -11552,7 +11552,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(y.is_contiguous())
             self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_cdist_non_contiguous_batch(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
@@ -17950,7 +17950,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
     @onlyCUDA
-    @tf32_on_and_off
+    @tf32_on_and_off()
     def test_mv_stride_0(self, device, rtol, atol):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
