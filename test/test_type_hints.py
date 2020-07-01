@@ -5,12 +5,10 @@ import tempfile
 import torch
 import re
 import os
-import sys
-import subprocess
 import inspect
 
 try:
-    import mypy  # noqa: F401
+    import mypy.api
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False
@@ -151,18 +149,14 @@ class TestTypeHints(TestCase):
                 )
             except OSError:
                 raise unittest.SkipTest('cannot symlink')
-            try:
-                subprocess.run([
-                    sys.executable,
-                    '-mmypy',
-                    '--follow-imports', 'silent',
-                    '--check-untyped-defs',
-                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
-                    os.path.abspath(fn)],
-                    cwd=tmp_dir,
-                    check=True)
-            except subprocess.CalledProcessError as e:
-                raise AssertionError("mypy failed.  Look above this error for mypy's output.")
+            (stdout, stderr, result) = mypy.api.run([
+                '--follow-imports', 'silent',
+                '--check-untyped-defs',
+                '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
+                os.path.abspath(fn),
+            ])
+            if result != 0:
+                self.fail("mypy failed:\n{}".format(stdout))
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_type_hint_examples(self):
@@ -174,17 +168,14 @@ class TestTypeHints(TestCase):
         examples_folder = os.path.join(test_path, "type_hint_tests")
         examples = os.listdir(examples_folder)
         for example in examples:
-            try:
-                example_path = os.path.join(examples_folder, example)
-                subprocess.run([
-                    sys.executable,
-                    '-mmypy',
-                    '--follow-imports', 'silent',
-                    '--check-untyped-defs',
-                    example_path],
-                    check=True)
-            except subprocess.CalledProcessError as e:
-                raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
+            example_path = os.path.join(examples_folder, example)
+            (stdout, stderr, result) = mypy.api.run([
+                '--follow-imports', 'silent',
+                '--check-untyped-defs',
+                example_path,
+            ])
+            if result != 0:
+                self.fail("mypy failed for exampl {}\n{}".format(example, stdout))
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
@@ -206,17 +197,21 @@ class TestTypeHints(TestCase):
         repo_rootdir = os.path.join(test_dir, '..')
         mypy_inifile = os.path.join(repo_rootdir, 'mypy.ini')
         if not (os.path.exists(mypy_inifile) and is_torch_mypyini(mypy_inifile)):
-            self.skipTest(True)
+            self.skipTest("Can't find PyTorch MyPy config file")
+
+        import numpy
+        if numpy.__version__ == '1.20.0.dev0+7af1024':
+            self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
         cwd = os.getcwd()
-        try:
-            os.chdir(repo_rootdir)
-            subprocess.run([sys.executable, '-mmypy', '--check-untyped-defs',
-                            '--follow-imports', 'silent'], check=True)
-        except subprocess.CalledProcessError as e:
-            raise AssertionError("mypy failed. Look above this error for mypy's output.")
-        finally:
-            os.chdir(cwd)
+        os.chdir(repo_rootdir)
+        (stdout, stderr, result) = mypy.api.run([
+            '--check-untyped-defs',
+            '--follow-imports', 'silent',
+        ])
+        os.chdir(cwd)
+        if result != 0:
+            self.fail("mypy failed: {}".format(stdout))
 
 if __name__ == '__main__':
     run_tests()

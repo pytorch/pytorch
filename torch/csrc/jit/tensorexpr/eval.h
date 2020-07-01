@@ -124,7 +124,18 @@ inline bool div_value(bool lhs, bool rhs) {
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
  public:
-  using CodeGen::CodeGen;
+  template <typename... Ts>
+  SimpleIREvaluator(Stmt* stmt, Ts... ts) : CodeGen(stmt, ts...) {
+    expand_intrinsics();
+  }
+
+  SimpleIREvaluator(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::kCPU)
+      : CodeGen(stmt, buffer_args, device) {
+    expand_intrinsics();
+  }
 
   ~SimpleIREvaluator() override {}
 
@@ -711,6 +722,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
  private:
+  void expand_intrinsics() {
+    GenericIntrinsicsExpander intrinsics_expander;
+    apply_mutator(&intrinsics_expander);
+  }
+
   static float compute_intrinsics(IntrinsicsOp op_type, float v) {
     switch (op_type) {
       case kSin:

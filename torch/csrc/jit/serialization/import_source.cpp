@@ -449,7 +449,7 @@ struct SourceImporterImpl : public Resolver,
           const auto type = type_parser.parseTypeFromExpr(assign.type().get());
           const bool is_parameter = parameter_names.count(name);
           const bool is_buffer = buffer_names.count(name);
-          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         } break;
         case TK_SUBSCRIPT: {
           const auto name =
@@ -458,7 +458,7 @@ struct SourceImporterImpl : public Resolver,
           const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
           const bool is_parameter = parameter_names.count(name);
           const bool is_buffer = buffer_names.count(name);
-          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         }
       }
     }

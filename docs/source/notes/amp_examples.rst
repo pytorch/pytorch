@@ -44,7 +44,7 @@ Typical Mixed Precision Training
 
             # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
             # Backward passes under autocast are not recommended.
-            # Backward ops run in the same precision that autocast used for corresponding forward ops.
+            # Backward ops run in the same dtype autocast chose for corresponding forward ops.
             scaler.scale(loss).backward()
 
             # scaler.step() first unscales the gradients of the optimizer's assigned params.
@@ -368,8 +368,8 @@ the relevant case below.
 Functions with multiple inputs or autocastable ops
 --------------------------------------------------
 
-Apply :func:`custom_fwd` and :func:`custom_bwd` (with no arguments) to ``forward`` and ``backward``
-respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
+Apply :func:`custom_fwd<custom_fwd>` and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``forward`` and
+``backward`` respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
 executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
@@ -391,13 +391,14 @@ Now ``MyMM`` can be invoked anywhere, without disabling autocast or manually cas
     with autocast():
         output = mymm(input1, input2)
 
-Functions that need a particular dtype
---------------------------------------
+Functions that need a particular ``dtype``
+------------------------------------------
 
+Consider a custom function that requires ``torch.float32`` inputs.
 Apply :func:`custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
 and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
-With ``cast_inputs=torch.float32``, these disable autocast in ``forward`` and ``backward``,
-and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
+If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
+inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``::
 
     class MyFloat32Func(torch.autograd.Function):
         @staticmethod
@@ -411,7 +412,7 @@ and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
         def backward(ctx, grad):
             ...
 
-Now ``MyFloat32Func`` can be invoked anywhere, without disabling autocast or manually casting inputs::
+Now ``MyFloat32Func`` can be invoked anywhere, without manually disabling autocast or casting inputs::
 
     func = MyFloat32Func.apply
 

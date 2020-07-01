@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -134,7 +137,6 @@ _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
@@ -257,6 +259,7 @@ _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
+_(aten, count_nonzero) \
 _(aten, cross) \
 _(aten, std_mean) \
 _(aten, var_mean) \
@@ -283,6 +286,7 @@ _(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
+_(aten, deg2rad) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
@@ -328,8 +332,11 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -544,6 +551,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \
@@ -723,8 +731,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
-_(aten, copy_real) \
-_(aten, copy_imag) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \
