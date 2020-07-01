@@ -26,7 +26,7 @@ popd
 python test_custom_backend.py -v
 if ERRORLEVEL 1 exit /b 1
 
-python backend.py --export-model-to="build/model.pt"
+python backend.py --export-module-to="build/model.pt"
 if ERRORLEVEL 1 exit /b 1
 
 :: Run tests C++-side and load the exported script module.
