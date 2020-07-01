@@ -6958,9 +6958,9 @@ full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
 
 .. warning::
-    In PyTorch 1.5 a bool or integral :attr:`fill_value` will produce a warning if
-    :attr:`dtype` or :attr:`out` are not set.
-    In a future PyTorch release, when :attr:`dtype` and :attr:`out` are not set
+    Providing a bool or integral :attr:`fill_value` without setting
+    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
+    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
     a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
     and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
 
