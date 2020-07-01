@@ -1234,21 +1234,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -1881,11 +1877,13 @@ void testFutures() {
   {
     auto f1 = c10::make_intrusive<Future>(IntType::get());
     ASSERT_FALSE(f1->completed());
+    ASSERT_FALSE(f1->hasValue());
     int32_t sat1 = 0;
     int32_t sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
     f1->markCompleted(43);
     ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasValue());
     ASSERT_FALSE(f1->hasError());
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(f1->constValue().toInt(), 43);
@@ -1905,16 +1903,12 @@ void testFutures() {
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
+    ASSERT_FALSE(f1->hasValue());
     try {
       (void)f1->value();
       ASSERT_TRUE(false); // Supposed to throw.
     } catch (const std::exception& e) {
       ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
-    }
-    try {
-      (void)f1->constValue();
-    } catch (const std::exception& e) {
-      ASSERT_TRUE(false); // Not supposed to throw.
     }
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);

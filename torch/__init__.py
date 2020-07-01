@@ -34,7 +34,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg',
+    'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
 
 ################################################################################
@@ -290,6 +290,27 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+def set_deterministic(d):
+    r"""Sets a global flag to force all operations to use a deterministic
+    implementation if available. If an operation that does not have a
+    deterministic implementation is called while this setting is True, the
+    operation will throw a RuntimeError.
+
+    Note that deterministic operations tend to have worse performance than
+    non-deterministic operations.
+
+    Args:
+        d (:class:`bool`): If True, force operations to be deterministic.
+                           If False, allow non-deterministic operations.
+    """
+    _C._set_deterministic(d)
+
+def is_deterministic():
+    r"""Returns True if the global deterministic flag is turned on and
+    operations are being forced to use a deterministic implementation.
+    """
+    return _C._get_deterministic()
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -487,6 +508,8 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
+
+from ._vmap_internals import vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom

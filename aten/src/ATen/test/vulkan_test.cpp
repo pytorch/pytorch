@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/ATen.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/vulkan/Context.h>
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
@@ -475,13 +475,17 @@ TEST(VulkanTest, conv2dPrepack) {
   auto stride = c10::IntArrayRef{1};
   auto padding = c10::IntArrayRef{0};
   auto dilation = c10::IntArrayRef{1};
-  float output_min = -10;
-  float output_max = 10;
+  float output_min = 0.25;
+  float output_max = 1.0;
 
-  auto t_out_expected =
+  auto t_out_conv2d =
       at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
+  auto t_out_expected = at::clamp(t_out_conv2d, output_min, output_max);
+
   auto tv_in = t_in.vulkan();
-  auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
+  auto tv_out_conv2d =
+      at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
+  auto tv_out = at::clamp(tv_out_conv2d, output_min, output_max);
 
   auto t_out = tv_out.cpu();
   bool no_prepack_check = almostEqual(t_out, t_out_expected);
@@ -492,7 +496,7 @@ TEST(VulkanTest, conv2dPrepack) {
   ASSERT_TRUE(no_prepack_check);
 
   auto prepack = callOpByName(
-      "vulkan::conv2d_clamp_prepack",
+      "vulkan_prepack::conv2d_clamp_prepack",
       "",
       t_w,
       t_b,
@@ -503,7 +507,7 @@ TEST(VulkanTest, conv2dPrepack) {
       output_min,
       output_max);
   auto tv_out_prepack_ivalues =
-      callOpByName("vulkan::conv2d_clamp_run", "", tv_in, prepack[0]);
+      callOpByName("vulkan_prepack::conv2d_clamp_run", "", tv_in, prepack[0]);
   auto tv_out_prepack = tv_out_prepack_ivalues[0].toTensor();
   auto t_out_prepack = tv_out_prepack.cpu();
   const auto prepack_check = almostEqual(t_out_prepack, t_out_expected);

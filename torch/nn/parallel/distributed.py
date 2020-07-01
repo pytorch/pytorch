@@ -109,7 +109,12 @@ class DistributedDataParallel(Module):
         same model and thus the exact same parameter registration order.
 
     .. warning::
-        This module assumes all buffers and gradients are dense.
+        This module allows parameters with non-rowmajor-contiguous strides.
+        For example, your model may contain some parameters whose
+        :class:`torch.memory_format` is ``torch.contiguous_format``
+        and others whose format is ``torch.channels_last``.  However,
+        corresponding parameters in different processes must have the
+        same strides.
 
     .. warning::
         This module doesn't work with :func:`torch.autograd.grad` (i.e. it will
@@ -147,6 +152,46 @@ class DistributedDataParallel(Module):
         by the optimizer in all processes in the same way. Buffers
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
+
+    .. note::
+        If you are using DistributedDataParallel in conjunction with the
+        :ref:`distributed-rpc-framework`, you should always use
+        :meth:`torch.distributed.autograd.backward` to compute gradients and
+        :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
+        parameters.
+
+    Example::
+        >>> import torch.distributed.autograd as dist_autograd
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>> from torch import optim
+        >>> from torch.distributed.optim import DistributedOptimizer
+        >>> from torch.distributed.rpc import RRef
+        >>>
+        >>> t1 = torch.rand((3, 3), requires_grad=True)
+        >>> t2 = torch.rand((3, 3), requires_grad=True)
+        >>> rref = rpc.remote("worker1", torch.add, args=(t1, t2))
+        >>> ddp_model = DDP(my_model)
+        >>>
+        >>> # Setup optimizer
+        >>> optimizer_params = [rref]
+        >>> for param in ddp_model.parameters():
+        >>>     optimizer_params.append(RRef(param))
+        >>>
+        >>> dist_optim = DistributedOptimizer(
+        >>>     optim.SGD,
+        >>>     optimizer_params,
+        >>>     lr=0.05,
+        >>> )
+        >>>
+        >>> with dist_autograd.context() as context_id:
+        >>>     pred = ddp_model(rref.to_here())
+        >>>     loss = loss_func(pred, loss)
+        >>>     dist_autograd.backward(context_id, loss)
+        >>>     dist_optim.step()
+
+    .. warning::
+        Using DistributedDataParallel in conjuction with the
+        :ref:`distributed-rpc-framework` is experimental and subject to change.
 
     Args:
         module (Module): module to be parallelized
@@ -320,9 +365,6 @@ class DistributedDataParallel(Module):
                 "Please consider using one DDP instance per device or per "
                 "module replica by explicitly setting device_ids or "
                 "CUDA_VISIBLE_DEVICES. "
-                "NB: There is a known issue in nn.parallel.replicate that "
-                "prevents a single DDP instance to operate on multiple model "
-                "replicas."
             )
 
             # only create replicas for single-device CUDA modules
@@ -335,6 +377,13 @@ class DistributedDataParallel(Module):
 
             for module_copy in self._module_copies[1:]:
                 for param, copy_param in zip(self.module.parameters(), parameters(module_copy)):
+                    # Reducer requires param copies have the same strides across replicas.
+                    # Fixes up copy_param strides in case replicate didn't match param strides.
+                    if param.layout is torch.strided and param.stride() != copy_param.stride():
+                        with torch.no_grad():
+                            copy_param.set_(copy_param.clone()
+                                                      .as_strided(param.size(), param.stride())
+                                                      .copy_(copy_param))
                     copy_param.requires_grad = param.requires_grad
 
         else:
@@ -390,7 +439,8 @@ class DistributedDataParallel(Module):
             list(reversed(bucket_indices)),
             self.process_group,
             expect_sparse_gradient,
-            self.bucket_bytes_cap)
+            self.bucket_bytes_cap,
+            self.find_unused_parameters)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
@@ -508,7 +558,13 @@ class DistributedDataParallel(Module):
                 for tensors, module_params in zip(result[1:],
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
-                        param.set_(tensor)
+                        # Formerly, this spot used param.set_(tensor) to steal tensor's
+                        # data without a deep copy.  Unfortunately, that wiped out the
+                        # allreduce hook attached to param's AccumulateGrad function,
+                        # likely causing https://github.com/pytorch/pytorch/issues/37079.
+                        # TODO:  If set_ becomes safe to use here, use set_.
+                        # Otherwise, find another way to steal tensor's data.
+                        param.copy_(tensor)
                         # Assume we have just run the optimizer and zeroed the
                         # grads of the parameters on the root model. We need
                         # to zero the grads on all model replicas as well.

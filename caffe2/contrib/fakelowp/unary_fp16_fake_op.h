@@ -4,12 +4,13 @@
 
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
-
+using namespace std;
 template <class Context>
 struct ReluFakeFp16Functor {
   template <typename T>
@@ -57,6 +58,22 @@ struct TanhFakeIdealFp16Functor {
         X, X_fp16.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
     math::Tanh<T, CPUContext>(N, X_fp16.data(), Y, context);
     fbgemm::RoundToFloat16(Y, Y, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    return true;
+  }
+};
+
+struct LogitFakeIdealFp16Functor {
+  template <typename T>
+  bool operator()(const int N, const T* X, T* Y, CPUContext* /* unused */)
+      const {
+    std::vector<float> X_fp16(N);
+    fbgemm::RoundToFloat16(
+        X, X_fp16.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    EigenVectorMap<T> X_vec(X_fp16.data(), N);
+    EigenVectorMap<T> Y_vec(Y, N);
+    Y_vec = (X_vec.array() / (T(1) - X_vec.array())).log();
+    fbgemm::RoundToFloat16(
+        Y_vec.data(), Y, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
     return true;
   }
 };
