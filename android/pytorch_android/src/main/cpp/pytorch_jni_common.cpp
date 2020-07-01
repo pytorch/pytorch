@@ -130,9 +130,9 @@ static at::Tensor newAtTensor(
 
   auto tensorOptions = at::TensorOptions(typeMeta);
   if (jmemoryFormat == kTensorMemoryFormatChannelsLast) {
-    // Different path for ChannelsLast memory forrmat case,
+    // Separate path for ChannelsLast memory forrmat case,
     // as from_blob creates empty tensor with shape {0}.
-    // That fails for Channels Last Tensor as it is supported only for 4-dim Tensors
+    // That fails for Channels Last Tensor as it is supported only for 4-dim Tensors.
     at::Tensor t = torch::empty(
         torch::IntArrayRef(shapeVec),
         at::TensorOptions(typeMeta).memory_format(
