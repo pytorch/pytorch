@@ -61,17 +61,19 @@ void cpu_upsample_bicubic(
     const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
         input_width, output_width, align_corners, scales[1]);
 
-    int64_t ih, iw;
-    scalar_t hlambda, wlambda;
     for (int64_t c = begin; c < end; c++) {
       for (int64_t oh = 0; oh < output_height; oh++) {
-        compute_source_index_and_lambda(
-            ih, hlambda, height_scale, oh, input_height, output_height, align_corners);
         for (int64_t ow = 0; ow < output_width; ow++) {
-          compute_source_index_and_lambda(
-              iw, wlambda, width_scale, ow, input_width, output_width, align_corners);
-
           scalar_t* input_ptr = input_data + c * input_height * input_width;
+          scalar_t* output_ptr = output_data + c * output_slice_size;
+
+          const scalar_t real_iw = area_pixel_compute_source_index(width_scale, ow, align_corners, /*cubic=*/true);
+          int64_t iw = floorf(real_iw);
+          const scalar_t t_x = real_iw - iw;
+
+          const scalar_t real_ih = area_pixel_compute_source_index(height_scale, oh, align_corners, /*cubic=*/true);
+          int64_t ih = floorf(real_ih);
+          const scalar_t t_y = real_ih - ih;
 
           // Interpolate 4 times in the x direction
           scalar_t coefficients[4];
@@ -85,17 +87,16 @@ void cpu_upsample_bicubic(
                     input_ptr, input_width, input_height, iw + 1, ih - 1 + i),
                 upsample_get_value_bounded<scalar_t>(
                     input_ptr, input_width, input_height, iw + 2, ih - 1 + i),
-                wlambda);
+                t_x);
           }
           
           // Interpolate in the y direction using x interpolations
-          int64_t output_offset = c * output_slice_size + oh * output_width + ow;
-          output_data[output_offset] = cubic_interp1d<scalar_t>(
+          output_ptr[oh * output_width + ow] = cubic_interp1d<scalar_t>(
               coefficients[0],
               coefficients[1],
               coefficients[2],
               coefficients[3],
-              hlambda);
+              t_y);
         }
       }
     }
