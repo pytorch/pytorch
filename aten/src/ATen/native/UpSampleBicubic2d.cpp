@@ -6,83 +6,6 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t>
-static void upsample_bicubic2d_backward_out_frame(
-    scalar_t* odata,
-    scalar_t* idata,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_height,
-    int64_t output_width,
-    int64_t nbatch,
-    int64_t channels,
-    bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  channels = channels * nbatch;
-
-  // Special case: input/output same size, just copy
-  if (input_height == output_height && input_width == output_width) {
-    for (int64_t output_y = 0; output_y < output_height; output_y++) {
-      for (int64_t output_x = 0; output_x < output_width; output_x++) {
-        scalar_t* in = &idata[output_y * input_width + output_x];
-        scalar_t* out = &odata[output_y * output_width + output_x];
-        for (int64_t c = 0; c < channels; ++c) {
-          in[0] = out[0];
-          in += input_width * input_height;
-          out += output_width * output_height;
-        }
-      }
-    }
-    return;
-  }
-
-  const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners, scales_h);
-  const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners, scales_w);
-
-  for (int64_t output_y = 0; output_y < output_height; output_y++) {
-    for (int64_t output_x = 0; output_x < output_width; output_x++) {
-      scalar_t* in = idata;
-      scalar_t* out = odata;
-
-      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
-      int64_t input_x = floorf(real_x);
-      scalar_t t_x = real_x - input_x;
-
-      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
-      int64_t input_y = floorf(real_y);
-      scalar_t t_y = real_y - input_y;
-
-      scalar_t x_coeffs[4];
-      scalar_t y_coeffs[4];
-
-      get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
-      get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
-
-      for (int64_t c = 0; c < channels; c++) {
-        scalar_t out_value = out[output_y * output_width + output_x];
-
-        for (int64_t i = 0; i < 4; i++) {
-          for (int64_t j = 0; j < 4; j++) {
-            upsample_increment_value_bounded<scalar_t>(
-                in,
-                input_width,
-                input_height,
-                input_x - 1 + i,
-                input_y - 1 + j,
-                out_value * y_coeffs[j] * x_coeffs[i]);
-          }
-        }
-
-        in += input_width * input_height;
-        out += output_width * output_height;
-      }
-    }
-  }
-}
-
 static void upsample_bicubic2d_out_cpu_template(
     Tensor& output,
     const Tensor& input,
@@ -124,7 +47,7 @@ static void upsample_bicubic2d_out_cpu_template(
 
 static void upsample_bicubic2d_backward_out_cpu_template(
     Tensor& grad_input,
-    const Tensor& grad_output_,
+    const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
@@ -150,7 +73,7 @@ static void upsample_bicubic2d_backward_out_cpu_template(
 
   upsample_2d_shape_check(
       Tensor(),
-      grad_output_,
+      grad_output,
       nbatch,
       channels,
       input_height,
@@ -158,29 +81,10 @@ static void upsample_bicubic2d_backward_out_cpu_template(
       output_height,
       output_width);
 
-  auto grad_output = grad_output_.contiguous();
-
   grad_input.resize_({nbatch, channels, input_height, input_width});
   grad_input.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
-        scalar_t* idata = grad_input.data_ptr<scalar_t>();
-        scalar_t* odata = grad_output.data_ptr<scalar_t>();
-
-        upsample_bicubic2d_backward_out_frame<scalar_t>(
-            odata,
-            idata,
-            input_height,
-            input_width,
-            output_height,
-            output_width,
-            nbatch,
-            channels,
-            align_corners,
-            scales_h,
-            scales_w);
-      });
+  upsample_bicubic2d_backward_kernel(kCPU, grad_input, grad_output, align_corners, scales_h, scales_w);
 }
 } // namespace
 
@@ -266,6 +170,7 @@ Tensor upsample_bicubic2d_backward_cpu(
 }
 
 DEFINE_DISPATCH(upsample_bicubic2d_kernel);
+DEFINE_DISPATCH(upsample_bicubic2d_backward_kernel);
 
 } // namespace native
 } // namespace at

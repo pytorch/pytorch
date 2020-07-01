@@ -109,6 +109,89 @@ void cpu_upsample_bicubic(
   }
 }
 
+template <typename scalar_t, typename scale_type>
+void cpu_upsample_bicubic_backward(
+    Tensor& grad_input_,
+    const Tensor& grad_output_,
+    bool align_corners,
+    const scale_type& scales) {
+  TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
+              " for `grad_input` but got dtype ", grad_input_.dtype());
+
+  auto grad_output = grad_output_.contiguous();
+  auto grad_input = grad_input_.contiguous();
+
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto input_sizes = grad_input.sizes().vec();
+  auto output_sizes = grad_output.sizes().vec();
+  auto ndim = input_sizes.size();
+
+  // treat nbatch and channels as one dimension
+  int64_t channels = input_sizes[0] * input_sizes[1];
+  int64_t input_height = input_sizes[2];
+  int64_t output_height = output_sizes[2];
+  int64_t input_width = input_sizes[3];
+  int64_t output_width = output_sizes[3];
+
+  int64_t output_slice_size = output_height * output_width;
+
+  // Special case: input/output same size, just copy
+  if (input_height == output_height && input_width == output_width) {
+    grad_input_.copy_(grad_output_);
+    return;
+  }
+
+  auto loop2d = [&](int64_t begin, int64_t end) {
+    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+        input_height, output_height, align_corners, scales[0]);
+    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+        input_width, output_width, align_corners, scales[1]);
+
+    for (int64_t c = begin; c < end; c++) {
+      for (int64_t oh = 0; oh < output_height; oh++) {
+        for (int64_t ow = 0; ow < output_width; ow++) {
+          scalar_t* grad_output_ptr = grad_output_data + c * output_slice_size;
+          scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
+
+          const scalar_t real_iw = area_pixel_compute_source_index(width_scale, ow, align_corners, /*cubic=*/true);
+          int64_t iw = floorf(real_iw);
+          scalar_t t_x = real_iw - iw;
+
+          const scalar_t real_ih = area_pixel_compute_source_index(height_scale, oh, align_corners, /*cubic=*/true);
+          int64_t ih = floorf(real_ih);
+          scalar_t t_y = real_ih - ih;
+
+          scalar_t x_coeffs[4];
+          scalar_t y_coeffs[4];
+
+          get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
+          get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
+
+          scalar_t grad_output_value = grad_output_ptr[oh * output_width + ow];
+          for (int64_t i = 0; i < 4; i++) {
+            for (int64_t j = 0; j < 4; j++) {
+              upsample_increment_value_bounded<scalar_t>(
+                  grad_input_ptr,
+                  input_width,
+                  input_height,
+                  iw - 1 + i,
+                  ih - 1 + j,
+                  grad_output_value * y_coeffs[j] * x_coeffs[i]);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, loop2d);
+
+  if (!grad_input_.is_contiguous()) {
+    grad_input_.copy_(grad_input);
+  }
+}
+
 using scale_t = std::vector<c10::optional<double>>;
 void upsample_bicubic2d_kernel_impl(
     Tensor& output,
@@ -126,9 +209,21 @@ void upsample_bicubic2d_kernel_impl(
   }
 }
 
+void upsample_bicubic2d_backward_kernel_impl(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
+    cpu_upsample_bicubic_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_h, scales_w});
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
+REGISTER_DISPATCH(upsample_bicubic2d_backward_kernel, &upsample_bicubic2d_backward_kernel_impl);
 
 } // namespace native
 } // namespace at

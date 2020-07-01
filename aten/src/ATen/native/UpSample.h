@@ -82,6 +82,7 @@ DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
 DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
+DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_backward_kernel);
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
