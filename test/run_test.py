@@ -73,7 +73,7 @@ TESTS = [
     'test_profiler',
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent'
+    'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'test_jit_py3',
     'test_determination',
@@ -83,7 +83,7 @@ TESTS = [
 WINDOWS_BLACKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent'
+    'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed',
 ]
@@ -91,7 +91,7 @@ WINDOWS_BLACKLIST = [
 ROCM_BLACKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent'
+    'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'test_determination',
     'test_multiprocessing',
@@ -129,7 +129,7 @@ SLOW_TESTS = [
     'test_torch',
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed',
-    'distributed/rpc/test_process_group_agent'
+    'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'test_cuda',
     'test_cuda_primary_ctx',
