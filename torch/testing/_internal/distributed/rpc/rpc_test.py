@@ -6,7 +6,7 @@ from threading import Lock
 import time
 import unittest
 from collections import namedtuple
-from functools import partial
+from functools import partial, wraps
 from unittest import mock
 
 import torch
@@ -3085,6 +3085,14 @@ class RpcTest(RpcAgentTestFixture):
 class ProcessGroupAgentRpcTest(RpcTest):
 
     def test_single_threaded_rref_owner(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
@@ -3148,6 +3156,14 @@ class ProcessGroupAgentRpcTest(RpcTest):
         rpc.shutdown()
 
     def test_single_threaded_rref_to_here(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
