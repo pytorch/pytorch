@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -146,6 +145,42 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
   return true;
 }
 
+BroadcastOp::BroadcastOp(Val* _out, Val* _in)
+    : Expr(ExprType::BroadcastOp), out_(_out), in_(_in) {
+  auto out_type = _out->getValType().value();
+  auto in_type = _in->getValType().value();
+  if (out_type == ValType::TensorView) {
+    TORCH_INTERNAL_ASSERT(
+        in_type == ValType::TensorView,
+        "Cannot braodcast a non-tensor object.");
+
+    int ndims = 0;
+    for (auto dom : static_cast<TensorView*>(out())->domain()->domain())
+      if (!dom->isBroadcast())
+        ndims++;
+
+    TORCH_INTERNAL_ASSERT(
+        ndims == (int)static_cast<TensorView*>(in_)->nDims(),
+        "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        in_type == ValType::TensorIndex && out_type == ValType::TensorIndex,
+        "Invalid types provided for broadcast op, ",
+        in_type,
+        " ",
+        out_type,
+        ".");
+  }
+
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+bool BroadcastOp::sameAs(const BroadcastOp* const other) const {
+  return other->in() == in() && other->out() == out();
+}
+
 ReductionOp::ReductionOp(
     BinaryOpType _reduction_op_type,
     Val* _init,
@@ -154,8 +189,8 @@ ReductionOp::ReductionOp(
     : Expr(ExprType::ReductionOp),
       reduction_op_type_(_reduction_op_type),
       init_(_init),
-      out_{_out},
-      in_{_in} {
+      out_(_out),
+      in_(_in) {
   TORCH_INTERNAL_ASSERT(
       _init->isConstScalar(),
       "Tried to create a reduction operation whith an initial value that isn't a constant.");
@@ -176,13 +211,22 @@ IterDomain::IterDomain(
     Val* _extent,
     ParallelType _parallel_method,
     bool _reduction_domain,
-    bool _rfactor_domain)
-    : Val(ValType::IterDomain, DataType::Int),
+    bool _rfactor_domain,
+    bool _broadcast_domain)
+    : Val(ValType::IterDomain, DataType::Int, false),
       start_(_start),
       extent_(_extent),
       parallel_method_(_parallel_method),
       is_reduction_domain_(_reduction_domain),
-      is_rfactor_domain_(_rfactor_domain) {
+      is_rfactor_domain_(_rfactor_domain),
+      is_broadcast_domain_(_broadcast_domain) {
+  TORCH_CHECK(
+      !(is_reduction_domain_ && is_broadcast_domain_),
+      "IterDomain cannot be both a broadcast and reduction domain.");
+  TORCH_CHECK(
+      !(is_rfactor_domain_ && is_broadcast_domain_),
+      "IterDomain cannot be both a broadcast and rfactor domain.");
+
   TORCH_INTERNAL_ASSERT(
       _extent->isAnInt(),
       "Cannot create an iter domain over an extent that is not an int but recieved ",
@@ -193,6 +237,7 @@ IterDomain::IterDomain(
       "Cannot create an iter domain with a start that is not an int but recieved ",
       _extent,
       " .");
+  this->name_ = fusion_->registerVal(this);
 }
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
@@ -202,6 +247,69 @@ bool IterDomain::sameAs(const IterDomain* const other) const {
   is_same = is_same && ScalarCheck::sameAs(start(), other->start());
 
   return is_same;
+}
+
+IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
+  TORCH_CHECK(
+      outer->start()->isZeroInt() && inner->start()->isZeroInt(),
+      "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
+  TORCH_CHECK(
+      outer->isReduction() == inner->isReduction(),
+      "Merging IterDomains requires that their iteration types match.");
+  TORCH_CHECK(
+      outer->parallel_method() == inner->parallel_method(),
+      "Merging IterDomains requires that their parallel types match.");
+
+  Val* merged_id_size = mul(outer->extent(), inner->extent());
+  IterDomain* merged_id = new IterDomain(
+      new Int(0),
+      static_cast<Int*>(merged_id_size),
+      outer->parallel_method(),
+      outer->isReduction(),
+      outer->isRFactorProduct() || inner->isRFactorProduct(),
+      outer->isBroadcast() && inner->isBroadcast());
+
+  new Merge(merged_id, outer, inner);
+
+  return merged_id;
+}
+
+std::pair<IterDomain*, IterDomain*> IterDomain::split(
+    IterDomain* in,
+    unsigned int factor) {
+  TORCH_CHECK(
+      in->start()->isZeroInt(),
+      "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
+
+  if (in->parallel_method() != ParallelType::Serial)
+    TORCH_CHECK(
+        false,
+        "Splitting an axis of non-Serial iteration is not supported at this time."
+        " Parallelization strategy must be set after calling split.");
+
+  Int* fact = new Int(factor);
+  // outer loop size
+  Val* vo = ceilDiv(in->extent(), fact);
+
+  // outer loop IterDomain
+  IterDomain* ido = new IterDomain(
+      new Int(0),
+      static_cast<Int*>(vo),
+      in->parallel_method(),
+      in->isReduction(),
+      in->isRFactorProduct(),
+      in->isBroadcast());
+
+  // inner loop IterDomain
+  IterDomain* idi = new IterDomain(
+      new Int(0),
+      fact,
+      in->parallel_method(),
+      in->isReduction(),
+      in->isRFactorProduct(),
+      in->isBroadcast());
+  new Split(ido, idi, in, fact);
+  return {ido, idi};
 }
 
 Val* IterDomain::extent() const {
@@ -216,35 +324,121 @@ Val* IterDomain::extent() const {
   return extent_;
 }
 
+TensorDomain::TensorDomain(std::vector<IterDomain*> _domain)
+    : Val(ValType::TensorDomain), root_domain_(std::move(_domain)) {
+  domain_ = std::vector<IterDomain*>(root_domain_.begin(), root_domain_.end());
+  resetDomains();
+}
+
+TensorDomain::TensorDomain(
+    std::vector<IterDomain*> _root_domain,
+    std::vector<IterDomain*> _domain)
+    : Val(ValType::TensorDomain, DataType::Null, false),
+      root_domain_(std::move(_root_domain)),
+      domain_(std::move(_domain)) {
+  std::vector<Val*> domain_vals(domain_.begin(), domain_.end());
+  auto inps = IterVisitor::getInputsTo(domain_vals);
+
+  // Validate that the root domain consists of all inputs to _domain
+  // Uncertain if this will hold for RFactor
+
+  std::unordered_set<Val*> root_vals(root_domain_.begin(), root_domain_.end());
+  std::for_each(inps.begin(), inps.end(), [root_vals](Val* inp) {
+    TORCH_INTERNAL_ASSERT(
+        root_vals.find(inp) != root_vals.end(),
+        "Invalid tensor domain, ",
+        inp,
+        " is an input of domain, but it is not found in the root domain.");
+  });
+
+  resetDomains();
+
+  this->name_ = fusion_->registerVal(this);
+}
+
+TensorDomain::TensorDomain(
+    std::vector<IterDomain*> _root_domain,
+    std::vector<IterDomain*> _rfactor_domain,
+    std::vector<IterDomain*> _domain)
+    : Val(ValType::TensorDomain, DataType::Null, false),
+      root_domain_(std::move(_root_domain)),
+      domain_(std::move(_domain)),
+      rfactor_domain_(std::move(_rfactor_domain)) {
+  auto inps = IterVisitor::getInputsTo(
+      std::vector<Val*>(domain_.begin(), domain_.end()));
+
+  // Validate that the root domain consists of all inputs to _domain
+  // Uncertain if this will hold for RFactor
+
+  std::unordered_set<Val*> root_vals(root_domain_.begin(), root_domain_.end());
+  std::for_each(inps.begin(), inps.end(), [root_vals](Val* inp) {
+    TORCH_INTERNAL_ASSERT(
+        root_vals.find(inp) != root_vals.end(),
+        "Invalid tensor domain, ",
+        inp,
+        " is an input of domain, but it is not found in the root domain.");
+  });
+
+  inps = IterVisitor::getInputsTo(
+      std::vector<Val*>(rfactor_domain_.begin(), rfactor_domain_.end()));
+  std::for_each(inps.begin(), inps.end(), [root_vals](Val* inp) {
+    TORCH_INTERNAL_ASSERT(
+        root_vals.find(inp) != root_vals.end(),
+        "Invalid tensor domain, ",
+        inp,
+        " is an input of the rfactor domain, but it is not found in the root domain.");
+  });
+
+  resetDomains();
+  this->name_ = fusion_->registerVal(this);
+}
+
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (nDims() != other->nDims())
     return false;
+  if (rootDomain().size() != other->rootDomain().size())
+    return false;
+  if (rfactorDomain().size() != other->rfactorDomain().size())
+    return false;
 
-  for (decltype(nDims()) i = 0; i < nDims(); i++)
+  for (size_t i = 0; i < nDims(); i++)
     if (!(axis(i)->sameAs(other->axis(i))))
+      return false;
+
+  for (size_t i = 0; i < rootDomain().size(); i++)
+    if (!(rootDomain()[i]->sameAs(other->rootDomain()[i])))
+      return false;
+
+  for (size_t i = 0; i < rfactorDomain().size(); i++)
+    if (!(rfactorDomain()[i]->sameAs(other->rfactorDomain()[i])))
       return false;
 
   return true;
 }
 
+bool TensorDomain::sameAs(
+    const std::vector<IterDomain*>& lhs,
+    const std::vector<IterDomain*>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  size_t i = 0;
+  for (auto td_lhs : lhs) {
+    if (!td_lhs->sameAs(rhs[i++]))
+      return false;
+  }
+  return true;
+}
+
 bool TensorDomain::hasReduction() const {
-  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
-    return id->isReduction();
-  });
+  return no_reduction_domain_.size() != domain_.size();
+}
+
+bool TensorDomain::hasBroadcast() const {
+  return no_bcast_domain_.size() != domain_.size();
 }
 
 bool TensorDomain::hasRFactor() const {
-  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
-    return id->isRFactorProduct();
-  });
-}
-
-TensorDomain* TensorDomain::noReductions() const {
-  std::vector<IterDomain*> noReductionDomain;
-  for (IterDomain* id : domain_)
-    if (!id->isReduction())
-      noReductionDomain.push_back(id);
-  return new TensorDomain(noReductionDomain);
+  return !rfactor_domain_.empty();
 }
 
 // i here is int, as we want to accept negative value and ::size_type can be a
@@ -261,9 +455,19 @@ IterDomain* TensorDomain::axis(int i) const {
   return domain_[i];
 }
 
+size_t TensorDomain::posOf(IterDomain* id) const {
+  size_t i = 0;
+  while (i < domain_.size()) {
+    if (domain_[i] == id)
+      return i;
+    i++;
+  }
+  TORCH_CHECK(false, "Provided id is not part of this domain.");
+}
+
 // Split "axis" into 2 axes where the inner axes is size of "factor"
 // and outer axis is size axis.extent() / factor
-TensorDomain* TensorDomain::split(int axis_, int factor) {
+void TensorDomain::split(int axis_, unsigned int factor) {
   if (axis_ < 0)
     axis_ += nDims();
 
@@ -272,107 +476,63 @@ TensorDomain* TensorDomain::split(int axis_, int factor) {
       "Tried to split on axis outside TensorDomain's range.");
 
   IterDomain* id = axis(axis_);
-
-  TORCH_CHECK(
-      id->start()->isZeroInt(),
-      "Splitting IterDomains with starting values that aren't 0, is not supported at this time.");
-
-  if (id->parallel_method() != ParallelType::Serial)
-    TORCH_CHECK(
-        false,
-        "Splitting an axis of non-Serial iteration is not supported at this time."
-        " Parallelization strategy must be set after calling split.");
-
-  std::vector<IterDomain*> new_domain;
-
-  Int* fact = new Int(factor);
-  for (decltype(nDims()) i = 0; i < nDims(); i++) {
-    if (i != (unsigned int)axis_)
-      new_domain.push_back(axis(i));
-    else {
-      // outer loop size
-      Val* vo = ceilDiv(id->extent(), fact);
-      Int* so = static_cast<Int*>(vo);
-
-      // outer loop IterDomain
-      IterDomain* ido = new IterDomain(
-          new Int(0),
-          so,
-          id->parallel_method(),
-          id->isReduction(),
-          id->isRFactorProduct());
-      new_domain.push_back(ido);
-
-      // inner loop IterDomain
-      IterDomain* idi = new IterDomain(
-          new Int(0),
-          fact,
-          id->parallel_method(),
-          id->isReduction(),
-          id->isRFactorProduct());
-      new_domain.push_back(idi);
-    }
-  }
-
-  TensorDomain* split_td = new TensorDomain(new_domain);
-  new Split(split_td, this, axis_, fact); // For record keeping
-  return split_td;
+  auto split_ids = IterDomain::split(id, factor);
+  domain_.erase(domain_.begin() + axis_);
+  domain_.insert(domain_.begin() + axis_, split_ids.second);
+  domain_.insert(domain_.begin() + axis_, split_ids.first);
+  resetDomains();
 }
 
 // Merge "axis" and "axis+1" into 1 dimension
-TensorDomain* TensorDomain::merge(int axis_) {
-  if (axis_ < 0)
-    axis_ += nDims();
+void TensorDomain::merge(int axis_o, int axis_i) {
+  if (axis_o < 0)
+    axis_o += nDims();
+
+  if (axis_i < 0)
+    axis_i += nDims();
 
   TORCH_CHECK(
-      axis_ >= 0 && (unsigned int)(axis_ + 1) < nDims(),
-      "Trying to merge axis_ outside of TensorView's range.");
-
-  IterDomain* first = axis(axis_);
-  IterDomain* second = axis(axis_ + 1);
+      axis_o >= 0 && (unsigned int)axis_o < nDims() && axis_i >= 0 &&
+          (unsigned int)axis_i < nDims(),
+      "Invalid merge detected, either one or both axes are outside of TensorView's range.");
 
   TORCH_CHECK(
-      first->start()->isZeroInt() && second->start()->isZeroInt(),
-      "Merging IterDomains with starting values that aren't 0, is not supported at this time.");
-  TORCH_CHECK(
-      first->isReduction() == second->isReduction(),
-      "Merging domains requires that they're either both a reduction axis_, or both an iteration axis_.");
-  TORCH_CHECK(
-      first->parallel_method() == second->parallel_method(),
-      "Axes must have matching parallel types.");
+      axis_o != axis_i,
+      "Invalid merge detected, axes provided are the same axis.");
 
-  Val* merged_id_size = mul(first->extent(), second->extent());
-  IterDomain* merged_id = new IterDomain(
-      new Int(0),
-      static_cast<Int*>(merged_id_size),
-      first->parallel_method(),
-      first->isReduction(),
-      first->isRFactorProduct() || second->isRFactorProduct());
-
-  std::vector<IterDomain*> new_domain;
-  for (decltype(nDims()) i = 0; i < nDims(); i++) {
-    if (i < (unsigned int)axis_ || i > (unsigned int)(axis_ + 1))
-      new_domain.push_back(axis(i));
-    else if (i == (unsigned int)axis_) {
-      new_domain.push_back(merged_id);
-    }
+  if (axis_o > axis_i) {
+    auto tmp = axis_i;
+    axis_i = axis_o;
+    axis_o = tmp;
   }
-  TensorDomain* merged_td = new TensorDomain(new_domain);
-  new Merge(merged_td, this, axis_); // For record keeping
-  return merged_td;
+
+  IterDomain* first = axis(axis_o);
+  IterDomain* second = axis(axis_i);
+
+  IterDomain* merged_id = IterDomain::merge(first, second);
+
+  domain_.erase(domain_.begin() + axis_i);
+  domain_.erase(domain_.begin() + axis_o);
+  domain_.insert(domain_.begin() + axis_o, merged_id);
+  resetDomains();
 }
 
 // Reorder axes according to map[old_pos] = new_pos
-TensorDomain* TensorDomain::reorder(
+void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
+  domain_ = orderedAs(domain_, old2new_);
+  resetDomains();
+}
+
+std::vector<IterDomain*> TensorDomain::orderedAs(
+    const std::vector<IterDomain*>& dom,
     const std::unordered_map<int, int>& old2new_) {
-  // START VALIDATION CHECKS
   // Eventhough these checks are already in TensorView, we want to redo them as
   // we can enter this function from other places, not through TensorView
 
   // adjust based on negative values (any negative values gets nDims added to
   // it)
   std::unordered_map<int, int> old2new;
-  auto ndims = nDims();
+  auto ndims = dom.size();
   std::transform(
       old2new_.begin(),
       old2new_.end(),
@@ -385,19 +545,16 @@ TensorDomain* TensorDomain::reorder(
       });
 
   // Check if any adjusted values are < 0, or >= nDims, which are invalid
-  bool out_of_range = std::any_of(
-      old2new.begin(),
-      old2new.end(),
-      [ndims](std::unordered_map<int, int>::value_type entry) {
-        return entry.first < 0 || (unsigned int)entry.first >= ndims ||
-            entry.second < 0 || (unsigned int)entry.second >= ndims;
-      });
 
   TORCH_CHECK(
-      !out_of_range,
-      "Reorder axes are not within the number of dimensions of this domain, ",
-      this,
-      ".");
+      std::none_of(
+          old2new.begin(),
+          old2new.end(),
+          [ndims](std::unordered_map<int, int>::value_type entry) {
+            return entry.first < 0 || (unsigned int)entry.first >= ndims ||
+                entry.second < 0 || (unsigned int)entry.second >= ndims;
+          }),
+      "Reorder axes are not within the number of dimensions of the provided domain.");
 
   // Going to use sets, to see if any duplicate values are in the map.
 
@@ -429,26 +586,18 @@ TensorDomain* TensorDomain::reorder(
 
   std::vector<int> new2old(ndims, -1);
 
-  // Go through each old and new position, make sure they're within 0-ndims
+  // Go through each old and new position, make sure they're within [0, ndims)
   for (std::pair<int, int> elem : old2new) {
     int old_pos = elem.first;
     int new_pos = elem.second;
-
-    assert(old_pos >= 0 && old_pos < ndims && new_pos >= 0 && new_pos < ndims);
-
-    if (new2old[new_pos] != -1)
-      TORCH_CHECK(false, "Reorder found duplicate destination positions.");
-
     new2old[new_pos] = old_pos;
   }
 
+  // old_positions that already have a new position
   std::set<int> old_positions(new2old.begin(), new2old.end());
   old_positions.erase(-1);
 
-  if (old_positions.size() != old2new.size())
-    TORCH_INTERNAL_ASSERT(
-        false, "Reorder found duplicate destination positions.");
-
+  // All available new positions
   std::set<int> all_positions;
   for (decltype(ndims) i{0}; i < ndims; i++)
     all_positions.insert(i);
@@ -476,11 +625,54 @@ TensorDomain* TensorDomain::reorder(
       new2old.begin(),
       new2old.end(),
       std::back_inserter(reordered_domain),
-      [this](int i) -> IterDomain* { return this->axis(i); });
+      [dom](int i) -> IterDomain* { return dom[i]; });
 
-  TensorDomain* reordered_td = new TensorDomain(reordered_domain);
-  new Reorder(reordered_td, this, new2old);
-  return reordered_td;
+  return reordered_domain;
+}
+
+std::vector<IterDomain*> TensorDomain::noReductions(
+    const std::vector<IterDomain*>& td) {
+  size_t size_out = 0;
+  for (auto id : td)
+    if (!id->isReduction())
+      size_out++;
+  std::vector<IterDomain*> noReductionDomain(size_out);
+
+  int it = 0;
+  for (auto id : td)
+    if (!id->isReduction())
+      noReductionDomain[it++] = id;
+
+  return noReductionDomain;
+}
+
+std::vector<IterDomain*> TensorDomain::noBroadcasts(
+    const std::vector<IterDomain*>& td) {
+  size_t size_out = 0;
+  for (auto id : td)
+    if (!id->isBroadcast())
+      size_out++;
+  std::vector<IterDomain*> noBroadcastDomain(size_out);
+
+  int it = 0;
+  for (auto id : td)
+    if (!id->isBroadcast())
+      noBroadcastDomain[it++] = id;
+
+  return noBroadcastDomain;
+}
+
+bool TensorDomain::hasBroadcast(const std::vector<IterDomain*>& td) {
+  for (auto id : td)
+    if (id->isBroadcast())
+      return true;
+  return false;
+}
+bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
+  for (auto id : td)
+    if (id->isReduction())
+      return true;
+  return false;
 }
 
 // pair is in order where second is the consumer of first
@@ -500,19 +692,22 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
           [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
       "RFactor axes less than 0 or >= ndims.");
 
+  // We might be able to lift this constraint in some instances, but needs more
+  // investigation.
   TORCH_CHECK(
       !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
 
-  std::set<int> axes_set(axes.begin(), axes.end());
+  std::unordered_set<int> axes_set(axes.begin(), axes.end());
 
   bool rfactor_found = false;
   bool reduction_found = false;
   for (decltype(nDims()) i{0}; i < nDims(); i++) {
     if (axis(i)->isReduction()) {
-      if (axes_set.find(i) != axes_set.end())
+      if (axes_set.find(i) != axes_set.end()) {
         rfactor_found = true;
-      else
+      } else {
         reduction_found = true;
+      }
     }
   }
 
@@ -525,56 +720,40 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
       TransformRFactor::runReplay2(this, axes)};
 }
 
-TensorDomain* TensorDomain::rootDomain() {
-  return TransformIter::getRoot(this);
-}
-
-Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
+Split::Split(
+    IterDomain* _outer,
+    IterDomain* _inner,
+    IterDomain* _in,
+    Int* _factor)
     : Expr(ExprType::Split),
-      out_{_out},
+      outer_{_outer},
+      inner_{_inner},
       in_{_in},
-      axis_{_axis},
       factor_{_factor} {
-  addOutput(_out);
+  addOutput(_outer);
+  addOutput(_inner);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 bool Split::sameAs(const Split* const other) const {
   return (
-      out()->sameAs(other->out()) && in()->sameAs(other->in()) &&
-      axis() == other->axis() && factor()->sameAs(other->factor()));
+      outer()->sameAs(other->outer()) && inner()->sameAs(other->inner()) &&
+      in()->sameAs(other->in()) && factor()->sameAs(other->factor()));
 }
 
-Merge::Merge(TensorDomain* _out, TensorDomain* _in, int _axis)
-    : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
+Merge::Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner)
+    : Expr(ExprType::Merge), out_{_out}, outer_{_outer}, inner_{_inner} {
   addOutput(_out);
-  addInput(_in);
+  addInput(_outer);
+  addInput(_inner);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 bool Merge::sameAs(const Merge* const other) const {
   return (
-      out()->sameAs(other->out()) && in()->sameAs(other->in()) &&
-      axis() == other->axis());
-}
-
-Reorder::Reorder(
-    TensorDomain* _out,
-    TensorDomain* _in,
-    std::vector<int> _new2old)
-    : Expr(ExprType::Reorder),
-      out_{_out},
-      in_{_in},
-      new2old_{std::move(_new2old)} {
-  addOutput(_out);
-  addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-bool Reorder::sameAs(const Reorder* const other) const {
-  // Implicitly in and out matching means new2old matches
-  return (out()->sameAs(other->out()) && in()->sameAs(other->in()));
+      out()->sameAs(other->out()) && outer()->sameAs(other->outer()) &&
+      inner()->sameAs(other->inner()));
 }
 
 ForLoop::ForLoop(

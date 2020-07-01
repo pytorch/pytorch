@@ -50,12 +50,12 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
-        # TODO: add selected op mechanism in augotrad to save learning size
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
+            selected_op_list=selected_op_list,
         )
         gen_unboxing_wrappers(
             declarations_path or DECLARATIONS_PATH,

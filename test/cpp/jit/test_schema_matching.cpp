@@ -15,12 +15,11 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype(t[] a, t b) -> (t)",
-            [](Stack& stack) {
+            [](Stack* stack) {
               c10::List<double> list;
               double a;
               pop(stack, list, a);
               push(stack, a);
-              return 0;
             },
             c10::AliasAnalysisKind::FROM_SCHEMA),
     });
@@ -53,12 +52,11 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype2(t a, t[] b) -> (t[])",
-            [](Stack& stack) {
+            [](Stack* stack) {
               double a;
               c10::List<double> list;
               pop(stack, a, list);
               push(stack, a);
-              return 0;
             },
             AliasAnalysisKind::FROM_SCHEMA),
     });

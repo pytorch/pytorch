@@ -31,11 +31,10 @@ class MobileJob:
             "build_only": miniutils.quote(str(int(True))),
             "docker_image": self.docker_image,
             "name": full_job_name,
-            "requires": ["setup"],
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         return [{"pytorch_linux_build": props_dict}]
 
@@ -48,8 +47,7 @@ WORKFLOW_DATA = [
     MobileJob(DOCKER_IMAGE_NDK, ["custom", "build", "dynamic"]),
 
     # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-    # Most of this CI is already covered by "mobile-custom-build-dynamic" job
-    MobileJob(DOCKER_IMAGE_NDK, ["code", "analysis"], True),
+    MobileJob(DOCKER_IMAGE_NDK, ["code", "analysis"]),
 ]
 
 
