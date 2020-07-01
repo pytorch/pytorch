@@ -84,6 +84,15 @@ struct TORCH_API RecordFunction {
   RecordFunction(
       RecordScope scope = RecordScope::FUNCTION);
 
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<c10::IValue>* args,
+      int64_t current_sequence_nr = -1) {
+    inputs_ = *args;
+    before(fn, current_sequence_nr);
+  }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -126,6 +135,11 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
+
+  // Sets node ID for distributed profiling
+  static void setDefaultNodeId(int64_t defaultNodeId);
+  // Gets node ID for distributed profiling
+  static int64_t getDefaultNodeId();
 
   template<typename F>
   void before(
@@ -234,6 +248,11 @@ class TORCH_API RecordFunctionCallback {
     return *this;
   }
 
+  RecordFunctionCallback& needsIds(bool needs_ids) {
+    needs_ids_ = needs_ids;
+    return *this;
+  }
+
   RecordFunctionCallback& samplingProb(double sampling_prob) {
     TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
         "Invalid sampling probability");
@@ -262,6 +281,10 @@ class TORCH_API RecordFunctionCallback {
 
   inline bool needsInputs() const {
     return needs_inputs_;
+  }
+
+  inline bool needsIds() const {
+    return needs_ids_;
   }
 
   inline double samplingProb() const {
@@ -303,6 +326,7 @@ class TORCH_API RecordFunctionCallback {
   std::function<void(const RecordFunction&)> end_;
   std::function<bool(const RecordFunctionCallback&)> should_run_;
   bool needs_inputs_ = false;
+  bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
 
