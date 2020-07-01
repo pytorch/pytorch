@@ -33,10 +33,11 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, tfloat32, tcomplex64
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, tfloat32, tcomplex64, tf32_to_fp32
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
+from torch.testing._internal.common_cuda import setup_tf32, tf32_is_not_fp32, tf32_on_and_off
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -8438,7 +8439,8 @@ class TestTorchDeviceType(TestCase):
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    def test_broadcast_batched_matmul(self, device):
+    @tf32_on_and_off
+    def test_broadcast_batched_matmul(self, device, rtol, atol):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
         p_dim = random.randint(1, 8)
@@ -8488,19 +8490,19 @@ class TestTorchDeviceType(TestCase):
                         for r in (rhs, rhs_expanded):
                             l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
-                            self.assertEqual(truth, result)
+                            self.assertEqual(truth, result, rtol=rtol, atol=atol)
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
-                            self.assertEqual(truth, torch_result)
+                            self.assertEqual(truth, torch_result, rtol=rtol, atol=atol)
                             # test torch.matmul with out
                             out = torch.zeros_like(torch_result)
                             torch.matmul(l, r, out=out)
-                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
+                            self.assertEqual(truth, maybe_squeeze_result(l, r, out), rtol=rtol, atol=atol)
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
                                         rhs_expanded.contiguous().view(-1, *rhs_mat_dims)))
-                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims))
+                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims), rtol=rtol, atol=atol)
 
         for indices in product((True, False), repeat=2):
             verify_batched_matmul(*indices)
@@ -16465,20 +16467,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCUDA(*([torch.float, torch.double, tfloat32] +
                     ([] if TEST_WITH_ROCM else (torch.testing.get_all_complex_dtypes() + [tcomplex64]))))
     def test_addmm_sizes(self, device, dtype):
-        for m in [0, 1, 25]:
-            for n in [0, 1, 10]:
-                for k in [0, 1, 8]:
-                    M = torch.randn(n, m, device=device, dtype=dtype)
-                    m1 = torch.randn(n, k, device=device, dtype=dtype)
-                    m2 = torch.randn(k, m, device=device, dtype=dtype)
-                    res1 = torch.addmm(M, m1, m2)
-                    res2 = torch.zeros(n, m, device=device, dtype=dtype)
-                    res2 += M
-                    for i in range(n):
-                        for j in range(m):
-                            for l in range(k):
-                                res2[i, j] += m1[i, l] * m2[l, j]
-                    self.assertEqual(res1, res2)
+        with setup_tf32(dtype) as (dtype, rtol, atol):
+            for m in [0, 1, 25]:
+                for n in [0, 1, 10]:
+                    for k in [0, 1, 8]:
+                        M = torch.randn(n, m, device=device, dtype=dtype)
+                        m1 = torch.randn(n, k, device=device, dtype=dtype)
+                        m2 = torch.randn(k, m, device=device, dtype=dtype)
+                        res1 = torch.addmm(M, m1, m2)
+                        res2 = torch.zeros(n, m, device=device, dtype=dtype)
+                        res2 += M
+                        for i in range(n):
+                            for j in range(m):
+                                for l in range(k):
+                                    res2[i, j] += m1[i, l] * m2[l, j]
+                        self.assertEqual(res1, res2, rtol=rtol, atol=atol)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -19407,12 +19410,6 @@ def generate_test_function(cls,
             torch.backends.cuda.matmul.allow_tf32 = True
         elif disable_tf32_on_fp32 and dtype in {torch.float32, torch.complex64}:
             torch.backends.cuda.matmul.allow_tf32 = False
-        def tf32_to_fp32(dtype):
-            if dtype == tfloat32:
-                return torch.float32
-            elif dtype == tcomplex64:
-                return torch.complex64
-            return dtype
         dtype = tf32_to_fp32(dtype_)
         # Generates the CPU inputs
         # Note: CPU tensors are never torch.half
@@ -19435,9 +19432,10 @@ def generate_test_function(cls,
         device_result = getattr(device_tensor, op_str)(*device_args)
 
         dtype2precision = {torch.half : half_precision,
-                           torch.bfloat16 : bfloat16_precision,
-                           tfloat32 : half_precision,
-                           tcomplex64 : half_precision}
+                           torch.bfloat16 : bfloat16_precision}
+        if tf32_is_not_fp32():
+            dtype2precision.update({tfloat32 : half_precision,
+                                    tcomplex64 : half_precision})
 
         # Compares CPU and device inputs and outputs
         precision = dtype2precision.get(dtype_, float_precision)

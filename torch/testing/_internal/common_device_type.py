@@ -578,10 +578,16 @@ tfloat32 = "_testing.tfloat32"
 tcomplex64 = "_testing.tcomplex64"
 
 
+def tf32_to_fp32(dtype):
+    if dtype == tfloat32:
+        return torch.float32
+    elif dtype == tcomplex64:
+        return torch.complex64
+    return dtype
+
+
 def is_dtype(x):
-    if x is tfloat32 or x is tcomplex64:
-        return True
-    return isinstance(x, torch.dtype)
+    return isinstance(tf32_to_fp32(x), torch.dtype)
 
 
 # Decorator that instantiates a variant of the test for each given dtype.

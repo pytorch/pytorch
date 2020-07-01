@@ -1,9 +1,11 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
+import contextlib
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
+from torch.testing._internal.common_device_type import tfloat32, tcomplex64, tf32_to_fp32
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -40,17 +42,33 @@ def tf32_is_not_fp32():
         return False
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
         return False
-    return torch.backends.cuda.matmul.allow_tf32
+    return True
 
 
-def tf32_aware(f):
+@contextlib.contextmanager
+def setup_tf32(dtype, rtol=None, atol=None):
+    if dtype in {tfloat32, tcomplex64}:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        if tf32_is_not_fp32():
+            yield tf32_to_fp32(dtype), 0.001, 1e-5
+        else:
+            yield tf32_to_fp32(dtype), rtol, atol
+    else:
+        if dtype in {torch.float32, torch.complex64}:
+            torch.backends.cuda.matmul.allow_tf32 = False
+        yield dtype, rtol, atol
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+
+def tf32_on_and_off(f):
 
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
+        rtol, atol = (0.001, 1e-5) if tf32_is_not_fp32() else (None, None)
         torch.backends.cuda.matmul.allow_tf32 = True
-        f(*args, **kwargs)
+        f(*args, **kwargs, rtol=rtol, atol=atol)
         torch.backends.cuda.matmul.allow_tf32 = False
-        f(*args, **kwargs)
+        f(*args, **kwargs, rtol=None, atol=None)
         torch.backends.cuda.matmul.allow_tf32 = True
 
     return wrapped
