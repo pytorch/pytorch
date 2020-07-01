@@ -26,69 +26,47 @@ def channel_range(input, axis=0):
     assert(mins.size()[0] == input.size()[axis])
     return maxs - mins
 
-def scaling_channels(module1, module2, output_axis=0, input_axis=1):
+def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     ''' Given two adjacent tensors', the weights are scaled such that
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
 
     '''
-    tensor1 = module1.weight
-    tensor2 = module2.weight
+    if module1.weight.size()[output_axis] != module2.weight.size()[input_axis]:
+        raise TypeError("Incompatible tensors")
+
+    weight1 = module1.weight
+    weight2 = module2.weight
     bias = module1.bias
 
-    output_channel_tensor1 = channel_range(tensor1, output_axis)
-    input_channel_tensor2 = channel_range(tensor2, input_axis)
+    weight1_range = channel_range(weight1, output_axis)
+    weight2_range = channel_range(weight2, input_axis)
 
     # producing scaling factors to applied
-    input_channel_tensor2 += 1e-9
-    scaling_factors = torch.sqrt(output_channel_tensor1 / input_channel_tensor2)
+    weight2_range += 1e-9
+    scaling_factors = torch.sqrt(weight1_range / weight2_range)
     r_scaling_factors = torch.reciprocal(scaling_factors)
 
     bias = bias * r_scaling_factors
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
     # pads axis to (1D) tensors to then be broadcasted
-    size1 = [1 for x in range(len(tensor1.size()))]
-    size1[output_axis] = tensor1.size()[output_axis]
-    size2 = [1 for x in range(len(tensor2.size()))]
-    size2[input_axis] = tensor2.size()[input_axis]
+    size1 = [1] * len(weight1.size())
+    size1[output_axis] = weight1.size()[output_axis]
+    size2 = [1] * len(weight2.size())
+    size2[input_axis] = weight2.size()[input_axis]
 
     scaling_factors = torch.reshape(scaling_factors, size2)
     r_scaling_factors = torch.reshape(r_scaling_factors, size1)
 
-    tensor1 = tensor1 * r_scaling_factors
-    tensor2 = tensor2 * scaling_factors
+    weight1 = weight1 * r_scaling_factors
+    weight2 = weight2 * scaling_factors
 
-    module1.weight.data = tensor1
+    module1.weight.data = weight1
     module1.bias.data = bias
-    module2.weight.data = tensor2
+    module2.weight.data = weight2
 
-def cross_layer_equalization(module1, module2):
-    ''' Given two adjacent modules, the weights are scaled such that
-    the ranges of the first modules' output channel are equal to the
-    ranges of the second modules' input channel
-
-    Scaling work is done in scaling_channels()
-    '''
-    module1_output_channel_axis = -1
-    module2_input_channel_axis = -1
-
-    # additional modules can be added, given the axises of the input/output channels are known
-    if isinstance(module1, nn.Linear) or isinstance(module1, nn.Conv2d):
-        module1_output_channel_axis = 0
-    else:
-        raise TypeError("Only Linear and Conv2d modules are supported at this time")
-    if isinstance(module2, nn.Linear) or isinstance(module2, nn.Conv2d):
-        module2_input_channel_axis = 1
-    else:
-        raise TypeError("Only Linear and Conv2d modules are supported at this time")
-
-    if module1.weight.size()[module1_output_channel_axis] != module2.weight.size()[module2_input_channel_axis]:
-        raise TypeError("Incompatible tensors")
-
-    scaling_channels(module1, module2, module1_output_channel_axis, module2_input_channel_axis)
-
-def equalize(model, paired_modules_list, threshold):
+def equalize(model, paired_modules_list, threshold = 1e-4):
     ''' Given a list of adjacent modules within a model, equalization will
     be applied between each pair, this will repeated until convergence is achieved
 
@@ -98,21 +76,21 @@ def equalize(model, paired_modules_list, threshold):
 
     '''
     name_to_module = {}
-    copies = {}
+    previous_name_to_module = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
     for name, module in model.named_modules():
         if name in name_set:
             name_to_module[name] = module
-            copies[name] = None
-    while not converged_test(name_to_module, copies, threshold):
+            previous_name_to_module[name] = None
+    while not converged(name_to_module, previous_name_to_module, threshold):
         for pair in paired_modules_list:
-            copies[pair[0]] = copy.deepcopy(name_to_module[pair[0]])
-            copies[pair[1]] = copy.deepcopy(name_to_module[pair[1]])
+            previous_name_to_module[pair[0]] = copy.deepcopy(name_to_module[pair[0]])
+            previous_name_to_module[pair[1]] = copy.deepcopy(name_to_module[pair[1]])
 
             cross_layer_equalization(name_to_module[pair[0]], name_to_module[pair[1]])
 
-def converged_test(curr_modules, prev_modules, threshold):
+def converged(curr_modules, prev_modules, threshold):
     ''' Tests for the summed norm of the differences between each set of modules
     being less than the given threshold
 

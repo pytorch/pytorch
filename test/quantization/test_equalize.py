@@ -23,20 +23,6 @@ class TestEqualizeEager(QuantizationTestCase):
             curr = curr._modules[subname]
         return curr
 
-    def test_scaling_channels(self):
-        module1 = nn.Conv2d(4, 4, 2)
-        module2 = nn.Linear(4, 4)
-
-        tensor1 = module1.weight
-        tensor2 = module2.weight
-
-        output_axis = 0
-        input_axis = 1
-
-        _equalize.scaling_channels(module1, module2, output_axis, input_axis)
-
-        self.channels_equalized_test(module1.weight, module2.weight, output_axis, input_axis)
-
     def test_cross_layer_equalization(self):
         module1 = nn.Conv2d(3, 4, 2)
         module2 = nn.Linear(4, 4)
@@ -50,7 +36,7 @@ class TestEqualizeEager(QuantizationTestCase):
 
         self.channels_equalized_test(mod_tensor1, mod_tensor2, module1_output_channel_axis, module2_input_channel_axis)
 
-    def test_convergence_test(self):
+    def test_converged(self):
         module1 = nn.Linear(3, 3)
         module2 = nn.Linear(3, 3)
 
@@ -60,17 +46,17 @@ class TestEqualizeEager(QuantizationTestCase):
         # input is a dictionary
         dictionary_1 = {'linear1': module1}
         dictionary_2 = {'linear1': module2}
-        self.assertTrue(_equalize.converged_test(dictionary_1, dictionary_1, 1e-6))
-        self.assertFalse(_equalize.converged_test(dictionary_1, dictionary_2, 1e-6))
+        self.assertTrue(_equalize.converged(dictionary_1, dictionary_1, 1e-6))
+        self.assertFalse(_equalize.converged(dictionary_1, dictionary_2, 1e-6))
 
     def test_equalize(self):
-        class chain_module(nn.Module):
+        class ChainModule(nn.Module):
             def __init__(self):
                 """
                 In the constructor we instantiate two nn.Linear modules and assign them as
                 member variables.
                 """
-                super(chain_module, self).__init__()
+                super(ChainModule, self).__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.linear2 = nn.Linear(4, 5)
                 self.linear3 = nn.Linear(5, 6)
@@ -85,7 +71,7 @@ class TestEqualizeEager(QuantizationTestCase):
                 x = self.linear2(x)
                 x = self.linear3(x)
                 return x
-        chain1 = chain_module()
+        chain1 = ChainModule()
         chain2 = copy.deepcopy(chain1)
 
         _equalize.equalize(chain1, [['linear1', 'linear2'], ['linear2', 'linear3']], 1e-6)
