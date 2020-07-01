@@ -325,24 +325,17 @@ static IValue addInput(
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
 
-    auto dict_size = dict.size();
-    auto unpack_to_list = state->graph->insert(aten::values, {value});
-    auto list_unpack =
-        state->graph->createListUnpack(unpack_to_list, dict_size);
-    auto unpack_node = state->graph->insertNode(list_unpack);
-    auto elem_values = unpack_node->outputs();
-
-    AT_ASSERT(dict.size() == elem_values.size());
-
-    size_t i = 0;
+    // Unpack the list values statically
     for (const auto& entry : dict) {
+      IValue key = entry.key();
+      auto static_key = state->graph->insertConstant(key);
+      auto static_value =
+          state->graph->insert(aten::__getitem__, {value, static_key});
+      recordSourceLocation(static_value->node());
       dict.insert_or_assign(
           entry.key(),
           addInput(
-              state,
-              entry.value(),
-              dict_type->getValueType(),
-              elem_values[i++]));
+              state, entry.value(), dict_type->getValueType(), static_value));
     }
 
     return dict;
