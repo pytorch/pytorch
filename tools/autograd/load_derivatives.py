@@ -237,6 +237,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
             names = split_names(raw_names)
             if is_fw_def(names):
                 derivative = {"out_arg": names[0],
+                              "out_type": declaration['returns'][0]['dynamic_type'],
                               "formula": formula,
                               "required_inputs": find_required_inputs_fw_grads(formula)}
                 fw_derivatives.append(derivative)

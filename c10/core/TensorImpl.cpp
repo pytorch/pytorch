@@ -279,9 +279,9 @@ const at::Tensor& TensorImpl::fw_grad() const {
   return autograd_meta_->fw_grad();
 }
 
-void TensorImpl::set_fw_grad(at::Tensor& new_grad, bool inplace, const at::Tensor& self) {
+void TensorImpl::set_fw_grad(at::Tensor& new_grad, const at::Tensor& self) {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  autograd_meta_->set_fw_grad(new_grad, inplace, self);
+  autograd_meta_->set_fw_grad(new_grad, self);
 }
 
 

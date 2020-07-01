@@ -2851,6 +2851,51 @@ Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
   return out_fw_grad;
 }
 
+Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const Tensor& weight,
+        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad) {
+  Tensor out_fw_grad;
+
+  // Used to make the broadcasting work when working with channel-only values
+  std::cout << "Input: " << input.sizes() << std::endl;
+  std::cout << "Res1: " << result1.sizes() << std::endl;
+  std::cout << "Res2: " << result2.sizes() << std::endl;
+  std::cout << "wfg: " << weight_fw_grad.sizes() << std::endl;
+  std::cout << "bfg: " << bias_fw_grad.sizes() << std::endl;
+  auto param_size = input.sizes().vec();
+  auto res_size = input.sizes().vec();
+
+  for (auto dim = 0; dim < param_size.size(); ++dim) {
+    if (dim == param_size.size() - 1) {
+      res_size[dim] = 1;
+    } else {
+      param_size[dim] = 1;
+    }
+  }
+
+  if (input_fw_grad.defined()) {
+    out_fw_grad = std::get<0>(native_layer_norm_backward(input_fw_grad, input, result1, result2, weight, M, N, {true, false, false}));
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = weight_fw_grad.view(param_size) * (input - result1.view(res_size)) / result2.view(res_size);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (bias_fw_grad.defined()) {
+    auto val = bias_fw_grad.view(param_size);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val.expand_as(input);
+    }
+  }
+  return out_fw_grad;
+}
+
 Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices) {
   // Do the same indexing as the one done during the forward
   auto out_size = indices.sizes();
@@ -2882,6 +2927,28 @@ Tensor addmm_forward(const Tensor& self_fw_grad, const Tensor& mat1_fw_grad, con
 
   if (mat2_fw_grad.defined()) {
     auto val = maybe_multiply(mat1.mm(mat2_fw_grad), alpha);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor bmm_forward(const Tensor& self_fw_grad, const Tensor& mat2_fw_grad,
+        const Tensor& self, const Tensor& mat2) {
+
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    auto val = self_fw_grad.bmm(mat2);
+    out_fw_grad = val;
+  }
+
+  if (mat2_fw_grad.defined()) {
+    auto val = self.bmm(mat2_fw_grad);
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
     } else {

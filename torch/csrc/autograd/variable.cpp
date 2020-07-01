@@ -488,21 +488,84 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
   }
 }
 
-void AutogradMeta::set_fw_grad(Variable& new_grad, bool inplace, const Variable& self) {
+// [Forward Grad Layout]
+// The storage offset, size and stride of the fw grad must match the original Tensor
+//
+// This is for two reasons
+// - To make sure views of the original Tensor are also valid views of the fw_grad
+// - Avoid performance issues with mismatched layouts
+//
+// Note that we assume for now that the view info are ALWAYS tracked.
+// This is not the case when `.detach()` is used but we leave this as future work
+
+namespace {
+  // Check if two Tensor have the same storage offset, sizes and strides
+  bool has_same_meta(const Variable& base, const Variable& other) {
+    if (base.storage_offset() != other.storage_offset()) {
+      return false;
+    }
+    if (base.dim() != other.dim()) {
+      return false;
+    }
+    for (auto i=0; i<base.dim(); ++i) {
+      if (base.sizes()[i] != other.sizes()[i]) {
+        return false;
+      }
+      if (base.strides()[i] != other.strides()[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
   at::NoFwGradGuard guard;
-  if (is_view_) {
-    // For views, the fw_grad **must** be a view of the base's fw_grad
-    auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
-    if (inplace) {
-      // If the user does not want to use the given new_grad. Make sure we have a valid new_grad
-      if (!fw_grad_.defined()) {
+  if (fw_grad_.defined()) {
+    // If there is already a fw_grad, re-use it
+    if (new_grad.defined()) {
+      // They are always the same size as the current Tensor
+      fw_grad_.copy_(new_grad);
+    } else {
+      fw_grad_.fill_(0);
+    }
+  } else {
+    // Otherwise, check if the new_grad is valid
+    bool keep_new_grad = false;
+    if (has_same_meta(new_grad, self)) {
+      if (is_view_) {
+        // For views, we need to have the same meta and it must be a view of the base's fw_grad
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        auto& base = this_view_meta->base_;
+        // The given new grad must be a view
+        if (new_grad.is_view() && base.fw_grad().defined()) {
+          auto new_grad_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(new_grad));
+          // And it must share data with the base's fw_grad
+          if (new_grad_view_meta->base_.data_ptr() == base.fw_grad().data_ptr()) {
+            keep_new_grad = true;
+          }
+        }
+      } else {
+        // For non-views, this is enough
+        keep_new_grad = true;
+      }
+    }
+
+    if (keep_new_grad) {
+      // Just re-use the given new_grad
+      fw_grad_ = new_grad;
+    } else {
+      // Otherwise reate the new fw_grad and populate it
+      if (is_view_) {
+        // For views, the fw_grad **must** be a view of the base's fw_grad
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
         if (!this_view_meta->base_.fw_grad().defined()) {
           // If no other view created it, create a full fw_grad on the base
           auto& base = this_view_meta->base_;
-          auto new_fw_grad = at::empty_strided(base.sizes(), base.strides(), base.options());
-          new_fw_grad.fill_(0);
+          auto new_base_fw_grad = at::empty_strided(base.sizes(), base.strides(), base.options());
+          new_base_fw_grad.fill_(0);
 
-          this_view_meta->base_.set_fw_grad(new_fw_grad);
+          this_view_meta->base_.set_fw_grad(new_base_fw_grad);
         }
         // Update this view's fw_grad as a view of the base
         if (this_view_meta->has_view_fn()) {
@@ -511,32 +574,16 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, bool inplace, const Variable&
           auto offset = self.storage_offset() - this_view_meta->base_.storage_offset();
           fw_grad_ = this_view_meta->base_.fw_grad().as_strided(self.sizes(), self.strides(), offset);
         }
+      } else {
+        // Create a Tensor with the same meta as self
+        fw_grad_ = at::empty_strided(self.sizes(), self.strides(), self.options());
       }
 
-      // Nothing to do. Just sanity checks
-      TORCH_CHECK(fw_grad_.is_view(), "Forward grad of a view should be a view but it is not.");
-      auto fw_grad_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(fw_grad_));
-      TORCH_CHECK(fw_grad_view_meta->base_.data_ptr() == this_view_meta->base_.fw_grad().data_ptr(), "Forward grad of "
-                  "a view is not a view of its base's forward grad");
-    } else {
-      // Check that the user provided new_grad follow our invariant
-      TORCH_CHECK(new_grad.is_view(), "Forward grad of a view should be a view but it is not.");
-      auto new_grad_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(new_grad));
-      TORCH_CHECK(new_grad_view_meta->base_.data_ptr() == this_view_meta->base_.fw_grad().data_ptr(), "Forward grad of "
-                  "a view is not a view of its base's forward grad");
+      fw_grad_.copy_(new_grad);
     }
   }
 
-  if (inplace and fw_grad_.defined()) {
-    if (new_grad.defined()) {
-      // They are always the same size as the current Tensor
-      fw_grad_.copy_(new_grad);
-    } else {
-      fw_grad_.fill_(0);
-    }
-  } else {
-    fw_grad_ = new_grad;
-  }
+  TORCH_INTERNAL_ASSERT(has_same_meta(self, fw_grad_));
 }
 
 
