@@ -247,11 +247,7 @@ SugaredValuePtr ModuleValue::getitem(
           auto key = keys_iter->tup_.at(i);
           auto key_str = toIValue(key->asValue(loc, m))->toStringRef();
           if (key_str == idx_str) {
-            std::shared_ptr<SugaredValue> module_sugared_value =
-                module_values_iter->tup_.at(i);
-            auto module_value =
-                std::dynamic_pointer_cast<ModuleValue>(module_sugared_value);
-            return module_value;
+            return module_values_iter->tup_.at(i);
           }
         }
         throw ErrorReport(loc) << "Key Error, " << idx_str;
