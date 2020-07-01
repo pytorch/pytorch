@@ -130,12 +130,23 @@ static at::Tensor newAtTensor(
 
   auto tensorOptions = at::TensorOptions(typeMeta);
   if (jmemoryFormat == kTensorMemoryFormatChannelsLast) {
-    tensorOptions = tensorOptions.memory_format(at::MemoryFormat::ChannelsLast);
+    // Different path for ChannelsLast memory forrmat case,
+    // as from_blob creates empty tensor with shape {0}.
+    // That fails for Channels Last Tensor as it is supported only for 4-dim Tensors
+    at::Tensor t = torch::empty(
+        torch::IntArrayRef(shapeVec),
+        at::TensorOptions(typeMeta).memory_format(
+            at::MemoryFormat::ChannelsLast));
+    t.unsafeGetTensorImpl()->ShareExternalPointer(
+        {jni->GetDirectBufferAddress(jbuffer.get()), at::DeviceType::CPU},
+        typeMeta,
+        dataCapacity);
+    return t;
   }
   return torch::from_blob(
       jni->GetDirectBufferAddress(jbuffer.get()),
       torch::IntArrayRef(shapeVec),
-      tensorOptions);
+      at::TensorOptions(typeMeta));
 }
 
 class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {

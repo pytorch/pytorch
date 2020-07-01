@@ -311,5 +311,42 @@ public abstract class PytorchTestBase {
     assertArrayEquals(new long[] {100, 300}, value.getDataAsLongArray());
   }
 
+  @Test
+  public void testChannelsLast() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] dataNCHW = new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104};
+    Tensor inputNCHW = Tensor.fromBlob(dataNCHW, inputShape, MemoryFormat.CONTIGUOUS);
+    long[] dataNHWC = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(dataNHWC, inputShape, MemoryFormat.CHANNELS_LAST);
+
+    long[] weightShape = new long[] {3, 3, 1, 1};
+    long[] dataWeightNCHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNCHW = Tensor.fromBlob(dataWeightNCHW, weightShape, MemoryFormat.CONTIGUOUS);
+    long[] dataWeightNHWC = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNHWC = Tensor.fromBlob(dataWeightNHWC, weightShape, MemoryFormat.CHANNELS_LAST);
+
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+
+    final IValue outputNCHW = module.runMethod(
+        "conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
+    assertIValueTensor(outputNCHW,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
+
+    final IValue outputNHWC = module.runMethod(
+        "conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
+    assertIValueTensor(outputNHWC,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
+  }
+
+  static void assertIValueTensor(
+      final IValue ivalue, final long[] expectedShape, final long[] expectedData) {
+    assertTrue(ivalue.isTensor());
+    Tensor t = ivalue.toTensor();
+    assertArrayEquals(expectedShape, t.shape());
+    assertArrayEquals(expectedData, t.getDataAsLongArray());
+  }
+
   protected abstract String assetFilePath(String assetName) throws IOException;
 }

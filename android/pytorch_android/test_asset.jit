@@ -90,3 +90,11 @@ def testNonContiguous(self):
     assert x[0] == 100
     assert x[1] == 300
     return x
+
+def conv2d(self, x, w, toChannelsLast):
+    r = torch.nn.functional.conv2d(x, w)
+    if (toChannelsLast):
+        r = r.contiguous(memory_format=torch.channels_last)
+    else:
+        r = r.contiguous()
+    return r
