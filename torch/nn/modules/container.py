@@ -243,12 +243,14 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged ``OrderedDict``
-      or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      :class:`~torch.nn.ModuleDict` (the argument to 
+      :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict``) does not preserve the order of the
-    merged mapping.
+    types (e.g., Python's plain ``dict`` before Python verision 3.6) does not 
+    preserve the order of the merged mapping.
 
     Arguments:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
