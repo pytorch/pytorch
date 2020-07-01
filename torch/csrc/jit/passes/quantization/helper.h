@@ -44,6 +44,9 @@ TORCH_API bool isScalar(Value* v);
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
+// Return the module name that corresponds to the value.
+TORCH_API c10::optional<std::string> getModuleName(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
 

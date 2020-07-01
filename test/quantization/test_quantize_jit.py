@@ -2710,6 +2710,24 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
             self.assertEqual(ref_qparams, graph_params)
 
+    def test_convert_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
+        FileCheck().check("aten::to") \
+                   .check_next("aten::to") \
+                   .check("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
+
 class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
     for individual ops end to end.

@@ -568,19 +568,27 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
+c10::optional<std::string> getModuleName(Value* value) {
+  auto type = value->type()->cast<ClassType>();
+  if (type && type->name()) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto qualified_name =
+        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
+    return qualified_name;
+  }
+  return c10::nullopt;
+}
+
 bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
     const std::string& module_qualified_name) {
   const auto& match_vmap = match.values_map;
-  Value* relu = match_vmap.at(vmap.at(vname));
-  auto type = relu->type()->cast<ClassType>();
-  if (type && type->name()) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-    return qualified_name == module_qualified_name;
+  Value* v = match_vmap.at(vmap.at(vname));
+  auto module_name = getModuleName(v);
+  if (module_name.has_value()) {
+    return module_name.value() == module_qualified_name;
   }
   return false;
 };
