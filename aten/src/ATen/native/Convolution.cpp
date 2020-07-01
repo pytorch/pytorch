@@ -1142,7 +1142,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
 // Performs convolution with a scaled weight, unscales, and returns the
 // unscaled results. This is done for QAT Conv-BN fusion: it contains
 // the logical part of QAT Conv-BN which is after observation (all inputs
-// are observed, and before BN.
+// are observed), and before BN.
 at::Tensor qat_conv2d_and_unscale(
     const Tensor& input, const Tensor& scaled_weight,
     const Tensor& scale_factor, const Tensor& bias, IntArrayRef stride,

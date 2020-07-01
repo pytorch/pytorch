@@ -34,12 +34,12 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.7.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.7.0-SNAPSHOT'
     ...
 }
 ```
-The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.6.0-SNAPSHOT`.
+The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.7.0-SNAPSHOT`.
 
 ## Building PyTorch Android from Source
 
@@ -182,8 +182,13 @@ find_library(PYTORCH_LIBRARY pytorch_jni
   PATHS ${PYTORCH_LINK_DIRS}
   NO_CMAKE_FIND_ROOT_PATH)
 
+find_library(FBJNI_LIBRARY fbjni
+  PATHS ${PYTORCH_LINK_DIRS}
+  NO_CMAKE_FIND_ROOT_PATH)
+
 target_link_libraries(${PROJECT_NAME}
   ${PYTORCH_LIBRARY})
+  ${FBJNI_LIBRARY})
 
 ```
 If your CMakeLists.txt file is located in the same directory as your build.gradle, `set(build_DIR ${CMAKE_SOURCE_DIR}/build)` should work for you. But if you have another location of it, you may need to change it.
