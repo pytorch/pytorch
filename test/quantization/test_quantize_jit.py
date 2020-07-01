@@ -237,6 +237,37 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
+    def test_foldbn_no_fusion(self):
+        ''' Test that we don't fuse the cases when module type does not match
+        '''
+        class CustomConv(torch.nn.Module):
+            def __init__(self):
+                super(CustomConv, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class CustomBn(torch.nn.Module):
+            def __init__(self):
+                super(CustomBn, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = CustomConv()
+                self.bn = CustomBn()
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        m = torch.jit.script(M())
+        m = fuse_conv_bn_jit(m)
+        FileCheck().check_count("prim::CallMethod", 2, exactly=True) \
+                   .run(m.graph)
+
     def test_foldbn_complex_cases(self):
         # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
