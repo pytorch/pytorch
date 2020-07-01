@@ -11505,24 +11505,27 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    def test_cdist_large(self, device):
+    @tf32_on_and_off
+    def test_cdist_large(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
     @slowTest
-    def test_cdist_large_batch(self, device):
+    @tf32_on_and_off
+    def test_cdist_large_batch(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
             y = torch.randn(4, 3, 1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
-    def test_cdist_non_contiguous(self, device):
+    @tf32_on_and_off
+    def test_cdist_non_contiguous(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).transpose(-1, -2)
             y = torch.randn(5, 3, device=device).transpose(-1, -2)
@@ -11530,7 +11533,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
             x = torch.randn(7, 5, device=device)
             y = torch.randn(5, 3, device=device).t()
@@ -11538,7 +11541,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(3, 5, device=device)
@@ -11546,9 +11549,10 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
-    def test_cdist_non_contiguous_batch(self, device):
+    @tf32_on_and_off
+    def test_cdist_non_contiguous_batch(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
@@ -11556,7 +11560,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
             x = torch.randn(7, 2, 7, 5, device=device)
             y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
@@ -11564,7 +11568,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
             x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 5, device=device)
@@ -11572,7 +11576,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
-            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
 
     def test_multinomial_constraints(self, device):
         x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
@@ -12384,7 +12388,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_tensordot(self, device):
+    @tf32_on_and_off
+    def test_tensordot(self, device, rtol, atol):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
         c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
@@ -12400,10 +12405,10 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
             torch.tensordot(a, b, dims=-1)
 
-        self.assertEqual(c, cn)
+        self.assertEqual(c, cn, rtol=rtol, atol=atol)
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
-        self.assertEqual(c, cn)
+        self.assertEqual(c, cn, rtol=rtol, atol=atol)
 
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -17944,13 +17949,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
     @onlyCUDA
-    def test_mv_stride_0(self, device):
+    @tf32_on_and_off
+    def test_mv_stride_0(self, device, rtol, atol):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
         vec = torch.tensor(2., device=device).expand(2)
         mat_cpu = mat.cpu()
         vec_cpu = vec.cpu()
-        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
+        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64)
