@@ -231,8 +231,8 @@
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
-        build_type: prebuild
-        docker_image: ${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+        build_type: prebuilt
+        artifact: ~/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -316,8 +316,8 @@
           docker commit "$id" ${output_image}
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
-        build_type: prebuild-single
-        docker_image: ${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+        build_type: prebuilt-single
+        artifact: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
