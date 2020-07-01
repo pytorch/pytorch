@@ -8439,7 +8439,7 @@ class TestTorchDeviceType(TestCase):
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @tf32_on_and_off(atol_=0.001)
+    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
     def test_broadcast_batched_matmul(self, device, rtol, atol):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
@@ -10429,7 +10429,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @tf32_on_and_off(atol_=0.0005)
+    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
     def test_qr(self, device, rtol, atol):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
@@ -11506,7 +11506,7 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off(rtol_=0.005)
+    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
     def test_cdist_large(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -12389,7 +12389,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @tf32_on_and_off(atol_=0.007)
+    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
     def test_tensordot(self, device, rtol, atol):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
