@@ -34,7 +34,7 @@ import weakref
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
 from torch.jit._script import Attribute, ScriptModule
-from torch.jit._trace import trace, trace_module, TracerWarning, TracingCheckError, \
+from torch.jit._trace import trace, trace_module, TracedModule, TracerWarning, TracingCheckError, \
     is_tracing, ONNXTracedModule, _unique_state_dict, _flatten
 from torch.jit._state import _python_cu, _enabled
 
