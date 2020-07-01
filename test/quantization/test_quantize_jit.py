@@ -1097,7 +1097,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
     def test_inplace_option(self):
         for tracing in [True, False]:
-            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3).float(), tracing, self.img_data[0][0])
             qconfig_dict = {'': default_qconfig}
             quantize_jit(
                 model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
