@@ -10,6 +10,7 @@ import torch.jit.quantized
 from torch.quantization import (
     QConfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_observer,
     per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
@@ -2460,17 +2461,24 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        m = torch.jit.script(M())
-        m = prepare_dynamic_jit(m, {'': default_dynamic_qconfig})
-        # for input of FC for dynamic quant
-        assert len(attrs_with_prefix(m, '_observer_')) == 1
-        # for weight
-        assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
-        FileCheck().check('DynamicQuantObserver = prim::GetAttr[name="_observer_') \
-                   .check('prim::GetAttr[name="fc"]') \
-                   .check('prim::CallMethod') \
-                   .check_not('Observer = prim::GetAttr[name="_observer_') \
-                   .run(m.graph)
+        model = torch.jit.script(M())
+        for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            m = prepare_dynamic_jit(model, {'': qconfig})
+
+            # for input of FC for dynamic quant
+            assert len(attrs_with_prefix(m, '_observer_')) == 1
+            # for weight
+            assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
+            if qconfig == float16_dynamic_qconfig:
+                observer_name = 'NoopObserver = prim::GetAttr[name="_observer_'
+            else:
+                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+
+            FileCheck().check(observer_name) \
+                       .check('prim::GetAttr[name="fc"]') \
+                       .check('prim::CallMethod') \
+                       .check_not('Observer = prim::GetAttr[name="_observer_') \
+                       .run(m.graph)
 
 
     def test_prepare_dynamic_child_qconfig(self):
