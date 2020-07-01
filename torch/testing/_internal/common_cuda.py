@@ -50,7 +50,7 @@ def setup_tf32(dtype, rtol=None, atol=None):
     if dtype in {tfloat32, tcomplex64}:
         torch.backends.cuda.matmul.allow_tf32 = True
         if tf32_is_not_fp32():
-            yield tf32_to_fp32(dtype), rtol, rtol
+            yield tf32_to_fp32(dtype), rtol, atol
         else:
             yield tf32_to_fp32(dtype), None, None
     else:
