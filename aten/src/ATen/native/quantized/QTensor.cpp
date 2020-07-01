@@ -212,6 +212,10 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   float x_min = input_contig.min().item<float>();
   float x_max = input_contig.max().item<float>();
 
+  if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    reduce_range = false;
+  }
+
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
       /*max=*/x_max,
