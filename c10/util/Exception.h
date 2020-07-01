@@ -281,7 +281,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
           " INTERNAL ASSERT FAILED at"        \
           C10_STRINGIZE(__FILE__)             \
           ", ",                               \
-          ##__VA_ARGS__)                        \
+          ::c10::error_value("", __VA_ARGS__))\
     );                                        \
   }
 #else
@@ -331,7 +331,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
           " CHECK FAILED at "                           \
           C10_STRINGIZE(__FILE__)                       \
           ", ",                                         \
-          ##__VA_ARGS__)                                  \
+          ::c10::error_value("", __VA_ARGS__))          \
     );                                                  \
   }
 #else
