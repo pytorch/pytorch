@@ -19,8 +19,8 @@ import torch.distributed.rpc as rpc
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class TestDdpUnderDistAutogradTensorPipe(
-    TestDdpUnderDistAutograd,
     TensorPipeRpcAgentTestFixture,
+    TestDdpUnderDistAutograd,
     MultiProcessTestCase,
 ):
     def setUp(self):
@@ -35,8 +35,8 @@ class TestDdpUnderDistAutogradTensorPipe(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class TestDdpComparisonTensorPipe(
-    TestDdpComparison,
     TensorPipeRpcAgentTestFixture,
+    TestDdpComparison,
     MultiProcessTestCase,
 ):
     def setUp(self):
