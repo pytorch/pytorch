@@ -38,4 +38,4 @@ class ElementwiseLinearGradientOp final : public Operator<Context> {
 
 } // namespace caffe2
 
-#endif  // CAFFE2_OPERATORS_ELEMENTWISE_LINEAR_OP_H_
+#endif // CAFFE2_OPERATORS_ELEMENTWISE_LINEAR_OP_H_

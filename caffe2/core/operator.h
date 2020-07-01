@@ -480,70 +480,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   virtual void CancelAsyncCallback() {}
 
-  // RunAsync, if implemenented by the specific operators, will schedule the
+  // RunAsync, if implemented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
   // it will simply be synchronous as a fallback.
-  virtual bool RunAsync(int stream_id = 0) {
-    try {
-      auto result = Run(stream_id);
-      if (result) {
-        if (HasAsyncPart()) {
-          RecordEvent();
-        } else {
-          SetEventFinished();
-        }
-      } else {
-        SetEventFinished(getErrorMsg().c_str());
-      }
-      return result;
-    } catch (EnforceNotMet& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (const std::exception& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (...) {
-      SetEventFinishedWithException(getErrorMsg().c_str());
-      throw;
-    }
-  }
+  virtual bool RunAsync(int stream_id = 0);
 
-  virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
-    CAFFE_ENFORCE(
-        isLegacyOperator(),
-        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
-
-    if (!has_debug_def()) {
-      return;
-    }
-
-    bool found_input = false;
-    bool found_output = false;
-    if (err->caller() != nullptr) {
-      std::ostringstream oss;
-      for (size_t i = 0; i < inputs_.size(); i++) {
-        if (inputs_[i]->GetRaw() == err->caller()) {
-          found_input = true;
-          oss << "while accessing input: " << debug_def().input(i);
-          break;
-        }
-      }
-      for (size_t i = 0; i < outputs_.size(); i++) {
-        if (outputs_[i]->GetRaw() == err->caller()) {
-          found_output = true;
-          if (found_input) {
-            oss << " OR ";
-          }
-          oss << "while accessing output: " << debug_def().output(i);
-          break;
-        }
-      }
-      if (found_input || found_output) {
-        err->add_context(oss.str());
-      }
-    }
-  }
+  virtual void AddRelatedBlobInfo(EnforceNotMet* err);
 
   virtual std::string debug_info_string() const {
     return "";
