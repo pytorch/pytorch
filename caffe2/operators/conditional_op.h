@@ -19,6 +19,6 @@ class ConditionalOp final : public Operator<Context> {
   bool RunOnDevice() override;
 };
 
-} // caffe2
+} // namespace caffe2
 
 #endif
