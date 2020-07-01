@@ -113,8 +113,20 @@ class FoldConvBatchNormHelper {
 
   std::unordered_map<ModulePtr, std::tuple<at::Tensor, at::Tensor>>
       conv_module_and_params_;
+
+  // A map from graph to a list of tuple of paths of matched conv and bn module
+  // e.g. if we have a graph `g` containing following code
+  // x = self.sub.conv1(..)
+  // x = self.sub.bn1(..)
+  // x = self.sub.conv2(..)
+  // x = self.sub.bn2(..)
+  // then the value for graph `g` in this map will be:
+  // [(['sub', 'conv1'], ['sub', 'bn1']), (['sub', 'conv2'], ['sub', 'bn2'])]
+  // the first entry of the list is the paths to first conv-bn match
+  // the second entry of the list is the path to second match
   std::unordered_map<Graph*, std::vector<std::tuple<std::vector<std::string>, std::vector<std::string>>>>
       conv_bn_paths_;
+
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
