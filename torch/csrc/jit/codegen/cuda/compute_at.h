@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct TensorView;
+class TensorView;
 
 class ComputeAt {
  public:

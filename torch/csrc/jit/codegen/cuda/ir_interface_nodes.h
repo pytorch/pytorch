@@ -169,7 +169,7 @@ class TORCH_CUDA_API Int : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-struct ComputeAt;
+class ComputeAt;
 class TransformReplay;
 class TransformIter;
 class OptOutMutator;

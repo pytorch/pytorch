@@ -65,10 +65,9 @@ void testGPU_IrGraphGenerator() {
   TensorView* tv0 = makeDummyTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(-1.0));
   TensorView* tv2 = add(tv0, new Float(3.141));
   TensorView* tv3 = broadcast(tv0, {false, true, false, true});
-  TensorView* tv4 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv3);
+  TensorView* tv4 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv3);
   TensorView* tv5 = clamp(tv4, new Float(0.f), new Float(1.f));
   TensorView* tv6 = add(tv2, tv2);
 
@@ -77,7 +76,6 @@ void testGPU_IrGraphGenerator() {
                    &fusion, IrGraphGenerator::DetailLevel::Explicit)
                    .empty());
 
-  fusion.addOutput(tv5);
   fusion.addOutput(tv6);
 
   tv6->merge(0);
@@ -2702,7 +2700,6 @@ void testGPU_FusionReduction4() {
   fusion.addOutput(tv1);
 
   int bidy = 2;
-  int bidx = 3;
   int tidy = 4;
   int tidx = 5;
 
@@ -3080,7 +3077,7 @@ void testGPU_FusionSoftmax() {
   sum_exp_tv4->split(-1, 32);
   TensorView* sum_exp_rf_tv8 = sum_exp_tv4->rFactor({-2});
 
-  exp_tv3->computeAt(sum_exp_rf_tv8, {2});
+  exp_tv3->computeAt(sum_exp_rf_tv8, 2);
 
   max_val_rf_tv7->axis(0)->parallelize(ParallelType::BIDx);
   max_val_tv1->axis(0)->parallelize(ParallelType::BIDx);

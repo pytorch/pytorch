@@ -552,7 +552,7 @@ void runKernel(
     blocks = numel;
     // Translated to `fcd_reduction`
     if (entry->reduction_axes_.back() ==
-        outputs[0].dim() + entry->reduction_axes_.size() - 1) {
+        outputs[0].dim() + ((int)entry->reduction_axes_.size()) - 1) {
       thread_x = kFcdReductionThreadX;
       thread_y = 1;
     } else {
@@ -643,9 +643,6 @@ void runTestKernel(
   KernelArgumentHolder kernel_args;
 
   auto exprs = entry->fusion_->exprs(true);
-  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr) {
-    return expr->getExprType() == ExprType::ReductionOp;
-  });
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different

@@ -59,6 +59,8 @@ class TORCH_CUDA_API ExpressionEvaluator : private IterVisitor {
 
   c10::optional<Int::ScalarType> value(const Statement* stmt) const;
 
+  using IterVisitor::handle;
+
   void handle(Int*) override;
   void handle(UnaryOp*) override;
   void handle(BinaryOp*) override;

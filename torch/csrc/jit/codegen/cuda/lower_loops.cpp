@@ -9,14 +9,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-namespace {
-bool operator==(
-    const std::pair<IterDomain*, TensorView*>& p1,
-    const std::pair<IterDomain*, TensorView*>& p2) {
-  return p1.first->sameAs(p2.first) && p1.second == p2.second;
-}
-} // namespace
-
 // Create, place, and return the allocation for tv
 Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   TORCH_INTERNAL_ASSERT(

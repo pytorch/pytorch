@@ -26,9 +26,9 @@ void ComputeAt::maybe_computeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_compute_at_axis) {
-  int prev_pos = 0;
+  unsigned int prev_pos = 0;
   if (producer->hasComputeAt())
-    prev_pos = (int)producer->getThisComputeAtAxis();
+    prev_pos = producer->getThisComputeAtAxis();
 
   auto replay = TransformReplay::replayPasC(
       producer->domain(), consumer->domain(), (int)consumer_compute_at_axis);

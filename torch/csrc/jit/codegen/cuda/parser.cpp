@@ -51,7 +51,7 @@ size_t coalescReduction(TensorView* tv) {
   std::unordered_map<int, int> coalesc_permute;
   for (size_t i = 0; i < reduction_axes.size(); i++) {
     size_t new_pos = i + n_dims - reduction_axes.size();
-    if (new_pos == reduction_axes[i]) {
+    if (new_pos == size_t(reduction_axes[i])) {
       break;
     } else {
       coalesc_permute[reduction_axes[i]] = new_pos;
@@ -775,7 +775,7 @@ class IrParser {
       // create tensor;
       if (broadcast_dim >= 0) {
         TORCH_INTERNAL_ASSERT(
-            broadcast_dim >= *tensor_type->dim(),
+            broadcast_dim >= (int)*tensor_type->dim(),
             "attempt to broadcast a tensor to shrinked dimension is invalid");
         tensor_type = tensor_type->withDim(broadcast_dim);
       }
