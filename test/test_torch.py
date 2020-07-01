@@ -16471,8 +16471,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(res1, res2, atol=prec, rtol=0)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*([torch.float, torch.double, tfloat32] +
-                    ([] if TEST_WITH_ROCM else (torch.testing.get_all_complex_dtypes() + [tcomplex64]))))
+    @dtypesIfCUDA(*((torch.float, torch.double, tfloat32) +
+                    (() if TEST_WITH_ROCM else (tcomplex64, *torch.testing.get_all_complex_dtypes()))))
     def test_addmm_sizes(self, device, dtype):
         with setup_tf32(dtype, atol=0.005, rtol=0.005) as (dtype, rtol, atol):
             for m in [0, 1, 25]:
@@ -18884,57 +18884,57 @@ class TestViewOps(TestCase):
 # the results. In-place variants of the ops can also be run.
 
 # Lists of dtypes to instantiate tensor op test variants.
-_types = [
+_types = (
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long,
     torch.uint8
-]
+)
 
-_types_no_half = [
+_types_no_half = (
     torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long,
     torch.uint8
-]
+)
 
 # _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
-_types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
+_types2 = _types + (torch.bfloat16,) if TEST_WITH_ROCM else _types
 
-_float_types = [torch.half, torch.float, torch.double]
+_float_types = (torch.half, torch.float, torch.double)
 
-_tfloat_types = [tfloat32]
+_tfloat_types = (tfloat32,)
 
-_complex_types = [torch.cfloat, torch.cdouble]
+_complex_types = (torch.cfloat, torch.cdouble)
 
-_complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
+_complex_types_skip_rocm = () if TEST_WITH_ROCM else _complex_types
 
-_float_types_no_half = [torch.float, torch.double]
+_float_types_no_half = (torch.float, torch.double)
 
-_tcomplex_types = [tcomplex64]
+_tcomplex_types = (tcomplex64,)
 
-_complex_types_with_tf32_skip_rocm = [] if TEST_WITH_ROCM else _complex_types + _tcomplex_types
+_complex_types_with_tf32_skip_rocm = () if TEST_WITH_ROCM else _complex_types + _tcomplex_types
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
-_float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
+_float_types2 = _float_types + (torch.bfloat16,) if TEST_WITH_ROCM else _float_types
 
 _tfloat_types2 = _float_types2 + _tfloat_types
 
 _complex_and_float_types2 = _float_types2 + _complex_types
 
-_signed_types = [
+_signed_types = (
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
-]
+)
 
-_signed_types_no_half = [
+_signed_types_no_half = (
     torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
-]
+)
 
-_cpu_types: List[torch.dtype] = []
+_cpu_types: Tuple = ()
 
-_unsigned_types = [torch.uint8]
+_unsigned_types = (torch.uint8,)
 
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
@@ -19440,8 +19440,9 @@ def generate_test_function(cls,
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
         device_result = getattr(device_tensor, op_str)(*device_args)
 
-        dtype2precision = {torch.half : half_precision,
-                           torch.bfloat16 : bfloat16_precision}
+        dtype2precision: Dict[Union[torch.dtype, str], float] = {
+            torch.half : half_precision,
+            torch.bfloat16 : bfloat16_precision}
         if tf32_is_not_fp32():
             dtype2precision.update({tfloat32 : half_precision,
                                     tcomplex64 : half_precision})
