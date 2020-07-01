@@ -2,6 +2,7 @@
 #define TH_BLAS_INC
 
 #include <TH/THGeneral.h>
+#include <ATen/native/CPUBlas.h>
 
 #define THBlas_(NAME) TH_CONCAT_4(TH,Real,Blas_,NAME)
 

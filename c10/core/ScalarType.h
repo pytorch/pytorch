@@ -95,6 +95,20 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 }
 
+template <typename T>
+struct CppTypeToScalarType;
+
+#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type) \
+  template<>                                                  \
+  struct CppTypeToScalarType<cpp_type>:                       \
+    std::integral_constant<c10::ScalarType,                   \
+                           c10::ScalarType::scalar_type>      \
+  {};
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
+
+#undef SPECIALIZE_CppTypeToScalarType
+
 #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
   _(int8_t, Char)                 \
