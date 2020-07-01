@@ -231,8 +231,8 @@
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
-        build_type: prebuild
-        docker_image: ${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+        build_type: prebuilt
+        artifact: ~/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -308,8 +308,8 @@
           docker commit "$id" ${output_image}
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
-        build_type: prebuild-single
-        docker_image: ${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+        build_type: prebuilt-single
+        artifact: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -348,12 +348,11 @@
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GRADLE_OFFLINE=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-custom-build-single
-          docker commit "$id" ${output_image}
-          time docker push ${output_image}
+          # Skip docker push as this job is purely for size analysis purpose.
+          # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
+
     - upload_binary_size_for_android_build:
         build_type: custom-build-single
-        docker_image: ${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-custom-build-single
 
   pytorch_ios_build:
     <<: *pytorch_ios_params
