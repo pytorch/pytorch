@@ -511,8 +511,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
     TypePtr value_type = dict.valueType();
     for (const auto& entry : dict) {
       auto static_key = graph->insertConstant(entry.key());
-      auto static_value =
-          graph->insert(aten::__getitem__, {value, static_key});
+      auto static_value = graph->insert(aten::__getitem__, {value, static_key});
       setValue(entry.value(), static_value);
     }
   } else {
