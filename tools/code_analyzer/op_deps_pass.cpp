@@ -619,13 +619,18 @@ private:
           std::cerr << op << " ";
         }
         std::cerr << ") in a registration call in function: "
-                  << demangle(I->getFunction()->getName()) << std::endl;
+                  << demangle(I->getFunction()->getName())
+                  << " contextualNamespace: " << contextualNamespace
+                  << std::endl;
       }
       for (const auto& op : visitedOps) {
         opSchemaStrs->insert(op);
         if (visitedFunctions.empty()) {
           std::cerr << "[WARNING] could not find registered function for op: "
-                    << op << std::endl;
+                    << op << " in function: "
+                    << demangle(I->getFunction()->getName())
+                    << " contextualNamespace: " << contextualNamespace
+                    << std::endl;
         }
         for (const auto& func : visitedFunctions) {
           (*schemaStrToFunctions)[op].insert(func);
@@ -744,8 +749,12 @@ private:
       const std::string& contextualNamespace, Value* V) {
     std::vector<std::string> schemaStrs;
     extractStringValue(V, [&](const std::string& str) {
+      // NB: some operator names might contain namespace. If this occurs, we
+      // MUST NOT use the contextual namespace. Fortunately, it's easy to tell
+      // if a namespace is included: a double colon will be present.
       const std::string& schemaStr =
-          contextualNamespace.empty() ? str : contextualNamespace + str;
+          (contextualNamespace.empty() || str.find("::") != std::string::npos)
+          ? str : contextualNamespace + str;
       if (FunctionSchemaPatternLoc.pattern->match(schemaStr)) {
         schemaStrs.push_back(schemaStr);
       }

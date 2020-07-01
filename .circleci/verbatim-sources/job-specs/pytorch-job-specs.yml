@@ -107,6 +107,9 @@ jobs:
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
+            hostname
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
@@ -166,7 +169,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -181,7 +184,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.13"
       vc_year:
         type: string
         default: "2017"
@@ -237,7 +240,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -252,7 +255,7 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.13"
       vc_year:
         type: string
         default: "2017"
