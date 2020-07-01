@@ -305,6 +305,7 @@ libtorch_cuda_sources = [
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
+    "torch/csrc/jit/codegen/cuda/compute_at.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",

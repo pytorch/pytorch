@@ -169,6 +169,7 @@ class TORCH_CUDA_API Int : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
+struct ComputeAt;
 class TransformReplay;
 class TransformIter;
 class OptOutMutator;
@@ -306,6 +307,7 @@ class TORCH_CUDA_API TensorView : public Val {
   friend TORCH_CUDA_API TransformReplay;
   friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API LoopNestGenerator;
+  friend ComputeAt;
   friend void IrFixComputeAt(Fusion*);
   friend void IrAdjustMemoryTypes(Fusion* fusion);
 
@@ -325,6 +327,10 @@ class TORCH_CUDA_API TensorView : public Val {
 
   void setComputeAt(TensorView* computeAtView, int axis);
 
+  // Set all computeAt members without checking any correctness. Useful for
+  // computeAt with outputs relative to eachother
+  void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
+
   void setMemoryType(MemoryType mt) {
     memory_type_ = mt;
     bool is_inp_or_out =
@@ -336,12 +342,6 @@ class TORCH_CUDA_API TensorView : public Val {
   }
 
  private:
-  // Transform this view like consumer, mark compute_at_(viw,axis)
-  void computeAt_impl(TensorView* consumer, int axis);
-
-  // Transform this view like producer, mark producer as compute_at_(this, axis)
-  void forwardComputeAt_impl(TensorView* producer, int axis);
-
   // Make a copy of the domain (used for Tensor based constructor), likely to be
   // removed soon.
   void copyDomain(const TensorDomain* td);

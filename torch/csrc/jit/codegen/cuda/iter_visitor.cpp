@@ -385,6 +385,42 @@ void BackwardVisitor::traverseFrom(
 /* DEPENDENCY CHECKING */
 
 namespace {
+
+// Looks for and returns all values in between dependencies and vals, including
+// them.
+struct Dependencies : public IterVisitor {
+  std::unordered_set<Val*> dependencies_;
+  std::unordered_set<Val*> vals;
+
+  std::vector<Statement*> next(Val* v) override {
+    if (dependencies_.find(v) != dependencies_.end())
+      return std::vector<Statement*>();
+    return IterVisitor::next(v);
+  }
+
+  void handle(Val* val) override {
+    vals.emplace(val);
+  }
+
+  Dependencies(
+      std::unordered_set<Val*> _dependencies,
+      const std::vector<Val*>& of)
+      : dependencies_(std::move(_dependencies)) {
+    traverseFrom(of[0]->fusion(), of, false);
+  };
+
+ public:
+  static std::unordered_set<Val*> getAllVals(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of) {
+    if (of.empty())
+      return std::unordered_set<Val*>();
+
+    Dependencies deps(dependencies, of);
+    return deps.vals;
+  }
+};
+
 // Looks for and returns
 class DependencyChains : public IterVisitor {
  public:
@@ -438,6 +474,7 @@ class DependencyChains : public IterVisitor {
     return dp.dep_chains[0];
   }
 
+  // I don't think this is actually hooked up, but leaving for now.
   static std::deque<std::deque<Val*>> getDependencyChains(
       Val* dependency,
       Val* of) {
@@ -447,14 +484,14 @@ class DependencyChains : public IterVisitor {
     return dp.dep_chains;
   }
 
-  static std::deque<std::deque<Val*>> getDependencyChainsTo(Val* dependency) {
+  static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency) {
     DependencyChains dp(dependency, true);
     if (dp.dep_chains.empty())
       return std::deque<std::deque<Val*>>();
     return dp.dep_chains;
   }
 
-  static std::deque<std::deque<Val*>> getDependencyChainsTo(
+  static std::deque<std::deque<Val*>> getAllUseChains(
       const std::unordered_set<Val*>& dependencies) {
     DependencyChains dp(dependencies, true);
     if (dp.dep_chains.empty())
@@ -481,9 +518,14 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChains(
   return DependencyChains::getDependencyChains(dependency, of);
 }
 
-std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChainsTo(
-    Val* dependency) {
-  return DependencyChains::getDependencyChainsTo(dependency);
+std::deque<std::deque<Val*>> DependencyCheck::getAllUseChains(Val* producer) {
+  return DependencyChains::getAllUseChains(producer);
+}
+
+std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
+    const std::unordered_set<Val*>& dependencies,
+    const std::vector<Val*>& of) {
+  return Dependencies::getAllVals(dependencies, of);
 }
 
 } // namespace fuser

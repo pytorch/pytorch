@@ -216,7 +216,12 @@ class TORCH_CUDA_API DependencyCheck {
   // Finds all Val* paths from all leaf nodes to "dependency". Returns those
   // paths. deque[i].back() are leaf nodes, and deque[i][0] is "dependency".
   // Returns an empty deque if there are no uses of dependency found.
-  static std::deque<std::deque<Val*>> getAllDependencyChainsTo(Val* dependency);
+  static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
+
+  // Grab all values that exist between and including provided vals
+  static std::unordered_set<Val*> getAllValsBetween(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of);
 };
 
 } // namespace fuser

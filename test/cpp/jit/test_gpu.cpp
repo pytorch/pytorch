@@ -1349,7 +1349,7 @@ void testGPU_FusionAdvancedComputeAt() {
     TORCH_CHECK(tv0->getComputeAtView() == tv3);
     TORCH_CHECK(tv1->getComputeAtView() == tv4);
     TORCH_CHECK(tv2->getComputeAtView() == tv4);
-    TORCH_CHECK(tv3->getComputeAtView() == tv5);
+    TORCH_CHECK(tv3->getComputeAtView() == tv6);
     TORCH_CHECK(tv4->getComputeAtView() == tv5);
     TORCH_CHECK(tv5->getComputeAtView() == tv6);
     TORCH_CHECK(!tv6->hasComputeAt());
@@ -2355,7 +2355,8 @@ void testGPU_FusionRFactorReplay() {
 
   // Replay casp, replay new_domain2 as new_domain
   // reordered_new_domain[I0oi{16}, I0oo*I0i{32}, ir1oi{4}rf, R(R1oo*R1i{8})rf]
-  TensorDomain* casp = TransformReplay::replayCasP(new_domain2, new_domain, 2);
+  auto replay_casp = TransformReplay::replayCasP(new_domain2, new_domain, 2);
+  TensorDomain* casp = replay_casp.first;
   // new_domain[I0oi{16}, I0oo*I0i{32}, ir1oi{4}rf, R(R1oo*R1i{8})rf]
   //       casp[I0oi{16}, I0oo*I0i{32},  R1oi{4}]
 
@@ -2364,7 +2365,8 @@ void testGPU_FusionRFactorReplay() {
   // new_domain[I0oi{16},  I0oo*I0i{32}  ,                 ir1oi{4}rf,
   // R(R1oo*R1i{8})rf]
 
-  TensorDomain* pasc = TransformReplay::replayPasC(new_domain, casp, 2);
+  auto replay_pasc = TransformReplay::replayPasC(new_domain, casp, 2);
+  TensorDomain* pasc = replay_pasc.first;
   // pasc      [I0oi{16}, (I0oo*I0i{32})o, I(Ioo*I0i)i{2}, ir1oi{4}rf,
   // R(R1oo*R1i{8})rf]
 
@@ -3670,6 +3672,26 @@ void testGPU_FusionBCastReduce() {
   TORCH_CHECK(
       tv2->axis(0)->isBroadcast() && tv2->axis(1)->isReduction() &&
       !tv2->axis(2)->isBroadcast() && !tv2->axis(2)->isReduction());
+}
+
+// Multiple consumer reduction with computeAt
+// https://github.com/csarofeen/pytorch/issues/110
+void testGPU_FusionReductionMultiConsumer() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = unaryOp(UnaryOpType::Exp, tv0);
+  auto tv2 = reductionOp(BinaryOpType::Max, {-1}, new Float(0), tv1);
+  auto tv3 = reductionOp(BinaryOpType::Min, {-1}, new Float(0), tv1);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+  tv1->computeAt(tv2, -1);
+
+  TORCH_CHECK(
+      (tv1->getComputeAtView() == tv2 || tv1->getComputeAtView() == tv3) &&
+      tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
 }
 
 void testGPU_FusionComputeAtExprOrder() {
