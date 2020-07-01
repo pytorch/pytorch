@@ -11506,7 +11506,7 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
+    @tf32_on_and_off(atol_=0.005, rtol_=0.005)
     def test_cdist_large(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -12389,7 +12389,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
+    @tf32_on_and_off(atol_=0.005, rtol_=0.005)
     def test_tensordot(self, device, rtol, atol):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
@@ -16473,7 +16473,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCUDA(*([torch.float, torch.double, tfloat32] +
                     ([] if TEST_WITH_ROCM else (torch.testing.get_all_complex_dtypes() + [tcomplex64]))))
     def test_addmm_sizes(self, device, dtype):
-        with setup_tf32(dtype, atol=0.003) as (dtype, rtol, atol):
+        with setup_tf32(dtype, atol=0.001, rtol=0.001) as (dtype, rtol, atol):
             for m in [0, 1, 25]:
                 for n in [0, 1, 10]:
                     for k in [0, 1, 8]:
