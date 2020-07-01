@@ -10456,7 +10456,8 @@ class TestTorchDeviceType(TestCase):
 
             # Check4: Q^{T}Q = I, triu(R) = R
             self.assertEqual(torch.matmul(Q.transpose(-2, -1), Q),
-                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)), rtol=rtol, atol=atol)
+                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)),
+                             rtol=rtol, atol=atol)
             self.assertEqual(R.triu(), R)
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
