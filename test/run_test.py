@@ -30,6 +30,8 @@ TESTS = [
     'distributed/test_c10d_spawn',
     'test_cuda',
     'test_jit_cuda_fuser',
+    'test_jit_cuda_fuser_legacy',
+    'test_jit_cuda_fuser_profiling',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
