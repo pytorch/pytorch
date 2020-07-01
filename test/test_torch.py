@@ -19405,10 +19405,10 @@ def generate_test_function(cls,
                            dtype_list,
                            dtype_cpu_list,
                            decorators) -> None:
-    def fn(self, device, dtype_, disable_tf32_on_fp32=False) -> None:
-        if dtype in {tfloat32, tcomplex64}:
+    def fn_(self, device, dtype_, disable_tf32_on_fp32) -> None:
+        if dtype_ in {tfloat32, tcomplex64}:
             torch.backends.cuda.matmul.allow_tf32 = True
-        elif disable_tf32_on_fp32 and dtype in {torch.float32, torch.complex64}:
+        elif disable_tf32_on_fp32 and dtype_ in {torch.float32, torch.complex64}:
             torch.backends.cuda.matmul.allow_tf32 = False
         dtype = tf32_to_fp32(dtype_)
         # Generates the CPU inputs
@@ -19449,7 +19449,11 @@ def generate_test_function(cls,
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
 
     if tfloat32 in dtype_list or tcomplex64 in dtype_list:
-        fn = lambda *args: fn(*args, disable_tf32_on_fp32=True)
+        def fn(self, device, dtype_):
+            return fn_(self, device, dtype_, True)
+    else:
+        def fn(self, device, dtype_):
+            return fn_(self, device, dtype_, False)
 
     # Constructs decorator list and applies decorators
     if decorators is None:
