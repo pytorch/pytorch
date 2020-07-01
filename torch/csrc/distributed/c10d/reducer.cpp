@@ -14,6 +14,7 @@
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 namespace {
@@ -161,6 +162,8 @@ Reducer::Reducer(
       }
     }
   }
+
+  comm_hook_.reset();
 }
 
 // Note [Skip allreducing local_used_maps_dev]
@@ -560,7 +563,11 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       //
       tensors.push_back(replica.contents);
     }
-    bucket.work = process_group_->allreduce(tensors);
+    if (comm_hook_ == nullptr) {
+      bucket.work = process_group_->allreduce(tensors);
+    } else {
+      bucket.future_work = comm_hook_->operate(GradBucket(tensors));
+    }
   }
 }
 
@@ -904,8 +911,13 @@ void Reducer::finalize_backward() {
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
-    TORCH_INTERNAL_ASSERT(bucket.work);
-    bucket.work->wait();
+    if (comm_hook_ == nullptr) {
+      TORCH_INTERNAL_ASSERT(bucket.work);
+      bucket.work->wait();
+    } else {
+      TORCH_INTERNAL_ASSERT(bucket.future_work);
+      bucket.future_work->wait();
+    }
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
@@ -1056,6 +1068,19 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   rebuilt_param_indices_.clear();
 
   return rebuilt_bucket_indices;
+}
+
+void Reducer::register_comm_hook(py::object state, py::object comm_hook){
+  Reducer::register_comm_hook_internal(PythonCommHook(state, comm_hook))
+}
+
+void Reducer::register_comm_hook_internal(CommHookInterface comm_hook){
+
+  TORCH_CHECK(
+      comm_hook_ == nullptr,
+      "register_comm_hook can only be called once.");
+
+  comm_hook_.reset(&comm_hook);
 }
 
 namespace {

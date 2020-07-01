@@ -4,6 +4,8 @@
 
 #include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -79,4 +81,31 @@ void broadcast_coalesced(
   }
 }
 
+GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
+
+using torch::jit::Future;
+using torch::jit::PythonFutureWrapper;
+
+// Temporarily disabled CppCommHook, because of `Taking the address of a
+// temporary object of type 'c10::ivalue::Future'` error in when we try
+// std::shared_ptr<Future>(&hook_(bucket.tensors_));.
+// ~~~~~~~~~~~~~~~
+// CppCommHook::CppCommHook(
+//     py::object state,
+//     std::function<Future(std::vector<at::Tensor>)>& hook)
+//     : state_(state), hook_(hook){};
+
+// std::shared_ptr<Future> CppCommHook::operate(const GradBucket& bucket) {
+//   return std::shared_ptr<Future>(&hook_(bucket.tensors_));
+// };
+
+PythonCommHook::PythonCommHook(py::object state, py::object hook)
+    : state_(state), hook_(hook){};
+std::shared_ptr<Future> PythonCommHook::operate(const GradBucket& bucket) {
+  return hook_(state_, bucket.tensors_).cast<std::shared_ptr<Future>>();
+  // Below return doesn't work. need to think about it.
+
+  // return (hook_(state_,
+  // bucket.tensors_).cast<std::shared_ptr<PythonFutureWrapper>>())->Future;
+};
 } // namespace c10d

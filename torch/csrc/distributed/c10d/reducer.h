@@ -11,6 +11,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
@@ -52,6 +54,8 @@ class Reducer {
   std::vector<std::vector<int64_t>> get_backward_stats() const {
     return backward_stats_;
   }
+
+  void register_comm_hook(py::object state, py::object comm_hook);
 
  protected:
   // Forward declaration.
@@ -98,6 +102,9 @@ class Reducer {
 
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
+
+  std::unique_ptr<CommHookInterface> comm_hook_;
+  void register_comm_hook_internal(CommHookInterface comm_hook);
 
   void verify_replicas_within_process();
 
@@ -196,6 +203,8 @@ class Reducer {
 
     // Keep work handle around when this set of buckets is being reduced.
     std::shared_ptr<c10d::ProcessGroup::Work> work;
+
+    std::shared_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
