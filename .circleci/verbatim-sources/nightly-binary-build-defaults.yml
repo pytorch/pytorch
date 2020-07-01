@@ -26,18 +26,18 @@
 # (smoke tests and upload jobs do not need the pytorch repo).
 binary_checkout: &binary_checkout
   name: Checkout pytorch/builder repo
-  command: ~/workspace/.circleci/scripts/binary_checkout.sh
+  command: .circleci/scripts/binary_checkout.sh
 
 # Parses circleci arguments in a consistent way, essentially routing to the
 # correct pythonXgccXcudaXos build we want
 binary_populate_env: &binary_populate_env
   name: Set up binary env variables
-  command: ~/workspace/.circleci/scripts/binary_populate_env.sh
+  command: .circleci/scripts/binary_populate_env.sh
 
 binary_install_miniconda: &binary_install_miniconda
   name: Install miniconda
   no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/binary_install_miniconda.sh
+  command: .circleci/scripts/binary_install_miniconda.sh
 
 # This section is used in the binary_test and smoke_test jobs. It expects
 # 'binary_populate_env' to have populated /home/circleci/project/env and it
@@ -47,4 +47,4 @@ binary_run_in_docker: &binary_run_in_docker
   name: Run in docker
   # This step only runs on circleci linux machine executors that themselves
   # need to start docker images
-  command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
+  command: .circleci/scripts/binary_run_in_docker.sh

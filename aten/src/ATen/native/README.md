@@ -274,6 +274,9 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
+If two backends have the same dispatch function, you can write `CPU, CUDA: func`
+to reuse the same function name in both cases.
+
 ### `device_guard`
 
 ```
@@ -296,17 +299,6 @@ that case, code generation of the device guard can be disabled by adding
 **Note.** We are considering eliminating automatic generation of DeviceGuard,
 in which case this field would go away. If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
-
-### `supports_named_tensor`
-
-```
-supports_named_tensor: True
-```
-
-By default, (`supports_named_tensor: False`) ATen code generation will generate a check
-that all tensor inputs to the function are unnamed. This is used to incrementally
-implement named tensors; if a function supports named tensors, then it'll have
-`supports_named_tensor: True`; otherwise, passing it a named tensor will error out.
 
 ### `matches_jit_signature`
 

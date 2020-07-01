@@ -72,7 +72,10 @@ class CudaFusionManager {
       graph_cache_[repr] = kernel_id;
 
       // create entry for cached kernel;
-      kernel_cache_.insert({kernel_id, CudaKernelCache()});
+      // Note: use make_pair instead of uniform initialization list here since
+      //       it doesn't work under some env that we still support.
+      //       eg. cuda9.2 + gcc5.4
+      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
 
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)
@@ -103,13 +106,12 @@ class CudaFusionManager {
           makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      Fusion fusion;
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
       // we should propagate more information back:
       //   1. device;
       //   2. launch config;
-      parseJitIR(graph, fusion, cuda_kernel.value());
+      parseJitIR(graph, cuda_kernel.value());
 
       // find device in inputs.
       for (const auto& input : inputs) {
@@ -123,7 +125,7 @@ class CudaFusionManager {
       }
 
       // NVRTC compile kernel
-      compileKernel(fusion, cuda_kernel.value());
+      compileKernel(cuda_kernel.value());
 
       runKernel(*cuda_kernel, inputs, outputs);
     }
