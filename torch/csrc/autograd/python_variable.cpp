@@ -344,7 +344,7 @@ int THPVariable_set_fw_grad(THPVariable *self, PyObject *py_fw_grad, void *unuse
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (!py_fw_grad || py_fw_grad == Py_None) {
-    var.fw_grad().reset();
+    var.mutable_fw_grad().reset();
     return 0;
   }
 

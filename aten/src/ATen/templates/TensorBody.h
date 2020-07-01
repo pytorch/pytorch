@@ -558,8 +558,8 @@ class CAFFE2_API Tensor {
   const Tensor& fw_grad() const {
     return impl_->fw_grad();
   }
-  Tensor& fw_grad() {
-    return impl_->fw_grad();
+  Tensor& mutable_fw_grad() {
+    return impl_->mutable_fw_grad();
   }
 
   // STOP.  Thinking of adding a method here, which only makes use

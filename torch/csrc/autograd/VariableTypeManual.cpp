@@ -238,7 +238,7 @@ Tensor& resize_(
 
   // Handle fw grad
   if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
-    self.fw_grad().resize_(size, std::move(optional_memory_format));
+    self.mutable_fw_grad().resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
@@ -259,7 +259,7 @@ Tensor& resize_as_(
 
   // Handle fw grad
   if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
-    at::resize_as_(self.fw_grad(), the_template_, std::move(optional_memory_format));
+    at::resize_as_(self.mutable_fw_grad(), the_template_, std::move(optional_memory_format));
   }
   return self;
 }

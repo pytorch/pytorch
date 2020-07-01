@@ -268,7 +268,7 @@ bool TensorImpl::requires_grad() const {
   return autograd_meta_->requires_grad();
 }
 
-at::Tensor& TensorImpl::fw_grad() {
+at::Tensor& TensorImpl::mutable_fw_grad() {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   return autograd_meta_->fw_grad();
 }

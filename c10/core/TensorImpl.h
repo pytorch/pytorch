@@ -597,7 +597,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  at::Tensor& fw_grad();
+  at::Tensor& mutable_fw_grad();
   const at::Tensor& fw_grad() const;
 
   /**
