@@ -46,7 +46,7 @@ def tf32_is_not_fp32():
 
 
 @contextlib.contextmanager
-def setup_tf32(dtype, rtol=None, atol=None):
+def setup_tf32(dtype, rtol=0.001, atol=1e-5):
     if dtype in {tfloat32, tcomplex64}:
         torch.backends.cuda.matmul.allow_tf32 = True
         if tf32_is_not_fp32():
