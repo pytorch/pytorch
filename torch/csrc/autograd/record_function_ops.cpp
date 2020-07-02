@@ -10,12 +10,10 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(at::RecordFunction);
 } // namespace caffe2
 
-// using namespace at;
 
 namespace torch {
 namespace autograd {
 namespace profiler {
-
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
