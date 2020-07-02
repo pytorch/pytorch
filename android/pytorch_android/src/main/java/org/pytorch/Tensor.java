@@ -404,6 +404,11 @@ public abstract class Tensor {
     return Arrays.copyOf(shape, shape.length);
   }
 
+  /** Returns the memory format of this tensor. */
+  public MemoryFormat memoryFormat() {
+    return memoryFormat;
+  }
+
   /** @return data type of this tensor. */
   public abstract DType dtype();
 
@@ -701,9 +706,14 @@ public abstract class Tensor {
   private static Tensor nativeNewTensor(
       ByteBuffer data, long[] shape, int dtype, int memoryFormatCode, HybridData hybridData) {
     Tensor tensor = null;
-    MemoryFormat memoryFormat = MemoryFormat.CHANNELS_LAST.jniCode == memoryFormatCode
-      ? MemoryFormat.CHANNELS_LAST
-      : MemoryFormat.CONTIGUOUS;
+
+    MemoryFormat memoryFormat = MemoryFormat.CONTIGUOUS;
+    if (MemoryFormat.CHANNELS_LAST.jniCode == memoryFormatCode) {
+      memoryFormat = MemoryFormat.CHANNELS_LAST;
+    } else if(MemoryFormat.CHANNELS_LAST_3D.jniCode == memoryFormatCode) {
+      memoryFormat = MemoryFormat.CHANNELS_LAST_3D;
+    }
+
     if (DType.FLOAT32.jniCode == dtype) {
       tensor = new Tensor_float32(data.asFloatBuffer(), shape, memoryFormat);
     } else if (DType.INT32.jniCode == dtype) {

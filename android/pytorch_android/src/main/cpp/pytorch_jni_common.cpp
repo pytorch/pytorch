@@ -186,6 +186,9 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     if (input_tensor.is_contiguous(at::MemoryFormat::ChannelsLast)) {
       tensor = input_tensor;
       jmemoryFormat = kTensorMemoryFormatChannelsLast;
+    } else if (input_tensor.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      tensor = input_tensor;
+      jmemoryFormat = kTensorMemoryFormatChannelsLast3d;
     } else if (input_tensor.is_contiguous()) {
       tensor = input_tensor;
       jmemoryFormat = kTensorMemoryFormatContiguous;

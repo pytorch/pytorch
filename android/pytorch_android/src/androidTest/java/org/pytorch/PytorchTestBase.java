@@ -318,11 +318,13 @@ public abstract class PytorchTestBase {
     Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
-    assertIValueTensor(outputNCHW,
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
         new long[] {1, 3, 2, 2},
         new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104});
     final IValue outputNHWC = module.runMethod("contiguousChannelsLast", IValue.from(inputNHWC));
-    assertIValueTensor(outputNHWC, inputShape, data);
+    assertIValueTensor(outputNHWC, MemoryFormat.CHANNELS_LAST, inputShape, data);
   }
 
   @Test
@@ -343,21 +345,29 @@ public abstract class PytorchTestBase {
 
     final IValue outputNCHW = module.runMethod(
         "conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
-    assertIValueTensor(outputNCHW,
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
         new long[] {1, 3, 2, 2},
         new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
 
     final IValue outputNHWC = module.runMethod(
         "conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
-    assertIValueTensor(outputNHWC,
+    assertIValueTensor(
+        outputNHWC,
+        MemoryFormat.CHANNELS_LAST,
         new long[] {1, 3, 2, 2},
         new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
   }
 
   static void assertIValueTensor(
-      final IValue ivalue, final long[] expectedShape, final long[] expectedData) {
+      final IValue ivalue,
+      final MemoryFormat memoryFormat,
+      final long[] expectedShape,
+      final long[] expectedData) {
     assertTrue(ivalue.isTensor());
     Tensor t = ivalue.toTensor();
+    assertEquals(memoryFormat, t.memoryFormat());
     assertArrayEquals(expectedShape, t.shape());
     assertArrayEquals(expectedData, t.getDataAsLongArray());
   }
