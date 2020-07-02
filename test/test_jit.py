@@ -4017,6 +4017,7 @@ def foo(xyz):
     def test_prim_grad_undefined(self):
 
         x = torch.ones(2)
+
         def f_grad(x):
             return x.grad
 
