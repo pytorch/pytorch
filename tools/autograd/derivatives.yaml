@@ -609,24 +609,31 @@
 
 - name: lgamma(Tensor self) -> Tensor
   self: grad * digamma(self)
+  result: element_wise
 
 - name: digamma(Tensor self) -> Tensor
   self: grad * polygamma(1, self)
+  result: element_wise
 
 - name: polygamma(int n, Tensor self) -> Tensor
   self: grad * polygamma(n + 1, self)
+  result: self_fw_grad * at::polygamma(n + 1, self)
 
 - name: log(Tensor self) -> Tensor
   self: grad.div(self)
+  result: element_wise
 
 - name: log10(Tensor self) -> Tensor
   self: grad / (self * 2.3025850929940456)
+  result: element_wise
 
 - name: log1p(Tensor self) -> Tensor
   self: log1p_backward(grad, self)
+  result: element_wise
 
 - name: log2(Tensor self) -> Tensor
   self: grad / (self * 0.6931471805599453)
+  result: element_wise
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
   self: grad / (1 + exp(other - self))
@@ -784,6 +791,7 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
+  result: linear
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
   self: not_implemented("nextafter")
@@ -1006,7 +1014,7 @@
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: grad
   other: -grad * alpha
-  result: linear
+  result: "self_fw_grad.defined()? (other_fw_grad.defined() ? self_fw_grad - maybe_multiply(other_fw_grad, alpha) : self_fw_grad) : other_fw_grad.defined() ? - maybe_multiply(other_fw_grad, alpha) : Tensor()"
 
 - name: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: grad
@@ -1203,10 +1211,12 @@
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
+  result: binary_cross_entropy_with_logits_forward(self_fw_grad, target_fw_grad, self, target, weight, pos_weight, reduction)
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+  result: "weight_fw_grad.defined() ? at::embedding(weight_fw_grad, indices, padding_idx, scale_grad_by_freq, sparse) : Tensor()"
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices)
@@ -1256,6 +1266,7 @@
 - name: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
+  output: std::get<0>(at::nll_loss2d_forward(self_fw_grad, target, weight, reduction, ignore_index))
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction)

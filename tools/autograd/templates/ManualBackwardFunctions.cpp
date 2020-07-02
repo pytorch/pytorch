@@ -3044,3 +3044,27 @@ static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64
   return unreduced;
 }
 
+
+Tensor binary_cross_entropy_with_logits_forward(const at::Tensor& self_fw_grad, const at::Tensor& target_fw_grad,
+        const at::Tensor& self, const at::Tensor& target, const at::Tensor& weight, const at::Tensor& pos_weight, int64_t reduction) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::binary_cross_entropy_with_logits_backward(self_fw_grad, self, target, weight, pos_weight, at::Reduction::None);
+  }
+
+  if (target_fw_grad.defined()) {
+    auto val = binary_cross_entropy_with_logits_target_backward(target_fw_grad, self, target, weight, pos_weight, at::Reduction::None);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (out_fw_grad.defined()) {
+    out_fw_grad = apply_loss_reduction(out_fw_grad, reduction);
+  }
+
+  return out_fw_grad;
+}
