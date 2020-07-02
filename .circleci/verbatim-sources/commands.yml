@@ -163,7 +163,7 @@ commands:
             # the docker during build and already contains the result binaries, so this step can be skipped.
             export ARTIFACTS="<< parameters.artifacts >>"
             if [ -n "${ARTIFACTS}" ]; then
-              tar xf "${ARTIFACTS}" -C project
+              tar xf "${ARTIFACTS}" -C ~/project
             fi
       - run:
           name: "Binary Size - Upload << parameters.build_type >>"
