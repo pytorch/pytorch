@@ -128,20 +128,14 @@ static at::Tensor newAtTensor(
         dataCapacity);
   }
 
-  auto tensorOptions = at::TensorOptions(typeMeta);
   if (jmemoryFormat == kTensorMemoryFormatChannelsLast) {
-    // Separate path for ChannelsLast memory forrmat case,
-    // as from_blob creates empty tensor with shape {0}.
-    // That fails for Channels Last Tensor as it is supported only for 4-dim Tensors.
-    at::Tensor t = torch::empty(
-        torch::IntArrayRef(shapeVec),
+    auto sizes = torch::IntArrayRef(shapeVec);
+    return torch::from_blob(
+        jni->GetDirectBufferAddress(jbuffer.get()),
+        sizes,
+        torch::IntArrayRef(c10::get_channels_last_strides_2d(sizes)),
         at::TensorOptions(typeMeta).memory_format(
             at::MemoryFormat::ChannelsLast));
-    t.unsafeGetTensorImpl()->ShareExternalPointer(
-        {jni->GetDirectBufferAddress(jbuffer.get()), at::DeviceType::CPU},
-        typeMeta,
-        dataCapacity);
-    return t;
   }
   return torch::from_blob(
       jni->GetDirectBufferAddress(jbuffer.get()),

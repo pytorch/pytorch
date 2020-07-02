@@ -314,6 +314,20 @@ public abstract class PytorchTestBase {
   @Test
   public void testChannelsLast() throws IOException {
     long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] data = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
+    assertIValueTensor(outputNCHW,
+        new long[] {1, 3, 2, 2},
+        new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104});
+    final IValue outputNHWC = module.runMethod("contiguousChannelsLast", IValue.from(inputNHWC));
+    assertIValueTensor(outputNHWC, inputShape, data);
+  }
+
+  @Test
+  public void testChannelsLastConv2d() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
     long[] dataNCHW = new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104};
     Tensor inputNCHW = Tensor.fromBlob(dataNCHW, inputShape, MemoryFormat.CONTIGUOUS);
     long[] dataNHWC = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};

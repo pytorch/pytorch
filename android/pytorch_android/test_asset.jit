@@ -98,3 +98,9 @@ def conv2d(self, x, w, toChannelsLast):
     else:
         r = r.contiguous()
     return r
+
+def contiguous(self, x):
+    return x.contiguous()
+
+def contiguousChannelsLast(self, x):
+    return x.contiguous(memory_format=torch.channels_last)
