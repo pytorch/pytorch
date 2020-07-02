@@ -335,6 +335,11 @@ class BuildExtension(build_ext, object):
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
+    def finalize_options(self):
+        super().finalize_options()
+        if self.use_ninja:
+            self.force = True
+
     def build_extensions(self):
         self._check_abi()
         for extension in self.extensions:
