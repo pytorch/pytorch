@@ -41,7 +41,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     for (int i = 0; i < grads.size(); i++) {
       auto param = l->parameters()[i];
       auto grad = grads[i];
-      p_scale.push_back(param.mutable_grad().data().div(grad).view(-1));
+      p_scale.push_back(param.grad().data().div(grad).view(-1));
     }
     auto scale = torch::cat(p_scale);
     return scale; // need to assert std is 0.
@@ -79,7 +79,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   };
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
-      l->parameters()[i].mutable_grad().data().copy_(grads[i]);
+      l->parameters()[i].grad().data().copy_(grads[i]);
     }
     auto norm_before = compute_norm(norm_type);
     auto norm = utils::clip_grad_norm_(l->parameters(), max_norm, norm_type);
