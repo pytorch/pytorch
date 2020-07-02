@@ -909,63 +909,6 @@ class OrderedModuleDict(OrderedDictWrapper):
     def __getitem__(self, k):
         return self._python_modules[k]
 
-# For each user-defined class that subclasses ScriptModule, this meta-class:
-# (1) finds all the methods annotated with @script_method in a ScriptModule and
-#     removes them from the class attributes
-# (2) puts a wrapper around the class's __init__ method to recusively compile
-#     all of the script_methods with the module after the original __init__ has
-#     run. This has to occur after the user-defined __init__ so that submodules and
-#     parameters are initialized _before_ the script compiler resolve references to
-#     `self.param` or `self.module`.
-class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):  # noqa: B902
-        # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods = {}
-        cls._constants_set = set(getattr(cls, '__constants__', ()))
-        for base in reversed(bases):
-            for k, v in getattr(base, '_methods', {}).items():
-                cls._methods[k] = v
-            base_constants = getattr(base, '_constants_set', set())
-            cls._constants_set = cls._constants_set.union(base_constants)
-
-        # find all the script methods of the current class
-        for k, v in sorted(attrs.items()):
-            if isinstance(v, ScriptMethodStub):
-                delattr(cls, k)
-                cls._methods[v.original_method.__name__] = v
-
-        if getattr(cls, '_disable_script_meta', False):
-            # We leave built-in ScriptModule types alone, since this metaclass
-            # is only for compiling user classes that inherit from
-            # ScriptModule.
-            return super(ScriptMeta, cls).__init__(name, bases, attrs)
-
-        original_init = getattr(cls, '__init__', lambda self: None)
-
-        @functools.wraps(original_init)
-        def init_then_script(self, *args, **kwargs):
-            original_init(self, *args, **kwargs)
-            if type(self) == cls:
-                def make_stubs(module):
-                    cls = type(module)
-                    return [v for k, v in sorted(cls._methods.items())]
-
-                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, make_stubs)
-
-                # Delete the Python attributes that now shadow the ScriptModule
-                # ones, so that __getattr__ and __setattr__ will properly find
-                # the scripted versions.
-                concrete_type = self._actual_script_module._concrete_type
-                for name in concrete_type.get_attributes():
-                    delattr(self, name)
-                for name, _ in concrete_type.get_modules():
-                    delattr(self, name)
-                for name in ("_parameters", "_buffers", "_modules"):
-                    delattr(self, name)
-
-        cls.__init__ = init_then_script
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
-
 
 if _enabled:
     class RecursiveScriptModule(ScriptModule):
