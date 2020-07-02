@@ -381,3 +381,27 @@ class TestModuleContainers(JitTestCase):
                                                   "ModuleDict indexing is only supported with string literals."):
             b = AnotherBadModule()
             torch.jit.script(b)
+
+    def test_empty_dict_override_contains(self):
+        class CustomModuleInterface(torch.nn.Module):
+            def __init__(self):
+                super(CustomModuleInterface, self).__init__()
+
+        class CustomModuleDict(CustomModuleInterface, torch.nn.ModuleDict):
+            def __init__(self, modules=None):
+                CustomModuleInterface.__init__(self)
+                torch.nn.ModuleDict.__init__(self, modules)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                # work around aliasing issue for 'is' operator by scripting ReLU up front
+                self.submod = torch.jit.script(torch.nn.ReLU())
+                self.moduledict = CustomModuleDict()
+
+            def forward(self, inputs):
+                assert "submod" not in self.moduledict, "__contains__ fails for ModuleDict"
+                return inputs
+
+        m = MyModule()
+        self.checkModule(m, [torch.randn(2, 2)])

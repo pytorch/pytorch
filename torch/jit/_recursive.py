@@ -383,8 +383,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
     if isinstance(nn_module, torch.nn.ModuleDict) and \
             '__contains__' not in cpp_module._method_names():
-        keys = repr(list(nn_module.keys()))
-        script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+        if len(nn_module.keys()):
+            keys = repr(list(nn_module.keys()))
+            script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+        else:
+            script_module.define("def __contains__(self, key: str):\n   return False\n")
+
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
