@@ -83,7 +83,7 @@ void backward(
     const Tensor& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
-  torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
+  torch::autograd::backward({self}, {gradient}, std::move(keep_graph), create_graph);
 }
 
 void set_data(const Tensor & self, const Tensor & new_data) {
