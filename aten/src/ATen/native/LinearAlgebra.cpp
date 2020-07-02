@@ -699,7 +699,7 @@ constexpr int fact_array_size = 5;
 constexpr std::array<float, fact_array_size> fact = {1., 1., 2., 6., 24.};
 
 // Iterates over first `n_batch_dims` and applies `f` to each element.
-// TODO: this implemtation is not efficient, it simply iteratates over
+// TODO: this implementation is not efficient, it simply iterates over
 // batch elements in a serial for-loop.
 template <typename func_t>
 void batch_apply(at::ArrayRef<Tensor> tensors, int64_t n_batch_dims, const func_t& f) {
@@ -714,11 +714,13 @@ void batch_apply(at::ArrayRef<Tensor> tensors, int64_t n_batch_dims, const func_
     for (auto d = n_batch_dims; d < tensor.dim(); ++d) {
       tensor_view_sizes.push_back(tensor.size(d));
     }
-    auto tensor_view = tensor.view(tensor_view_sizes);
-    tensors_view.push_back(tensor_view);
+    auto tensor_squashed_batch_dims = tensor.view(tensor_view_sizes);
+    tensors_view.push_back(tensor_squashed_batch_dims);
   }
 
-  for (int64_t input_idx = 0; input_idx < tensors_view[0].size(0);
+  for (
+    int64_t input_idx = 0;
+    input_idx < tensors_view[0].size(0);
     ++input_idx) {
     std::vector<Tensor> input_selected;
     for (auto& tensor_view : tensors_view) {
@@ -739,7 +741,7 @@ Tensor matrix_power(const Tensor& matrices, const Tensor& powers) {
       [](auto tensors) {
         auto& out = tensors[0];
         auto& in = tensors[1];
-        int64_t n = tensors[2].item().template to<int64_t>();
+        int64_t n = tensors[2].template item<int64_t>();
         out.copy_(at::matrix_power(in, n));
       }
     );
@@ -747,7 +749,7 @@ Tensor matrix_power(const Tensor& matrices, const Tensor& powers) {
     return res;
   }
   else {
-    int64_t n = powers.item().template to<int64_t>();
+    int64_t n = powers.template item<int64_t>();
     return at::matrix_power(matrices, n);
   }
 }
@@ -757,19 +759,18 @@ Tensor operator_1_norm(const Tensor& tensor) {
 }
 
 Tensor compute_T1(const Tensor& A) {
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
+  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
   return I + A;
 }
 
 Tensor compute_T2(const Tensor& A) {
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto A2 = at::matmul(A, A);
-  return I + A + A2 / fact[2];
+  const auto& A2 = at::matmul(A, A);
+  return compute_T1(A) + A2 / fact[2];
 }
 
 Tensor compute_T4(const Tensor& A) {
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto A2 = at::matmul(A, A);
+  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
+  const auto& A2 = at::matmul(A, A);
   return I + A + at::matmul(A2, I / fact[2] + A / fact[3] + A2 / fact[4]);
 }
 
@@ -785,10 +786,10 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto A2 = at::matmul(A, A);
-  const auto A4 = at::matmul(A2, x1 * A + x2 * A2);
-  const auto A8 = at::matmul(x3 * A2 + A4,
+  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
+  const auto& A2 = at::matmul(A, A);
+  const auto& A4 = at::matmul(A2, x1 * A + x2 * A2);
+  const auto& A8 = at::matmul(x3 * A2 + A4,
     x4 * I + x5 * A + x6 * A2 + x7 * A4);
   return I + A + y2 * A2 + A8;
 }
@@ -823,9 +824,9 @@ Tensor compute_T12(const Tensor& A) {
     }
   }};
 
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto A2 = at::matmul(A, A);
-  const auto A3 = at::matmul(A2, A);
+  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
+  const auto& A2 = at::matmul(A, A);
+  const auto& A3 = at::matmul(A2, A);
   std::array<
     std::reference_wrapper<const Tensor>,
     num_prods> As = {I, A, A2, A3};
@@ -841,8 +842,8 @@ Tensor compute_T12(const Tensor& A) {
     }
   }
 
-  const auto A6 = Bs[2] + at::matmul(Bs[3], Bs[3]);
-  const auto res = Bs[0] + at::matmul(Bs[1] + A6, A6);
+  const auto& A6 = Bs[2] + at::matmul(Bs[3], Bs[3]);
+  const auto& res = Bs[0] + at::matmul(Bs[1] + A6, A6);
 
   return res;
 }
@@ -888,10 +889,10 @@ Tensor compute_T18(const Tensor& A) {
     }
   }};
 
-  const auto I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto A2 = at::matmul(A, A);
-  const auto A3 = at::matmul(A2, A);
-  const auto A6 = at::matmul(A3, A3);
+  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
+  const auto& A2 = at::matmul(A, A);
+  const auto& A3 = at::matmul(A2, A);
+  const auto& A6 = at::matmul(A3, A3);
   std::array<
     std::reference_wrapper<const Tensor>,
     num_prods> As = {I, A, A2, A3, A6};
@@ -907,8 +908,8 @@ Tensor compute_T18(const Tensor& A) {
     }
   }
 
-  const auto A9 = at::matmul(Bs[0], Bs[4]) + Bs[3];
-  const auto res = Bs[1] + at::matmul(Bs[2] + A9, A9);
+  const auto& A9 = at::matmul(Bs[0], Bs[4]) + Bs[3];
+  const auto& res = Bs[1] + at::matmul(Bs[2] + A9, A9);
 
   return res;
 }
@@ -917,7 +918,7 @@ template <typename scalar_t>
 Tensor mexp_impl(const Tensor& a, std::array<scalar_t, total_n_degs> thetas) {
   auto norm = operator_1_norm(a);
 
-  auto norm_value = norm.item().template to<scalar_t>();
+  auto norm_value = norm.template item<scalar_t>();
   constexpr std::array<
     Tensor(*)(const Tensor&),
     total_n_degs - 1> 
