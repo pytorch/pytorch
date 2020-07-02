@@ -374,6 +374,9 @@ Layers used in dynamically quantized models (i.e. quantized only on weights)
 
 * :class:`~torch.nn.quantized.dynamic.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.quantized.dynamic.LSTM` — Long-Short Term Memory RNN module
+* :class:`~torch.nn.quantized.dynamic.LSTMCell` — LSTM Cell
+* :class:`~torch.nn.quantized.dynamic.GRUCell` — GRU Cell
+* :class:`~torch.nn.quantized.dynamic.RNNCell` — RNN Cell
 
 ``torch.nn.quantized.functional``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -853,4 +856,19 @@ Linear
 LSTM
 ~~~~~~~~~~~~~~~
 .. autoclass:: LSTM
+    :members:
+
+LSTMCell
+~~~~~~~~~~~~~~~
+.. autoclass:: LSTMCell
+    :members:
+
+GRUCell
+~~~~~~~~~~~~~~~
+.. autoclass:: GRUCell
+    :members:
+    
+RNNCell
+~~~~~~~~~~~~~~~
+.. autoclass:: RNNCell
     :members:
