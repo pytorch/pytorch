@@ -14,11 +14,9 @@
 
 #cmakedefine USE_MAGMA
 
-# define THC_EXTERNC extern "C"
-
 // TH & THC are now part of the same library as ATen and Caffe2
 // NB: However, we are planning to split it out to a torch_cuda library
-#define THC_API THC_EXTERNC TORCH_CUDA_API
+#define THC_API TORCH_CUDA_API
 #define THC_CLASS TORCH_CUDA_API
 
 #ifndef THAssert
@@ -72,7 +70,5 @@ THC_API void THCudaFree(THCState *state, void* ptr);
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
 
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
-
-THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes, size_t* largestBlock);
 
 #endif

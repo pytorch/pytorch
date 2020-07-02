@@ -28,6 +28,7 @@ kEpsilon = 1e-8
 
 class ArithmeticOpsTest(TestCase):
     def _test_binary_op_graph(self, name):
+        workspace.ResetWorkspace()
         # First dimension is the batch size
         dims = np.concatenate((np.array([1]), np.random.randint(1, 20, size=3)))
         A = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)

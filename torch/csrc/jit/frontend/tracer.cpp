@@ -708,6 +708,17 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
+    ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
+    const ClassTypePtr& class_type) {
+  Graph* g = n->owningGraph();
+  Node* list_node =
+      g->insertNode(g->createList(class_type, fmap(value, getValueTrace)));
+  n->addInput(list_node->output());
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
     c10::optional<caffe2::TypeMeta> opt_dtype) {
   if (opt_dtype.has_value()) {
     return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
@@ -788,6 +799,14 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
 
 void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
   return addOutput(node, outputs.vec());
+}
+
+void addOutput(
+    Node* node,
+    const c10::intrusive_ptr<c10::ivalue::Object>& output) {
+  Value* output_val = node->addOutput();
+  output_val->inferTypeFrom(output);
+  setValueTrace(output, output_val);
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {

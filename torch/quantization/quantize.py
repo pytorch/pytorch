@@ -50,7 +50,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                                   module_qconfig, module_prefix)
 
 # TODO(jerryzh): expose white_list
-def propagate_qconfig_(module, qconfig_dict=None):
+def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -66,7 +66,7 @@ def propagate_qconfig_(module, qconfig_dict=None):
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict)
+    _propagate_qconfig_helper(module, qconfig_dict, white_list)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
@@ -86,7 +86,7 @@ def add_observer_(module):
         None, module is modified inplace with added observer modules and forward_hooks
     """
     for child in module.children():
-        if type(child) == nnq.FloatFunctional:
+        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.activation_post_process = child.qconfig.activation()
         else:
@@ -122,7 +122,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -137,7 +137,7 @@ def prepare(model, inplace=False):
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_(model)
+    propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
@@ -145,6 +145,19 @@ def prepare(model, inplace=False):
                       "by assigning the `.qconfig` attribute directly on submodules")
     add_observer_(model)
     return model
+
+def _remove_qconfig(module):
+    r"""Clean up the qconfig left in the module so that new qconfig can be
+    propagated.
+
+    Args:
+        module: module to be cleaned up
+    """
+    for child in module.children():
+        _remove_qconfig(child)
+
+    if hasattr(module, "qconfig"):
+        del module.qconfig
 
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     r"""Converts a float model to quantized model.
@@ -173,6 +186,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     prepare(model, inplace=True)
     run_fn(model, run_args)
     convert(model, mapping, inplace=True)
+    _remove_qconfig(model)
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
@@ -236,6 +250,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     model.eval()
     propagate_qconfig_(model, qconfig_spec)
     convert(model, mapping, inplace=True)
+    _remove_qconfig(model)
     return model
 
 def prepare_qat(model, mapping=None, inplace=False):

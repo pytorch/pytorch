@@ -126,6 +126,8 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPQInt8Storage_postInit(module);
   THPQInt32Storage_postInit(module);
   THPBFloat16Storage_postInit(module);
+  THPComplexDoubleStorage_postInit(module);
+  THPComplexFloatStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -476,7 +478,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  auto dtype = (PyObject*)torch::getDtype(scalar_type);
+  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
   Py_INCREF(dtype);
   return dtype;
   END_HANDLE_TH_ERRORS
@@ -578,6 +580,8 @@ bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
 bool THCPBoolStorage_init(PyObject *module);
 bool THCPBFloat16Storage_init(PyObject *module);
+bool THCPComplexDoubleStorage_init(PyObject *module);
+bool THCPComplexFloatStorage_init(PyObject *module);
 
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
@@ -602,6 +606,8 @@ bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
 bool THDPBoolStorage_init(PyObject *module);
 bool THDPBFloat16Storage_init(PyObject *module);
+bool THDPComplexDoubleStorage_init(PyObject *module);
+bool THDPComplexFloatStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -695,6 +701,8 @@ PyObject* initModule() {
   ASSERT_TRUE(THPQInt8Storage_init(module));
   ASSERT_TRUE(THPQInt32Storage_init(module));
   ASSERT_TRUE(THPBFloat16Storage_init(module));
+  ASSERT_TRUE(THPComplexDoubleStorage_init(module));
+  ASSERT_TRUE(THPComplexFloatStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -711,6 +719,8 @@ PyObject* initModule() {
   ASSERT_TRUE(THCPByteStorage_init(module));
   ASSERT_TRUE(THCPBoolStorage_init(module));
   ASSERT_TRUE(THCPBFloat16Storage_init(module));
+  ASSERT_TRUE(THCPComplexDoubleStorage_init(module));
+  ASSERT_TRUE(THCPComplexFloatStorage_init(module));
 
   THCPStream_init(module);
   THCPEvent_init(module);

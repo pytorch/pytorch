@@ -90,6 +90,15 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
+  // handle case at 0 where we return a subgradient containing 0
+  Tensor ratio = grad / res;
+  ratio.masked_fill_(res == 0, 0);
+  return std::tuple<Tensor, Tensor>{
+            x1 * ratio.sum(-1, true) - ratio.matmul(x2),
+            x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;

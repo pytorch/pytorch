@@ -69,12 +69,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  return TensorType::create(
-      scalar_type,
-      typePtr->device(),
-      typePtr->sizes(),
-      typePtr->strides(),
-      typePtr->requiresGrad());
+  return typePtr->withScalarType({scalar_type});
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {

@@ -219,7 +219,8 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
     rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
   }
   if (cuda::detail::canUse32BitIndexMath(self)){
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "fused_dropout", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
@@ -249,9 +250,11 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
         }
       }
+     });
    });
   } else {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "fused_dropout", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
@@ -281,6 +284,7 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
         }
       }
+     });
    });
   }
   AT_CUDA_CHECK(cudaGetLastError());
@@ -290,10 +294,12 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(self, self.suggest_memory_format());
    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      accscalar_t pa = (accscalar_t)(scale);
-    masked_scale_kernel<scalar_t>(ret, self, mask, pa);
+   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "masked_scale", [&] {
+     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "masked_scale", [&] {
+       using accscalar_t = acc_type<scalar_t, true>;
+       accscalar_t pa = (accscalar_t)(scale);
+       masked_scale_kernel<scalar_t>(ret, self, mask, pa);
+    });
   });
   return ret;
 }

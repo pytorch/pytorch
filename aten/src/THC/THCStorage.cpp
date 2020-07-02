@@ -9,6 +9,9 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateComplexTypes.h>
+
+#include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateBoolType.h>
 
 #include <THC/generic/THCStorage.cpp>

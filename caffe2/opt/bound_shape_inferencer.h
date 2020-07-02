@@ -17,9 +17,20 @@ namespace caffe2 {
 // max_seq_size.
 struct CAFFE2_API BoundShapeSpec {
   explicit BoundShapeSpec(int64_t b, int64_t q)
-      : max_batch_size(b), max_seq_size(q) {}
+      : max_batch_size(b),
+        max_seq_size(q),
+        num_embeddings(0),
+        embedding_length(0) {}
+  explicit BoundShapeSpec(int64_t b, int64_t q, int64_t n, int64_t e)
+      : max_batch_size(b),
+        max_seq_size(q),
+        num_embeddings(n),
+        embedding_length(e) {}
   int64_t max_batch_size;
   int64_t max_seq_size;
+  // The following two parameters are for shape inference of UnPackRecords
+  int64_t num_embeddings;
+  int64_t embedding_length;
 };
 
 /// \class A class that does bound shape inference given a C2 net. Depending on
@@ -118,6 +129,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
   void InferQuantizationTransformation(const OperatorDef& op);
+  void InferUnPackRecords(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function

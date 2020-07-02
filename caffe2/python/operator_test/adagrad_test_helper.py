@@ -18,6 +18,7 @@ def ref_adagrad(
     output_effective_lr_and_update=False,
     decay=1.0,
     row_wise=False,
+    weight_decay=0.0,
 ):
     mom_in_f32 = mom_in
     param_in_f32 = param_in
@@ -25,6 +26,7 @@ def ref_adagrad(
         mom_in_f32 = mom_in.astype(np.float32)
         param_in_f32 = param_in.astype(np.float32)
 
+    grad += weight_decay * param_in_f32
     if row_wise:
         mom_out = decay * mom_in_f32 + np.mean(np.square(grad))
     else:
@@ -69,7 +71,16 @@ def ref_adagrad(
 
 
 def adagrad_sparse_test_helper(
-    parent_test, inputs, lr, epsilon, engine, ref_adagrad, gc, dc, row_wise=False
+    parent_test,
+    inputs,
+    lr,
+    epsilon,
+    engine,
+    ref_adagrad,
+    gc,
+    dc,
+    row_wise=False,
+    weight_decay=0.0,
 ):
     param, momentum, grad = inputs
     if row_wise:
@@ -97,6 +108,7 @@ def adagrad_sparse_test_helper(
         ["param", "momentum", "indices", "grad", "lr"],
         ["param", "momentum"],
         epsilon=epsilon,
+        weight_decay=weight_decay,
         engine=engine,
         device_option=gc,
     )
@@ -118,6 +130,7 @@ def adagrad_sparse_test_helper(
                 grad[i],
                 lr,
                 epsilon,
+                weight_decay=weight_decay,
             )
         return (param_out, momentum_out)
 

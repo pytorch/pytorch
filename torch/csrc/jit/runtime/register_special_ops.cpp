@@ -300,7 +300,7 @@ RegisterOperators reg({
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
-      "aten::tensor(" #operator_type                                       \
+      "aten::tensor." #operator_type "(" #operator_type                    \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
       [](Stack& stack) {                                                   \
@@ -317,7 +317,7 @@ RegisterOperators reg({
       },                                                                   \
       aliasAnalysisFromSchema()),                                          \
       Operator(                                                            \
-          "aten::as_tensor(" #operator_type                                \
+          "aten::as_tensor." #operator_type "(" #operator_type             \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
           [](Stack& stack) {                                               \
             c_type scalar_val;                                             \

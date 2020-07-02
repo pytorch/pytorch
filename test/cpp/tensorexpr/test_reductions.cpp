@@ -24,7 +24,7 @@ using namespace torch::jit::tensorexpr;
 void testReduceSum1D() {
   KernelScope kernel_scope;
 
-  Buffer b(BufHandle("b", {10}), kFloat);
+  Buffer b(BufHandle("b", {10}, kFloat));
   std::vector<float> in(10);
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
@@ -53,7 +53,7 @@ void testReduceSum2D() {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Buffer b(BufHandle("b", {m, n}), kFloat);
+  Buffer b(BufHandle("b", {m, n}, kFloat));
   std::vector<float> in(M * N);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
@@ -91,7 +91,7 @@ void testReduceSum3D() {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Buffer b(BufHandle("b", {2, 3, m}), kFloat);
+  Buffer b(BufHandle("b", {2, 3, m}, kFloat));
 
   Tensor* c = Reduce("sum", {{2, "l"}, {3, "n"}}, Sum(), b, {{m, "m"}});
   LoopNest loop({c});
@@ -139,7 +139,7 @@ void testReduceSum3D() {
   }
 
   // This is the same as just reducing the original result across that axis.
-  Buffer c_buf(BufHandle(c->func_var()), kFloat);
+  Buffer c_buf(BufHandle(c->func_var()));
   Tensor* e = Reduce("sum3", {{2, "l"}}, Sum(), c_buf, {{3, "m"}});
   LoopNest loop3({e});
   loop3.prepareForCodegen();
@@ -158,9 +158,9 @@ void testReduceSum3D() {
 void testReduceSum10D() {
   KernelScope kernel_scope;
 
-  Buffer in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}), kFloat);
+  Buffer in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
   const int InputSize = 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3;
-  Buffer out_(BufHandle("out_", {2, 3, 2, 3, 2}), kFloat);
+  Buffer out_(BufHandle("out_", {2, 3, 2, 3, 2}, kFloat));
   const int OutputSize = 2 * 3 * 2 * 3 * 2;
 
   std::vector<float> in(InputSize, 1.f);
@@ -194,7 +194,7 @@ void testReduceProduct() {
   const int M = 4;
   const int N = 4;
 
-  Buffer b(BufHandle("b", {M, N}), kFloat);
+  Buffer b(BufHandle("b", {M, N}, kFloat));
   std::vector<float> in(M * N);
   for (int i = 0; i < M; ++i) {
     for (int j = 0; j < N; ++j) {
@@ -231,7 +231,7 @@ void testReduceProduct() {
 void testReduceMax() {
   KernelScope kernel_scope;
 
-  Buffer in_(BufHandle("b", {10}), kFloat);
+  Buffer in_(BufHandle("b", {10}, kFloat));
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
@@ -251,7 +251,7 @@ void testReduceMax() {
 
   ASSERT_EQ(out[0], 9);
 
-  Buffer in2_(BufHandle("b", {2, 5}), kFloat);
+  Buffer in2_(BufHandle("b", {2, 5}, kFloat));
   std::vector<float> out2(2, -1.f);
 
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
@@ -273,7 +273,7 @@ void testReduceMinCustomInitializer() {
   KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
-  Buffer in_(BufHandle("b", {10}), kFloat);
+  Buffer in_(BufHandle("b", {10}, kFloat));
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
@@ -311,7 +311,7 @@ void testReduceAnyAll() {
   KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
-  Buffer b(BufHandle("b", {4, 10}), kInt);
+  Buffer b(BufHandle("b", {4, 10}, kInt));
 
   Reducer anyEqSV(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
     return CompareSelect::make(a, 1, 1, b, kEQ);
@@ -396,8 +396,8 @@ void testReduceAnyAll() {
 void testReduceMatmul2D() {
   KernelScope kernel_scope;
 
-  Buffer tA(BufHandle("tA", {3, 2}), kFloat);
-  Buffer tB(BufHandle("tB", {2, 3}), kFloat);
+  Buffer tA(BufHandle("tA", {3, 2}, kFloat));
+  Buffer tB(BufHandle("tB", {2, 3}, kFloat));
 
   std::vector<float> tA_(6);
   std::vector<float> tB_(6);
@@ -438,7 +438,7 @@ void testReduceMatmul2D() {
 void testReduceRfactorLike() {
   KernelScope kernel_scope;
 
-  Buffer in(BufHandle("in", {10, 10}), kFloat);
+  Buffer in(BufHandle("in", {10, 10}, kFloat));
   std::vector<float> in_(100);
   for (int i = 0; i < 100; ++i) {
     in_[i] = i;
@@ -447,7 +447,7 @@ void testReduceRfactorLike() {
   std::vector<float> out(1, -1.f);
 
   Tensor* l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
-  Buffer in_rf(BufHandle(l1->func_var()), kFloat);
+  Buffer in_rf(BufHandle(l1->func_var()));
 
   Tensor* l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
 
@@ -465,7 +465,7 @@ void testReduceRfactorLike() {
 void testSplitReduceAxis() {
   KernelScope kernel_scope;
 
-  Buffer in(BufHandle("in", {16, 8}), kFloat);
+  Buffer in(BufHandle("in", {16, 8}, kFloat));
 
   std::vector<float> in_(16 * 8);
   for (int i = 0; i < 16; ++i) {
@@ -499,7 +499,7 @@ void testSplitReduceAxis() {
 void testSplitNonReduceAxis() {
   KernelScope kernel_scope;
 
-  Buffer in(BufHandle("in", {16, 8}), kFloat);
+  Buffer in(BufHandle("in", {16, 8}, kFloat));
 
   std::vector<float> in_(16 * 8);
   for (int i = 0; i < 16; ++i) {
@@ -543,7 +543,7 @@ void testReorderedReductionInitializer() {
         SumOp(c(k, n), 0, a(k, m, n), {m})
   */
 
-  Buffer in(BufHandle("in", {1, 12, 6}), kFloat);
+  Buffer in(BufHandle("in", {1, 12, 6}, kFloat));
   std::vector<float> in_(12 * 6, 1.f);
 
   Tensor* tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
@@ -608,7 +608,7 @@ void testReduceRfactor() {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Buffer b(BufHandle("b", {m, n}), kFloat);
+  Buffer b(BufHandle("b", {m, n}, kFloat));
   std::vector<float> in(M * N);
   for (int j = 0; j < M * N; ++j) {
     in[j] = j;
@@ -645,7 +645,7 @@ void testReduce3DRfactor() {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Buffer b(BufHandle("b", {m, n, k}), kFloat);
+  Buffer b(BufHandle("b", {m, n, k}, kFloat));
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -682,7 +682,7 @@ void testReduce3DRfactor2() {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Buffer b(BufHandle("b", {m, n, k}), kFloat);
+  Buffer b(BufHandle("b", {m, n, k}, kFloat));
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -719,7 +719,7 @@ void testReduce3DRfactor3() {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Buffer b(BufHandle("b", {m, n, k}), kFloat);
+  Buffer b(BufHandle("b", {m, n, k}, kFloat));
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -755,7 +755,7 @@ void testReduce3DRfactorRepeated() {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Buffer b(BufHandle("b", {m, n, k}), kFloat);
+  Buffer b(BufHandle("b", {m, n, k}, kFloat));
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -797,7 +797,7 @@ void testReduceRfactorInsertionPoint() {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Buffer b(BufHandle("b", {m, n}), kFloat);
+  Buffer b(BufHandle("b", {m, n}, kFloat));
   std::vector<float> in(M * N);
   for (int j = 0; j < M * N; ++j) {
     in[j] = j;
@@ -834,7 +834,7 @@ void testReduce3DRfactorInsertionPoint() {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Buffer b(BufHandle("b", {m, n, k}), kFloat);
+  Buffer b(BufHandle("b", {m, n, k}, kFloat));
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;

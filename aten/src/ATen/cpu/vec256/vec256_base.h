@@ -1,5 +1,19 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+//
+// Note [Do not compile initializers with AVX]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// If you define a static initializer in this file, the initialization will use
+// AVX instructions because these object files are compiled with AVX enabled.
+// We need to avoid non-trivial global data in these architecture specific files
+// because there's no way to guard the global initializers with CPU capability
+// detection.
+//
+// See https://github.com/pytorch/pytorch/issues/37577 for an instance
+// of this bug in the past.
+
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -634,7 +648,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
 
 struct Vec256i;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 
 template <class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {

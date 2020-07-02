@@ -71,7 +71,7 @@ jobs:
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
-        name: Test
+        name: Download Docker image
         no_output_timeout: "90m"
         command: |
           set -e
@@ -101,11 +101,15 @@ jobs:
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
 
-          retrieve_test_reports() {
-            echo "retrieving test reports"
-            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          }
-          trap "retrieve_test_reports" ERR
+          # Pass environment variables to the next step
+          # See https://circleci.com/docs/2.0/env-vars/#using-parameters-and-bash-environment
+          echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
+          echo "export id=$id" >> $BASH_ENV
+    - run:
+        name: Run tests
+        no_output_timeout: "90m"
+        command: |
+          set -e
 
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -113,9 +117,15 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          retrieve_test_reports
+    - run:
+        name: Report results
+        no_output_timeout: "5m"
+        command: |
+          set -e
           docker stats --all --no-stream
+          echo "Retrieving test reports"
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+        when: always
     - store_test_results:
         path: test-reports
 

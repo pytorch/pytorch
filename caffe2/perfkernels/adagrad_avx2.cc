@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 // version without prefetching
-void adagrad_update__avx_f16c(
+void adagrad_update__avx2_fma(
     int N,
     const float* w,
     const float* g,
@@ -16,13 +16,15 @@ void adagrad_update__avx_f16c(
     float* nh,
     float epsilon,
     float decay,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   constexpr size_t kSize = 8;
   auto i = 0;
   for (; i + kSize <= N; i += kSize) {
     __m256 gi = _mm256_loadu_ps(g + i);
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
+    gi = _mm256_fmadd_ps(_mm256_set1_ps(weight_decay), wi, gi);
 
     __m256 nhi = _mm256_add_ps(
         _mm256_mul_ps(_mm256_set1_ps(decay), hi), _mm256_mul_ps(gi, gi));
@@ -34,13 +36,13 @@ void adagrad_update__avx_f16c(
   }
 
   for (; i < N; ++i) {
-    float gi = g[i];
+    float gi = std::fma(weight_decay, w[i], g[i]);
     float hi = nh[i] = decay * h[i] + gi * gi;
     nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
   }
 }
 
-void adagrad_update_prefetch__avx_f16c(
+void adagrad_update_prefetch__avx2_fma(
     int N,
     const float* w,
     const float* w_n, // prefetch ptr
@@ -57,13 +59,14 @@ void adagrad_update_prefetch__avx_f16c(
     float* nh_n, // prefetch ptr
 
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   internal::adagrad_update_prefetch_inlined(
-      N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr);
+      N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr, weight_decay);
 }
 
 // Compute adagrad sparse, assumes embedding and momentum are at::Half
-void adagrad_fp16_update_prefetch__avx_f16c(
+void adagrad_fp16_update_prefetch__avx2_fma(
     int N,
     const at::Half* w,
     const at::Half* w_n, // prefetch ptr
@@ -75,7 +78,8 @@ void adagrad_fp16_update_prefetch__avx_f16c(
     at::Half* nh,
     at::Half* nh_n, // prefetch ptr
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   constexpr int kSize = 8;
   auto i = 0;
   for (; i + kSize <= N; i += kSize) {
@@ -90,6 +94,7 @@ void adagrad_fp16_update_prefetch__avx_f16c(
     __m256 hi = _mm256_cvtph_ps(hhi);
     __m128i whi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(w + i));
     __m256 wi = _mm256_cvtph_ps(whi);
+    gi = _mm256_fmadd_ps(_mm256_set1_ps(weight_decay), wi, gi);
 
     __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
     __m128i nhhi = _mm256_cvtps_ph(nhi, 0);
@@ -104,7 +109,10 @@ void adagrad_fp16_update_prefetch__avx_f16c(
   }
 
   for (; i < N; ++i) {
-    float gi = g[i];
+    float gi = std::fma(
+        weight_decay,
+        _cvtsh_ss(reinterpret_cast<const unsigned short*>(w)[i]),
+        g[i]);
     float nhi =
         _cvtsh_ss(reinterpret_cast<const unsigned short*>(h)[i]) + gi * gi;
     reinterpret_cast<unsigned short*>(nh)[i] = _cvtss_sh(nhi, 0);

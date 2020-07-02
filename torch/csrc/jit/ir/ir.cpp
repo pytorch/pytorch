@@ -719,6 +719,11 @@ void Value::inferTypeFrom(const at::Tensor& output) {
   setType(TensorType::create(output));
 }
 
+void Value::inferTypeFrom(
+    const c10::intrusive_ptr<c10::ivalue::Object>& output) {
+  setType(output->type());
+}
+
 bool Value::mustBeNone() const {
   return type()->cast<NoneType>() || node_->mustBeNone();
 }

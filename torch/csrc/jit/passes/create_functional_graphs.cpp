@@ -216,9 +216,12 @@ struct MutationRemover {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
-  void run() {
-    RemoveAtenMutation(graph_->block());
+  void removeListMutation() {
     RemoveListMutation(graph_->block());
+  }
+
+  void removeTensorMutation() {
+    RemoveTensorMutation(graph_->block());
   }
 
  private:
@@ -319,21 +322,22 @@ struct MutationRemover {
       Node* list_construct = mutated_value->node();
       list_construct->addInput(node->inputs().at(1));
       node->output()->replaceAllUsesWith(mutated_value);
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
-  void RemoveAtenMutation(Block* block) {
+  void RemoveTensorMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
       it++;
 
       for (Block* sub_block : node->blocks()) {
-        RemoveAtenMutation(sub_block);
+        RemoveTensorMutation(sub_block);
       }
 
       // TODO: out op variants
@@ -374,20 +378,21 @@ struct MutationRemover {
       // same aliasing relationships as the original x.
       // To avoid rebuilding the entire alias db, we can replace
       // the memory dag element of x with x0.
-      aliasDb_->replaceMemoryLocation(mutated_value, new_node->output());
+      aliasDb_->replaceWithNewValue(mutated_value, new_node->output());
 
       // it is an invariant that all mutable types have an element in the memory
       // dag so we must regive x an alias db element. We have already verified
       // that the mutated value is a fresh alias with a single use.
-      aliasDb_->giveFreshAlias(mutated_value);
+      aliasDb_->createValue(mutated_value);
 
       // We must erase the destroyed node from the AliasDb lists of writes
-      aliasDb_->writeIndex_.erase(node);
+      aliasDb_->writeIndex_->erase(node);
       node->destroy();
 
       // now that we have removed a mutating op, the write cache is stale
       // TODO: don't strictly need to reset write cache, evaluate on models
-      aliasDb_->isWriteCacheStale_ = true;
+      aliasDb_->writtenToLocationsIndex_ =
+          aliasDb_->buildWrittenToLocationsIndex();
     }
   }
 
@@ -409,9 +414,14 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-void RemoveMutation(const std::shared_ptr<Graph>& graph) {
+void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  mr.run();
+  mr.removeListMutation();
+}
+
+void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
+  MutationRemover mr(graph);
+  mr.removeTensorMutation();
 }
 
 } // namespace jit

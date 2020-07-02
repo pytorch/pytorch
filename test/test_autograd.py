@@ -31,7 +31,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck, skipIfRocm)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -420,6 +420,17 @@ class TestAutograd(TestCase):
             expected_grad[i] = 1.0
             self.assertEqual(x.grad, expected_grad)
             self.assertIsNone(x_list[i].grad)
+
+    def test_hook_with_no_name(self):
+        # Create a hook that do not have a __name__ attribute
+        class MyHookClass:
+            def __call__(self, grad):
+                return grad.clone()
+
+        x = torch.randn(5, requires_grad=True).clone()
+        x.register_hook(MyHookClass())
+        x.sum().backward()
+        # Should run fine
 
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
@@ -2655,6 +2666,7 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
+    @skipIfRocm
     def test_profiler_custom_op(self):
         inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -5288,7 +5300,6 @@ class TestAutogradDeviceType(TestCase):
             x = x - (((x - y) < eps).float() * 2 * eps)
             x.requires_grad = True
             y.requires_grad = True
-            f_args_variable = (x, y)
             dist = torch.cdist(x, y, p=2)
             # Do a backward pass to check that it is valid for large
             # matrices
@@ -5303,6 +5314,21 @@ class TestAutogradDeviceType(TestCase):
         _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
 
+    def test_cdist_same_inputs(self, device):
+        # Test to detect issues in cdist gradient calculation
+        # When the distances are 0
+        sizex = (1, 27, 32)
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            x = torch.randn(sizex, device=device, dtype=torch.float)
+            dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
+            y = x.clone()
+            eps = 1e-6
+            x.requires_grad = True
+            d = torch.cdist(x, y)
+            d.backward(dist_grad)
+            # Check that the backward passs does not contain invalid 
+            # values such as nan or inf
+            assert torch.isfinite(x.grad).all()
 
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, device=device))
@@ -5314,6 +5340,24 @@ class TestAutogradDeviceType(TestCase):
 
             m = torch.cat((asd, asd))
             m.sum().backward()
+
+
+    @deviceCountAtLeast(2)
+    def test_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = b * a
+        c.sum().backward()
+
+
+    @onlyCUDA
+    def test_scalar_different_device_types(self, device):
+        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
+        c.sum().backward()
+
+        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
+        d.sum().backward()
 
 
     # NOTE: flaky on ROCm CI
@@ -5633,6 +5677,14 @@ class TestAutogradDeviceType(TestCase):
         b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
+
+    @skipCUDAIfRocm
+    def test_leaky_relu_inplace_with_zero_slope(self, device):
+        a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
+        b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
+        b.backward(torch.ones(3, device=device))
+        expected = torch.tensor([0., 0., 1.], device=device)
+        self.assertEqual(a.grad, expected)
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):

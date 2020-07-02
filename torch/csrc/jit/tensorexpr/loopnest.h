@@ -67,8 +67,7 @@ class TORCH_API LoopNest {
 
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
-  // TODO: Remove Dtype from here once Bufs store their dtype
-  std::vector<std::pair<const Buf*, Dtype>> temp_bufs_;
+  std::vector<const Buf*> temp_bufs_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);

@@ -36,7 +36,6 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 Tensor ${function_name}(${method_formals}) {
   static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
   ${dispatch_key_init}
-  globalLegacyTypeDispatch().initForDispatchKey(_dk);
   return OP.callUnboxedWithDispatchKey<${formals_types}>(_dk, ${type_method_actuals});
 }
 """)

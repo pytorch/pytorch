@@ -39,6 +39,9 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _clamp) \
+_(aten, _clamp_max) \
+_(aten, _clamp_min) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
@@ -138,9 +141,6 @@ _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
-_(aten, _th_clamp) \
-_(aten, _th_clamp_max) \
-_(aten, _th_clamp_min) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_max) \
@@ -530,6 +530,7 @@ _(aten, ones_like) \
 _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
+_(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
@@ -715,6 +716,7 @@ _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
 _(aten, values) \
+_(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \

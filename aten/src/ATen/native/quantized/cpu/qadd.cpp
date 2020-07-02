@@ -137,7 +137,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto a_scale = qa_contig.q_scale();
   const auto b_scale = qb_contig.q_scale();
 
-  Tensor qy = at::_empty_affine_quantized(
+  Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
       at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
       scale,

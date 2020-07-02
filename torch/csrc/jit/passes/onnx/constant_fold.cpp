@@ -14,10 +14,6 @@ using namespace ::c10::onnx;
 
 namespace {
 
-using ParamMap = std::map<std::string, at::Tensor>;
-using ValueToParamPairMap =
-    std::map<Value*, std::pair<std::string, at::Tensor>>;
-
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
@@ -350,7 +346,7 @@ std::vector<at::Tensor> getValues(
         throw std::runtime_error(
             "getValues: Input value not found amongst constant parameters.");
       }
-      inputTensorValues.push_back(itr->second.second);
+      inputTensorValues.push_back(itr->second.second.toTensor());
     } else if (val->node()->kind() == onnx::Constant) {
       inputTensorValues.push_back(val->node()->t(attr::value));
     } else {

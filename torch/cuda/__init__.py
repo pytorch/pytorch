@@ -415,7 +415,8 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
+              'ComplexDouble', 'ComplexFloat']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -484,6 +485,13 @@ class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
 class BFloat16Storage(_CudaBase, torch._C.CudaBFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_CudaBase, torch._C.CudaComplexDoubleStorageBase, _StorageBase):
+    pass
+
+
+class ComplexFloatStorage(_CudaBase, torch._C.CudaComplexFloatStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -494,6 +502,8 @@ torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
+torch._storage_classes.add(ComplexDoubleStorage)
+torch._storage_classes.add(ComplexFloatStorage)
 
 from . import sparse
 from . import profiler

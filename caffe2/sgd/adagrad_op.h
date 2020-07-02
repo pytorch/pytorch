@@ -19,8 +19,10 @@ void adagrad_update(
     float epsilon,
     float decay,
     const float* lr,
-    Context* /*context*/) {
-  return adagrad_update(N, w, g, h, nw, nh, epsilon, decay, lr[0]);
+    Context* /*context*/,
+    float weight_decay = 0.f) {
+  return adagrad_update(
+      N, w, g, h, nw, nh, epsilon, decay, lr[0], weight_decay);
 }
 
 template <typename Context>
@@ -35,9 +37,10 @@ void adagrad_update_output_effective_lr(
     float epsilon,
     float decay,
     const float* lr,
-    Context* /*context*/) {
+    Context* /*context*/,
+    float weight_decay = 0.f) {
   for (auto i = 0; i < N; ++i) {
-    float grad = gradIn[i];
+    float grad = std::fma(weight_decay, paramIn[i], gradIn[i]);
     float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
     float effective_lr = effectiveLROut[i] =
         lr[0] / (std::sqrt(moment) + epsilon);
@@ -58,9 +61,10 @@ void adagrad_update_output_effective_lr_and_update(
     float epsilon,
     float decay,
     const float* lr,
-    Context* /*context*/) {
+    Context* /*context*/,
+    float weight_decay = 0.f) {
   for (auto i = 0; i < N; ++i) {
-    float grad = gradIn[i];
+    float grad = std::fma(weight_decay, paramIn[i], gradIn[i]);
     float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
     float effective_lr = effectiveLROut[i] =
         lr[0] / (std::sqrt(moment) + epsilon);
@@ -76,7 +80,13 @@ class AdagradOp final : public Operator<Context> {
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
-        decay_(this->template GetSingleArgument<float>("decay", 1.0f)) {}
+        decay_(this->template GetSingleArgument<float>("decay", 1.0f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "AdagradOp"
+              << " weight_decay_=" << weight_decay_;
+  }
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
@@ -105,7 +115,8 @@ class AdagradOp final : public Operator<Context> {
           epsilon_,
           decay_,
           Input(LR).template data<float>(),
-          &context_);
+          &context_,
+          weight_decay_);
     } else if (OutputSize() == 3) {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       adagrad_update_output_effective_lr<Context>(
@@ -119,7 +130,8 @@ class AdagradOp final : public Operator<Context> {
           epsilon_,
           decay_,
           Input(LR).template data<float>(),
-          &context_);
+          &context_,
+          weight_decay_);
     } else {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       Output(OUTPUT_UPDATE)->ResizeLike(Input(GRAD));
@@ -135,7 +147,8 @@ class AdagradOp final : public Operator<Context> {
           epsilon_,
           decay_,
           Input(LR).template data<float>(),
-          &context_);
+          &context_,
+          weight_decay_);
     }
 
     return true;
@@ -144,6 +157,7 @@ class AdagradOp final : public Operator<Context> {
  protected:
   float epsilon_;
   float decay_;
+  float weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR);
   OUTPUT_TAGS(
       OUTPUT_PARAM,
@@ -156,7 +170,12 @@ class SparseAdagradOp final : public Operator<CPUContext> {
  public:
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "SparseAdagradOp"
+              << " weight_decay_=" << weight_decay_;
     const float decay = this->template GetSingleArgument<float>("decay", 1.0);
     CAFFE_ENFORCE_EQ(
         decay, 1.0, "Decay is not supported for SparseSimdAdagradOp");
@@ -207,13 +226,18 @@ class SparseAdagradOp final : public Operator<CPUContext> {
         n);
 
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
+    C10_LOG_FIRST_N(INFO, 1)
+        << "using fbgemm::GenerateSparseAdaGrad in SparseAdagradOp";
+
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
       if (std::is_same<SIndex, std::int32_t>::value) {
-        kernel_i32_ = fbgemm::GenerateSparseAdaGrad<std::int32_t>(block_size);
+        kernel_i32_ = fbgemm::GenerateSparseAdaGrad<std::int32_t>(
+            block_size, /*rowwise=*/false, /*prefetch=*/16, weight_decay_);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
-        kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(block_size);
+        kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
+            block_size, /*rowwise=*/false, /*prefetch=*/16, weight_decay_);
       }
     }
 
@@ -258,6 +282,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
     }
 #endif
 
+    C10_LOG_FIRST_N(INFO, 1)
+        << "using internal::adagrad_update_prefetch_inlined in SparseAdagradOp";
+
     const auto* paramIn = Input(PARAM).template data<float>();
     const auto* momentIn = Input(MOMENT_1).template data<float>();
 
@@ -284,7 +311,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           Input(PARAM).numel());
 
       if (block_size == 1) {
-        float gi = gradIn[i];
+        float gi = std::fma(weight_decay_, paramIn[idx], gradIn[i]);
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
         paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
@@ -305,7 +332,8 @@ class SparseAdagradOp final : public Operator<CPUContext> {
             momentOut + offsetIdx,
             &momentOut[idx_pref * block_size],
             epsilon_,
-            lr[0]);
+            lr[0],
+            weight_decay_);
       }
     }
     return true;
@@ -313,6 +341,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
 
  protected:
   float epsilon_;
+  float weight_decay_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
   fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
   fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
@@ -329,7 +358,13 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "RowWiseSparseAdagradOp"
+              << " weight_decay_=" << weight_decay_;
+  }
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -381,15 +416,18 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         n);
 
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
+    C10_LOG_FIRST_N(INFO, 1)
+        << "using fbgemm::GenerateSparseAdaGrad in RowWiseSparseAdagradOp";
+
     if (block_size != last_block_size_) {
       last_block_size_ = block_size;
       if (std::is_same<SIndex, std::int32_t>::value) {
         kernel_i32_ = fbgemm::GenerateSparseAdaGrad<std::int32_t>(
-            block_size, /*rowwise=*/true);
+            block_size, /*rowwise=*/true, /*prefetch=*/16, weight_decay_);
       } else {
         CAFFE_ENFORCE((std::is_same<SIndex, std::int64_t>::value));
         kernel_i64_ = fbgemm::GenerateSparseAdaGrad<std::int64_t>(
-            block_size, /*rowwise=*/true);
+            block_size, /*rowwise=*/true, /*prefetch=*/16, weight_decay_);
       }
     }
 
@@ -436,10 +474,13 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
       return true;
     }
 #else
+    C10_LOG_FIRST_N(INFO, 1)
+        << "using plain adagrad updates in RowWiseSparseAdagradOp";
+
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
-        float gi = gradIn[i];
+        float gi = std::fma(weight_decay_, param[idx], gradIn[i]);
         float hi = moment[idx] = moment[idx] + gi * gi;
         param[idx] = param[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
@@ -472,13 +513,14 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         float* h = moment + idx;
         float hs = 0.;
         for (auto j = 0; j < block_size; ++j) {
-          float gj = g[j];
+          float gj = std::fma(weight_decay_, w[j], g[j]);
           hs += gj * gj;
         }
         float hi = h[0] = h[0] + hs / block_size;
         float step = lr[0] / (std::sqrt(hi) + epsilon_);
         for (auto j = 0; j < block_size; ++j) {
-          w[j] = w[j] + g[j] * step;
+          float gj = std::fma(weight_decay_, w[j], g[j]);
+          w[j] = w[j] + gj * step;
         }
       }
     }
@@ -488,6 +530,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
  protected:
   float epsilon_;
+  float weight_decay_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
   fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
   fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;

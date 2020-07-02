@@ -57,8 +57,8 @@ inline bool isFusableNode(const Node* const node) {
 
 // TODO: how would symbolic shape from profiling executor play with this?
 static bool compatible_broadcast_shape(
-    const c10::VaryingShape& e,
-    const c10::VaryingShape& a) {
+    const c10::VaryingShape<int64_t>& e,
+    const c10::VaryingShape<int64_t>& a) {
   if (e.isComplete() && a.isComplete()) {
     auto e_size = e.concrete_sizes().value();
     auto a_size = a.concrete_sizes().value();

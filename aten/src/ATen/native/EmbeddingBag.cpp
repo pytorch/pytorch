@@ -309,8 +309,8 @@ static at::Tensor make_bag_size(
     }
     bag_size[-1] = indices.size(0) - offsets[-1];
   } else if (requires_grad) {
-    // in MODE_SUM, only initialize bag_size if we need gradients
-    bag_size = at::zeros(offsets.sizes(), indices.options());
+    // in MODE_SUM, only allocate bag_size if we need gradients
+    bag_size = at::empty(offsets.sizes(), indices.options());
   }
   return bag_size;
 }
@@ -451,7 +451,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
         "include_last_offset: number of offset should be at least 1");
   }
 
-  auto output = at::zeros(
+  auto output = at::empty(
       {include_last_offset ? offsets.size(0) - 1 : offsets.size(0),
        weight.size(1)},
       weight.options());
@@ -481,6 +481,9 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     make_offset2bag(offsets, indices, offset2bag);
 
     offset2bag.resize_({indices.sizes()[0]});
+
+    // only initialize output in slow path
+    output.zero_();
   }
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {

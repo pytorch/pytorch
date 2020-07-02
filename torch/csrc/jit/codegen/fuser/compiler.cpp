@@ -216,8 +216,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     graph->inputs()[i]->setType(TensorType::create(
         desc.scalar_type,
         device,
-        c10::VaryingShape(desc.nDim()),
-        c10::VaryingShape(desc.nDim()),
+        {desc.nDim()},
         false)); // TODO: nDim is bad, as it is collapsed
   }
 

@@ -1068,3 +1068,8 @@ OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
 SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRanges,
+    "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
+    caffe2::GatherRangesOp<caffe2::CPUContext>)

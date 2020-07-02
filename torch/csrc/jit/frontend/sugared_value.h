@@ -41,6 +41,13 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
 
+  virtual bool hasAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
+    throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+  }
+
   // assign an attribute on it, e.g. `this.field = newValue`
   virtual void setAttr(
       const SourceRange& loc,
@@ -154,6 +161,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
 
   void setAttr(
       const SourceRange& loc,

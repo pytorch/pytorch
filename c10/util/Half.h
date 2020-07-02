@@ -3,14 +3,15 @@
 /// Defines the Half type (half-precision floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
-/// performing the operation in float32, instead of using CUDA half intrinisics.
+/// performing the operation in float32, instead of using CUDA half intrinsics.
 /// Most uses of this type within ATen are memory bound, including the
-/// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+/// element-wise kernels, and the half intrinsics aren't efficient on all GPUs.
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/complex_type.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -308,7 +309,11 @@ namespace detail {
     const float scale_to_inf = scale_to_inf_val;
     const float scale_to_zero = scale_to_zero_val;
 
+#if defined(_MSC_VER) && _MSC_VER == 1916
+          float base = ((signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
+#else
           float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
+#endif
 
           const uint32_t w = fp32_to_bits(f);
           const uint32_t shl1_w = w + w;
@@ -355,17 +360,18 @@ struct alignas(2) Half {
 
 // This is just a placeholder for whatever complex representation we
 // end up deciding to use for half-precision complex numbers.
-struct alignas(4) ComplexHalf {
+template<>
+struct alignas(4) complex<Half> {
   Half real_;
   Half imag_;
-  ComplexHalf() = default;
+  complex() = default;
   Half real() const {
     return real_;
   }
   Half imag() const {
     return imag_;
   }
-  inline ComplexHalf(std::complex<float> value)
+  inline complex(std::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
   inline operator std::complex<float>() const {
     return {real_, imag_};
@@ -378,8 +384,9 @@ struct is_complex_t : public std::false_type {};
 template <typename T>
 struct is_complex_t<std::complex<T>> : public std::true_type {};
 
-template <>
-struct is_complex_t<ComplexHalf> : public std::true_type {};
+template <typename T>
+struct is_complex_t<c10::complex<T>> : public std::true_type {};
+
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
@@ -391,8 +398,12 @@ template <typename T>
 struct scalar_value_type<std::complex<T>> {
   using type = T;
 };
+template <typename T>
+struct scalar_value_type<c10::complex<T>> {
+  using type = T;
+};
 template <>
-struct scalar_value_type<ComplexHalf> {
+struct scalar_value_type<complex<Half>> {
   using type = Half;
 };
 
@@ -404,6 +415,7 @@ struct scalar_value_type<ComplexHalf> {
 #pragma warning( push )
 #pragma warning( disable : 4146 )
 #pragma warning( disable : 4804 )
+#pragma warning( disable : 4018 )
 #endif
 
 // The overflow checks may involve float to int conversion which may

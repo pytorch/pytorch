@@ -223,7 +223,7 @@ Example::
 For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
 
 torch.memory_format
-------------
+-------------------
 
 .. class:: torch.memory_format
 

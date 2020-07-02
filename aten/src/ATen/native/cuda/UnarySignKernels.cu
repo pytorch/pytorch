@@ -31,10 +31,12 @@ __host__ __device__ static inline bool abs_wrapper(bool v) {
 }
 
 void abs_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return abs_wrapper(a);
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "abs_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return abs_wrapper(a);
+      });
     });
   });
 }

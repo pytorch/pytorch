@@ -1246,9 +1246,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto t = stack.back().toTensor();
               const TypePtr& expected = af.types[inst.X];
-              bool comp = expected->cast<TensorType>()
-                              ->isCompatibleWithInCurrentExecutionContext(t);
-              push(stack, comp);
+              auto pttp = tensorTypeInCurrentExecutionContext(t);
+              push(stack, pttp->isSubtypeOf(expected));
             }
             ++af.pc;
           } break;
