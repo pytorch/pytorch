@@ -1819,7 +1819,7 @@ class ShapePropagator {
         if (!t->dim()) {
           return nullptr;
         }
-        return *t->dim() == 0 ? t : t->withDim(*t->dim() + 1);
+        return t->withDim(*t->dim() + 1);
       } else if (node->matches(
                      "aten::polygamma(int n, Tensor self) -> Tensor")) {
         return tensor_types.at(0);
