@@ -303,23 +303,8 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether this callbacks should run in the given scope
-  inline bool shouldRun(RecordScope scope) const {
-    // first check whether this callback is interested in
-    // the given scope type
-    if (!checkScope(scope)) {
-      return false;
-    }
-    // if we have registered should_run_ function, use it
-    if (should_run_) {
-      return should_run_(*this);
-    }
-    // otherwise potentially do the uniform sampling
-    if (sampling_prob_ != 1.0) {
-      return (sample_zero_one() < sampling_prob_);
-    }
-    return true;
-  }
+  // whether the callbacks should run in the given scope
+  bool shouldRun(RecordScope scope) const;
 
  private:
   std::function<void(const RecordFunction&)> start_;
@@ -329,8 +314,6 @@ class TORCH_API RecordFunctionCallback {
   bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
-
-  static double sample_zero_one();
 };
 
 // Using macro to minimize inputs copies,

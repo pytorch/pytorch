@@ -5,6 +5,7 @@ import sys
 
 import torch
 import torch._C
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -127,6 +128,7 @@ class BasicModuleTest(JitBackendTestCase):
         self.check_function("sub_accum", input)
         self.check_function("forward", input)
 
+    @skipIfRocm
     def test_save_load(self):
         # Lowered module should produce the same outputs.
         self.test_execution()
@@ -196,13 +198,16 @@ class TestBackends(JitTestCase):
         self.nested_module_test = NestedModuleTest()
 
     def setUp(self):
-        self.basic_module_test.setUp()
-        self.nested_module_test.setUp()
+        if not TEST_WITH_ROCM:
+            self.basic_module_test.setUp()
+            self.nested_module_test.setUp()
 
+    @skipIfRocm
     def test_execution(self):
         self.basic_module_test.test_execution()
         self.nested_module_test.test_execution()
 
+    @skipIfRocm
     def test_save_load(self):
         self.basic_module_test.test_save_load()
         self.nested_module_test.test_save_load()

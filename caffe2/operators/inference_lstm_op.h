@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <vector>
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"

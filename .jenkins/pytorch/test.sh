@@ -204,12 +204,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
-test_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
-  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
-}
-
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
@@ -336,7 +330,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
-  test_torchvision
+  install_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
@@ -349,7 +343,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_nn
   test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  test_torchvision
+  install_torchvision
   test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
@@ -363,7 +357,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   # cpp extension can be built correctly under this old env
   test_cpp_extensions
 else
-  test_torchvision
+  install_torchvision
   test_python_nn
   test_python_all_except_nn_and_cpp_extensions
   test_cpp_extensions
