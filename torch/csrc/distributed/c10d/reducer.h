@@ -103,8 +103,8 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
-  std::unique_ptr<const CommHookInterface> comm_hook_;
-  void register_comm_hook_internal(const CommHookInterface& comm_hook);
+  std::unique_ptr<CommHookInterface> comm_hook_;
+  void register_comm_hook_internal(std::unique_ptr<CommHookInterface> iface);
 
   void verify_replicas_within_process();
 

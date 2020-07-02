@@ -82,24 +82,10 @@ void broadcast_coalesced(
 
 GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
 
-// Temporarily disabled CppCommHook, because of `Taking the address of a
-// temporary object of type 'c10::ivalue::Future'` error in when we try
-// std::shared_ptr<Future>(&hook_(bucket.tensors_));.
-// ~~~~~~~~~~~~~~~
-// CppCommHook::CppCommHook(
-//     py::object state,
-//     std::function<torch::jit::Future(std::vector<at::Tensor>)>& hook)
-//     : state_(state), hook_(hook){};
-
-// std::shared_ptr<torch::jit::Future> CppCommHook::operate(const GradBucket&
-// bucket) {
-//   return std::shared_ptr<torch::jit::Future>(&hook_(bucket.tensors_));
-// };
-
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 std::shared_ptr<torch::jit::Future> PythonCommHook::operate(
-    const GradBucket& bucket) const {
+    const GradBucket& bucket) {
   return hook_(state_, bucket.tensors_)
       .cast<std::shared_ptr<torch::jit::Future>>();
 
