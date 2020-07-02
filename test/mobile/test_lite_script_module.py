@@ -66,6 +66,23 @@ class TestLiteScriptModule(unittest.TestCase):
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
         torch.testing.assert_allclose(script_module_result, mobile_module_result)
 
+    def test_unsupported_instruction(self):
+        class Foo():
+            def __init__(self):
+                return
+
+            def func(self, x: int, y: int):
+                return x + y
+
+        class MyTestModule(torch.nn.Module):
+            def forward(self, arg):
+                f = Foo()
+                return f.func(1, 2)
+
+        script_module = torch.jit.script(MyTestModule())
+        with self.assertRaisesRegex(RuntimeError, "^CREATE_OBJECT is not supported in mobile module.$"):
+            script_module._save_to_buffer_for_lite_interpreter()
+
 
 
 if __name__ == '__main__':
