@@ -1421,6 +1421,9 @@ void OnnxifiTransformer::transform(
     LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
     annotateOpIndex(pred_net);
     shape_hints_mapped = input_shape_hints;
+    for (const auto& w : weights) {
+      input_mapping_.emplace(w, w);
+    }
   } else {
     shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   }
