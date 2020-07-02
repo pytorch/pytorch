@@ -24,6 +24,7 @@ from function_wrapper import gen_dispatch_key_init
 GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
   m.impl_UNBOXED("aten::${op_name_with_overload_name}", ${function_name});
 """)
@@ -79,6 +80,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
 
+                # See NOTE[UnboxedOnly] in function_wrapper.py
                 if option['use_c10_dispatcher'] == 'full':
                     function_cpp_signature = option['schema_order_cpp_signature']
                     function_actuals = option['schema_order_actuals']

@@ -30,7 +30,7 @@ void testCustomOperators() {
 
     Stack stack;
     push(stack, 2.0f, at::ones(5));
-    op->getOperation()(stack);
+    op->getOperation()(&stack);
     at::Tensor output;
     pop(stack, output);
 
@@ -59,7 +59,7 @@ void testCustomOperators() {
 
     Stack stack;
     push(stack, 2.0f, at::ones(5));
-    op->getOperation()(stack);
+    op->getOperation()(&stack);
     at::Tensor output;
     pop(stack, output);
 
@@ -98,7 +98,7 @@ void testCustomOperators() {
     push(stack, c10::List<int64_t>({1, 2}));
     push(stack, c10::List<double>({1.0, 2.0}));
     push(stack, c10::List<at::Tensor>({at::ones(5)}));
-    op->getOperation()(stack);
+    op->getOperation()(&stack);
     c10::List<double> output;
     pop(stack, output);
 
@@ -128,7 +128,7 @@ void testCustomOperators() {
 
     Stack stack;
     push(stack, c10::List<at::Tensor>({at::ones(5)}));
-    op->getOperation()(stack);
+    op->getOperation()(&stack);
     c10::List<at::Tensor> output;
     pop(stack, output);
 
