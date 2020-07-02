@@ -2666,13 +2666,10 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['aten::is_complex', 'aten::mul', 'aten::to',
-                 'aten::empty_strided', 'aten::copy_', 'aten::is_complex',
-                 'aten::is_complex', 'aten::empty', 'aten::is_complex',
-                 'aten::add', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::is_complex', 'aten::is_complex', 'aten::empty']
-        top_level_names = ['aten::is_complex', 'aten::mul',
-                           'aten::is_complex', 'aten::add']
+        names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
+                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
+                 'aten::copy_', 'aten::empty']
+        top_level_names = ['aten::mul', 'aten::add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
