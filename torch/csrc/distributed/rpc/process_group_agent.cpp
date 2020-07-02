@@ -5,8 +5,6 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <Python.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
