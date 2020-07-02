@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/metrics/RpcMetricsHandler.h>
+#include <torch/csrc/distributed/rpc/metrics/RpcMetricsHandler.h> // @manual
 namespace torch {
 namespace distributed {
 namespace rpc {
