@@ -640,9 +640,9 @@ std::function<T(void)> wrapPropagateTLSState(std::function<T(void)> callback) {
   };
 }
 
-template std::function<c10::IValue(void)> wrapPropagateTLSState<c10::IValue>(
+template TORCH_API std::function<c10::IValue(void)> wrapPropagateTLSState<c10::IValue>(
     std::function<c10::IValue(void)> callback);
-template std::function<void(void)> wrapPropagateTLSState<void>(
+template TORCH_API std::function<void(void)> wrapPropagateTLSState<void>(
     std::function<void(void)> callback);
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
