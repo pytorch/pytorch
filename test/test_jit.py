@@ -6802,6 +6802,16 @@ a")
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
 
+    def test_shape_analysis_grad_property(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.sub(x, torch.tanh(x))
+
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
+
+        # requires_grad property shouldn't be accidentally set by shape analysis
+        self.assertTrue(foo.graph.findNode("aten::sub").output().requiresGrad() is None)
+
     def test_empty_like_memory_format_bc(self):
         def f(x):
             # type: (Tensor) -> Tensor

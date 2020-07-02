@@ -421,8 +421,14 @@ class ShapePropagator {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
       // its most constrained form.
-      if (stack[i].isTensor())
-        node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+      auto tensor_type = node->outputs()[i]->type()->cast<TensorType>();
+      if (stack[i].isTensor() && tensor_type) {
+        // gradient information isn't always available or part of represenative
+        // inputs, maintain original grad property
+        auto tensor_grad = tensor_type->requiresGrad();
+        node->outputs()[i]->setType(TensorType::create(stack[i].toTensor())
+                                        ->withRequiresGrad(tensor_grad));
+      }
     }
     return true;
   }
