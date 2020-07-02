@@ -2824,10 +2824,6 @@ class AbstractTestCases:
                         val = random.random()
                         dst2 = dst.clone()
 
-                        if dt == torch.half:
-                            self.assertRaises(RuntimeError, lambda: dst.masked_fill_(mask, val))
-                            continue
-
                         dst.masked_fill_(mask, val)
                         for i in range(num_dest):
                             if mask[i]:
@@ -6939,18 +6935,6 @@ class TestTorchDeviceType(TestCase):
             a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
-
-                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-                if device.startswith('cuda') and torch.bfloat16 in (dtype, other_dtype):
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
-                # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
-                # Skip only if either dtype or other_dtype is bfloat16.
-                if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
 
                 if dtype.is_complex or other_dtype.is_complex:
                     with self.assertRaises(RuntimeError):
@@ -12870,10 +12854,6 @@ class TestTorchDeviceType(TestCase):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
-
-            if dtype == torch.half and torch.device(device).type == 'cpu':
-                self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                continue
 
             with warnings.catch_warnings(record=True) as w:
                 dst = src.masked_select(mask)
