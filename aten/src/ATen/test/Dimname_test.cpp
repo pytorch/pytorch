@@ -14,14 +14,19 @@ TEST(DimnameTest, isValidIdentifier) {
   ASSERT_TRUE(Dimname::isValidName("N"));
   ASSERT_TRUE(Dimname::isValidName("CHANNELS"));
   ASSERT_TRUE(Dimname::isValidName("foo_bar_baz"));
+  ASSERT_TRUE(Dimname::isValidName("batch1"));
+  ASSERT_TRUE(Dimname::isValidName("batch_9"));
+  ASSERT_TRUE(Dimname::isValidName("_"));
+  ASSERT_TRUE(Dimname::isValidName("_1"));
 
   ASSERT_FALSE(Dimname::isValidName(""));
   ASSERT_FALSE(Dimname::isValidName(" "));
   ASSERT_FALSE(Dimname::isValidName(" a "));
-  ASSERT_FALSE(Dimname::isValidName("batch1"));
-  ASSERT_FALSE(Dimname::isValidName("foo_bar_1"));
+  ASSERT_FALSE(Dimname::isValidName("1batch"));
   ASSERT_FALSE(Dimname::isValidName("?"));
   ASSERT_FALSE(Dimname::isValidName("-"));
+  ASSERT_FALSE(Dimname::isValidName("1"));
+  ASSERT_FALSE(Dimname::isValidName("01"));
 }
 
 TEST(DimnameTest, wildcardName) {
@@ -36,7 +41,7 @@ TEST(DimnameTest, createNormalName) {
   ASSERT_EQ(dimname.type(), NameType::BASIC);
   ASSERT_EQ(dimname.symbol(), foo);
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("inva.lid")), c10::Error);
-  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("invalid1")), c10::Error);
+  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("1invalid")), c10::Error);
 }
 
 static void check_unify_and_match(
