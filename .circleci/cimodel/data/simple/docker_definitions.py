@@ -36,7 +36,12 @@ def get_workflow_jobs():
         OrderedDict(
             {
                 "docker_build_job": OrderedDict(
-                    {"name": quote(image_name), "image_name": quote(image_name)}
+                    {
+                        # distinguish docker build jobs by prefixing with
+                        # docker-
+                        "name": quote(f"docker-{image_name}"),
+                        "image_name": quote(image_name)
+                    }
                 )
             }
         )
