@@ -819,7 +819,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-        py::module::import("torch.jit")
+        py::module::import("torch.jit._script")
             .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
@@ -837,7 +837,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
     auto overloads =
-        py::module::import("torch.jit").attr("_get_overloads")(obj);
+        py::module::import("torch.jit._script").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
       return std::make_shared<FunctionValue>(std::move(compiled_fns));

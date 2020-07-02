@@ -287,7 +287,7 @@ def try_ann_to_type(ann, loc):
             return ClassType(_qualified_name(ann))
         ignored_builtin_classes = (torch.nn.Module, tuple, list)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
-            torch.jit._recursive_compile_class(ann, loc)
+            torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))
 
     # Maybe resolve a NamedTuple to a Tuple Type

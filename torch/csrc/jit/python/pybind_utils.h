@@ -287,7 +287,7 @@ inline InferredType tryToInferType(py::handle input) {
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName = py::module::import("torch.jit")
                                 .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit")
+    auto pyClass = py::module::import("torch.jit._state")
                        .attr("_get_script_class")(qualifiedName);
     if (!pyClass.is_none()) {
       auto cu = get_python_cu();
@@ -876,7 +876,7 @@ inline py::object toPyObject(IValue ivalue) {
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
-        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+        py::module::import("torch.jit._state").attr("_get_script_class")(obj->name());
     if (pyClass.is_none()) {
       std::stringstream err;
       err << "Unknown reference to ScriptClass ";
