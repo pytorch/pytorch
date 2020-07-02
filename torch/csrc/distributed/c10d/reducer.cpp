@@ -1070,8 +1070,9 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   return rebuilt_bucket_indices;
 }
 
-void Reducer::register_comm_hook(py::object state, py::object comm_hook){
-  Reducer::register_comm_hook_internal(PythonCommHook(state, comm_hook));
+void Reducer::register_comm_hook(py::object state, py::object comm_hook) {
+  Reducer::register_comm_hook_internal(
+      PythonCommHook(std::move(state), std::move(comm_hook)));
 }
 
 void Reducer::register_comm_hook_internal(const CommHookInterface& comm_hook){
