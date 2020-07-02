@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple
+from typing import List, Tuple, Iterable
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -485,6 +485,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
+
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -647,6 +648,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         global Foo, MyClass  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -802,6 +804,7 @@ class TestClassType(JitTestCase):
 
     def test_cast_overloads(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
@@ -929,3 +932,98 @@ class TestClassType(JitTestCase):
             self.assertEqual(m(input), m_loaded(input))
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
+
+    def test_unused_method(self):
+        """
+        Test unused methods on scripted classes.
+        """
+        @torch.jit.script
+        class Unused(object):
+            def __init__(self):
+                self.count: int = 0
+                self.items: List[int] = []
+
+            def used(self):
+                self.count += 1
+                return self.count
+
+            @torch.jit.unused
+            def unused(self, x: int, y: Iterable[int], **kwargs) -> int:
+                a = next(self.items)
+                return a
+
+            def uses_unused(self) -> int:
+                return self.unused(y="hi", x=3)
+
+        class ModuleWithUnused(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.obj = Unused()
+
+            def forward(self):
+                return self.obj.used()
+
+            @torch.jit.export
+            def calls_unused(self):
+                return self.obj.unused(3, "hi")
+
+            @torch.jit.export
+            def calls_unused_indirectly(self):
+                return self.obj.uses_unused()
+
+        python_module = ModuleWithUnused()
+        script_module = torch.jit.script(ModuleWithUnused())
+
+        # Forward should work because it does not used any methods marked unused.
+        self.assertEqual(python_module.forward(), script_module.forward())
+
+        # Calling a method marked unused should throw.
+        with self.assertRaises(torch.jit.Error):
+            script_module.calls_unused()
+
+        with self.assertRaises(torch.jit.Error):
+            script_module.calls_unused_indirectly()
+
+    def test_self_referential_method(self):
+        """
+        Test that a scripted class can have a method that refers to the class itself
+        in its type annotations.
+        """
+        @torch.jit.script
+        class Meta(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def method(self, other: List['Meta']) -> 'Meta':
+                return Meta(len(other))
+
+        class ModuleWithMeta(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.meta = Meta(a)
+
+            def forward(self):
+                new_obj = self.meta.method([self.meta])
+                return new_obj.a
+
+        self.checkModule(ModuleWithMeta(5), ())
+
+    def test_type_annotation(self):
+        """
+        Test that annotating container attributes with types works correctly
+        """
+        @torch.jit.script
+        class CompetitiveLinkingTokenReplacementUtils:
+            def __init__(self):
+                self.my_list : List[Tuple[float, int, int]] = []
+                self.my_dict : Dict[int, int] = {}
+
+        @torch.jit.script
+        def foo():
+            y = CompetitiveLinkingTokenReplacementUtils()
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
+            y.my_dict = new_dict
+
+            new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
+            y.my_list = new_list
+            return y

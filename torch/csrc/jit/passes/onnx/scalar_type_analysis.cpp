@@ -56,11 +56,11 @@ static bool IsStandardOp(const NodeKind& nkind) {
 
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {
-    onnx::Greater,
-    onnx::Less,
-    onnx::Equal,
-};
+static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
+                                                           onnx::Less,
+                                                           onnx::Equal,
+                                                           onnx::GreaterOrEqual,
+                                                           onnx::LessOrEqual};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();

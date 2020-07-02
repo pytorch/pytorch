@@ -4,6 +4,7 @@
 
 #include <c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -18,7 +19,7 @@ class TestE2EProcessGroup : public TestE2EBase {
     c10d::ProcessGroupGloo::Options options;
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname(serverAddress));
-    std::chrono::milliseconds rpcTimeout(10000);
+    std::chrono::milliseconds rpcTimeout(30000);
 
     // Initialize server rpc agent.
     auto pg =
@@ -28,7 +29,8 @@ class TestE2EProcessGroup : public TestE2EBase {
         "worker",
         pg,
         std::max(16U, std::thread::hardware_concurrency()),
-        rpcTimeout);
+        rpcTimeout,
+        std::make_unique<RequestCallbackNoPython>());
   }
 };
 

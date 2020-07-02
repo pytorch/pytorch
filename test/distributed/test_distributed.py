@@ -203,7 +203,7 @@ class Barrier(object):
             os.unlink(os.path.join(barrier_dir, f_name))
 
     @classmethod
-    def sync(cls, wait_for=None, timeout=5):
+    def sync(cls, wait_for=None, timeout=10):
         if wait_for is None:
             wait_for = dist.get_world_size()
         cls.barrier_id += 1
@@ -455,7 +455,6 @@ class _DistTestBase(object):
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
@@ -1906,6 +1905,45 @@ class _DistTestBase(object):
     def test_DistributedDataParallel_requires_grad(self):
         # a module without gradients shouldn't be accepted
         self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
+
+    @unittest.skipIf(
+        BACKEND != "nccl" and BACKEND != "gloo",
+        "Only NCCL and GLOO backend support DistributedDataParallel",
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_DistributedDataParallel_non_default_stream(self):
+        stream = torch.cuda.Stream()
+        rank = self.rank
+        with torch.cuda.stream(stream):
+            net = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(rank), device_ids=[rank]
+            )
+            for i in range(1000):
+                # Clear gradients manually
+                grad = net.module.weight.grad
+                if grad is not None:
+                    grad.detach_()
+                    grad.zero_()
+                # Forward + BW
+                batch = torch.tensor([rank]).float().cuda(rank)
+                loss = net(batch).sum()
+                loss.backward()
+                # For each worker, the gradient on the weight should be worker_rank.
+                grad = net.module.weight.grad
+                avg = grad.clone()
+                # All-reducing the gradient averages should give us the gradient
+                # average. If not, then one of the workers has not correctly
+                # written back the averaged gradient before this all-reduce call.
+                dist.all_reduce(avg)
+                world_size = int(os.environ["WORLD_SIZE"])
+                avg.div_(world_size)
+                expected_grad = sum(i for i in range(world_size)) / world_size
+                self.assertEqual(
+                    avg[0, 0],
+                    expected_grad,
+                    msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
+                )
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")

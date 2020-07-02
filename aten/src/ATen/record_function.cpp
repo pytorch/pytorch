@@ -9,13 +9,20 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_id {0};
-  return CallbackHandle(++unique_id);
+  static std::atomic<uint64_t> unique_cb_id {0};
+  return CallbackHandle(++unique_cb_id);
+}
+
+RecordFunctionHandle next_unique_record_function_handle() {
+  static std::atomic<uint64_t> unique_rf_id {0};
+  return RecordFunctionHandle(++unique_rf_id);
 }
 
 // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
 // must be sorted in increasing handles order
 thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
+
+std::atomic<int64_t> defaultNodeId(-1);
 
 class CallbackManager {
  public:
@@ -82,8 +89,10 @@ class CallbackManager {
     auto scope = rec_fn.scope();
     bool found_active_cb = false;
     bool found_needs_inputs = false;
-    auto init_handles = [scope, &found_active_cb, &found_needs_inputs](
-        CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
+    bool found_needs_ids = false;
+    auto init_handles = [
+        scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
+          CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
       handles.clear();
       for (const auto& cb : cbs) {
         if (cb.first.shouldRun(scope)) {
@@ -92,14 +101,20 @@ class CallbackManager {
           if (cb.first.needsInputs()) {
             found_needs_inputs = true;
           }
+          if (cb.first.needsIds()) {
+            found_needs_ids = true;
+          }
         }
       }
     };
 
     init_handles(rec_fn.sorted_active_tls_handles_, sorted_tls_callbacks_);
     init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
-    rec_fn.active_ = found_active_cb;
-    rec_fn.needs_inputs_ = found_needs_inputs;
+    rec_fn.active = found_active_cb;
+    rec_fn.needs_inputs = found_needs_inputs;
+    if (found_needs_ids && found_active_cb) {
+      rec_fn.setHandle(next_unique_record_function_handle());
+    }
   }
 
   void runStartCallbacks(RecordFunction& rf) {
@@ -197,14 +212,56 @@ inline CallbackManager& manager() {
   return _manager;
 }
 
-} // namespace
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
 
-/* static */
-double RecordFunctionCallback::sample_zero_one() {
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
   static thread_local auto gen =
       std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
+}
+
+} // namespace
+
+bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
+  // first check whether this callback is interested in
+  // the given scope type
+  if (!checkScope(scope)) {
+    return false;
+  }
+  // if we have registered should_run_ function, use it
+  if (should_run_) {
+    return should_run_(*this);
+  }
+  // otherwise potentially do the uniform sampling
+  if (sampling_prob_ != 1.0) {
+    // model the low probability events as events happening
+    // with prob. kLowProb followed by another sampling with
+    // prob. (sampling_prob_ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution
+    if (sampling_prob_ < kLowProb) {
+      if (tries_left_ == 0) {
+        tries_left_ = sample_geometric();
+        return (sample_zero_one() < sampling_prob_ / kLowProb);
+      } else {
+        --tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < sampling_prob_);
+    }
+  }
+  return true;
 }
 
 RecordFunctionCallbacks _getTLSCallbacks() {
@@ -293,8 +350,8 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-void RecordFunction::_before(const char* name, int64_t sequence_nr) {
-  if (!active_) {
+void RecordFunction::before(const char* name, int64_t sequence_nr) {
+  if (!active) {
     return;
   }
   name_ = StringView(name);
@@ -304,8 +361,8 @@ void RecordFunction::_before(const char* name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::_before(std::string name, int64_t sequence_nr) {
-  if (!active_) {
+void RecordFunction::before(std::string name, int64_t sequence_nr) {
+  if (!active) {
     return;
   }
   name_ = StringView(std::move(name));
@@ -315,14 +372,23 @@ void RecordFunction::_before(std::string name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-RecordFunction::~RecordFunction() {
-  _end();
+/* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
+  TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
+  defaultNodeId = newDefaultNodeId;
 }
 
-void RecordFunction::_end() {
-  if (active_) {
+/* static */ int64_t RecordFunction::getDefaultNodeId() {
+  return defaultNodeId;
+}
+
+RecordFunction::~RecordFunction() {
+  end();
+}
+
+void RecordFunction::end() {
+  if (active) {
     manager().runEndCallbacks(*this);
-    active_ = false;
+    active = false;
   }
   if (is_current_) {
     current_record_func_ = parent_;

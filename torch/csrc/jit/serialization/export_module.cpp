@@ -111,7 +111,7 @@ c10::IValue getFunctionTuple(const Function& func) {
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->python_str());
+    types.emplace_back(t->annotation_str());
   }
 
   // since the register location is embedded into the bytecode, pass the
@@ -179,7 +179,7 @@ class ScriptModuleSerializer {
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
-    // Then we werialize all code info.
+    // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
@@ -188,6 +188,11 @@ class ScriptModuleSerializer {
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module);
+    }
+
+    // Acquires and sets minimum (dynamic) version
+    for (auto& item : file_streams_) {
+      writer_.setMinVersion(item.value().minVersion());
     }
   }
 
@@ -211,8 +216,9 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
+      WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
@@ -233,6 +239,17 @@ class ScriptModuleSerializer {
     if (hook) {
       ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
+        // Checks if the hooked file is already written in extra files,
+        //   if so, skips it and warns
+        if (extra_files.find(kv.first) != extra_files.end()) {
+          TORCH_WARN_ONCE(
+              "An extra files hook attempted to write ",
+              kv.first,
+              " but ",
+              "this is already written in extra files and so will be skipped. ",
+              "This warning will only appear once per process.");
+          continue;
+        }
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
       }

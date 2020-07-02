@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -26,7 +26,10 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
-  size_t num_elems = input_contig.numel() / input_contig.size(0);
+  size_t num_elems = 1;
+  for (int i = 1; i < input_contig.ndimension(); ++i) {
+    num_elems *= input_contig.size(i);
+  }
 
   auto min_f = min.to<float>();
   auto max_f = max.to<float>();
@@ -61,7 +64,7 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK Clamp operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(clamp_op, threadpool);
@@ -137,7 +140,7 @@ Tensor& quantized_hardtanh_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", quantized_clamp);
+  m.impl("clamp", TORCH_FN(quantized_clamp));
 }
 
 } // namespace native

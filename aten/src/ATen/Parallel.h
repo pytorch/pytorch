@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 
@@ -128,6 +129,9 @@ CAFFE2_API int get_num_interop_threads();
 
 // Launches inter-op parallel task
 CAFFE2_API void launch(std::function<void()> func);
+namespace internal {
+void launch_no_thread_state(std::function<void()> fn);
+} // namespace internal
 
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);

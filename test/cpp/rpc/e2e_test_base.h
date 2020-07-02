@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
@@ -39,11 +38,8 @@ class TestE2EBase : public ::testing::Test {
     RpcAgent::setCurrentRpcAgent(rpcAgent);
     std::shared_ptr<TypeResolver> typeResolver =
         std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
-          auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
-              qn.qualifiedName());
           return c10::StrongTypePtr(
-              PythonRpcHandler::getInstance().jitCompilationUnit(),
-              std::move(typePtr));
+              nullptr, c10::TensorType::create(at::Tensor()));
         });
     rpcAgent->setTypeResolver(typeResolver);
     rpcAgent->start();
@@ -71,7 +67,9 @@ class TestE2EBase : public ::testing::Test {
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
     fm->addCallback(
-        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
+          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+        });
     return ownerRRef;
   }
 
