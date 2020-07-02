@@ -144,7 +144,6 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   auto* sub_block = loop_node->blocks()[0];
 
   std::vector<size_t> idx_to_remove;
-  // std::vector<Value*> split_outputs;
   std::vector<Value*> new_outputs;
   // ONNX Loop node:
   // sub-block inputs are  (iter, cond, loop-carried dependencies)
