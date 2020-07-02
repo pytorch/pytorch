@@ -189,6 +189,10 @@ binary_run_in_docker.sh is a way to share the docker start-up code between the b
 
 We want all the nightly binary jobs to run on the exact same git commit, so we wrote our own checkout logic to ensure that the same commit was always picked. Later circleci changed that to use a single pytorch checkout and persist it through the workspace (they did this because our config file was too big, so they wanted to take a lot of the setup code into scripts, but the scripts needed the code repo to exist to be called, so they added a prereq step called 'setup' to checkout the code and persist the needed scripts to the workspace). The changes to the binary jobs were not properly tested, so they all broke from missing pytorch code no longer existing. We hotfixed the problem by adding the pytorch checkout back to binary_checkout, so now there's two checkouts of pytorch on the binary jobs. This problem still needs to be fixed, but it takes careful tracing of which code is being called where.
 
+## How do I modify the Docker images that jobs run in?
+
+Modifications to the docker images need to be made in the `.circleci/docker` folder. Any changes to that folder will trigger circleci to build / push new images that will then get consumed by downstream jobs. There is no need to modify any circleci configuration to build new docker images.
+
 # Azure Pipelines structure of the binaries
 
 TODO: fill in stuff
@@ -338,7 +342,7 @@ Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for
 
 ### Note on docker images / Dockerfiles
 
-All linux builds occur in docker images. The docker images are
+All linux binary builds occur in docker images. The docker images are
 
 * pytorch/conda-cuda
     * Has ALL CUDA versions installed. The script pytorch/builder/conda/switch_cuda_version.sh sets /usr/local/cuda to a symlink to e.g. /usr/local/cuda-10.0 to enable different CUDA builds
