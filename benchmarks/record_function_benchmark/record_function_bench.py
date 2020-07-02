@@ -44,7 +44,7 @@ def run_bench(model_name, bench_args):
         torch.autograd._enable_record_function(with_rec_fn)
         torch.autograd._clear_callbacks()
         if with_rec_fn:
-           torch.autograd._set_empty_test_observer(True, 0.0001)
+            torch.autograd._set_empty_test_observer(True, 0.0001)
         print("Running {} iterations {} RecordFunction...".format(
             bench_args.nloops, "with" if with_rec_fn else "without"), end=" ")
         sys.stdout.flush()
