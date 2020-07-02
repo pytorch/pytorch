@@ -333,11 +333,15 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds /* unused */) {
+bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
   bool sendCompleted = false;
   std::exception_ptr exception{nullptr};
   try {
-    sendCompleted = buffer_->waitSend();
+    if (timeout == kNoTimeout) {
+      sendCompleted = buffer_->waitSend();
+    } else {
+      sendCompleted = buffer_->waitSend(timeout);
+    }
   } catch (...) {
     exception = std::current_exception();
   }
@@ -361,11 +365,15 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds /* unused */) {
+bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
   bool recvCompleted = false;
   std::exception_ptr exception{nullptr};
   try {
-    recvCompleted = buffer_->waitRecv(&srcRank_);
+    if (timeout == kNoTimeout) {
+      recvCompleted = buffer_->waitRecv(&srcRank_);
+    } else {
+      recvCompleted = buffer_->waitRecv(&srcRank_, timeout);
+    }
   } catch (...) {
     exception = std::current_exception();
   }
