@@ -3,11 +3,12 @@
 
 #include <climits>
 
-#if AT_MKL_ENABLED()
-#  include "mkl_cblas.h"
-#elif AT_BUILD_WITH_BLAS()
-#  include "cblas.h"
-#endif
+#if AT_BUILD_WITH_BLAS()
+extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc);
+extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
+extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+#endif  // AT_BUILD_WITH_BLAS()
 
 #ifdef USE_FBGEMM
 #include <fbgemm/FbgemmI64.h>
@@ -58,11 +59,11 @@ bool use_blas_gemm(
 }
 
 #if AT_BUILD_WITH_BLAS()
-CBLAS_TRANSPOSE to_cblas(TransposeType trans) {
+char to_blas(TransposeType trans) {
   switch (trans) {
-  case Transpose: return CblasTrans;
-  case NoTranspose: return CblasNoTrans;
-  // case ConjTranspose: return CblasConjTrans;
+  case Transpose: return 't';
+  case NoTranspose: return 'n';
+  // case ConjTranspose: return 'c';
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
@@ -94,15 +95,17 @@ void gemm(
 #if AT_BUILD_WITH_BLAS()
   normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    cblas_dgemm(
-        CblasColMajor,
-        to_cblas(transa), to_cblas(transb),
-        m, n, k,
-        alpha,
-        a, lda,
-        b, ldb,
-        beta,
-        c, ldc);
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    double alpha_ = alpha, beta_ = beta;
+    dgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        a, &lda_,
+        b, &ldb_,
+        &beta_,
+        c, &ldc_);
     return;
   }
 #endif
@@ -122,15 +125,17 @@ void gemm(
 #if AT_BUILD_WITH_BLAS()
   normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    cblas_sgemm(
-        CblasColMajor,
-        to_cblas(transa), to_cblas(transb),
-        m, n, k,
-        alpha,
-        a, lda,
-        b, ldb,
-        beta,
-        c, ldc);
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    float alpha_ = alpha, beta_ = beta;
+    sgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        a, &lda_,
+        b, &ldb_,
+        &beta_,
+        c, &ldc_);
     return;
   }
 #endif
@@ -150,15 +155,17 @@ void gemm(
 #if AT_BUILD_WITH_BLAS()
   normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    cblas_zgemm(
-        CblasColMajor,
-        to_cblas(transa), to_cblas(transb),
-        m, n, k,
-        &alpha,
-        a, lda,
-        b, ldb,
-        &beta,
-        c, ldc);
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    c10::complex<double> alpha_ = alpha, beta_ = beta;
+    zgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        a, &lda_,
+        b, &ldb_,
+        &beta_,
+        c, &ldc_);
     return;
   }
 #endif
@@ -178,15 +185,17 @@ void gemm(
 #if AT_BUILD_WITH_BLAS()
   normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    cblas_cgemm(
-        CblasColMajor,
-        to_cblas(transa), to_cblas(transb),
-        m, n, k,
-        &alpha,
-        a, lda,
-        b, ldb,
-        &beta,
-        c, ldc);
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    c10::complex<float> alpha_ = alpha, beta_ = beta;
+    cgemm_(
+        &transa_, &transb_,
+        &m_, &n_, &k_,
+        &alpha_,
+        a, &lda_,
+        b, &ldb_,
+        &beta_,
+        c, &ldc_);
     return;
   }
 #endif
