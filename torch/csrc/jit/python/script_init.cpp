@@ -116,7 +116,7 @@ struct PythonResolver : public Resolver {
     }
 
     auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-        py::module::import("torch.jit").attr("_qualified_name")(obj)));
+        py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
     return get_python_cu()->get_type(qualifiedName);
   }

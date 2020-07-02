@@ -1,17 +1,12 @@
 import torch._C
 import torch._jit_internal as _jit_internal
-import torch.jit.annotations
-import torch.testing
-import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
-from torch._jit_internal import Future, _qualified_name
-from torch.autograd import Variable, function
-from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
+from torch._jit_internal import Future
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
+from torch._six import string_classes
 from torch.utils import set_module
 from torch.autograd.grad_mode import _DecoratorContextManager
 from typing import Optional, List
@@ -21,8 +16,6 @@ import contextlib
 import functools
 import os
 import pathlib
-import sys
-import warnings
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
@@ -30,8 +23,7 @@ from torch._jit_internal import ignore, export, unused
 from torch.jit._script import script, Attribute, ScriptModule, is_scripting, script_method, \
     RecursiveScriptModule, ScriptWarning, interface
 from torch.jit._trace import trace, trace_module, TracedModule, TracerWarning, TracingCheckError, \
-    is_tracing, ONNXTracedModule, _unique_state_dict, _flatten
-from torch.jit._state import _python_cu, _enabled
+    is_tracing, ONNXTracedModule, _unique_state_dict, _flatten, TopLevelTracedModule
 
 set_module(Future, "torch.jit")
 _fork = torch._C.fork
@@ -243,7 +235,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
-    return torch.jit._recursive.wrap_cpp_module(cpp_module)
+    return wrap_cpp_module(cpp_module)
 
 def validate_map_location(map_location=None):
     if isinstance(map_location, str):
@@ -506,22 +498,6 @@ def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
     def __exit__(self, *args):
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
-
-
-def whichmodule(obj):
-    """Find the module an object belong to."""
-    module_name = getattr(obj, '__module__', None)
-    # Protect the iteration by using a list copy of sys.modules against dynamic
-    # modules that trigger imports of other modules upon calls to getattr.
-    for name, module in list(sys.modules.items()):
-        if name == '__main__' or module is None:
-            continue
-        try:
-            if _getattribute(module, name)[0] is obj:
-                return module_name
-        except AttributeError:
-            pass
-    return '__main__'
 
 def _script_if_tracing(fn):
     """

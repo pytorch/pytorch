@@ -646,7 +646,7 @@ bool isNamedTupleClass(const py::object& obj) {
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-      py::module::import("torch.jit").attr("_qualified_name")(obj)));
+      py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
   // Currently don't support default values
   if (py::hasattr(obj, "_field_defaults")) {
     auto default_dict = py::cast<std::map<std::string, py::object>>(
@@ -803,7 +803,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
+        py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
     auto qualname = c10::QualifiedName(qualifiedName);
     if (auto classType = pyCu->get_class(qualname)) {

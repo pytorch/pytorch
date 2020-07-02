@@ -6,7 +6,7 @@ import functools
 import warnings
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args
+from torch.jit.frontend import get_default_args, get_jit_def
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
@@ -31,7 +31,7 @@ blacklist = [
 
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, name, self_name="RecursiveScriptModule")
+    ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
@@ -464,16 +464,16 @@ def get_overload_name_mapping(overload_info):
 def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func, None, _jit_internal.fake_range(), inspect.ismethod(func))
     if signature is None:
-        qual_name = torch.jit._qualified_name(func)
+        qual_name = _jit_internal._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
 
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
-        orig_ast = torch.jit.get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
+        orig_ast = get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
             _check_no_signature(overload_fn)
-            over_ast = torch.jit.get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
+            over_ast = get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))

@@ -61,7 +61,7 @@ TypePtr tryInferTypeWithTypeHint(
         "The RRef being created contains a ScriptModule, "
         "must provide its ModuleInterface type hint. ");
     c10::QualifiedName type_qualified_name = c10::QualifiedName(
-        py::cast<std::string>(py::module::import("torch.jit")
+        py::cast<std::string>(py::module::import("torch.._jit_internal")
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
