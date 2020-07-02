@@ -181,6 +181,10 @@ class Module:
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
+
+    :ivar training: Boolean represents whether this module is in training or
+                    evaluation mode.
+    :vartype training: bool
     """
 
     dump_patches: bool = False
