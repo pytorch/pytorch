@@ -1022,6 +1022,7 @@ void initJitScriptBindings(PyObject* module) {
             return Module(
                 pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
           })
+      .def("children", &Module::children)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });
