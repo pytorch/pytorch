@@ -102,6 +102,7 @@ void testGPU_IrGraphGenerator() {
   TORCH_CHECK(!IrGraphGenerator::toGraphviz(
                    &fusion, IrGraphGenerator::DetailLevel::Verbose)
                    .empty());
+  std::cout << "testGPU_IrGraphGenerator" << std::endl;
 }
 
 void testGPU_FusionDispatch() {
@@ -117,6 +118,7 @@ void testGPU_FusionDispatch() {
   TORCH_CHECK(
       ss1.str().compare(ss2.str()) == 0 && ss1.str().compare(ss3.str()) == 0,
       "Error with dispatch system where results differ by passing Float* vs Val* vs Statement*.");
+  std::cout << "testGPU_FusionDispatch" << std::endl;
 }
 
 // Evaluate basic scalar operations with constant values
@@ -135,6 +137,7 @@ void testGPU_FusionExprEvalConstants() {
   checkIntValue(&eval_context, neg(mul(sub(a, b), div(a, b))), -8);
   checkIntValue(&eval_context, mod(a, b), 1);
   checkIntValue(&eval_context, ceilDiv(a, b), 3);
+  std::cout << "testGPU_FusionExprEvalConstants" << std::endl;
 }
 
 // Evaluate basic scalar operations with bound values
@@ -178,6 +181,7 @@ void testGPU_FusionExprEvalBindings() {
   checkIntValue(&eval_context, mod(a, b), 2);
   checkIntValue(&eval_context, ceilDiv(a, b), 1);
   checkIntValue(&eval_context, d, -2);
+  std::cout << "testGPU_FusionExprEvalBindings" << std::endl;
 }
 
 // Evaluate expressions in a simple IR
@@ -235,6 +239,7 @@ void testGPU_FusionExprEvalBasic() {
   checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
   checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
   checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
+  std::cout << "testGPU_FusionExprEvalBasic" << std::endl;
 }
 
 // Evaluate expressions in a more complex IR
@@ -288,6 +293,7 @@ void testGPU_FusionExprEvalComplex() {
   checkIntValue(&eval_context, tv6->axis(0)->rawExtent(), 26);
   checkIntValue(&eval_context, tv6->axis(1)->rawExtent(), 5);
   checkIntValue(&eval_context, tv6->axis(2)->rawExtent(), 127);
+  std::cout << "testGPU_FusionExprEvalComplex" << std::endl;
 }
 
 // Evaluate expressions post lowering
@@ -349,6 +355,7 @@ void testGPU_FusionExprEvalPostLower() {
 
   checkIntValue(&eval_context, bid_x, 2);
   checkIntValue(&eval_context, tid_x, 128);
+  std::cout << "testGPU_FusionExprEvalPostLower" << std::endl;
 }
 
 void testGPU_FusionClear() {
@@ -430,6 +437,7 @@ void testGPU_FusionClear() {
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));
+  std::cout << "testGPU_FusionClear" << std::endl;
 }
 
 void testGPU_FusionCopy() {
@@ -501,6 +509,7 @@ void testGPU_FusionCopy() {
     lower.printKernel(clone_kernel);
   }
   ASSERT_EQ(original_kernel.str(), clone_kernel.str());
+  std::cout << "testGPU_FusionCopy" << std::endl;
 }
 
 void testGPU_FusionMove() {
@@ -576,6 +585,7 @@ void testGPU_FusionMove() {
   std::stringstream moved_lowered_ir;
   moved_lowered_ir << fusion;
   ASSERT_EQ(lowered_ir.str(), moved_lowered_ir.str());
+  std::cout << "testGPU_FusionMove" << std::endl;
 }
 
 void testGPU_FusionSimpleArith() {
@@ -606,6 +616,7 @@ void testGPU_FusionSimpleArith() {
   TORCH_CHECK(
       ss1.str().compare(ss2.str()) == 0,
       "Error where explicit add nodes don't match implicit add nodes.");
+  std::cout << "testGPU_FusionSimpleArith" << std::endl;
 }
 
 void testGPU_FusionSimpleTypePromote() {
@@ -618,6 +629,7 @@ void testGPU_FusionSimpleTypePromote() {
   auto f5 = add(f4, i1);
 
   TORCH_CHECK(f5->getDataType() == DataType::Float);
+  std::cout << "testGPU_FusionSimpleTypePromote" << std::endl;
 }
 
 class ZeroMutator : public OptOutMutator {
@@ -649,6 +661,7 @@ void testGPU_FusionMutator() {
   Float* flhs = static_cast<Float*>(lhs);
 
   TORCH_CHECK(flhs->value().value() == 0.f);
+  std::cout << "testGPU_FusionMutator" << std::endl;
 }
 
 void testGPU_FusionRegister() {
@@ -663,6 +676,7 @@ void testGPU_FusionRegister() {
   TORCH_CHECK(v2->name() + 1 == v3->name());
   TORCH_CHECK(v3->name() + 1 == v4->name());
   TORCH_CHECK(fusion.origin(v3)->name() + 1 == fusion.origin(v4)->name());
+  std::cout << "testGPU_FusionRegister" << std::endl;
 }
 
 // dummy expr with 2 outputs only for toposort test.
@@ -749,6 +763,7 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(fusion.origin(v4)->name() == 1);
   TORCH_CHECK(fusion.origin(v5)->name() == 2);
   TORCH_CHECK(fusion.origin(v6)->name() == 3);
+  std::cout << "testGPU_FusionTopoSort" << std::endl;
 }
 
 void testGPU_FusionTensor() {
@@ -765,6 +780,7 @@ void testGPU_FusionTensor() {
   auto fuser_tensor = new TensorView(tensor_type);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
   TORCH_CHECK(fuser_tensor->domain() != nullptr);
+  std::cout << "testGPU_FusionTensor" << std::endl;
 }
 
 void testGPU_FusionTVSplit() {
@@ -792,6 +808,7 @@ void testGPU_FusionTVSplit() {
       inner->extent()->isScalar() &&
       static_cast<Int*>(inner->extent())->isConst() &&
       static_cast<Int*>(inner->extent())->value().value() == 2);
+  std::cout << "testGPU_FusionTVSplit" << std::endl;
 }
 
 void testGPU_FusionTVMerge() {
@@ -811,6 +828,7 @@ void testGPU_FusionTVMerge() {
           tv->getRootDomain()[1]->extent() &&
       static_cast<BinaryOp*>(axisOp)->rhs() ==
           tv->getRootDomain()[2]->extent());
+  std::cout << "testGPU_FusionTVMerge" << std::endl;
 }
 
 void testGPU_FusionTVReorder() {
@@ -859,6 +877,7 @@ void testGPU_FusionTVReorder() {
   TORCH_CHECK(ref[0]->sameAs(tv->axis(2)));
   TORCH_CHECK(ref[2]->sameAs(tv->axis(0)));
   TORCH_CHECK(ref[1]->sameAs(tv->axis(1)));
+  std::cout << "testGPU_FusionTVReorder" << std::endl;
 }
 
 void testGPU_FusionEquality() {
@@ -901,6 +920,7 @@ void testGPU_FusionEquality() {
   TORCH_CHECK(neg1->sameAs(neg1_copy));
   TORCH_CHECK(!static_cast<Expr*>(neg1)->sameAs(add1));
   TORCH_CHECK(!neg1->sameAs(neg2));
+  std::cout << "testGPU_FusionEquality" << std::endl;
 }
 
 void testGPU_FusionReplaceAll() {
@@ -928,6 +948,7 @@ void testGPU_FusionReplaceAll() {
   BinaryOp* bop = static_cast<BinaryOp*>(fusion.origin(f3));
   // make sure the binary op (origin of f3) actually changed to 2.f
   TORCH_CHECK(static_cast<Float*>(bop->lhs())->sameAs(new Float{2.f}));
+  std::cout << "testGPU_FusionReplaceAll" << std::endl;
 }
 
 void testGPU_FusionDependency() {
@@ -999,6 +1020,7 @@ void testGPU_FusionDependency() {
 
   dep_chain = DependencyCheck::getSingleDependencyChain(f11, f2);
   TORCH_CHECK(dep_chain.empty());
+  std::cout << "testGPU_FusionDependency" << std::endl;
 }
 
 void testGPU_FusionParser() {
@@ -1086,6 +1108,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
         << actual_kernel.str() << "\n=================" << std::endl;
     TORCH_CHECK(false);
   }
+  std::cout << "testGPU_FusionParser" << std::endl;
 }
 
 void testGPU_FusionForLoop() {
@@ -1122,6 +1145,7 @@ void testGPU_FusionForLoop() {
             << std::endl;
     TORCH_CHECK(false, err_msg.str());
   }
+  std::cout << "testGPU_FusionForLoop" << std::endl;
 }
 
 void testGPU_FusionCodeGen() {
@@ -1166,6 +1190,7 @@ void testGPU_FusionCodeGen() {
   output_ref = output_ref + 0.0 + 1.0 + 2.0 + 3.0;
 
   TORCH_CHECK(output_ref.equal(output));
+  std::cout << "testGPU_FusionCodeGen" << std::endl;
 }
 
 void testGPU_FusionCodeGen2() {
@@ -1215,6 +1240,7 @@ void testGPU_FusionCodeGen2() {
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));
+  std::cout << "testGPU_FusionCodeGen2" << std::endl;
 }
 
 void testGPU_FusionSimplePWise() {
@@ -1277,6 +1303,7 @@ void testGPU_FusionSimplePWise() {
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));
+  std::cout << "testGPU_FusionSimplePWise" << std::endl;
 }
 
 void testGPU_FusionExecKernel() {
@@ -1334,6 +1361,7 @@ void testGPU_FusionExecKernel() {
   at::Tensor check = at::full({1, 128}, 4, options);
   ;
   TORCH_CHECK(output.equal(check));
+  std::cout << "testGPU_FusionExecKernel" << std::endl;
 }
 
 int ceilDiv_(int a, int b) {
@@ -1668,6 +1696,7 @@ void testGPU_FusionAdvancedComputeAt() {
 
     TORCH_CHECK(at::allclose(kernel_tv6, t6), actual_kernel.str());
   }
+  std::cout << "testGPU_FusionAdvancedComputeAt" << std::endl;
 }
 
 void testGPU_FusionScalarInputs() {
@@ -1768,6 +1797,7 @@ void testGPU_FusionScalarInputs() {
   gpulw.printKernel(actual_kernel);
 
   TORCH_CHECK(at::allclose(kernel_tv4, t4), actual_kernel.str());
+  std::cout << "testGPU_FusionScalarInputs" << std::endl;
 }
 
 void testGPU_FusionLoopUnroll() {
@@ -1829,6 +1859,7 @@ void testGPU_FusionLoopUnroll() {
   torch::jit::fuser::cuda::runTestKernel(&prog, {input0, input1}, {output});
 
   TORCH_CHECK(output.equal(input0.add(input1.add(2.0))));
+  std::cout << "testGPU_FusionLoopUnroll" << std::endl;
 }
 
 /*
@@ -2101,6 +2132,7 @@ void testGPU_FusionUnaryOps() {
       /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
       /*Inputs Tuple*/
       std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+  std::cout << "testGPU_FusionUnaryOps" << std::endl;
 }
 
 void testGPU_FusionBinaryOps() {
@@ -2202,6 +2234,7 @@ void testGPU_FusionBinaryOps() {
           std::make_pair(ValType::TensorView, DataType::Float),
           std::make_pair(ValType::TensorView, DataType::Float),
           std::make_pair(ValType::Scalar, DataType::Float)));
+  std::cout << "testGPU_FusionBinaryOps" << std::endl;
 }
 
 void testGPU_FusionTernaryOps() {
@@ -2252,6 +2285,7 @@ void testGPU_FusionTernaryOps() {
           std::make_pair(ValType::TensorView, DataType::Bool),
           std::make_pair(ValType::TensorView, DataType::Float),
           std::make_pair(ValType::TensorView, DataType::Float)));
+  std::cout << "testGPU_FusionTernaryOps" << std::endl;
 }
 
 void testGPU_FusionCompoundOps() {
@@ -2292,6 +2326,7 @@ void testGPU_FusionCompoundOps() {
           std::make_pair(ValType::TensorView, DataType::Float),
           std::make_pair(ValType::TensorView, DataType::Float),
           std::make_pair(ValType::Scalar, DataType::Float)));
+  std::cout << "testGPU_FusionCompoundOps" << std::endl;
 }
 
 void testGPU_FusionCastOps() {
@@ -2345,6 +2380,7 @@ void testGPU_FusionCastOps() {
       "REF: ",
       ref_output,
       "\n");
+  std::cout << "testGPU_FusionCastOps" << std::endl;
 }
 
 // We want split/merge/reorder all tested both on and off rfactor domains, also
@@ -2439,6 +2475,7 @@ void testGPU_FusionRFactorReplay() {
               dom2.end(),
               [](IterDomain* id) { return id->isReduction(); }),
       "Error in rFactor, there seems to be something wrong in root domain.");
+  std::cout << "testGPU_FusionRFactorReplay" << std::endl;
 }
 
 // Start off simple, block on the outer dim
@@ -2504,6 +2541,7 @@ void testGPU_FusionReduction() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionReduction" << std::endl;
 }
 
 void testGPU_FusionReduction2() {
@@ -2643,6 +2681,7 @@ void testGPU_FusionReduction2() {
     auto aten_output = input.sum({1});
     TORCH_CHECK(aten_output.allclose(cg_output));
   }
+  std::cout << "testGPU_FusionReduction2" << std::endl;
 }
 
 // TODO: Fix and reenable this test.
@@ -2723,6 +2762,7 @@ void testGPU_FusionReduction3() {
     TORCH_CHECK(
         t5.allclose(cg_output), "Error of: ", t5.sub(cg_output).abs().max());
   }
+  std::cout << "testGPU_FusionReduction3" << std::endl;
 }
 
 void testGPU_FusionReduction4() {
@@ -2776,6 +2816,7 @@ void testGPU_FusionReduction4() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionReduction4" << std::endl;
 }
 
 void testGPU_FusionReduction5() {
@@ -2843,6 +2884,7 @@ void testGPU_FusionReduction5() {
 
   auto aten_output = input.sum({1, 2});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionReduction5" << std::endl;
 }
 
 void testGPU_FusionReductionTFT() {
@@ -2905,6 +2947,7 @@ void testGPU_FusionReductionTFT() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionReductionTFT" << std::endl;
 }
 
 void testGPU_FusionSimpleBCast() {
@@ -3004,6 +3047,7 @@ void testGPU_FusionSimpleBCast() {
 
     TORCH_CHECK(t4.allclose(cg_output));
   }
+  std::cout << "testGPU_FusionSimpleBCast" << std::endl;
 }
 
 void testGPU_FusionSimpleGemm() {
@@ -3090,6 +3134,7 @@ void testGPU_FusionSimpleGemm() {
         "Error of: ",
         t2.sub(cg_output).abs().max());
   }
+  std::cout << "testGPU_FusionSimpleGemm" << std::endl;
 }
 
 // This test currently requires a combination of broadcast and reduction
@@ -3166,6 +3211,7 @@ void testGPU_FusionSoftmax() {
   //     t2.allclose(cg_output, 1e-5, 1e-5),
   //     "Error of: ",
   //     t2.sub(cg_output).abs().max());
+  std::cout << "testGPU_FusionSoftmax" << std::endl;
 }
 // Similar to FusionReduction but uses grid reduction
 void testGPU_FusionGridReduction1() {
@@ -3225,6 +3271,7 @@ void testGPU_FusionGridReduction1() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction1" << std::endl;
 }
 
 // Same test as the above but uses BIDy and TIDx for reduction
@@ -3285,6 +3332,7 @@ void testGPU_FusionGridReduction2() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction2" << std::endl;
 }
 
 // Same test but uses BIDy and BIDz for reduction. No TID used.
@@ -3348,9 +3396,10 @@ void testGPU_FusionGridReduction3dim1() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction3dim1" << std::endl;
 }
 
-// Same as testGPU_FusionGridReduction3dim1 but reduces dimension 0
+// Same as GridReduction3dim1 but reduces dimension 0
 void testGPU_FusionGridReduction3dim0() {
   std::cout << "testGPU_FusionGridReduction3dim0" << std::endl;
   const int rdim = 0;
@@ -3409,6 +3458,7 @@ void testGPU_FusionGridReduction3dim0() {
 
   auto aten_output = input.sum({0});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction3dim0" << std::endl;
 }
 
 // This is similar to the FusionReduction, but swaps BIDx and TIDx
@@ -3476,6 +3526,7 @@ void testGPU_FusionGridReduction4() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction4" << std::endl;
 }
 
 // Grid reduction with 2D thread blocks but only TIDx and BIDx are
@@ -3535,6 +3586,7 @@ void testGPU_FusionGridReduction5() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction5" << std::endl;
 }
 
 // Similar to FusionGridReduction1 but with 3D tensors
@@ -3602,6 +3654,7 @@ void testGPU_FusionGridReduction6() {
 
   auto aten_output = input.sum({1, 2});
   TORCH_CHECK(aten_output.allclose(cg_output));
+  std::cout << "testGPU_FusionGridReduction6" << std::endl;
 }
 
 void testGPU_FusionNonRedAxisBind() {
@@ -3643,6 +3696,7 @@ void testGPU_FusionNonRedAxisBind() {
       aten_output.allclose(cg_output),
       "Error of: ",
       aten_output.sub(cg_output).abs().max());
+  std::cout << "testGPU_FusionNonRedAxisBind" << std::endl;
 }
 
 void testGPU_FusionSplitBCast() {
@@ -3694,6 +3748,7 @@ void testGPU_FusionSplitBCast() {
   at::Tensor cg_output = at::empty({32, 32, 128}, options);
   torch::jit::fuser::cuda::compileKernel(&prog);
   torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+  std::cout << "testGPU_FusionSplitBCast" << std::endl;
 }
 
 void testGPU_FusionBCastInnerDim() {
@@ -3710,6 +3765,7 @@ void testGPU_FusionBCastInnerDim() {
   auto tv2 = broadcast(tv1, {false, true});
 
   TORCH_CHECK(!tv2->axis(0)->isReduction() && tv2->axis(1)->isBroadcast());
+  std::cout << "testGPU_FusionBCastInnerDim" << std::endl;
 }
 
 void testGPU_FusionBCastReduce() {
@@ -3726,6 +3782,7 @@ void testGPU_FusionBCastReduce() {
   TORCH_CHECK(
       tv2->axis(0)->isBroadcast() && tv2->axis(1)->isReduction() &&
       !tv2->axis(2)->isBroadcast() && !tv2->axis(2)->isReduction());
+  std::cout << "testGPU_FusionBCastReduce" << std::endl;
 }
 
 // Multiple consumer reduction with computeAt
@@ -3747,6 +3804,7 @@ void testGPU_FusionReductionMultiConsumer() {
   TORCH_CHECK(
       (tv1->getComputeAtView() == tv2 || tv1->getComputeAtView() == tv3) &&
       tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
+  std::cout << "testGPU_FusionReductionMultiConsumer" << std::endl;
 }
 
 void testGPU_FusionComputeAtExprOrder() {
@@ -3827,6 +3885,7 @@ void testGPU_FusionComputeAtExprOrder() {
         "Error of: ",
         aten_output.sub(output).abs().max());
   }
+  std::cout << "testGPU_FusionComputeAtExprOrder" << std::endl;
 }
 
 void testGPU_FusionZeroDimComputeAt() {
@@ -3859,6 +3918,7 @@ void testGPU_FusionZeroDimComputeAt() {
       aten_output.allclose(output),
       "Error of: ",
       aten_output.sub(output).abs().max());
+  std::cout << "testGPU_FusionZeroDimComputeAt" << std::endl;
 }
 
 void testGPU_FusionZeroDimBroadcast() {
@@ -3899,6 +3959,7 @@ void testGPU_FusionZeroDimBroadcast() {
       aten_output.allclose(output),
       "Error of: ",
       aten_output.sub(output).abs().max());
+  std::cout << "testGPU_FusionZeroDimBroadcast" << std::endl;
 }
 
 void testGPU_FusionZeroDimReduction() {
@@ -3940,6 +4001,7 @@ void testGPU_FusionZeroDimReduction() {
       aten_output.allclose(output),
       "Error of: ",
       aten_output.sub(output).abs().max());
+  std::cout << "testGPU_FusionZeroDimReduction" << std::endl;
 }
 
 } // namespace jit
