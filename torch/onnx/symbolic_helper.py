@@ -438,12 +438,6 @@ def assert_training_mode(op_mode, op_name):
                       training_mode + ", as specified by the export mode.")
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
-
     input_size = g.op("Shape", input)
     slice1 = _slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
     slice2 = _slice_helper(g, input_size, axes=[0], starts=[start_dim], ends=[end_dim + 1])
