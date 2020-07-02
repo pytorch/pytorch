@@ -81,6 +81,10 @@ public:
     return schema_.has_value();
   }
 
+  bool isObserved() const {
+    return is_observed_;
+  }
+
   // We may allocate an OperatorEntry for an operator even when we don't
   // have a schema.  When we receive the schema registration, we post
   // facto register a schema.
@@ -231,6 +235,9 @@ private:
   // If this is set, it will be used in unboxed function calls
   // to verify their arguments against the known function signature.
   c10::optional<CppSignature> cpp_signature_;
+
+  // Whether this operator needs to be observed with RecordFunction
+  const bool is_observed_;
 
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(

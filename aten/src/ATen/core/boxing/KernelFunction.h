@@ -88,7 +88,8 @@ public:
 
 
   /**
-   * Like call, but with a stack of inputs already passed
+   * Like call, but with the stack of the already boxed inputs, in addition to the same
+   * inputs in the parameter pack
    */
   template<class Return, class... Args>
   Return callBoxedOrUnboxed(
