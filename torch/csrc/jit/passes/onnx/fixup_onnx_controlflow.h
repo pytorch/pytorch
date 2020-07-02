@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void FixupONNXConditionals(std::shared_ptr<Graph>& graph);
+std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version);
 
 }
 } // namespace torch
