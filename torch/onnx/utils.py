@@ -278,8 +278,16 @@ def _decide_add_node_names(add_node_names, operator_export_type):
     return _resolve_args_by_export_type("add_node_names", add_node_names, operator_export_type)
 
 
-def _decide_constant_folding(do_constant_folding, operator_export_type):
-    return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+def _decide_constant_folding(do_constant_folding, operator_export_type, training):
+    do_constant_folding = _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+    if do_constant_folding and (training is not None and training is not TrainingMode.EVAL):
+        warnings.warn("It is recommended that constant folding be turned off ('do_constant_folding=False') "
+                      "when exporting the model in training-amenable mode, i.e. with 'training=TrainingMode.TRAIN' "
+                      "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
+                      "learnable model parameters may not translate correctly in the exported ONNX model "
+                      "because constant folding mutates model parameters. Please consider "
+                      "turning off constant folding or setting the training=TrainingMode.EVAL.")
+    return do_constant_folding
 
 
 def _decide_external_data_format(use_external_data_format, operator_export_type, f):
@@ -465,7 +473,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          operator_export_type,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate, _retain_param_name,
@@ -519,7 +527,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              operator_export_type,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
@@ -917,7 +925,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
-                           and sould start with a letter and contain only \
+                           and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')

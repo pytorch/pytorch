@@ -149,9 +149,8 @@
 [[
   name: _th_equal
   cname: equal
-  cpu_bool: True
-  cpu_bfloat16: True
-  cpu_half: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants:
     - function
@@ -209,6 +208,36 @@
     - long dim
     - bool largest
     - bool sorted
+]]
+[[
+  name: _th_var
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants: function
+  options:
+    - cname: var_all
+      return: accreal
+      arguments:
+        - THTensor* self
+        - bool unbiased
+]]
+[[
+  name: _th_std
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants: function
+  options:
+    - cname: std_all
+      return: accreal
+      arguments:
+        - THTensor* self
+        - bool unbiased
 ]]
 [[
   name: _th_renorm
@@ -317,9 +346,10 @@
 ]]
 [[
   name: _th_dot
-  backend_types: {CUDA: [floating_point], CPU: [all]}
+  backend_types: {CUDA: [floating_point]}
   cname: dot
-  cpu_half: True
+  backends:
+    CUDA
   variants: function
   return: accreal
   arguments:

@@ -141,10 +141,33 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     return tensor
 
 
+_sparse_tensors_to_validate = []
+
+# In _legacy_load() in serialization.py we unpickle storages after the sparse
+# tensors have been already unpickled. Those storages contain data necessary for
+# validating sparse tensors: indices and values. That's why sparse tensors are
+# first unpickled without any validation, and then this function is called just
+# before _legacy_load() returns, so that all the sparse tensors can be validated
+# in bulk.
+#
+# The same procedure must be followed by _load() in serialization.py because due
+# to Pickler semantics, we have to use the same (non-validating) function for
+# unpickling sparse tensors, regardless of the caller.
+def _validate_loaded_sparse_tensors():
+    try:
+        for t in _sparse_tensors_to_validate:
+            torch._validate_sparse_coo_tensor_args(t._indices(), t._values(),
+                                                   t.size())
+    finally:
+        _sparse_tensors_to_validate.clear()
+
 def _rebuild_sparse_tensor(layout, data):
     if layout == torch.sparse_coo:
         indices, values, size = data
-        return torch.sparse_coo_tensor(indices, values, size)
+        result = torch._sparse_coo_tensor_unsafe(indices, values, size)
+        _sparse_tensors_to_validate.append(result)
+        return result
+
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 

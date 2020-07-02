@@ -105,8 +105,6 @@ def compare_weights(float_dict, quantized_dict):
             module_name = ".".join(split_str[:-3])
             float_weight_ih_key = module_name + ".weight_ih_l" + layer
             float_weight_hh_key = module_name + ".weight_hh_l" + layer
-            print("lstm float ih key is: ", float_weight_ih_key)
-            print("lstm float hh key is: ", float_weight_hh_key)
             if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
                 weight_dict[key] = {}
                 weight_dict[key]["float"] = float_dict[float_weight_ih_key]

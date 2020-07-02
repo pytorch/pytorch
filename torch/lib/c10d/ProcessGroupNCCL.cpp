@@ -302,6 +302,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
+
+  {
+    // Abort all NCCL Communicators on Process Group Destruction
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end(); it++) {
+      auto& ncclComms = it->second;
+
+      for (const auto& ncclComm : ncclComms) {
+        ncclComm->ncclCommAbort();
+      }
+    }
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -612,13 +624,9 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
 
     for (const auto& t : tensor_lists[i]) {
-      if (t.sizes() != other[i].sizes()) {
+      if (t.numel() != other[i].numel()) {
         throw std::runtime_error(
-            "All tensor operands to scatter/gather must have the same size");
-      }
-      if (t.strides() != other[i].strides()) {
-        throw std::runtime_error(
-            "All tensor operands to scatter/gather must have the same layout (strides)");
+            "All tensor operands to scatter/gather must have the same number of elements");
       }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.

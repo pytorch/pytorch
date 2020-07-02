@@ -31,8 +31,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
     "linear",
-    "addmm",
-    "matmul",
     "hardswish",
     "hardswish_",
     "elu",
@@ -353,8 +351,13 @@ bool isFunctionNode(
   return is_func_node;
 }
 
+bool isSingleInputGeneralShapeAtenFunction(Node* n) {
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs);
+}
+
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
-  return isAtenFunc(n, _single_input_general_value_aten_funcs);
+  return isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+      isBinaryOpWithScalarInput(n);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
@@ -381,8 +384,8 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       std::back_inserter(fixed_qparams_aten_funcs),
       [](auto pair) { return pair.first; });
 
-  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-      isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+  return isSingleInputGeneralValueAtenFunction(n) ||
+      isSingleInputGeneralShapeAtenFunction(n) ||
       isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
@@ -404,6 +407,10 @@ bool isPropagateQuantBinaryOp(Node* n) {
 
 bool isPropagateQuantOp(Node* n) {
   return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
+}
+
+bool isBinaryOpWithScalarInput(Node* n) {
+  return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
@@ -561,19 +568,27 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
+c10::optional<std::string> getModuleName(Value* value) {
+  auto type = value->type()->cast<ClassType>();
+  if (type && type->name()) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto qualified_name =
+        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
+    return qualified_name;
+  }
+  return c10::nullopt;
+}
+
 bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
     const std::string& module_qualified_name) {
   const auto& match_vmap = match.values_map;
-  Value* relu = match_vmap.at(vmap.at(vname));
-  auto type = relu->type()->cast<ClassType>();
-  if (type && type->name()) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-    return qualified_name == module_qualified_name;
+  Value* v = match_vmap.at(vmap.at(vname));
+  auto module_name = getModuleName(v);
+  if (module_name.has_value()) {
+    return module_name.value() == module_qualified_name;
   }
   return false;
 };
@@ -649,6 +664,31 @@ bool is_batchnorm3d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
+}
+
+bool is_half_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp16")));
+  return (fp16_type->toScalarType() == c10::kHalf);
+}
+
+bool is_float_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp32")));
+  return (fp16_type->toScalarType() == c10::kFloat);
+}
+
+bool is_false_value(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+
+  auto default_param = toIValue(match_vmap.at(vmap.at("false")));
+  return default_param->toBool() == false;
 }
 
 } // namespace jit

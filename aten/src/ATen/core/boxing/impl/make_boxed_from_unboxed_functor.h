@@ -42,7 +42,10 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     at::Tensor,
     at::Scalar,
     c10::QScheme,
-    c10::ScalarType
+    c10::ScalarType,
+    c10::Device,
+    c10::Layout,
+    c10::MemoryFormat
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
@@ -50,7 +53,8 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        auto tmap = c10::getCustomClassTypeMap();
+        // TODO This is called for each operator call and potentially expensive.
+        // This check should be moved to operator registration time instead.
         TORCH_CHECK(
           c10::isCustomClassRegistered<T>(),
           "Tried to use undefined class ",
@@ -143,7 +147,8 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        auto tmap = getCustomClassTypeMap();
+        // TODO This is called for each operator call and potentially expensive.
+        // This check should be moved to operator registration time instead.
         TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class ", c10::util::get_fully_qualified_type_name<T>(), " as output");
       });
     }
