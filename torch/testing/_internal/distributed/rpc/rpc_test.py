@@ -6,7 +6,7 @@ from threading import Lock
 import time
 import unittest
 from collections import namedtuple
-from functools import partial, wraps
+from functools import partial
 from unittest import mock
 
 import torch

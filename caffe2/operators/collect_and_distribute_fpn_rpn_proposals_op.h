@@ -1,8 +1,8 @@
 #ifndef CAFFE2_OPERATORS_COLLECT_AND_DISTRIBUTE_FPN_RPN_PROPOSALS_OP_H_
 #define CAFFE2_OPERATORS_COLLECT_AND_DISTRIBUTE_FPN_RPN_PROPOSALS_OP_H_
 
-#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
