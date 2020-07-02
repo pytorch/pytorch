@@ -11,7 +11,7 @@ bool ObservedOperators::isObserved(const OperatorName& name) {
   std::unordered_set<std::string> not_observed_ops = {
     "aten::size",
   };
-  return !not_observed_ops.count(toString(name));
+  return !not_observed_ops.count(name.name);
 }
 
 } // namespace c10
