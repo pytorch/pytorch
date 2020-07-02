@@ -333,7 +333,7 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::wait() {
+bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds /* unused */) {
   bool sendCompleted = false;
   std::exception_ptr exception{nullptr};
   try {
@@ -361,7 +361,7 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-bool ProcessGroupGloo::RecvWork::wait() {
+bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds /* unused */) {
   bool recvCompleted = false;
   std::exception_ptr exception{nullptr};
   try {

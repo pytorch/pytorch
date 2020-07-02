@@ -11,6 +11,8 @@
 
 #include <c10d/Types.hpp>
 
+constexpr auto kNoTimeout = std::chrono::milliseconds(0);
+
 namespace c10d {
 
 // ProcessGroup is a base class that captures collective and point to
@@ -83,7 +85,7 @@ class ProcessGroup {
     //   if (!success) { std::rethrow_exception(exception()); }
     //   return success;
     //
-    virtual bool wait();
+    virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
 
     virtual void abort();
 

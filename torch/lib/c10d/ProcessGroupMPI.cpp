@@ -208,7 +208,7 @@ int ProcessGroupMPI::AsyncWork::sourceRank() const {
   return status_.MPI_SOURCE;
 }
 
-bool ProcessGroupMPI::AsyncWork::wait() {
+bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
   if (request_ == MPI_REQUEST_NULL) {
     return true;
   }

@@ -68,7 +68,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override;
 
     void abort() override;
 
