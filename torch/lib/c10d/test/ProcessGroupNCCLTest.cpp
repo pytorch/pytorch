@@ -14,6 +14,10 @@ using namespace c10d::test;
 using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
 
+const auto kTimeoutErrorString = "Operation timed out!";
+constexpr auto kWorkDelayTime = std::chrono::milliseconds(1000);
+constexpr auto kWorkTimeout = std::chrono::milliseconds(250);
+
 class NCCLTestBase {
  public:
   NCCLTestBase(const std::string& path) : path_(path) {}
@@ -76,9 +80,11 @@ class NCCLTest : public NCCLTestBase {
     }
   }
 
-  void wait(std::shared_ptr<ProcessGroup::Work>& work) {
+  void wait(
+      std::shared_ptr<ProcessGroup::Work>& work,
+      std::chrono::milliseconds timeout = kNoTimeout) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
-    work->wait();
+    work->wait(timeout);
   }
 
   std::vector<at::Tensor> getTensors() {
@@ -248,6 +254,17 @@ class AllgatherNCCLTest : public NCCLTest {
   }
 };
 
+class AllgatherNCCLTestWithTimeout : public AllgatherNCCLTest {
+ public:
+  AllgatherNCCLTestWithTimeout(const std::string& path, int worldSize)
+      : AllgatherNCCLTest(path, worldSize) {}
+
+  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+    std::this_thread::sleep_for(kWorkDelayTime);
+    return AllgatherNCCLTest::run();
+  }
+};
+
 struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
@@ -386,6 +403,31 @@ void testAllgather(const std::string& path, int rank, int size) {
   std::cout << "Allgather test successful" << std::endl;
 }
 
+void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
+  auto test = AllgatherNCCLTestWithTimeout(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+
+  // Wait for work to finish
+  try {
+    test.wait(work, kWorkTimeout);
+  } catch (const std::runtime_error& e) {
+    // We are expecting the operation to timeout and throw a runtime_error
+    std::string errorMsg = e.what();
+    if (errorMsg.find(kTimeoutErrorString) != std::string::npos) {
+      // If the runtime_error message is the same one thrown in wait::timeout,
+      // the test is successful
+      std::cout << "Allgather test with timeouts was successful" << std::endl;
+    } else {
+      // Other runtime errors indicates a test failure
+      throw std::runtime_error("BOOM!");
+    }
+  } catch (...) {
+    // Any other exception indicates a test failure
+    throw std::runtime_error("BOOM!");
+  }
+}
+
 void testReduceScatter(const std::string& path, int rank, int size) {
   auto test = ReduceScatterNCCLTest(path, size);
   test.initialize(rank, size);
@@ -439,6 +481,7 @@ int main(int argc, char** argv) {
   testBroadcast(file.path, rank, size);
   testReduce(file.path, rank, size);
   testAllgather(file.path, rank, size);
+  testAllgatherWithTimeout(file.path, rank, size);
   testReduceScatter(file.path, rank, size);
 
   return EXIT_SUCCESS;
