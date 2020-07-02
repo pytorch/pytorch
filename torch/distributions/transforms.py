@@ -418,10 +418,6 @@ class TanhTransform(Transform):
     bijective = True
     sign = +1
 
-    @staticmethod
-    def atanh(x):
-        return 0.5 * (x.log1p() - (-x).log1p())
-
     def __eq__(self, other):
         return isinstance(other, TanhTransform)
 
@@ -431,7 +427,7 @@ class TanhTransform(Transform):
     def _inverse(self, y):
         # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
         # one should use `cache_size=1` instead
-        return self.atanh(y)
+        return torch.atanh(y)
 
     def log_abs_det_jacobian(self, x, y):
         # We use a formula that is more numerically stable, see details in the following link
