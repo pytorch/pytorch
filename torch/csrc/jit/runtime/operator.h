@@ -82,6 +82,17 @@ struct TORCH_API Operator {
                 UnparsedFunctionSchema{std::move(schema), alias_analysis}),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
+  C10_DEPRECATED_MESSAGE(
+      "Please define your operator as taking a `Stack*` argument instead of `Stack&` and as returning `void` instead of `int`.")
+  Operator(
+      std::string schema,
+      std::function<int(Stack&)> op,
+      c10::AliasAnalysisKind alias_analysis)
+      : Operator(
+            std::move(schema),
+            [op = std::move(op)](Stack* stack) { op(*stack); },
+            alias_analysis) {}
+
   Operator(
       std::string schema,
       OperationCreator op_creator,
