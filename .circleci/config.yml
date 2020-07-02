@@ -180,11 +180,11 @@ commands:
         default: ""
     steps:
       - run:
-          name: "Set Python Version"
+          name: "Binary Size - Set Python Version"
           no_output_timeout: "1m"
           command: pyenv global 3.7.0
       - run:
-          name: "Install dependencies"
+          name: "Binary Size - Install Dependencies"
           no_output_timeout: "5m"
           command: |
             retry () {
@@ -192,7 +192,7 @@ commands:
             }
             retry pip3 install requests
       - run:
-          name: "Untar Artifacts"
+          name: "Binary Size - Untar Artifacts"
           no_output_timeout: "5m"
           command: |
             # The artifact file is created inside docker container, which contains the result binaries.
@@ -205,10 +205,10 @@ commands:
               tar xf "${ARTIFACTS}" -C project
             fi
       - run:
-          name: Upload << parameters.build_type >>
+          name: "Binary Size - Upload << parameters.build_type >>"
           no_output_timeout: "5m"
           command: |
-            cd project
+            cd ~/project
             export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
             export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 .circleci/scripts/upload_binary_size_to_scuba.py android
