@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
+#include <thread>
+
 #if !AT_NNPACK_ENABLED()
 
 namespace at {
@@ -56,8 +58,9 @@ bool _nnpack_available() {
 
 #include <nnpack.h>
 
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -85,15 +88,9 @@ static bool init_nnpack() {
 }
 
 static pthreadpool_t nnpack_threadpool() {
-  // Try initializing a threadpool for NNPACK's use.  If we fail to
-  // successfully initialize an implementation, return nullptr which will
-  // instruct NNPACK to run single threaded.
-
 #ifdef C10_MOBILE
-  // If building for mobile, use Caffe 2's mobile-friendly threadpool.
-  return caffe2::mobile_pthreadpool();
+  return caffe2::pthreadpool_();
 #else
-  // Otherwise, try using pthreadpool if we manage to initialize it successfully.
   static pthreadpool_t nnpack_threadpool_ = nullptr;
   static bool called_nnpack_threadpool_ = false;
 

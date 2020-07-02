@@ -1,35 +1,37 @@
+# Table of contents
+
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
-  * [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
 - [Writing documentation](#writing-documentation)
-  * [Building documentation](#building-documentation)
-    + [Tips](#tips)
-    + [Building C++ Documentation](#building-c---documentation)
-  * [Previewing changes](#previewing-changes)
-    + [Submitting changes for review](#submitting-changes-for-review)
-  * [Adding documentation tests](#adding-documentation-tests)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes](#previewing-changes)
+    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
-- [C++ development tips](#c---development-tips)
-  * [Build only what you need](#build-only-what-you-need)
-  * [Code completion and IDE support](#code-completion-and-ide-support)
-  * [Make no-op build fast](#make-no-op-build-fast)
-    + [Use Ninja](#use-ninja)
-    + [Use CCache](#use-ccache)
-    + [Use a faster linker](#use-a-faster-linker)
-  * [C++ frontend development tips](#c---frontend-development-tips)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+  - [C++ frontend development tips](#c-frontend-development-tips)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
-  * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
-  * [Running clang-tidy](#running-clang-tidy)
-  * [Pre-commit tidy/linting hook](#pre-commit-tidy-linting-hook)
-  * [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    + [Getting `ccache` to work](#getting--ccache--to-work)
-    + [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with--ld-preload--and--libasan-rt--)
-    + [Why LD_PRELOAD in the build function?](#why-ld-preload-in-the-build-function-)
-    + [Why no leak detection?](#why-no-leak-detection-)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
 
@@ -127,7 +129,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   you'll have a lot of missing functionality if you try to use it
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
-  * [src](aten/src)
+  * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
@@ -157,6 +159,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
           [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
           - implementations of operators which simply bind to some
             backend library.
+        * [quantized](aten/src/ATen/native/quantized/) - Quantized tensor (i.e. QTensor) operation implementations. [README](aten/src/ATen/native/quantized/README.md) contains details including how to implement native quantized operations.
 * [torch](torch) - The actual PyTorch library. Everything that is not
   in [csrc](torch/csrc) is a Python module, following the PyTorch Python
   frontend module structure.
@@ -164,11 +167,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     in this directory tree are a mix of Python binding code, and C++
     heavy lifting. Consult `setup.py` for the canonical list of Python
     binding files; conventionally, they are often prefixed with
-    `python_`.
+    `python_`. [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
-      frontend.
-    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic
-      differentiation.
+      frontend. [README](torch/csrc/jit/README.md)
+    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
     * [api](torch/csrc/api) - The PyTorch C++ frontend.
     * [distributed](torch/csrc/distributed) - Distributed training
       support for PyTorch.
@@ -185,6 +187,9 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
     and TorchScript.
   * ...
   * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
+    * [api](test/cpp/api) - [README](test/cpp/api/README.md)
+    * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
+    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -195,6 +200,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [operators](caffe2/operators) - Operators of Caffe2.
   * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
+* [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## Unit testing
 

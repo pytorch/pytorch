@@ -46,6 +46,7 @@ TORCH_API std::ostream& operator<<(
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;
+using ProfilingId = GloballyUniqueId;
 
 struct TORCH_API SerializedPyObj final {
   SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)

@@ -66,7 +66,7 @@ class ExecutionTriggerList {
   void AddTrigger(const std::string& name, ExecutionTrigger* trigger) {
     auto insert_ret = trigger_list_.insert(std::make_pair(name, trigger));
     if (!insert_ret.second) {
-      throw std::runtime_error("Duplicated trigger name: " + name);
+      std::cerr << "Warning: duplicated trigger name: " << name << "\n";
     }
   }
 

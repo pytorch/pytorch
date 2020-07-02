@@ -163,8 +163,8 @@ void testCudaDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}), kFloat);
-    Buffer b(BufHandle("b", {m, n}), kFloat);
+    Buffer a(BufHandle("a", {m, n}, kFloat));
+    Buffer b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -284,7 +284,7 @@ void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}), kFloat);
+  Buffer a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   LoopNest l({b});
@@ -606,7 +606,7 @@ void testCudaSharedMemReduce_1() {
   VarHandle c_var("c", kHandle);
   std::vector<const Expr*> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims)};
+  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
   {
     // alloc(c, 64);
     Allocate* alloc = Allocate::make(c_var, kFloat, {N});
@@ -722,7 +722,7 @@ void testCudaLocalMemReduce_1() {
   VarHandle c_var("c", kHandle);
   std::vector<const Expr*> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims)};
+  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0

@@ -7,6 +7,8 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
+source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+
 echo "python_doc_push_script.sh: Invoked with $*"
 
 set -ex
@@ -59,11 +61,7 @@ pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-
 
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
-git clone https://github.com/pytorch/vision
-pushd vision
-conda install -q pillow
-time python setup.py install
-popd
+checkout_install_torchvision
 pushd docs
 rm -rf source/torchvision
 cp -a ../vision/docs/source source/torchvision
@@ -71,8 +69,30 @@ cp -a ../vision/docs/source source/torchvision
 # Build the docs
 pip -q install -r requirements.txt || true
 if [ "$is_master_doc" = true ]; then
+  # TODO: fix gh-38011 then enable this which changes warnings into errors
+  # export SPHINXOPTS="-WT --keep-going"
   make html
+  make coverage
+  # Now we have the coverage report, we need to make sure it is empty.
+  # Count the number of lines in the file and turn that number into a variable
+  # $lines. The `cut -f1 ...` is to only parse the number, not the filename
+  # Skip the report header by subtracting 2: the header will be output even if
+  # there are no undocumented items.
+  #
+  # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
+  # be documented then removed from there.
+  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
+  undocumented=$(($lines - 2))
+  if [ $undocumented -lt 0 ]; then
+    echo coverage output not found
+    exit 1
+  elif [ $undocumented -gt 0 ]; then
+    echo undocumented objects found:
+    cat build/coverage/python.txt
+    exit 1
+  fi
 else
+  # Don't fail the build on coverage problems
   make html-stable
 fi
 

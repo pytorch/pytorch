@@ -5,9 +5,10 @@
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <typeindex>
 
 namespace torch {
-class CustomClassHolder : public c10::intrusive_ptr_target {};
+class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
 using ::torch::CustomClassHolder;
 struct Function;
@@ -168,7 +169,7 @@ struct CAFFE2_API IValue final {
    *      [tensor1] == [tensor1] -> True (because container equality will first compare identity)
    *      [tensor1] == [tensor1_copy] -> RuntimeError: bool value of Tensor is ambiguous
    */
-  friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -335,7 +336,14 @@ struct CAFFE2_API IValue final {
   // Bool
   IValue(bool b)
   : tag(Tag::Bool), is_intrusive_ptr(false) {
+#if defined(__clang__) && defined(__x86_64__)
+    // Initializing entire payload stops valgrind's from reporting
+    // "jump or move depends on uninitialised value" in IValue copy constructor
+    // See https://github.com/pytorch/pytorch/issues/37117
+    payload.as_int = b;
+#else
     payload.as_bool = b;
+#endif
   }
    bool isBool() const { return Tag::Bool == tag; }
    bool toBool() const {
@@ -400,6 +408,8 @@ struct CAFFE2_API IValue final {
       class T,
       enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
+  template<class T, size_t N>
+  IValue(std::array<T, N> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
@@ -620,6 +630,7 @@ struct CAFFE2_API IValue final {
   };
 
   using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -627,6 +638,10 @@ struct CAFFE2_API IValue final {
 
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
+
+  IValue deepcopy() const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo) const;
 
  private:
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
@@ -781,12 +796,12 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<Type> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
+TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap();
 
 template<typename T>
 c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
-  auto res = tmap.find(typeid(T).name());
+  auto res = tmap.find(std::type_index(typeid(T)));
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
   }
@@ -796,7 +811,7 @@ c10::ClassTypePtr getCustomClassType() {
 template<typename T>
 inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
-  return tmap.find(typeid(T).name()) != tmap.end();
+  return tmap.find(std::type_index(typeid(T))) != tmap.end();
 }
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&

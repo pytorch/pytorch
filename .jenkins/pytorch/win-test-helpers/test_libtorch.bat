@@ -1,3 +1,7 @@
+:: Skip LibTorch tests when building a GPU binary and testing on a CPU machine
+:: because LibTorch tests are not well designed for this use case.
+if "%USE_CUDA%" == "0" IF NOT "%CUDA_VERSION%" == "cpu" exit /b 0
+
 call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 if errorlevel 1 exit /b 1
 

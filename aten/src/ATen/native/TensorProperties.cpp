@@ -3,7 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include <ATen/Config.h>
 namespace at {
@@ -71,7 +71,7 @@ Tensor & detach_(Tensor & self) {
 }
 
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl("detach", detach);
+  m.impl("detach", TORCH_FN(detach));
   m.impl_UNBOXED("detach_", detach_);
 }
 

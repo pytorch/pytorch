@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/library.h>
 
 using Stack = std::vector<c10::IValue>;
 using at::Scalar;
@@ -102,14 +102,14 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 // NB! This is _aten, not aten!!!
 TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
-  m.impl("add.Scalar", torch::autograd::VariableType::add_Scalar);
-  m.impl("mul.Tensor", torch::autograd::VariableType::mul_Tensor);
-  m.impl("conv2d", CppFunction::makeFromBoxedFunction<conv2d_kernel>());
-  m.impl("dropout", VariableType::dropout);
-  m.impl("feature_dropout", VariableType::feature_dropout);
+  m.impl("add.Scalar", TORCH_FN(torch::autograd::VariableType::add_Scalar));
+  m.impl("mul.Tensor", TORCH_FN(torch::autograd::VariableType::mul_Tensor));
+  m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
+  m.impl("dropout", TORCH_FN(VariableType::dropout));
+  m.impl("feature_dropout", TORCH_FN(VariableType::feature_dropout));
   m.impl(
       "log_softmax.int",
-      CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
+      torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
   m.impl(
       "max_pool2d",
       [](const Tensor& self,
@@ -126,9 +126,9 @@ TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
             dilation.vec(),
             ceil_mode);
       });
-  m.impl("relu", VariableType::relu);
-  m.impl("view", CppFunction::makeFromBoxedFunction<view_kernel>());
-  m.impl("t", VariableType::t);
-  m.impl("addmm", VariableType::addmm);
+  m.impl("relu", TORCH_FN(VariableType::relu));
+  m.impl("view", torch::CppFunction::makeFromBoxedFunction<view_kernel>());
+  m.impl("t", TORCH_FN(VariableType::t));
+  m.impl("addmm", TORCH_FN(VariableType::addmm));
 }
 } // anonymous namespace

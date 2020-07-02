@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/autocast_mode.h>
 
@@ -373,7 +373,7 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 Explicit registration for out-of-place ops
 *****************************************/
 TORCH_LIBRARY_IMPL(_, Autocast, m) {
-  m.fallback(c10::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
@@ -402,7 +402,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
+  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
   // fp32
   KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
@@ -487,10 +487,10 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_UNBOXED_ONLY(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
   KERNEL_UNBOXED_ONLY(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
   KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
+  KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
   KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
+  KERNEL(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
 
   m.impl_UNBOXED("binary_cross_entropy", &at::autocast::binary_cross_entropy_banned);
 }

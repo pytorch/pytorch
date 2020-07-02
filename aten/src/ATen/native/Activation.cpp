@@ -701,11 +701,11 @@ Tensor & leaky_relu_(
   return at::leaky_relu_out(self, self, neg_val);
 }
 
-// Note: leakyReLu backward calculation doesn't support in-place call with non-positive slope.
+// Note: leakyReLu backward calculation doesn't support in-place call with negative slope.
 // The reason is that for in-place forward call, the forward result will be saved into autograd
 // node instead of the input itself, when calculating backward gradient, there is no way to know
 // whether the original input for current node is positive or not if the input slope is
-// non-positive. eg. forward is 2, slope is -0.2, the original input for this node could be
+// negative. eg. forward is 2, slope is -0.2, the original input for this node could be
 // either 2, or -10, so no way to get a correct backward gradient in this case.
 Tensor leaky_relu_backward(
     const Tensor& grad_output,
@@ -713,11 +713,11 @@ Tensor leaky_relu_backward(
     Scalar negval,
     bool is_result) {
   TORCH_CHECK(
-    !is_result || negval.to<double>() > 0.0,
-    "In-place leakyReLu backward calculation is triggered with a non-positive slope which is not supported. "
-    "This is caused by calling in-place forward function with a non-positive slope, "
+    !is_result || negval.to<double>() >= 0.0,
+    "In-place leakyReLu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
     "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
-    "require supporting in-place leakRelu backward calculation with non-positive slope");
+    "require supporting in-place leakRelu backward calculation with negative slope");
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self_or_result, grad_output);
@@ -756,13 +756,13 @@ Tensor log_sigmoid(const Tensor & self) {
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return iter.output();
 }
@@ -772,13 +772,13 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& buffer) {
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return grad_input;
 }

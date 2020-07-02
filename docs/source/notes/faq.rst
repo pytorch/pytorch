@@ -83,7 +83,7 @@ this way (and remember that you will need at least twice the size of the
 weights, since you also need to store the gradients.)
 
 My GPU memory isn't freed properly
--------------------------------------------------------
+----------------------------------
 PyTorch uses a caching memory allocator to speed up memory allocations. As a
 result, the values shown in ``nvidia-smi`` usually don't reflect the true
 memory usage. See :ref:`cuda-memory-management` for more details about GPU
@@ -94,7 +94,7 @@ some Python subprocesses are still alive. You may find them via
 ``ps -elf | grep python`` and manually kill them with ``kill -9 [pid]``.
 
 My out of memory exception handler can't allocate memory
--------------------------------------------------------
+--------------------------------------------------------
 You may have some code that tries to recover from out of memory errors.
 
 .. code-block:: python
