@@ -1074,7 +1074,7 @@ void Reducer::register_comm_hook(py::object state, py::object comm_hook){
   Reducer::register_comm_hook_internal(PythonCommHook(state, comm_hook));
 }
 
-void Reducer::register_comm_hook_internal(CommHookInterface comm_hook){
+void Reducer::register_comm_hook_internal(const CommHookInterface& comm_hook){
 
   TORCH_CHECK(
       comm_hook_ == nullptr,

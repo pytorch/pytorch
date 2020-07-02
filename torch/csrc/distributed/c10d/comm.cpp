@@ -82,31 +82,31 @@ void broadcast_coalesced(
 
 GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
 
-using torch::jit::Future;
-using torch::jit::PythonFutureWrapper;
-
 // Temporarily disabled CppCommHook, because of `Taking the address of a
 // temporary object of type 'c10::ivalue::Future'` error in when we try
 // std::shared_ptr<Future>(&hook_(bucket.tensors_));.
 // ~~~~~~~~~~~~~~~
 // CppCommHook::CppCommHook(
 //     py::object state,
-//     std::function<Future(std::vector<at::Tensor>)>& hook)
+//     std::function<torch::jit::Future(std::vector<at::Tensor>)>& hook)
 //     : state_(state), hook_(hook){};
 
-// std::shared_ptr<Future> CppCommHook::operate(const GradBucket& bucket) {
-//   return std::shared_ptr<Future>(&hook_(bucket.tensors_));
+// std::shared_ptr<torch::jit::Future> CppCommHook::operate(const GradBucket&
+// bucket) {
+//   return std::shared_ptr<torch::jit::Future>(&hook_(bucket.tensors_));
 // };
 
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
-    : state_(state), hook_(hook){};
-std::shared_ptr<Future> PythonCommHook::operate(const GradBucket& bucket) {
-  return hook_(state_, bucket.tensors_).cast<std::shared_ptr<Future>>();
+    : state_(std::move(state)), hook_(std::move(hook)){};
+std::shared_ptr<torch::jit::Future> PythonCommHook::operate(
+    const GradBucket& bucket) const {
+  return hook_(state_, bucket.tensors_)
+      .cast<std::shared_ptr<torch::jit::Future>>();
 
   // Below return doesn't work. need to think about it.
 
   // c10::intrusive_ptr<c10::ivalue::Future> fut;
   // return hook_(state_, bucket.tensors_)
-  //             .cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
+  //             .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
 };
 } // namespace c10d

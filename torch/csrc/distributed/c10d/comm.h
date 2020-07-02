@@ -20,30 +20,31 @@ class GradBucket {
   std::vector<at::Tensor> tensors_;
 };
 
-using torch::jit::Future;
-
-class CommHookInterface {
+struct CommHookInterface {
  public:
-  virtual std::shared_ptr<Future> operate(const GradBucket& bucket);
+  virtual std::shared_ptr<torch::jit::Future> operate(
+      const GradBucket& bucket) const = 0;
 };
 
 // class CppCommHook : public CommHookInterface {
 //  public:
 //   CppCommHook(
 //       py::object state,
-//       std::function<Future(std::vector<at::Tensor>)>& hook);
-//   std::shared_ptr<Future> operate(const GradBucket& bucket) override;
+//       std::function<torch::jit::Future(std::vector<at::Tensor>)>& hook);
+//   std::shared_ptr<torch::jit::Future> operate(const GradBucket& bucket)
+//   override;
 
 //  private:
 //   py::object state_;
-//   std::function<Future(std::vector<at::Tensor>)> hook_;
+//   std::function<torch::jit::Future(std::vector<at::Tensor>)> hook_;
 // };
 
 class PythonCommHook : public CommHookInterface {
  public:
   PythonCommHook(py::object state, py::object hook);
 
-  std::shared_ptr<Future> operate(const GradBucket& bucket) override;
+  std::shared_ptr<torch::jit::Future> operate(
+      const GradBucket& bucket) const override;
 
  private:
   py::object state_;
