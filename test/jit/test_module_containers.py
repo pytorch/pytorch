@@ -305,6 +305,37 @@ class TestModuleContainers(JitTestCase):
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
 
+    def test_special_method_with_override(self):
+        class CustomModuleInterface(torch.nn.Module):
+            def __init__(self):
+                super(CustomModuleInterface, self).__init__()
+
+        class CustomModuleList(CustomModuleInterface, torch.nn.ModuleList):
+            def __init__(self, modules=None):
+                CustomModuleInterface.__init__(self)
+                torch.nn.ModuleList.__init__(self, modules)
+
+            def __len__(self):
+                # this is arbitrary, just to check that the overridden py __len__ from
+                # CustomModuleList takes precedence over the automatically generated
+                # __len__ added by the jit compiler
+                return 2
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                # work around aliasing issue for 'is' operator by scripting ReLU up front
+                self.submod = torch.jit.script(torch.nn.ReLU())
+                self.modulelist = CustomModuleList([self.submod])
+
+            def forward(self, inputs):
+                assert len(self.modulelist) == 2, "__len__ failing for ModuleList"
+                return inputs
+
+        m = MyModule()
+        self.checkModule(m, [torch.randn(2, 2)])
+        mm = torch.jit.script(m)
+
     def test_moduledict_getitem(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
