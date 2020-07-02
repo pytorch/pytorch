@@ -5,6 +5,7 @@ import sys
 
 import torch
 import torch._C
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -41,11 +42,13 @@ class MyModule(torch.nn.Module):
 class TestBackends(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Create Python, JIT and backend versions of MyModule.
-        self.module = MyModule()
-        self.scripted_module = torch.jit.script(MyModule())
-        self.lowered_module = to_test_backend_multi(
-            self.scripted_module._c, {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}})
+
+        if not TEST_WITH_ROCM:
+            # Create Python, JIT and backend versions of MyModule.
+            self.module = MyModule()
+            self.scripted_module = torch.jit.script(MyModule())
+            self.lowered_module = to_test_backend_multi(
+                self.scripted_module._c, {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}})
 
     def compare_py_jit_backend(self, name, input):
         """
@@ -66,6 +69,7 @@ class TestBackends(JitTestCase):
         self.assertEqual(python_output, backend_output)
         self.assertEqual(jit_output, backend_output)
 
+    @skipIfRocm
     def test_simple(self):
         """
         This is a simple test that compiles MyModule for the test backend and ensures it produces the correct
@@ -79,6 +83,7 @@ class TestBackends(JitTestCase):
         self.compare_py_jit_backend("sub_accum", input)
         self.compare_py_jit_backend("forward", input)
 
+    @skipIfRocm
     def test_save_load(self):
         """
         This method tests that a lowered module till produces the same output as a Python module and ScriptModule after
