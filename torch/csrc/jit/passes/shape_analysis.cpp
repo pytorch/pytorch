@@ -668,7 +668,7 @@ class ShapePropagator {
         auto tt = node->input()->type()->expect<TensorType>();
         // grad may be undefined
         // requires_grad may be required
-        auto grad_type = tt->withRequiresGrad({})->withPossiblyUndefined();
+        auto grad_type = TensorType::get()->withPossiblyUndefined();
         node->output()->setType(grad_type);
         return;
       }
