@@ -233,8 +233,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for tracing, dim, bias in options:
             eager = TestModule(dim, bias).eval()
             x = data[dim]
-            scripted_or_traced = get_script_module(eager, tracing, x).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
@@ -310,7 +309,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         x2 = torch.rand(5, 5)
         w2 = torch.rand(5, 5)
         b2 = torch.rand(5)
-        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2)]):
+
+        x3 = torch.rand(5, 5, 5)
+        w3 = torch.rand(5, 5)
+        b3 = torch.rand(5)
+        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2), (x3, w3, b3)]):
             bias = b if has_bias else None
             model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
             torch._C._jit_pass_fuse_linear(model.graph)
@@ -320,6 +323,29 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             for cn in check_not:
                 FileCheck().check_not(cn) \
                            .run(model.graph)
+            # make sure it runs
+            model(x)
+
+        # check matmuls are not fused
+        class Matmul(torch.nn.Module):
+            def __init__(self, weight):
+                super(Matmul, self).__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return torch.matmul(x, self.weight)
+
+        x = torch.rand(5, 6, 5)
+        w = torch.rand(5, 5, 100)
+        model = torch.jit.trace(Matmul(w), [x])
+        torch._C._jit_pass_fuse_linear(model.graph)
+        # check 3d matmul is not fused
+        FileCheck().check("aten::matmul") \
+                   .run(model.graph)
+        FileCheck().check_not("aten::linear") \
+                   .run(model.graph)
+        # make sure it runs
+        model(x)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
@@ -1038,6 +1064,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .check("quantized::linear") \
                    .run(model.graph)
 
+    def test_inplace_option(self):
+        for tracing in [True, False]:
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            qconfig_dict = {'': default_qconfig}
+            quantize_jit(
+                model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
+            FileCheck().check("quantized::conv2d") \
+                       .run(model.graph)
+
+            FileCheck().check_not("aten::conv2d") \
+                       .run(model.graph)
+
+
     def test_finalize_debug(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1062,21 +1101,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .check_next("prim::dtype") \
                    .check_next("aten::quantize_per_tensor") \
                    .check("aten::dequantize") \
-                   .run(model.graph)
-
-    def test_finalize_no_extra_dequantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                return x.size(0) * x
-
-        model = torch.jit.script(M()).eval()
-        model = quantize_jit(model, {'': default_qconfig}, test_only_eval_fn, [self.img_data])
-        FileCheck().check_not("aten::dequantize(") \
                    .run(model.graph)
 
     def test_module_list(self):
@@ -1718,7 +1742,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
             for tracing in [True, False]:
                 # quantized::add_scalar_relu or quantized::add_scalar_relu_out
                 # TODO: split this after refactor of checkGraphModeOp
-                # TODO: fix debug=True numerics
                 m = self.checkGraphModeOp(m, data, "quantized::add_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
@@ -1755,7 +1778,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                  torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for tracing in [True, False]:
-            m = self.checkGraphModeOp(QuantizedCat(), data, "quantized::cat", tracing)
+            m = self.checkGraphModeOp(QuantizedCat(), data, "quantized::cat", tracing, debug=True)
             FileCheck().check_not("aten::cat") \
                        .run(m.graph)
 
@@ -2100,7 +2123,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
                   InplaceMulScalarInplaceFunctionalRelu()]:
             for tracing in [True, False]:
                 # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
-                # TODO: fix debug=True numerics
                 m = self.checkGraphModeOp(m, data, "quantized::mul_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
@@ -2233,6 +2255,26 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 x = self.conv(x)
+                # add_scalar
+                x = x + 3
+                # mul_scalar
+                x = x * 3
+                # add_scalar_out
+                x += 3
+                # mul_scalar_out
+                x *= 3
+                # add_scalar_relu
+                x = x + 3
+                x = F.relu(x)
+                # add_scalar_relu_out
+                x += 3
+                x = F.relu(x)
+                # mul_scalar_relu
+                x = x * 3
+                x = F.relu(x)
+                # mul_scalar_relu_out
+                x *= 3
+                x = F.relu(x)
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
@@ -2293,9 +2335,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
+        # TODO: the checks are problematic, we need to split all checks
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
+                   .run(m.graph)
+
+        FileCheck().check("quantized::add_scalar") \
+                   .check("quantized::mul_scalar") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
@@ -2660,7 +2707,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
     @override_qengines
-    def test_quantized_linear_dynamic(self):
+    def test_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
                 super(FunctionalLinear, self).__init__()

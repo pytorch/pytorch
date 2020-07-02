@@ -32,17 +32,6 @@ inline void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
 AT_FORALL_SCALAR_TYPES(COPY_SPECIALIZATION)
 
 template<typename T>
-inline T THBlas_dot(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
-
-#define DOT_SPECIALIZATION(ctype,name) \
-  template<> \
-  inline ctype THBlas_dot<ctype>(int64_t n, ctype *x, int64_t incx, ctype *y, int64_t incy) { \
-    return TH ## name ## Blas_dot(n, x, incx, y, incy); \
-  }
-
-AT_FORALL_SCALAR_TYPES(DOT_SPECIALIZATION)
-
-template<typename T>
 inline void THBlas_gemm(
     char transa,
     char transb,
