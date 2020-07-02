@@ -2371,7 +2371,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .run(m.graph)
 
-        FileCheck().check_count("quantized::conv2d", 2, exactly=True) \
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
                    .run(m.graph)
 
         FileCheck().check_count("aten::dequantize", 1, exactly=True) \
@@ -2379,7 +2379,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         FileCheck().check("quantized::add_scalar") \
                    .check("quantized::mul_scalar") \
-                   .check("aten::append") \
+                   .check("aten::append(") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
