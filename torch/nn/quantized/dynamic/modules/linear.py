@@ -6,7 +6,7 @@ from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""
-    A dynamic quantized linear module with quantized tensor as inputs and outputs.
+    A dynamic quantized linear module with floating point tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
     https://pytorch.org/docs/stable/nn.html#torch.nn.Linear for documentation.
 
@@ -16,8 +16,9 @@ class Linear(nnq.Linear):
     Attributes:
         weight (Tensor): the non-learnable quantized weights of the module which are of
                          shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized to zero.
+        bias (Tensor): the non-learnable floating point bias of the module of shape
+                       :math:`(\text{out\_features})`. If :attr:`bias` is ``True``,
+                       the values are initialized to zero.
 
     Examples::
 
