@@ -119,6 +119,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // exception_ptr.
     bool finishedGPUExecutionInternal() const;
 
+    // Aborts all NCCL Communicators
+    void abortNCCLComms();
+
     // Reference to the store so that we can write aborted communicators
     // to the store.
     std::shared_ptr<Store> store_;
