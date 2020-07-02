@@ -8,7 +8,7 @@
 
 /*
  * IRMathPrinter and IRTransformPrinter allow the splitting up of fusion print
- * functions. IRMathPrinter as its name implies focuses soley on what tensor
+ * functions. IRMathPrinter as its name implies focuses solely on what tensor
  * computations are taking place. Resulting TensorView math will reflect the
  * series of split/merge/computeAts that have taken place, however these
  * nodes will not be displayed in what is printed. IRTransformPrinter does not

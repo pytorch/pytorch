@@ -7,6 +7,8 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
+source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+
 echo "python_doc_push_script.sh: Invoked with $*"
 
 set -ex
@@ -59,11 +61,7 @@ pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-
 
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
-git clone https://github.com/pytorch/vision
-pushd vision
-conda install -q pillow
-time python setup.py install
-popd
+checkout_install_torchvision
 pushd docs
 rm -rf source/torchvision
 cp -a ../vision/docs/source source/torchvision
