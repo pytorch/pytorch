@@ -1065,16 +1065,14 @@ class TracedModule(ScriptModule):
         return "original_name={}".format(self._name)
 
 
-if _enabled:
+class TopLevelTracedModule(TracedModule):
+    forward = _CachedForward()
 
-    class TopLevelTracedModule(TracedModule):
-        forward = _CachedForward()
+    def _reconstruct(self, cpp_module):
+        """
+        Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
 
-        def _reconstruct(self, cpp_module):
-            """
-            Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
-
-            Arguments:
-                cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
-            """
-            self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
+        Arguments:
+            cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
+        """
+        self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
