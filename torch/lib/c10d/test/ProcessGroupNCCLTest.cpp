@@ -16,7 +16,7 @@ using c10d::ProcessGroup;
 
 const auto kTimeoutErrorString = "Operation timed out!";
 constexpr auto kWorkDelayTime = std::chrono::milliseconds(1000);
-constexpr auto kWorkTimeout = std::chrono::milliseconds(250);
+constexpr auto kWorkTimeout = std::chrono::milliseconds(5);
 
 class NCCLTestBase {
  public:
@@ -404,6 +404,9 @@ void testAllgather(const std::string& path, int rank, int size) {
 }
 
 void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
+  // First we must set NCCL_BLOCKING_WAIT to 1 for timeouts to work in
+  // ProcessGroupNCCL.
+  setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1);
   auto test = AllgatherNCCLTestWithTimeout(path, size);
   test.initialize(rank, size);
   auto work = test.run();
@@ -418,6 +421,7 @@ void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
       // If the runtime_error message is the same one thrown in wait::timeout,
       // the test is successful
       std::cout << "Allgather test with timeouts was successful" << std::endl;
+      return;
     } else {
       // Other runtime errors indicates a test failure
       throw std::runtime_error("BOOM!");
@@ -426,6 +430,9 @@ void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
     // Any other exception indicates a test failure
     throw std::runtime_error("BOOM!");
   }
+  // If no exception, that is also an error since we expect the test.wait call
+  // to timeout and throw.
+  throw std::runtime_error("BOOM!");
 }
 
 void testReduceScatter(const std::string& path, int rank, int size) {
