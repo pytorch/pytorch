@@ -14,11 +14,12 @@ C10_DEFINE_bool(
 namespace caffe2 {
 
 inline void QuitIfFeatureUnsupported(
-    const bool cpu_has_feature, const string& feature) {
+    const bool cpu_has_feature,
+    const string& feature) {
   VLOG(1) << "Caffe2 built with " << feature << ".";
   if (!cpu_has_feature) {
-    string err_string =
-        "The Caffe2 binary is compiled with CPU feature " + feature +
+    string err_string = "The Caffe2 binary is compiled with CPU feature " +
+        feature +
         ", but your CPU does not support it. This will lead to segfaults "
         "on your machine, such as SIGILL 'illegal instructions' on Linux. "
         "As a result Caffe2 will preemptively quit. Please install or "
@@ -32,7 +33,8 @@ inline void QuitIfFeatureUnsupported(
 }
 
 static void WarnIfFeatureUnused(
-    const bool cpu_has_feature, const string& feature) {
+    const bool cpu_has_feature,
+    const string& feature) {
   VLOG(1) << "Caffe2 not built with " << feature << ".";
   if (cpu_has_feature) {
 #ifdef CAFFE2_NO_CROSS_ARCH_WARNING
@@ -50,7 +52,6 @@ static void WarnIfFeatureUnused(
 }
 
 bool Caffe2CheckIntrinsicsFeatures(int*, char***) {
-
 #ifdef __AVX__
   QuitIfFeatureUnsupported(GetCpuId().avx(), "avx");
 #else
@@ -77,4 +78,4 @@ REGISTER_CAFFE2_INIT_FUNCTION(
     &Caffe2CheckIntrinsicsFeatures,
     "Check intrinsics compatibility between the CPU feature and the binary.");
 
-}  // namespace caffe2
+} // namespace caffe2

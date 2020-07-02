@@ -7,4 +7,4 @@ namespace caffe2 {
 namespace {
 REGISTER_BLOB_DESERIALIZER(TensorCUDA, TensorDeserializer);
 }
-}  // namespace caffe2
+} // namespace caffe2

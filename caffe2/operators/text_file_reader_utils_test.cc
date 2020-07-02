@@ -1,10 +1,10 @@
+#include <gtest/gtest.h>
 #include <fstream>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/math.h"
-#include <gtest/gtest.h>
 
 #include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"

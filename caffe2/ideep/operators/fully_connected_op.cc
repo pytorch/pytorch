@@ -13,7 +13,8 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
-        training_mode_(OperatorBase::GetSingleArgument<int>("training_mode", 0)) {}
+        training_mode_(
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {}
   ~IDEEPFullyConnectedOp() override {}
 
   bool RunOnDevice() override {
@@ -59,8 +60,7 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
     }
 
     if (InputSize() > BIAS) {
-      ideep::inner_product_forward::compute(
-          X_in, filter_, bias_, *Y);
+      ideep::inner_product_forward::compute(X_in, filter_, bias_, *Y);
     } else {
       ideep::inner_product_forward::compute(X_in, filter_, *Y);
     }
@@ -115,7 +115,8 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
 
     /**
      * In mkl-dnn,weight gradient shape is determined by X_in,
-     * so we should ensure that weight gradient shape is consistent with weight shape.
+     * so we should ensure that weight gradient shape is consistent with weight
+     * shape.
      */
     if (dfilter->get_dims() != filter.get_dims()) {
       dfilter->reshape(filter.get_dims());

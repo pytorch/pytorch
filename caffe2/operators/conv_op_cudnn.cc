@@ -97,8 +97,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  // A helper function to set up the tensor Nd descriptor, depending on the order
-  // the group and the type given.
+  // A helper function to set up the tensor Nd descriptor, depending on the
+  // order the group and the type given.
   template <typename T>
   void SetTensorNdDescriptorWithGroup(
       int size,
@@ -1198,7 +1198,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
           break;
         }
       }
-      CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN backward filter");
+      CAFFE_ENFORCE(
+          found, "Unable to find algorithms for cuDNN backward filter");
     }
     // Pick dX algo if needed
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
@@ -1299,7 +1300,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
             break;
           }
         }
-        CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN backward data");
+        CAFFE_ENFORCE(
+            found, "Unable to find algorithms for cuDNN backward data");
       }
     }
 

@@ -106,4 +106,4 @@ bool unsafeRunCaffe2InitFunction(const char* name, int* pargc, char*** pargv) {
   return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
       name, pargc, pargv);
 }
-}  // namespace caffe2
+} // namespace caffe2

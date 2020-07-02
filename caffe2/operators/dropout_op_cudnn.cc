@@ -7,7 +7,7 @@ namespace caffe2 {
 
 // cudnnRestoreDropoutDescriptor is needed for correctness and
 // doesn't exist prior to cuDNN v7
-#if CUDNN_VERSION_MIN(7,0,0)
+#if CUDNN_VERSION_MIN(7, 0, 0)
 
 class CuDNNDropoutOp final : public Operator<CUDAContext> {
  public:
@@ -74,7 +74,9 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
 class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  explicit CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CuDNNDropoutGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
@@ -177,8 +179,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
               ratio_,
               states_data,
               states_size_in_bytes_,
-              random_seed_
-              ));
+              random_seed_));
         }
         states_initialized_ = true;
       }
@@ -237,8 +238,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
           ratio_,
           const_cast<uint8_t*>(states.data<uint8_t>()),
           states_size_in_bytes_,
-          random_seed_
-          ));
+          random_seed_));
     }
     states_initialized_ = true;
   }
@@ -291,7 +291,7 @@ bool CuDNNDropoutGradientOp::RunOnDevice() {
 namespace {
 REGISTER_CUDNN_OPERATOR(Dropout, CuDNNDropoutOp);
 REGISTER_CUDNN_OPERATOR(DropoutGrad, CuDNNDropoutGradientOp);
-}
+} // namespace
 
 #endif
 

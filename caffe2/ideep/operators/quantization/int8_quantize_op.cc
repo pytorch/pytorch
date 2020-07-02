@@ -14,15 +14,13 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
         scale_(this->template GetSingleArgument<float>("Y_scale", 1.0)),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)) {
-
     if (HasArgument("output_order")) {
-      Y_fmt_ = static_cast<iformat>(
-        this->template GetSingleArgument<int>("output_order",
-                                              static_cast<int>(iformat::nchw)));
+      Y_fmt_ = static_cast<iformat>(this->template GetSingleArgument<int>(
+          "output_order", static_cast<int>(iformat::nchw)));
     }
 
-    CAFFE_ENFORCE(zero_point_ == 0 || zero_point_ == 128,
-        "Not support this zero point");
+    CAFFE_ENFORCE(
+        zero_point_ == 0 || zero_point_ == 128, "Not support this zero point");
     Y_data_type_ = zero_point_ == 0 ? idtype::u8 : idtype::s8;
     Y_scales_ = ConvertScales({scale_});
   }
@@ -49,7 +47,7 @@ class IDEEPInt8QuantizeOp final : public IDEEPOperator {
   int32_t zero_point_;
   iscale Y_scales_;
   idtype Y_data_type_;
-  iformat Y_fmt_ {iformat::undef};
+  iformat Y_fmt_{iformat::undef};
 
   INPUT_TAGS(INPUT0);
   OUTPUT_TAGS(OUTPUT);

@@ -63,4 +63,4 @@ class FP32MomentumSGDUpdateOp final : public Operator<Context> {
   INPUT_TAGS(GRAD, MOMENTUM, LR, PARAM);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENTUM, OUTPUT_PARAM);
 };
-}
+} // namespace caffe2

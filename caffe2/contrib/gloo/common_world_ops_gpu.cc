@@ -12,10 +12,10 @@ template <>
 void CreateCommonWorld<CUDAContext>::initializeForContext() {
   static std::once_flag once;
   std::call_once(once, [&]() {
-      // This is the first time we call Gloo code for a CUDAContext.
-      // Share Caffe2 CUDA mutex with Gloo.
-      ::gloo::CudaShared::setMutex(&CUDAContext::mutex());
-    });
+    // This is the first time we call Gloo code for a CUDAContext.
+    // Share Caffe2 CUDA mutex with Gloo.
+    ::gloo::CudaShared::setMutex(&CUDAContext::mutex());
+  });
 }
 
 namespace {

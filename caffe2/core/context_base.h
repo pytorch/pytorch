@@ -6,12 +6,12 @@
 #include <memory>
 #include <unordered_map>
 
-#include <c10/macros/Macros.h>
 #include <c10/core/Allocator.h>
-#include <c10/util/typeid.h>
+#include <c10/core/CopyBytes.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
-#include <c10/core/CopyBytes.h>
+#include <c10/util/typeid.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -59,10 +59,8 @@ class CAFFE2_API BaseContext {
   // did direct CPU-X copy, so we just make three functions for it (to avoid
   // double dispatch).  This will get obsoleted by C10. where copies
   // will be proper operators (and get to rely on multiple dispatch there.)
-  virtual void CopyBytesSameDevice(
-      size_t nbytes,
-      const void* src,
-      void* dst) = 0;
+  virtual void
+  CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) = 0;
 
   virtual void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) = 0;
 
@@ -89,7 +87,8 @@ class CAFFE2_API BaseContext {
   template <typename T>
   inline void CopyToCPU(size_t n, const T* src, T* dst) {
     static_assert(
-        c10::guts::is_fundamental<T>::value, "CopyToCPU requires fundamental types");
+        c10::guts::is_fundamental<T>::value,
+        "CopyToCPU requires fundamental types");
     CopyBytesToCPU(
         n * sizeof(T), static_cast<const void*>(src), static_cast<void*>(dst));
   }

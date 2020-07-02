@@ -3,14 +3,15 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(AveragedLoss, AveragedLoss<float, CPUContext>);
-REGISTER_CPU_OPERATOR(AveragedLossGradient,
-                      AveragedLossGradient<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    AveragedLossGradient,
+    AveragedLossGradient<float, CPUContext>);
 
 OPERATOR_SCHEMA(AveragedLoss)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .ScalarType(TensorProto::FLOAT)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .ScalarType(TensorProto::FLOAT)
+    .SetDoc(R"DOC(
 The *AveragedLoss* op takes a single 1-D input tensor *input* and returns a single output float value *output*. The output represents the average of the values in *input*. This op is commonly used for averaging losses, hence the name, however it does not exclusively operate on losses.
 
 Github Links:
@@ -58,8 +59,11 @@ output:
 
 
 )DOC")
-  .Input(0, "input", "The input data as Tensor")
-  .Output(0, "output", "The output tensor of size 1 containing the averaged value.");
+    .Input(0, "input", "The input data as Tensor")
+    .Output(
+        0,
+        "output",
+        "The output tensor of size 1 containing the averaged value.");
 
 OPERATOR_SCHEMA(AveragedLossGradient).NumInputs(2).NumOutputs(1);
 
@@ -67,11 +71,12 @@ class GetAveragedLossGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "AveragedLossGradient", "",
+        "AveragedLossGradient",
+        "",
         vector<string>{I(0), GO(0)},
         vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(AveragedLoss, GetAveragedLossGradient);
 
-}  // namespace caffe2
+} // namespace caffe2

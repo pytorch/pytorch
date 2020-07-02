@@ -20,8 +20,9 @@ struct MPSCNNContext {
   id<MTLLibrary> library;
 
   id<MTLComputePipelineState> getPipelineState(NSString* kernel);
-  id<MTLComputePipelineState> getSpecializedPipelineState(NSString* kernel,
-                                                          const std::vector<ushort>& constants);
+  id<MTLComputePipelineState> getSpecializedPipelineState(
+      NSString* kernel,
+      const std::vector<ushort>& constants);
 
  private:
   std::mutex pipelineCacheMutex_;

@@ -50,4 +50,4 @@ Returns (grad_o, mean_squares_o, mom_o).
 )DOC");
 SHOULD_NOT_DO_GRADIENT(RmsProp);
 
-}
+} // namespace caffe2

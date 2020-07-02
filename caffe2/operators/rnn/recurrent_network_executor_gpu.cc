@@ -12,7 +12,8 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor<CUDAContext>(
     ArgumentHelper arg_helper) {
   auto* exec = new CUDARecurrentNetworkExecutor(
       step_net_def, recurrent_input_map, timestep_blob);
-  int max_streams = arg_helper.GetSingleArgument<int>("rnn_executor.max_cuda_streams", 0);
+  int max_streams =
+      arg_helper.GetSingleArgument<int>("rnn_executor.max_cuda_streams", 0);
   if (max_streams > 0) {
     exec->setMaxStreams(max_streams);
     LOG(INFO) << "Set max streams:" << max_streams;
@@ -38,9 +39,9 @@ CUDARecurrentNetworkExecutor::~CUDARecurrentNetworkExecutor() {
 void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
   int direction = to > from ? 1 : -1;
 
-  int max_streams = max_parallel_timesteps_ > 0 ?
-                    std::min(max_parallel_timesteps_, max_cuda_streams_)
-                    : max_cuda_streams_;
+  int max_streams = max_parallel_timesteps_ > 0
+      ? std::min(max_parallel_timesteps_, max_cuda_streams_)
+      : max_cuda_streams_;
   int stream_seq = 0;
   int num_ops = timestep_ops_[0].size();
 
@@ -92,7 +93,7 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
                 CUDAContext::cuda_stream(gpu_id, stream_id),
                 events_[parent_ev_idx],
                 0));
-        }
+          }
         }
       }
 
@@ -152,4 +153,4 @@ bool CUDARecurrentNetworkExecutor::RunBackwards(int T) {
   _ExecRange(T - 1, -1);
   return true;
 }
-}
+} // namespace caffe2

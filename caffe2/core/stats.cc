@@ -50,4 +50,4 @@ StatRegistry& StatRegistry::get() {
   static StatRegistry r;
   return r;
 }
-}
+} // namespace caffe2

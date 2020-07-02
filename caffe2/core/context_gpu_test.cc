@@ -1,11 +1,11 @@
+#include <array>
 #include <chrono>
 #include <future>
 #include <random>
 #include <thread>
-#include <array>
 
-#include "caffe2/core/context_gpu.h"
 #include <gtest/gtest.h>
+#include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
 
@@ -14,7 +14,8 @@ TEST(CUDATest, HasCudaRuntime) {
 }
 
 TEST(CUDAContextTest, TestAllocDealloc) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   CUDAContext context(0);
   context.SwitchToDevice();
   auto data = CUDAContext::New(10 * sizeof(float));
@@ -70,7 +71,8 @@ cudaStream_t getStreamForHandle(cublasHandle_t handle) {
 }
 
 TEST(CUDAContextTest, TestSameThreadSameObject) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   CUDAContext context_a(0);
   CUDAContext context_b(0);
   EXPECT_EQ(context_a.cuda_stream(), context_b.cuda_stream());
@@ -102,7 +104,6 @@ TEST(CUDAContextTest, TestSameThreadTempObject) {
     CUDAContext context_noop;
     EXPECT_EQ(context_outer.cuda_stream(), before_stream);
     EXPECT_EQ(context_noop.cuda_stream(), before_stream);
-
 
     // override stream - the previous context is not valid any more until
     // SwitchToDevice is called again (needs to be refactored into proper guard)
@@ -137,10 +138,11 @@ void TEST_GetStreamAddress(cudaStream_t* ptr) {
   // Sleep for a while so we have concurrent thread executions
   std::this_thread::sleep_for(std::chrono::seconds(1));
 }
-}  // namespace
+} // namespace
 
 TEST(CUDAContextTest, TestDifferntThreadDifferentobject) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   std::array<cudaStream_t, 2> temp = {0};
   // Same thread
   TEST_GetStreamAddress(&temp[0]);
@@ -158,4 +160,4 @@ TEST(CUDAContextTest, TestDifferntThreadDifferentobject) {
   EXPECT_NE(temp[0], temp[1]);
 }
 
-}  // namespace caffe2
+} // namespace caffe2

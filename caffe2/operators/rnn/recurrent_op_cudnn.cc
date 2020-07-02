@@ -31,7 +31,7 @@ TensorDescriptors<T>::~TensorDescriptors() {
     cudnnDestroyTensorDescriptor(desc);
   }
 }
-}
+} // namespace detail
 
 template <typename T>
 RecurrentBaseOp<T>::~RecurrentBaseOp() {
@@ -314,10 +314,10 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
       Output(GRAD_WEIGHT)->template mutable_data<T>(),
       &context_);
 
-#if CUDNN_VERSION_MIN(6,0,0)
-  auto * reserve = Output(RNN_SCRATCH_OUT)->template mutable_data<T>();
+#if CUDNN_VERSION_MIN(6, 0, 0)
+  auto* reserve = Output(RNN_SCRATCH_OUT)->template mutable_data<T>();
 #else
-  const auto * reserve = Output(RNN_SCRATCH_OUT)->template data<T>();
+  const auto* reserve = Output(RNN_SCRATCH_OUT)->template data<T>();
 #endif
   auto InputData = [this](int i) { return this->Input(i).template data<T>(); };
   auto OutputData = [this](int i) {
@@ -586,4 +586,4 @@ struct GetRecurrentGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Recurrent, GetRecurrentGradient);
-}
+} // namespace caffe2

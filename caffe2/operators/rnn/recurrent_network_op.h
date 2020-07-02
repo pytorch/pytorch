@@ -150,11 +150,11 @@ void initializeRecurrentInput(
     // Usually, the initial state is the same for all inputs in the batch.
     // So the op conveniently accepts 1-D input and copies it batchSize times.
     repeatCopy<T, Context>(
-          batchSize,
-          stateSize,
-          input.template data<T>(),
-          state->template mutable_data<T>(),
-          context);
+        batchSize,
+        stateSize,
+        input.template data<T>(),
+        state->template mutable_data<T>(),
+        context);
   }
 }
 
@@ -262,11 +262,11 @@ class RecurrentNetworkOp final : public Operator<Context> {
   }
 
   /**
-    * Some blobs can be marked as to be recomputed on backward pass.
-    * For those blobs, we do not want to allocate on each step workspace,
-    * but we instead store that blob in the shared workspace so all
-    * steps can use the same buffer on forward pass.
-    */
+   * Some blobs can be marked as to be recomputed on backward pass.
+   * For those blobs, we do not want to allocate on each step workspace,
+   * but we instead store that blob in the shared workspace so all
+   * steps can use the same buffer on forward pass.
+   */
   void initializeBlobsToRecomputeOnBackward(Workspace* sharedBlobsWs) {
     std::vector<std::string> v;
     const auto& blobs = this->template GetRepeatedArgument<std::string>(
@@ -289,7 +289,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     return links;
   }
 
-  template<typename T>
+  template <typename T>
   bool DoRunWithType() {
     const auto seqLen = Input(0).dim32(0);
     const auto batchSize = Input(0).dim32(1);
@@ -332,7 +332,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
     num_workspaces_on_fwd_only = this->template GetSingleArgument<int>(
         "num_workspaces", num_workspaces_on_fwd_only);
 
-    if (!has_backward_pass && stepWorkspaces.size() < num_workspaces_on_fwd_only) {
+    if (!has_backward_pass &&
+        stepWorkspaces.size() < num_workspaces_on_fwd_only) {
       // Use alternating stepWorkspaces when forward_only=True.
       // Note that the step workspaces can be shared by other ops, thus
       // we cannot shrink it to 2 if there are more than 2 step workspaces.
@@ -341,8 +342,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
     for (auto t = 0; t < seqLen; ++t) {
       auto& currentStepWorkspace =
-          (has_backward_pass ? stepWorkspaces[t] :
-              stepWorkspaces[t % num_workspaces_on_fwd_only]);
+          (has_backward_pass ? stepWorkspaces[t]
+                             : stepWorkspaces[t % num_workspaces_on_fwd_only]);
       if (!currentStepWorkspace) {
         currentStepWorkspace = std::make_shared<Workspace>(sharedBlobsWs.get());
       }
@@ -418,7 +419,9 @@ template <class Context>
 class RecurrentNetworkGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  explicit RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit RecurrentNetworkGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
         enable_rnn_executor_(this->template GetSingleArgument<bool>(
@@ -576,15 +579,16 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
   void InitializeExecutor(const OperatorDef& operator_def) {
     VLOG(1) << "Use RecurrentNetworkExecutor for backward";
-    auto recurrent_map = detail::GetRecurrentMapping(links_, true /* backward */);
+    auto recurrent_map =
+        detail::GetRecurrentMapping(links_, true /* backward */);
     rnnExecutor_ = createRNNExecutor<Context>(
-      stepNetDef_, recurrent_map, timestep_, ArgumentHelper(operator_def));
+        stepNetDef_, recurrent_map, timestep_, ArgumentHelper(operator_def));
   }
 
   void AddGradientInputAccumulationOps(const OperatorDef& operator_def) {
     /**
-      * Add ops to the step net to accumulate input gradients.
-      */
+     * Add ops to the step net to accumulate input gradients.
+     */
     std::vector<OperatorDef> ops;
     for (const auto& rg : recurrentGradients_) {
       if (rg.externalGrad.empty()) {
@@ -645,9 +649,9 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       const std::shared_ptr<Workspace>& step0Ws,
       Workspace* sharedBlobsWs) {
     /**
-      * Create all output blobs created by ops of the backward step net, they
-      * can be shared.
-      */
+     * Create all output blobs created by ops of the backward step net, they
+     * can be shared.
+     */
     for (auto& op : stepNetDef_.op()) {
       for (const string& outp : op.output()) {
         if (!step0Ws->HasBlob(outp)) {
@@ -657,7 +661,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     }
   }
 
-  template<typename T>
+  template <typename T>
   bool DoRunWithType() {
     const auto seqLen = Input(gradInputs_.size()).dim32(0);
     VLOG(1) << "seqLen: " << seqLen;
@@ -812,7 +816,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
         math::Set<T, Context>(
             recurrentStateSize,
-            convert::To<float,T>(0.0),
+            convert::To<float, T>(0.0),
             output_data,
             &context_);
 
@@ -859,7 +863,7 @@ class AccumulateInputGradientOp : public Operator<Context> {
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template<typename T>
+  template <typename T>
   bool DoRunWithType() {
     const auto& t0 = this->template Input<Tensor>(0, CPU);
     const auto t = t0.template data<int32_t>()[0];

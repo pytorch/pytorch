@@ -31,12 +31,15 @@ __global__ void LSTMUnitKernel(
     const int d = index % dim;
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
     if (!valid) {
-      H[index] = convert::To<MATH, T>(convert::To<T, MATH>(H_prev[index]) * !drop_states);
-      C[index] = convert::To<MATH, T>(convert::To<T, MATH>(C_prev[index]) * !drop_states);
+      H[index] = convert::To<MATH, T>(
+          convert::To<T, MATH>(H_prev[index]) * !drop_states);
+      C[index] = convert::To<MATH, T>(
+          convert::To<T, MATH>(C_prev[index]) * !drop_states);
     } else {
       const T* X_offset = X + 4 * dim * n;
       const MATH i = cuda_sigmoid(convert::To<T, MATH>(X_offset[d]));
-      const MATH f = cuda_sigmoid(convert::To<T, MATH>(X_offset[1 * dim + d]) + forget_bias);
+      const MATH f = cuda_sigmoid(
+          convert::To<T, MATH>(X_offset[1 * dim + d]) + forget_bias);
       const MATH o = cuda_sigmoid(convert::To<T, MATH>(X_offset[2 * dim + d]));
       const MATH g = tanh(convert::To<T, MATH>(X_offset[3 * dim + d]));
       const MATH c_prev = convert::To<T, MATH>(C_prev[index]);
@@ -78,31 +81,31 @@ __global__ void LSTMUnitGradientKernel(
     T* o_diff = X_diff_offset + 2 * dim + d;
     T* g_diff = X_diff_offset + 3 * dim + d;
     if (!valid) {
-      *h_prev_diff = convert::To<MATH, T>(convert::To<T, MATH>(H_diff[index]) *
-                                          !drop_states);
-      *c_prev_diff = convert::To<MATH, T>(convert::To<T, MATH>(C_diff[index]) *
-                                          !drop_states);
+      *h_prev_diff = convert::To<MATH, T>(
+          convert::To<T, MATH>(H_diff[index]) * !drop_states);
+      *c_prev_diff = convert::To<MATH, T>(
+          convert::To<T, MATH>(C_diff[index]) * !drop_states);
       *i_diff = convert::To<MATH, T>(0);
       *f_diff = convert::To<MATH, T>(0);
       *o_diff = convert::To<MATH, T>(0);
       *g_diff = convert::To<MATH, T>(0);
     } else {
       const MATH i = cuda_sigmoid(convert::To<T, MATH>(X_offset[d]));
-      const MATH f = cuda_sigmoid(convert::To<T, MATH>(X_offset[1 * dim + d]) + forget_bias);
+      const MATH f = cuda_sigmoid(
+          convert::To<T, MATH>(X_offset[1 * dim + d]) + forget_bias);
       const MATH o = cuda_sigmoid(convert::To<T, MATH>(X_offset[2 * dim + d]));
       const MATH g = tanh(convert::To<T, MATH>(X_offset[3 * dim + d]));
       const MATH c_prev = convert::To<T, MATH>(C_prev[index]);
       const MATH c = convert::To<T, MATH>(C[index]);
       const MATH tanh_c = tanh(c);
-      const MATH c_term_diff =
-          convert::To<T, MATH>(C_diff[index]) +
+      const MATH c_term_diff = convert::To<T, MATH>(C_diff[index]) +
           convert::To<T, MATH>(H_diff[index]) * o * (1 - tanh_c * tanh_c);
       *c_prev_diff = convert::To<MATH, T>(c_term_diff * f);
       *h_prev_diff = convert::To<MATH, T>(0);
       *i_diff = convert::To<MATH, T>(c_term_diff * g * i * (1 - i));
       *f_diff = convert::To<MATH, T>(c_term_diff * c_prev * f * (1 - f));
       *o_diff = convert::To<MATH, T>(
-                  convert::To<T, MATH>(H_diff[index]) * tanh_c * o * (1 - o));
+          convert::To<T, MATH>(H_diff[index]) * tanh_c * o * (1 - o));
       *g_diff = convert::To<MATH, T>(c_term_diff * i * (1 - g * g));
     }
   }
@@ -122,22 +125,22 @@ void LSTMUnit<float, CUDAContext>(
     float* H,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitKernel<float, float><<<
-      CAFFE_GET_BLOCKS(N * D),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(
-      N * D,
-      D,
-      t,
-      H_prev,
-      C_prev,
-      X,
-      seqLengths,
-      drop_states,
-      C,
-      H,
-      forget_bias);
+  LSTMUnitKernel<float, float>
+      <<<CAFFE_GET_BLOCKS(N * D),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(
+          N * D,
+          D,
+          t,
+          H_prev,
+          C_prev,
+          X,
+          seqLengths,
+          drop_states,
+          C,
+          H,
+          forget_bias);
 }
 
 template <>
@@ -154,22 +157,22 @@ void LSTMUnit<at::Half, CUDAContext>(
     at::Half* H,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitKernel<at::Half, float><<<
-      CAFFE_GET_BLOCKS(N * D),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(
-      N * D,
-      D,
-      t,
-      H_prev,
-      C_prev,
-      X,
-      seqLengths,
-      drop_states,
-      C,
-      H,
-      forget_bias);
+  LSTMUnitKernel<at::Half, float>
+      <<<CAFFE_GET_BLOCKS(N * D),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(
+          N * D,
+          D,
+          t,
+          H_prev,
+          C_prev,
+          X,
+          seqLengths,
+          drop_states,
+          C,
+          H,
+          forget_bias);
 }
 
 template <>
@@ -190,26 +193,26 @@ void LSTMUnitGradient<float, CUDAContext>(
     float* X_diff,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitGradientKernel<float, float><<<
-      CAFFE_GET_BLOCKS(N * D),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(
-      N * D,
-      D,
-      t,
-      C_prev,
-      X,
-      C,
-      H,
-      seqLengths,
-      C_diff,
-      H_diff,
-      drop_states,
-      H_prev_diff,
-      C_prev_diff,
-      X_diff,
-      forget_bias);
+  LSTMUnitGradientKernel<float, float>
+      <<<CAFFE_GET_BLOCKS(N * D),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(
+          N * D,
+          D,
+          t,
+          C_prev,
+          X,
+          C,
+          H,
+          seqLengths,
+          C_diff,
+          H_diff,
+          drop_states,
+          H_prev_diff,
+          C_prev_diff,
+          X_diff,
+          forget_bias);
 }
 
 template <>
@@ -230,28 +233,28 @@ void LSTMUnitGradient<at::Half, CUDAContext>(
     at::Half* X_diff,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitGradientKernel<at::Half, float><<<
-      CAFFE_GET_BLOCKS(N * D),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(
-      N * D,
-      D,
-      t,
-      C_prev,
-      X,
-      C,
-      H,
-      seqLengths,
-      C_diff,
-      H_diff,
-      drop_states,
-      H_prev_diff,
-      C_prev_diff,
-      X_diff,
-      forget_bias);
+  LSTMUnitGradientKernel<at::Half, float>
+      <<<CAFFE_GET_BLOCKS(N * D),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(
+          N * D,
+          D,
+          t,
+          C_prev,
+          X,
+          C,
+          H,
+          seqLengths,
+          C_diff,
+          H_diff,
+          drop_states,
+          H_prev_diff,
+          C_prev_diff,
+          X_diff,
+          forget_bias);
 }
-}
+} // namespace detail
 
 template <>
 bool LSTMUnitOp<CUDAContext>::RunOnDevice() {
@@ -264,7 +267,5 @@ bool LSTMUnitGradientOp<CUDAContext>::RunOnDevice() {
 }
 
 REGISTER_CUDA_OPERATOR(LSTMUnit, LSTMUnitOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(
-    LSTMUnitGradient,
-    LSTMUnitGradientOp<CUDAContext>);
-}
+REGISTER_CUDA_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<CUDAContext>);
+} // namespace caffe2

@@ -69,7 +69,8 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
   }
 
-  Tensor* OutputTensorCPU_(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+  Tensor*
+  OutputTensorCPU_(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     auto* t = &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
     ReinitializeTensor(t, dims, options.device(CPU));
     return t;

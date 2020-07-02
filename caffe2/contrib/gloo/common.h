@@ -14,12 +14,12 @@ namespace gloo {
 CAFFE2_API void signalFailure(Blob* status_blob, std::exception& exception);
 
 struct createDeviceAttr {
-    // "tcp" or "ibverbs"
-    std::string transport;
+  // "tcp" or "ibverbs"
+  std::string transport;
 
-    // E.g. "eth0" (tcp), or "mlx5_0" (ibverbs).
-    // This may be empty to make Gloo figure it out.
-    std::string interface;
+  // E.g. "eth0" (tcp), or "mlx5_0" (ibverbs).
+  // This may be empty to make Gloo figure it out.
+  std::string interface;
 };
 
 CAFFE2_API std::shared_ptr<::gloo::transport::Device> createDevice(

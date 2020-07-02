@@ -42,10 +42,10 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
-  Eigen::array<int64_t, 4> kernel_shuffles
-      { {int64_t(2), int64_t(3), int64_t(1), int64_t(0)} };
-  Eigen::array<int64_t, 4> input_shuffles
-      { {int64_t(0), int64_t(2), int64_t(3), int64_t(1)} };
+  Eigen::array<int64_t, 4> kernel_shuffles{
+      {int64_t(2), int64_t(3), int64_t(1), int64_t(0)}};
+  Eigen::array<int64_t, 4> input_shuffles{
+      {int64_t(0), int64_t(2), int64_t(3), int64_t(1)}};
 
   Eigen::Tensor<T, 4, Eigen::RowMajor> filter_tensor =
       Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
@@ -115,8 +115,8 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   }
 
   // Do a last transpose.
-  Eigen::array<int64_t, 4> output_shuffles
-      { {int64_t(0), int64_t(3), int64_t(1), int64_t(2) } };
+  Eigen::array<int64_t, 4> output_shuffles{
+      {int64_t(0), int64_t(3), int64_t(1), int64_t(2)}};
 
   Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
       Y->template mutable_data<T>(), N, M, Y->dim32(2), Y->dim32(3)) =

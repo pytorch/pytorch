@@ -788,25 +788,28 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
     const auto& input_size = shapes.at(node.input(0));
     const auto& output_size = shapes.at(node.output(0));
     CAFFE_ENFORCE_EQ(output_size.dims().size(), 4);
-    if (!global &&  // global pool does not care about legacy pad
-        legacy_pad_attr.i() != static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
+    if (!global && // global pool does not care about legacy pad
+        legacy_pad_attr.i() !=
+            static_cast<int64_t>(caffe2::LegacyPadding::NOTSET)) {
       if (legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::VALID)) {
         CAFFE_ENFORCE(!attrs.count("pads"));
         attrs.emplace("auto_pad", MakeAttribute("auto_pad", "VALID"));
-      } else if (legacy_pad_attr.i() ==
+      } else if (
+          legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::SAME)) {
         CAFFE_ENFORCE(!attrs.count("pads"));
         // default behavior in Caffe2 is SAME_UPPER
         // https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
         attrs.emplace("auto_pad", MakeAttribute("auto_pad", "SAME_UPPER"));
-      } else if (legacy_pad_attr.i() ==
+      } else if (
+          legacy_pad_attr.i() ==
           static_cast<int64_t>(caffe2::LegacyPadding::CAFFE_LEGACY_POOLING)) {
-        // The problem here is that, Pool op in Caffe may add an additional pixel,
-        // if the last part is smaller than stride. So we use the explicit padding
-        // to replace legacy_pad. pad[end] = output_size[start + 2] *
-        // stride[start] - pad[start] - 1 + kernel[start] - input[start + 2] end =
-        // start + len(pad) / 2
+        // The problem here is that, Pool op in Caffe may add an additional
+        // pixel, if the last part is smaller than stride. So we use the
+        // explicit padding to replace legacy_pad. pad[end] = output_size[start
+        // + 2] * stride[start] - pad[start] - 1 + kernel[start] - input[start +
+        // 2] end = start + len(pad) / 2
         LOG(WARNING) << "Converting legacy padding to explicit padding.";
         auto* pads_attr = attrs.at("pads").mutable_ints();
         auto& strides_attr = attrs.at("strides").ints();
@@ -818,7 +821,8 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
           pads_attr->Set(i + 2, tmp_pad);
         }
       } else {
-        LOG(ERROR) << "Don't know how to handle the legacy_pad:" << legacy_pad_attr.i();
+        LOG(ERROR) << "Don't know how to handle the legacy_pad:"
+                   << legacy_pad_attr.i();
         CAFFE_THROW("Failed to handle legacy padding in pool operator!");
       }
     }
@@ -946,16 +950,16 @@ ConvertedResult OnnxExporter::CreateMergeDimNodes(
   }
 
   const auto reshaped = dummy_->NewDummyName();
-  nodes.emplace_back(MakeNode("Reshape",
-              { x, const_tensors.back().name() },
-              { reshaped }));
+  nodes.emplace_back(
+      MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped}));
 
-  nodes.emplace_back(MakeNode("Squeeze",
-              { reshaped },
-              { y },
-              std::vector<AttributeProto>{
-                  MakeAttribute("axes", std::vector<int64_t>{ 0 }),
-              }));
+  nodes.emplace_back(MakeNode(
+      "Squeeze",
+      {reshaped},
+      {y},
+      std::vector<AttributeProto>{
+          MakeAttribute("axes", std::vector<int64_t>{0}),
+      }));
 
   return result;
 }
@@ -1011,67 +1015,68 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
 ConvertedResult OnnxExporter::CreateReduceMeanNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-    CAFFE_ENFORCE_GE(def.input_size(), 1);
-    CAFFE_ENFORCE_LE(def.input_size(), 2);
-    CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
-    CAFFE_ENFORCE_GE(def.output_size(), 1);
-    const auto& x = def.input(0);
-    const auto& y = def.output(0);
-    const auto& dims = shapes.at(x).dims();
+  CAFFE_ENFORCE_GE(def.input_size(), 1);
+  CAFFE_ENFORCE_LE(def.input_size(), 2);
+  CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
+  CAFFE_ENFORCE_GE(def.output_size(), 1);
+  const auto& x = def.input(0);
+  const auto& y = def.output(0);
+  const auto& dims = shapes.at(x).dims();
 
-    ConvertedResult result;
-    auto& nodes = result.first;
-    std::unordered_map<std::string, const caffe2::Argument*> args;
-    for (const auto& a : def.arg()) {
-        args.emplace(a.name(), &a);
-    }
+  ConvertedResult result;
+  auto& nodes = result.first;
+  std::unordered_map<std::string, const caffe2::Argument*> args;
+  for (const auto& a : def.arg()) {
+    args.emplace(a.name(), &a);
+  }
 
-    std::vector<int64_t> axes;
-    int64_t keepdims = 1;
+  std::vector<int64_t> axes;
+  int64_t keepdims = 1;
 
-    if (def.type() == "ReduceMean") {
-        // axes
-        auto it = args.find("axes");
-        if (it == args.end()) {
-            axes.resize(dims.size());
-            std::iota(axes.begin(), axes.end(), 0);
-        } else {
-            axes.assign(it->second->ints().begin(), it->second->ints().end());
-        }
-
-        // keepdims
-        it = args.find("keepdims");
-        if (it != args.end()) {
-            keepdims = it->second->i();
-        }
+  if (def.type() == "ReduceMean") {
+    // axes
+    auto it = args.find("axes");
+    if (it == args.end()) {
+      axes.resize(dims.size());
+      std::iota(axes.begin(), axes.end(), 0);
     } else {
-        // num_reduce_dim
-        auto it = args.find("num_reduce_dim");
-        const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
-        CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
-        axes.resize(num_reduce_dim);
-
-        int64_t start_dim = 0;
-        if (def.type() == "ReduceFrontMean") {
-            start_dim = 0;
-        } else if (def.type() == "ReduceBackMean") {
-            start_dim = dims.size() - axes.size();
-        }
-        std::iota(axes.begin(), axes.end(), start_dim);
-
-        keepdims = 0;
+      axes.assign(it->second->ints().begin(), it->second->ints().end());
     }
 
-    nodes.emplace_back(MakeNode("ReduceMean",
-                { x },
-                { y },
-                {
-                    MakeAttribute("axes", axes),
-                    MakeAttribute("keepdims", keepdims),
-                },
-                def.name()));
+    // keepdims
+    it = args.find("keepdims");
+    if (it != args.end()) {
+      keepdims = it->second->i();
+    }
+  } else {
+    // num_reduce_dim
+    auto it = args.find("num_reduce_dim");
+    const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
+    CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
+    axes.resize(num_reduce_dim);
 
-    return result;
+    int64_t start_dim = 0;
+    if (def.type() == "ReduceFrontMean") {
+      start_dim = 0;
+    } else if (def.type() == "ReduceBackMean") {
+      start_dim = dims.size() - axes.size();
+    }
+    std::iota(axes.begin(), axes.end(), start_dim);
+
+    keepdims = 0;
+  }
+
+  nodes.emplace_back(MakeNode(
+      "ReduceMean",
+      {x},
+      {y},
+      {
+          MakeAttribute("axes", axes),
+          MakeAttribute("keepdims", keepdims),
+      },
+      def.name()));
+
+  return result;
 }
 
 ConvertedResult OnnxExporter::CreateUpsampleNodes(
@@ -1244,11 +1249,10 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
 
     gemm_x_input = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
-                std::vector<int64_t>{ -1, inner }));
-    nodes.emplace_back(MakeNode("Reshape",
-                { x, const_tensors.back().name() },
-                { gemm_x_input }));
+    const_tensors.emplace_back(
+        CreateOnnxShapeTensor(dummy_, std::vector<int64_t>{-1, inner}));
+    nodes.emplace_back(
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {gemm_x_input}));
   }
 
   it = args.find("axis_w");
@@ -1261,20 +1265,20 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
     auto reshaped_w = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
-                std::vector<int64_t>{ outer, inner }));
-    nodes.emplace_back(MakeNode("Reshape",
-                { w, const_tensors.back().name() },
-                { reshaped_w }));
+    const_tensors.emplace_back(
+        CreateOnnxShapeTensor(dummy_, std::vector<int64_t>{outer, inner}));
+    nodes.emplace_back(
+        MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
     w = reshaped_w;
   }
 
   auto gemm_y_output = axis > 1 ? dummy_->NewDummyName() : y;
-  nodes.emplace_back(MakeNode("Gemm",
-              { gemm_x_input, w, b },
-              { gemm_y_output },
-              { MakeAttribute("transB", 1L) },
-              def.name()));
+  nodes.emplace_back(MakeNode(
+      "Gemm",
+      {gemm_x_input, w, b},
+      {gemm_y_output},
+      {MakeAttribute("transB", 1L)},
+      def.name()));
 
   // capture the outer shape if needed.
   if (axis > 1) {
@@ -1282,26 +1286,26 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     nodes.emplace_back(MakeNode("Shape", {x}, {x_shape}));
 
     const auto x_shape_outer = dummy_->NewDummyName();
-    nodes.emplace_back(MakeNode("Slice",
-                { x_shape },
-                { x_shape_outer },
-                std::vector<AttributeProto>{
-                    MakeAttribute("starts", std::vector<int64_t>{ 0 }),
-                    MakeAttribute("ends", std::vector<int64_t>{ axis }),
-                }));
+    nodes.emplace_back(MakeNode(
+        "Slice",
+        {x_shape},
+        {x_shape_outer},
+        std::vector<AttributeProto>{
+            MakeAttribute("starts", std::vector<int64_t>{0}),
+            MakeAttribute("ends", std::vector<int64_t>{axis}),
+        }));
 
     const auto y_shape = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, { -1 }));
-    nodes.emplace_back(MakeNode("Concat",
-                { x_shape_outer, const_tensors.back().name() },
-                { y_shape },
-                std::vector<AttributeProto>{
-                    MakeAttribute("axis", static_cast<int64_t>(0)),
-                }));
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, {-1}));
+    nodes.emplace_back(MakeNode(
+        "Concat",
+        {x_shape_outer, const_tensors.back().name()},
+        {y_shape},
+        std::vector<AttributeProto>{
+            MakeAttribute("axis", static_cast<int64_t>(0)),
+        }));
 
-    nodes.emplace_back(MakeNode("Reshape",
-                { gemm_y_output, y_shape },
-                { y }));
+    nodes.emplace_back(MakeNode("Reshape", {gemm_y_output, y_shape}, {y}));
   }
 
   return result;
@@ -1318,7 +1322,7 @@ void OnnxExporter::InitOpToTensorProto(
 
   const Argument* values = nullptr;
   const Argument* shape = nullptr;
-  for (const auto& arg: op.arg()) {
+  for (const auto& arg : op.arg()) {
     if (arg.name() == "values") {
       values = &arg;
     } else if (arg.name() == "shape") {
@@ -1330,7 +1334,7 @@ void OnnxExporter::InitOpToTensorProto(
   CAFFE_ENFORCE(shape);
 
   // Set dims
-  for (const auto i: shape->ints()) {
+  for (const auto i : shape->ints()) {
     tensor->add_dims(i);
   }
 

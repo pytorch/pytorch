@@ -32,8 +32,8 @@ class NCCLContext {
       CUDA_ENFORCE(cudaStreamCreateWithPriority(
           &streams_[i], cudaStreamNonBlocking, hi_pri));
 #else
-      CUDA_ENFORCE(cudaStreamCreateWithFlags(
-          &streams_[i], cudaStreamNonBlocking));
+      CUDA_ENFORCE(
+          cudaStreamCreateWithFlags(&streams_[i], cudaStreamNonBlocking));
 #endif // __HIP_PLATFORM_HCC__
       CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));

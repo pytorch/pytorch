@@ -23,11 +23,14 @@ MPSCNNContext& getMPSCNNContext() {
   std::call_once(once, []() {
     NSError* compileError = nil;
     ctx.device = MTLCreateSystemDefaultDevice();
-    ctx.library = [ctx.device newLibraryWithSource:[NSString stringWithUTF8String:MPSCNN_KERNELS]
-                                           options:nil
-                                             error:&compileError];
+    ctx.library = [ctx.device
+        newLibraryWithSource:[NSString stringWithUTF8String:MPSCNN_KERNELS]
+                     options:nil
+                       error:&compileError];
     if (compileError != nil || ctx.library == nil) {
-      CAFFE_THROW("Failed to load kernels: ", [[compileError localizedDescription] UTF8String]);
+      CAFFE_THROW(
+          "Failed to load kernels: ",
+          [[compileError localizedDescription] UTF8String]);
     }
     ctx.commandQueue = [ctx.device newCommandQueue];
   });
@@ -59,7 +62,8 @@ id<MTLComputePipelineState> MPSCNNContext::getPipelineState(NSString* kernel) {
 }
 
 id<MTLComputePipelineState> MPSCNNContext::getSpecializedPipelineState(
-    NSString* kernel, const std::vector<ushort>& constants) {
+    NSString* kernel,
+    const std::vector<ushort>& constants) {
   std::string kernelStr = std::string([kernel UTF8String]);
   for (auto i = 0; i < constants.size(); ++i) {
     kernelStr += "_" + std::to_string(constants[i]);
@@ -71,27 +75,32 @@ id<MTLComputePipelineState> MPSCNNContext::getSpecializedPipelineState(
   }
   MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
   for (auto i = 0; i < constants.size(); ++i) {
-    [constantValues setConstantValue:&constants[i] type:MTLDataTypeUShort atIndex:i];
+    [constantValues setConstantValue:&constants[i]
+                                type:MTLDataTypeUShort
+                             atIndex:i];
   }
   NSError* errors;
 
   LOG(INFO) << "Miss in pipeline cache for: " << kernelStr;
-  id<MTLFunction> func =
-      [library newFunctionWithName:kernel constantValues:constantValues error:&errors];
+  id<MTLFunction> func = [library newFunctionWithName:kernel
+                                       constantValues:constantValues
+                                                error:&errors];
   if (!func) {
-    CAFFE_THROW("Couldn't get function: ",
-                kernelStr,
-                " error: ",
-                [[errors localizedDescription] UTF8String]);
+    CAFFE_THROW(
+        "Couldn't get function: ",
+        kernelStr,
+        " error: ",
+        [[errors localizedDescription] UTF8String]);
     return nullptr;
   }
   id<MTLComputePipelineState> state =
       [device newComputePipelineStateWithFunction:func error:&errors];
   if (!state) {
-    CAFFE_THROW("Couldn't get function: ",
-                kernelStr,
-                " error: ",
-                [[errors localizedDescription] UTF8String]);
+    CAFFE_THROW(
+        "Couldn't get function: ",
+        kernelStr,
+        " error: ",
+        [[errors localizedDescription] UTF8String]);
     return nullptr;
   }
   pipelineCache_[kernelStr] = state;

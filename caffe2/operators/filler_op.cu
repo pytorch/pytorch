@@ -22,7 +22,7 @@ __global__ void FillDiagonalKernel(
     data[index * step_size] = value;
   }
 }
-}
+} // namespace
 
 template <>
 bool RangeFillOp<float, CUDAContext>::Fill(Tensor* output) {

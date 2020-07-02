@@ -77,9 +77,17 @@ Y (avg_op): 4.111111
 </details>
 
     )DOC")
-    .Arg("average", "(*bool*): set to True to compute the average of the elements rather than the sum")
-    .Input(0, "X", "(*Tensor`<float>`*): blob pointing to an instance of a counter")
-    .Output(0, "sum", "(*Tensor`<float>`*): Scalar tensor containing the sum (or average)");
+    .Arg(
+        "average",
+        "(*bool*): set to True to compute the average of the elements rather than the sum")
+    .Input(
+        0,
+        "X",
+        "(*Tensor`<float>`*): blob pointing to an instance of a counter")
+    .Output(
+        0,
+        "sum",
+        "(*Tensor`<float>`*): Scalar tensor containing the sum (or average)");
 
 OPERATOR_SCHEMA(SumElementsInt)
     .NumInputs(1)

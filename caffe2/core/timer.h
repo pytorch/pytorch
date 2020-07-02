@@ -17,11 +17,15 @@ class Timer {
  public:
   typedef std::chrono::high_resolution_clock clock;
   typedef std::chrono::nanoseconds ns;
-  Timer() { Start(); }
+  Timer() {
+    Start();
+  }
   /**
    * @brief Starts a timer.
    */
-  inline void Start() { start_time_ = clock::now(); }
+  inline void Start() {
+    start_time_ = clock::now();
+  }
   inline float NanoSeconds() {
     return static_cast<float>(
         std::chrono::duration_cast<ns>(clock::now() - start_time_).count());
@@ -29,20 +33,26 @@ class Timer {
   /**
    * @brief Returns the elapsed time in milliseconds.
    */
-  inline float MilliSeconds() { return NanoSeconds() / 1000000.f; }
+  inline float MilliSeconds() {
+    return NanoSeconds() / 1000000.f;
+  }
   /**
    * @brief Returns the elapsed time in microseconds.
    */
-  inline float MicroSeconds() { return NanoSeconds() / 1000.f; }
+  inline float MicroSeconds() {
+    return NanoSeconds() / 1000.f;
+  }
   /**
    * @brief Returns the elapsed time in seconds.
    */
-  inline float Seconds() { return NanoSeconds() / 1000000000.f; }
+  inline float Seconds() {
+    return NanoSeconds() / 1000000000.f;
+  }
 
  protected:
   std::chrono::time_point<clock> start_time_;
   C10_DISABLE_COPY_AND_ASSIGN(Timer);
 };
-}
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_TIMER_H_
+#endif // CAFFE2_CORE_TIMER_H_

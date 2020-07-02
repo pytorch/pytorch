@@ -19,7 +19,7 @@ ctcComputeInfo workspaceInfo<CPUContext>(const CPUContext& /*context*/) {
   result.num_threads = 0;
   return result;
 }
-}
+} // namespace detail
 
 REGISTER_CPU_OPERATOR(CTC, CTCOp<float, CPUContext>);
 OPERATOR_SCHEMA(CTC).NumInputs(3, 4).NumOutputs(2, 3);
@@ -37,6 +37,6 @@ class GetCTCGradient : public GradientMakerBase {
         "Copy", "", vector<string>{O(0)}, vector<string>{GI(0)});
   }
 };
-}
+} // namespace
 REGISTER_GRADIENT(CTC, GetCTCGradient);
-}
+} // namespace caffe2

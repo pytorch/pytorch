@@ -33,7 +33,8 @@ class CAFFE2_API OptimizationPass {
 
 class CAFFE2_API WorkspaceOptimizationPass : public OptimizationPass {
  public:
-  WorkspaceOptimizationPass(NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
+  WorkspaceOptimizationPass(NNModule* nn, Workspace* ws)
+      : OptimizationPass(nn), ws_(ws) {}
   virtual ~WorkspaceOptimizationPass() {}
 
  protected:

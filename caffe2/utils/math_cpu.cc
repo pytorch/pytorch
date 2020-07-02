@@ -110,7 +110,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -127,7 +127,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:
@@ -177,7 +177,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -201,7 +201,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:

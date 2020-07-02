@@ -1,8 +1,8 @@
 #ifndef CAFFE2_UTILS_SIMPLE_QUEUE_H_
 #define CAFFE2_UTILS_SIMPLE_QUEUE_H_
 
-#include <condition_variable>  // NOLINT
-#include <mutex>  // NOLINT
+#include <condition_variable> // NOLINT
+#include <mutex> // NOLINT
 #include <queue>
 
 #include "caffe2/core/logging.h"
@@ -29,8 +29,10 @@ class SimpleQueue {
   // true.
   bool Pop(T* value) {
     std::unique_lock<std::mutex> mutex_lock(mutex_);
-    while (queue_.size() == 0 && !no_more_jobs_) cv_.wait(mutex_lock);
-    if (queue_.size() == 0 && no_more_jobs_) return false;
+    while (queue_.size() == 0 && !no_more_jobs_)
+      cv_.wait(mutex_lock);
+    if (queue_.size() == 0 && no_more_jobs_)
+      return false;
     *value = queue_.front();
     queue_.pop();
     return true;
@@ -74,6 +76,6 @@ class SimpleQueue {
   SimpleQueue(const SimpleQueue& /*src*/) {}
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_UTILS_SIMPLE_QUEUE_H_
+#endif // CAFFE2_UTILS_SIMPLE_QUEUE_H_

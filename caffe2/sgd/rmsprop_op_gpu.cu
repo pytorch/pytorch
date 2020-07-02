@@ -1,6 +1,6 @@
-#include "caffe2/sgd/rmsprop_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/sgd/rmsprop_op.h"
 
 namespace caffe2 {
 
@@ -20,8 +20,7 @@ __global__ void RmsPropUpdate(
     // Update new mean square estimate
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
     // Update momentum estimate
-    nmom[i] =
-        mom[i] * momentum + lr[0] * g[i] / sqrtf(epsilon + nms[i]);
+    nmom[i] = mom[i] * momentum + lr[0] * g[i] / sqrtf(epsilon + nms[i]);
     // New gradient is the momentum
     ng[i] = nmom[i];
   }
@@ -41,11 +40,14 @@ void rmsprop_update<CUDAContext>(
     float epsilon,
     const float* lr,
     CUDAContext* context) {
-  RmsPropUpdate<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+  RmsPropUpdate<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(
       N, g, ms, mom, ng, nms, nmom, decay, momentum, epsilon, lr);
 }
 
-
 REGISTER_CUDA_OPERATOR(RmsProp, RmsPropOp<float, CUDAContext>);
 
-}
+} // namespace caffe2

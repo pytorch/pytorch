@@ -43,33 +43,37 @@ std::pair<void*, MemoryDeleter> OpenCLContext::New(size_t nbytes) {
   auto& ctx = GetSingleton();
   cl_int err = 0;
 
-  cl::Buffer* buffer = new cl::Buffer(ctx.context, CL_MEM_READ_WRITE,
-      nbytes, nullptr, &err);
+  cl::Buffer* buffer =
+      new cl::Buffer(ctx.context, CL_MEM_READ_WRITE, nbytes, nullptr, &err);
   OPENCL_CHECK(err);
   // TODO(bwasti): use host ptr if possible to make CopyBytes free
-  return std::make_pair((void *)buffer, OpenCLContext::Delete);
+  return std::make_pair((void*)buffer, OpenCLContext::Delete);
 }
 
-void OpenCLContext::Delete(void *ptr) {
-  delete (cl::Buffer *)ptr;
+void OpenCLContext::Delete(void* ptr) {
+  delete (cl::Buffer*)ptr;
 }
 
 struct OpenCLContextSingleton& OpenCLContext::GetSingleton() {
   return OpenCLContextSingleton::getInstance();
 }
 
-cl::Kernel OpenCLContext::BuildKernel(const char* src, std::string additional_options, const char* fn_name) {
+cl::Kernel OpenCLContext::BuildKernel(
+    const char* src,
+    std::string additional_options,
+    const char* fn_name) {
   auto& ctx = GetSingleton();
 
-  cl::Program::Sources source(1,
-      std::make_pair(src, strlen(src)));
+  cl::Program::Sources source(1, std::make_pair(src, strlen(src)));
 
   cl::Program p = cl::Program(ctx.context, source);
   cl_int err = CL_SUCCESS;
-  std::string options = "-cl-std=CL1.1 -cl-fast-relaxed-math -cl-single-precision-constant";
+  std::string options =
+      "-cl-std=CL1.1 -cl-fast-relaxed-math -cl-single-precision-constant";
   options += additional_options;
   err = p.build(ctx.devices, options.c_str());
-  cl_build_status build_status = p.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(ctx.device);
+  cl_build_status build_status =
+      p.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(ctx.device);
   if (err != CL_SUCCESS || build_status != CL_BUILD_SUCCESS) {
     auto str = p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(ctx.device);
     LOG(ERROR) << str;
@@ -81,7 +85,8 @@ cl::Kernel OpenCLContext::BuildKernel(const char* src, std::string additional_op
   return kernel;
 }
 
-std::string OpenCLContext::BuildArgumentList(std::vector<std::pair<std::string, std::string>> args) {
+std::string OpenCLContext::BuildArgumentList(
+    std::vector<std::pair<std::string, std::string>> args) {
   std::string out = " "; // There may be args before this
   for (auto arg : args) {
     out += "-D " + arg.first + "=" + arg.second + " ";

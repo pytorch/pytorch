@@ -231,4 +231,4 @@ void RebatchingQueue::close() {
   cvEmpty_.notify_all();
   cvOverflow_.notify_all();
 }
-} // caffe2
+} // namespace caffe2

@@ -60,4 +60,4 @@ class RmsPropOp final : public Operator<Context> {
   INPUT_TAGS(GRAD, MEAN_SQUARES, MOMENTUM, LR);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MEAN_SQUARES, OUTPUT_MOMENTUM);
 };
-}
+} // namespace caffe2

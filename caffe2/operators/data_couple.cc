@@ -3,9 +3,7 @@
 namespace caffe2 {
 REGISTER_CPU_OPERATOR(DataCouple, DataCoupleOp<CPUContext>);
 
-OPERATOR_SCHEMA(DataCouple)
-    .EnforceOneToOneInplace()
-    .SetDoc(R"DOC(
+OPERATOR_SCHEMA(DataCouple).EnforceOneToOneInplace().SetDoc(R"DOC(
 
 A one to one operator that takes an arbitrary number of input and output blobs
 such that each input blob is inplace with it's matching output blob. It then proceedes

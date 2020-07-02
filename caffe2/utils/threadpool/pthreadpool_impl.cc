@@ -1,6 +1,5 @@
-#include "caffe2/utils/threadpool/pthreadpool.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
-
+#include "caffe2/utils/threadpool/pthreadpool.h"
 
 //
 // External API
@@ -37,7 +36,8 @@ void legacy_pthreadpool_parallelize_1d(
 }
 
 size_t legacy_pthreadpool_get_threads_count(legacy_pthreadpool_t threadpool) {
-  // The current fix only useful when XNNPACK calls legacy_pthreadpool_get_threads_count with nullptr.
+  // The current fix only useful when XNNPACK calls
+  // legacy_pthreadpool_get_threads_count with nullptr.
   if (threadpool == nullptr) {
     return 1;
   }
@@ -48,7 +48,8 @@ legacy_pthreadpool_t legacy_pthreadpool_create(size_t threads_count) {
   std::mutex thread_pool_creation_mutex_;
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
 
-  return reinterpret_cast<legacy_pthreadpool_t>(new caffe2::ThreadPool(threads_count));
+  return reinterpret_cast<legacy_pthreadpool_t>(
+      new caffe2::ThreadPool(threads_count));
 }
 
 void legacy_pthreadpool_destroy(legacy_pthreadpool_t pthreadpool) {

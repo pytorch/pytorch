@@ -525,11 +525,11 @@ void addNomnigraphMethods(pybind11::module& m) {
           "operator_def",
           [](Caffe2Annotation& annot) {
             auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
-                                    .attr("OperatorDef");
+                             .attr("OperatorDef");
             auto proto = annot.getOperatorDef();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);
-            auto py_op_def= opDef();
+            auto py_op_def = opDef();
             py_op_def.attr("ParseFromString")(py::bytes(serialized_proto));
             return py_op_def;
           },

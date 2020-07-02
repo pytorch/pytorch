@@ -21,7 +21,8 @@
  * MATERIALS OR THE USE OR OTHER DEALINGS IN THE MATERIALS.
  ******************************************************************************/
 
-/* $Revision: 11708 $ on $Date: 2010-06-13 23:36:24 -0700 (Sun, 13 Jun 2010) $ */
+/* $Revision: 11708 $ on $Date: 2010-06-13 23:36:24 -0700 (Sun, 13 Jun 2010) $
+ */
 
 #ifndef __OPENCL_H
 #define __OPENCL_H
@@ -33,16 +34,16 @@ extern "C" {
 #ifdef __APPLE__
 
 #include <OpenCL/cl.h>
+#include <OpenCL/cl_ext.h>
 #include <OpenCL/cl_gl.h>
 #include <OpenCL/cl_gl_ext.h>
-#include <OpenCL/cl_ext.h>
 
 #else
 
 #include <CL/cl.h>
+#include <CL/cl_ext.h>
 #include <CL/cl_gl.h>
 #include <CL/cl_gl_ext.h>
-#include <CL/cl_ext.h>
 
 #endif
 
@@ -50,5 +51,4 @@ extern "C" {
 }
 #endif
 
-#endif  /* __OPENCL_H   */
-
+#endif /* __OPENCL_H   */

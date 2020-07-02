@@ -529,4 +529,4 @@ TEST(PatternNetTransformTest, TestMultiInputOutputTransform) {
 
 } // namespace
 
-} // namespace Caffe2
+} // namespace caffe2

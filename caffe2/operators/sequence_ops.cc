@@ -28,9 +28,9 @@ void GatherPaddingOp<CPUContext>::GatherPadding(
     // accumulate start paddings
     for (int j = 0; j < startPaddingWidth_; ++j) {
       for (int k = 0; k < block_size; ++k) {
-        // Note: MSVC warns about unsafe use of type bool in operation.
-        // This is now guarded by a CAFFE_ENFORCE so we can suppress it.
-        #pragma warning(suppress: 4804)
+// Note: MSVC warns about unsafe use of type bool in operation.
+// This is now guarded by a CAFFE_ENFORCE so we can suppress it.
+#pragma warning(suppress : 4804)
         padding_start_ptr[k] += in_ptr[k];
       }
       in_ptr += block_size;
@@ -39,7 +39,7 @@ void GatherPaddingOp<CPUContext>::GatherPadding(
     // accumulate end paddings
     for (int j = 0; j < endPaddingWidth_; ++j) {
       for (int k = 0; k < block_size; ++k) {
-        #pragma warning(suppress: 4804)
+#pragma warning(suppress : 4804)
         padding_end_ptr[k] += in_ptr[k];
       }
       in_ptr += block_size;
@@ -363,10 +363,7 @@ lengths_out: [5]
         "end_padding_width",
         "*(type: int)* [OPTIONAL] Specifies a different end-padding width. If "
         "this is not set, will use same as `padding_width`.")
-    .Input(
-        0,
-        "data_in",
-        "*(type: Tensor)* Input data ($T<N, D_1, ..., D_n>$).")
+    .Input(0, "data_in", "*(type: Tensor)* Input data ($T<N, D_1, ..., D_n>$).")
     .Input(
         1,
         "lengths",
@@ -469,10 +466,7 @@ lengths_out_rm: [3]
         "end_padding_width",
         "*(type: int)* [OPTIONAL] Specifies a different end-padding width. "
         "If this is not set, will use same as `padding_width`.")
-    .Input(
-        0,
-        "data_in",
-        "Input tensor ($T<N, D_1, ..., D_n>$).")
+    .Input(0, "data_in", "Input tensor ($T<N, D_1, ..., D_n>$).")
     .Input(
         1,
         "lengths",

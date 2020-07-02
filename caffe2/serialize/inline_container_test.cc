@@ -1,6 +1,6 @@
+#include <array>
 #include <cstdio>
 #include <string>
-#include <array>
 
 #include <gtest/gtest.h>
 

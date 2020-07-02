@@ -55,7 +55,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
-    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    bool weights_changed =
+        (cached_weights_descriptor_ != filter.get_descriptor());
     if (!training_mode_ && weights_changed) {
       cached_weights_descriptor_ = filter.dup_descriptor();
       auto expected_descriptor =
@@ -103,7 +104,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
             algo_,
             pk_);
       } else {
-          ideep::convolution_forward::prepare(
+        ideep::convolution_forward::prepare(
             conv_param,
             X,
             filter_in,
@@ -124,15 +125,17 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     }
 
     if (with_bias) {
-      ideep::convolution_forward::compute(conv_param, X, filter_in,
-                                          Input(BIAS_OR_INPUT_S), *Y);
+      ideep::convolution_forward::compute(
+          conv_param, X, filter_in, Input(BIAS_OR_INPUT_S), *Y);
     } else {
       ideep::convolution_forward::compute(conv_param, X, filter_in, *Y);
     }
 
-    if (fusion_type_ == FUSION_CONV_SUM
-        && fusion_type_ == FUSION_CONV_SUM_RELU) {
-      CAFFE_ENFORCE_EQ(Y,  &(Input(InputSize() - 1)),
+    if (fusion_type_ == FUSION_CONV_SUM &&
+        fusion_type_ == FUSION_CONV_SUM_RELU) {
+      CAFFE_ENFORCE_EQ(
+          Y,
+          &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
 
@@ -162,8 +165,9 @@ class IDEEPConvFusionOp final : public IDEEPConvOp {
 
   IDEEPConvFusionOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvOp(operator_def, ws) {
-    CAFFE_ENFORCE(OperatorBase::HasArgument("fusion_type"),
-          "You should specify the fusion type");
+    CAFFE_ENFORCE(
+        OperatorBase::HasArgument("fusion_type"),
+        "You should specify the fusion type");
     fusion_type_ = static_cast<FusionType>(
         OperatorBase::GetSingleArgument<int>("fusion_type", FUSION_UNKNOWN));
     OPERATOR_NEEDS_FEATURE(

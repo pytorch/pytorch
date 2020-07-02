@@ -1,6 +1,6 @@
+#include <caffe2/operators/concat_split_op.h>
 #include <caffe2/ideep/ideep_utils.h>
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
-#include <caffe2/operators/concat_split_op.h>
 
 using namespace caffe2;
 
@@ -13,10 +13,10 @@ class IDEEPConcatOp final : public IDEEPOperator {
   using FALLBACK_OP = IDEEPFallbackOp<ConcatOp<CPUContext>, SkipIndices<0>>;
 
   IDEEPConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws),
-        fallback_(operator_def, ws) {
+      : IDEEPOperator(operator_def, ws), fallback_(operator_def, ws) {
     CAFFE_ENFORCE(
-      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        !(OperatorBase::HasArgument("axis") &&
+          OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to concat, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
@@ -55,11 +55,13 @@ class IDEEPConcatOp final : public IDEEPOperator {
       int adj_size = inputs_itensor[0].ndims() + (add_axis_ ? 1 : 0);
       int canonical_axis = canonical_axis_index_(axis_, adj_size);
       auto* output = Output(OUTPUT);
-      Tensor* axis_info = OutputTensor(AXIS_INFO,
-        vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
+      Tensor* axis_info = OutputTensor(
+          AXIS_INFO,
+          vector<int64_t>(1, InputSize()),
+          at::dtype<int>().device(CPU));
       auto* axis_data = axis_info->template mutable_data<int>();
-      auto axis_vdata =
-        ideep::concat::compute(inputs_itensor, canonical_axis, add_axis_, *output);
+      auto axis_vdata = ideep::concat::compute(
+          inputs_itensor, canonical_axis, add_axis_, *output);
       for (int i = 0; i < axis_vdata.size(); i++) {
         axis_data[i] = axis_vdata[i];
       }
@@ -87,7 +89,8 @@ class IDEEPSplitOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_offset_(OperatorBase::GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
-      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        !(OperatorBase::HasArgument("axis") &&
+          OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to split, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
@@ -137,13 +140,13 @@ class IDEEPSplitOp final : public IDEEPOperator {
     CAFFE_ENFORCE_EQ(
         add_axis_ ? OutputSize()
                   : std::accumulate(
-                    axis_vdata.data(), axis_vdata.data() + OutputSize(), 0),
+                        axis_vdata.data(), axis_vdata.data() + OutputSize(), 0),
         input_channels,
         "Sum of split dimensions do not match: should be ",
         input_channels);
 
-    auto iten_vector = ideep::spliter::compute(
-        input, axis_vdata, canonical_axis, add_axis_);
+    auto iten_vector =
+        ideep::spliter::compute(input, axis_vdata, canonical_axis, add_axis_);
     CAFFE_ENFORCE_EQ(
         iten_vector.size(),
         OutputSize(),
@@ -165,7 +168,6 @@ class IDEEPSplitOp final : public IDEEPOperator {
 
   INPUT_TAGS(INPUT, AXIS_INFO);
 };
-
 
 REGISTER_IDEEP_OPERATOR(Concat, IDEEPConcatOp);
 REGISTER_IDEEP_OPERATOR(Split, IDEEPSplitOp);

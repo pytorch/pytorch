@@ -32,12 +32,14 @@ template <typename T>
 class RecurrentBaseOp : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  template<class... Args> explicit RecurrentBaseOp(Args&&... args)
-  : Operator<CUDAContext>(std::forward<Args>(args)...), cudnn_wrapper_(&context_) {
-      CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropoutDesc_));
-      CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
-      CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
-      CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
+  template <class... Args>
+  explicit RecurrentBaseOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
+        cudnn_wrapper_(&context_) {
+    CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropoutDesc_));
+    CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
+    CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
+    CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
   }
   virtual ~RecurrentBaseOp();
 
@@ -143,7 +145,6 @@ class RecurrentGradientOp : public RecurrentBaseOp<T> {
       DROPOUT_STATES,
       RNN_SCRATCH_OUT);
 };
-
 
 } // namespace caffe2
 

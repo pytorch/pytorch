@@ -13,11 +13,10 @@
 #ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
+#include <c10/cuda/CUDAGuard.h>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 #include "caffe2/python/pybind_state_registry.h"
-#include <c10/cuda/CUDAGuard.h>
-
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -27,9 +26,7 @@ namespace caffe2 {
 namespace python {
 
 REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(
-    PythonGradient,
-    GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(PythonGradient, GPUFallbackOp);
 
 REGISTER_CUDA_OPERATOR(PythonDLPack, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
@@ -43,11 +40,14 @@ void addCUDAGlobalMethods(py::module& m) {
   m.def("get_cuda_version", &CudaVersion);
 #ifdef CAFFE2_USE_CUDNN
   m.def("get_cudnn_version", &cudnnCompiledVersion);
-  m.attr("cudnn_convolution_fwd_algo_count") = py::int_((int) CUDNN_CONVOLUTION_FWD_ALGO_COUNT);
-  m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT);
-  m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT);
+  m.attr("cudnn_convolution_fwd_algo_count") =
+      py::int_((int)CUDNN_CONVOLUTION_FWD_ALGO_COUNT);
+  m.attr("cudnn_convolution_bwd_data_algo_count") =
+      py::int_((int)CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT);
+  m.attr("cudnn_convolution_bwd_filter_algo_count") =
+      py::int_((int)CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT);
 #else
-  m.def("get_cudnn_version", [](){ return static_cast<size_t>(0);});
+  m.def("get_cudnn_version", []() { return static_cast<size_t>(0); });
   m.attr("cudnn_convolution_fwd_algo_count") = py::int_(0);
   m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_(0);
   m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_(0);

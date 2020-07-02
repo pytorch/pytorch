@@ -11,11 +11,9 @@ class IDEEPInt8DequantizeOp final : public IDEEPOperator {
 
   IDEEPInt8DequantizeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws) {
-
     if (HasArgument("output_order")) {
-      Y_fmt_ = static_cast<iformat>(
-        this->template GetSingleArgument<int>("output_order",
-                                              static_cast<int>(iformat::nchw)));
+      Y_fmt_ = static_cast<iformat>(this->template GetSingleArgument<int>(
+          "output_order", static_cast<int>(iformat::nchw)));
     }
   }
   virtual ~IDEEPInt8DequantizeOp() {}
@@ -34,9 +32,12 @@ class IDEEPInt8DequantizeOp final : public IDEEPOperator {
   }
 
  private:
-  iformat Y_fmt_ {iformat::undef};
+  iformat Y_fmt_{iformat::undef};
 };
 
-REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Dequantize, DNNLOWP, IDEEPInt8DequantizeOp);
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(
+    Int8Dequantize,
+    DNNLOWP,
+    IDEEPInt8DequantizeOp);
 
 } // namespace

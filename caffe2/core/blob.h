@@ -3,8 +3,8 @@
 
 #include <cstddef>
 #include <sstream>
-#include <typeinfo>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 #include "caffe2/core/common.h"
 
@@ -61,14 +61,20 @@ inline Tensor GetSizedTensorWithOptions(
 
 // need to keep both functions that returns Tensor* and the one
 // returns Tensor for clangr codemod
-inline Tensor*
-BlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
+inline Tensor* BlobGetMutableTensor(
+    Blob* blob,
+    at::IntArrayRef dims,
+    at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
-      // We only compare device_type if the index is not set since there are Tensors
-      // TODO: remove the extra check when all the Tensors are properly initialized
-      if (tensor->GetDevice() == options.device() || (!tensor->GetDevice().has_index() && tensor->GetDeviceType() == options.device().type())) {
+      // We only compare device_type if the index is not set since there are
+      // Tensors
+      // TODO: remove the extra check when all the Tensors are properly
+      // initialized
+      if (tensor->GetDevice() == options.device() ||
+          (!tensor->GetDevice().has_index() &&
+           tensor->GetDeviceType() == options.device().type())) {
         if (tensor->sizes() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
@@ -90,8 +96,10 @@ BlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options
   return BlobSetTensor(blob, caffe2::empty(dims, options));
 }
 
-inline Tensor
-XBlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
+inline Tensor XBlobGetMutableTensor(
+    Blob* blob,
+    at::IntArrayRef dims,
+    at::TensorOptions options) {
   return BlobGetMutableTensor(blob, dims, options)->UnsafeSharedInstance();
 }
 
@@ -129,5 +137,5 @@ inline Tensor BlobGetTensorOrUndefined(const Blob& blob) {
   }
 }
 
-}  // namespace caffe2
-#endif  // CAFFE2_CORE_BLOB_H_
+} // namespace caffe2
+#endif // CAFFE2_CORE_BLOB_H_

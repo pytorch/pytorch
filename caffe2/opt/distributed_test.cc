@@ -39,7 +39,6 @@ TEST(Converter, DeclareExport) {
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
 
-
   // This is in nom::repr
   auto inputs = nn::filter<Declare>(nn);
   auto outputs = nn::filter<Export>(nn);

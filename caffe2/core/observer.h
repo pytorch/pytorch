@@ -47,7 +47,7 @@ class Observable {
   Observable() = default;
 
   Observable(Observable&&) = default;
-  Observable& operator =(Observable&&) = default;
+  Observable& operator=(Observable&&) = default;
 
   virtual ~Observable() = default;
 

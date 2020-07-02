@@ -41,11 +41,16 @@ class IDEEPInt8PoolOp final : public IDEEPConvPoolOpBase {
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
-    ideep::pooling_forward::compute(X, Y_dims, *Y,
-                                    {stride_.begin(), stride_.end()},
-                                    {kernel_.begin(), kernel_.end()},
-                                    pad_tl(), pad_br(), algo_,
-                                    iprop::forward_inference);
+    ideep::pooling_forward::compute(
+        X,
+        Y_dims,
+        *Y,
+        {stride_.begin(), stride_.end()},
+        {kernel_.begin(), kernel_.end()},
+        pad_tl(),
+        pad_br(),
+        algo_,
+        iprop::forward_inference);
 
     return true;
   }

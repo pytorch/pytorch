@@ -21,7 +21,8 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
           "Pad should be smaller than kernel.");
     }
 
-    bool training_mode = OperatorBase::GetSingleArgument<int>("training_mode", 1);
+    bool training_mode =
+        OperatorBase::GetSingleArgument<int>("training_mode", 1);
     pk_ = training_mode ? iprop::forward_training : iprop::forward_inference;
 
     // Figure out the pooling descriptor.
@@ -44,10 +45,16 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
-    ideep::pooling_forward::compute(X, Y_dims, *Y,
-                                    {stride_.begin(), stride_.end()},
-                                    {kernel_.begin(), kernel_.end()},
-                                    pad_tl(), pad_br(), algo_, pk_);
+    ideep::pooling_forward::compute(
+        X,
+        Y_dims,
+        *Y,
+        {stride_.begin(), stride_.end()},
+        {kernel_.begin(), kernel_.end()},
+        pad_tl(),
+        pad_br(),
+        algo_,
+        pk_);
 
     return true;
   }
@@ -94,10 +101,16 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
     const auto& dY = Input(OUTPUT_GRAD);
     auto* dX = Output(INPUT_GRAD);
 
-    ideep::pooling_backward::compute(dY, Y, X, *dX,
-                                     {stride_.begin(), stride_.end()},
-                                     {kernel_.begin(), kernel_.end()},
-                                     pad_tl(), pad_br(), algo_);
+    ideep::pooling_backward::compute(
+        dY,
+        Y,
+        X,
+        *dX,
+        {stride_.begin(), stride_.end()},
+        {kernel_.begin(), kernel_.end()},
+        pad_tl(),
+        pad_br(),
+        algo_);
 
     return true;
   }

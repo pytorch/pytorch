@@ -103,8 +103,8 @@ void SparseFtrlOp<T>::DoRun() {
   // #pragma omp parallel for
   for (int64_t i = 0; i < K; ++i) {
     SIndex idx = idxs[i];
-    DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
-                                << ", range 0 to " << N;
+    DCHECK(0 <= idx && idx < N)
+        << "Index out of bounds: " << idx << ", range 0 to " << N;
     if (block_size == 1) {
       ftrl_compute(
           w[idx],
@@ -142,6 +142,6 @@ OPERATOR_SCHEMA(SparseFtrl)
     .NumOutputs(2)
     .EnforceInplace({{0, 0}, {1, 1}});
 SHOULD_NOT_DO_GRADIENT(SparseFtrl);
-}
+} // namespace
 
-}
+} // namespace caffe2

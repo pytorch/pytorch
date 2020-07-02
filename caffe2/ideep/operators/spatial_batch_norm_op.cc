@@ -15,8 +15,8 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)) {
     CAFFE_ENFORCE(
-        (is_test_ && OutputSize() > OUTPUT)
-          || (!is_test_ && OutputSize() > SAVED_VAR));
+        (is_test_ && OutputSize() > OUTPUT) ||
+        (!is_test_ && OutputSize() > SAVED_VAR));
     CAFFE_ENFORCE_GT(epsilon_, 0);
     CAFFE_ENFORCE_GE(momentum_, 0);
     CAFFE_ENFORCE_LE(momentum_, 1);
@@ -46,8 +46,16 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
       auto* running_mean = Output(RUNNING_MEAN);
       auto* running_var = Output(RUNNING_VAR);
       ideep::batch_normalization_forward_training::compute(
-          X, scale, bias, *Y, *saved_mean, *saved_var,
-          *running_mean, *running_var, momentum_, epsilon_);
+          X,
+          scale,
+          bias,
+          *Y,
+          *saved_mean,
+          *saved_var,
+          *running_mean,
+          *running_var,
+          momentum_,
+          epsilon_);
     }
 
     return true;
@@ -86,8 +94,7 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
     auto* dbias = Output(BIAS_GRAD);
 
     ideep::batch_normalization_backward::compute(
-        X, saved_mean, saved_var, dY, scale,
-        *dX, *dscale, *dbias, epsilon_);
+        X, saved_mean, saved_var, dY, scale, *dX, *dscale, *dbias, epsilon_);
 
     return true;
   }
@@ -102,4 +109,4 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(SpatialBN, IDEEPSpatialBNOp);
 REGISTER_IDEEP_OPERATOR(SpatialBNGradient, IDEEPSpatialBNGradientOp)
 
-}  // namespace
+} // namespace

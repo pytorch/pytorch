@@ -7,14 +7,15 @@
 
 namespace caffe2 {
 
-void uniformQuantize2b1b(const TensorCPU& X,
-                         const std::vector<std::unique_ptr<TensorCPU>>& XQ,
-                         float offset,
-                         float inter_center_distance) {
+void uniformQuantize2b1b(
+    const TensorCPU& X,
+    const std::vector<std::unique_ptr<TensorCPU>>& XQ,
+    float offset,
+    float inter_center_distance) {
   CAFFE_ENFORCE_GT(X.ndim(), 1);
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
-  const auto QC = divRoundUp(C,  8);
+  const auto QC = divRoundUp(C, 8);
   auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   CAFFE_ENFORCE_EQ(XQ.size(), k2b1bXBits);
@@ -53,21 +54,23 @@ void uniformQuantize2b1b(const TensorCPU& X,
   }
 }
 
-void qconv(const ConvArgs& args,
-           const TensorCPU& X,
-           const TensorCPU& W,
-           const TensorCPU* b,
-           TensorCPU* Y) {
+void qconv(
+    const ConvArgs& args,
+    const TensorCPU& X,
+    const TensorCPU& W,
+    const TensorCPU* b,
+    TensorCPU* Y) {
   const auto N = X.dim32(0);
   const auto IH = X.dim32(1);
   const auto IW = X.dim32(2);
   const auto KH = W.dim32(1);
   const auto KW = W.dim32(2);
   const auto KC = W.dim32(3);
-  Y->Resize(X.dim32(0),
-            (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
-            (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
-            W.dim32(0));
+  Y->Resize(
+      X.dim32(0),
+      (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
+      (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
+      W.dim32(0));
   const auto OH = Y->dim32(1);
   const auto OW = Y->dim32(2);
   const auto OC = Y->dim32(3);
@@ -83,18 +86,24 @@ void qconv(const ConvArgs& args,
         for (size_t oc = 0; oc < OC; ++oc) {
           float acc = 0.0;
           for (size_t kh = 0; kh < KH; ++kh) {
-            const int32_t ih = (int32_t)kh + (int32_t)args.stride_h * oh - (int32_t)args.pad_t;
+            const int32_t ih =
+                (int32_t)kh + (int32_t)args.stride_h * oh - (int32_t)args.pad_t;
             for (size_t kw = 0; kw < KW; ++kw) {
-              const int32_t iw = (int32_t)kw + (int32_t)args.stride_w * ow - (int32_t)args.pad_l;
+              const int32_t iw = (int32_t)kw + (int32_t)args.stride_w * ow -
+                  (int32_t)args.pad_l;
               for (size_t kc = 0; kc < KC; ++kc) {
-                const uint8_t w = Wdata[kc + KC * kw + KC * KW * kh + KC * KW * KH * oc];
-                // Use unsigned integer math to avoid multiple comparisons (>= H, < 0).
+                const uint8_t w =
+                    Wdata[kc + KC * kw + KC * KW * kh + KC * KW * KH * oc];
+                // Use unsigned integer math to avoid multiple comparisons (>=
+                // H, < 0).
                 if ((size_t)ih >= (size_t)IH || (size_t)iw >= (size_t)IW) {
                   acc += __builtin_popcount(0 ^ w);
                 } else {
-                  const uint8_t x =
-                      Xdata[kc + KC * (size_t)iw + KC * IW * (size_t)ih + n * KC * IW * IH];
-                  const uint8_t w = Wdata[kc + KC * kw + KC * KW * kh + KC * KW * KH * oc];
+                  const uint8_t x = Xdata
+                      [kc + KC * (size_t)iw + KC * IW * (size_t)ih +
+                       n * KC * IW * IH];
+                  const uint8_t w =
+                      Wdata[kc + KC * kw + KC * KW * kh + KC * KW * KH * oc];
                   acc += __builtin_popcount(x ^ w);
                 }
               }
@@ -113,30 +122,32 @@ void qpad_zero(const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
   CAFFE_ENFORCE_EQ(args.stride_h, 1);
   CAFFE_ENFORCE_EQ(args.stride_w, 1);
   const auto* Xdata = X.data<uint8_t>();
-  Y->Resize(X.dim32(0),
-            X.dim32(1) + args.pad_t + args.pad_b,
-            X.dim32(2) + args.pad_l + args.pad_r,
-            X.dim32(3));
+  Y->Resize(
+      X.dim32(0),
+      X.dim32(1) + args.pad_t + args.pad_b,
+      X.dim32(2) + args.pad_l + args.pad_r,
+      X.dim32(3));
   auto* Ydata = Y->mutable_data<uint8_t>();
   ::memset(Ydata, 0, Y->nbytes());
   const auto C = Y->dim32(3);
   const auto XrowSize = X.dim32(3) * X.dim32(2);
   const auto YrowSize = Y->dim32(3) * Y->dim32(2);
-  math::CopyMatrix<CPUContext>(1,
-                               X.dim32(1),
-                               XrowSize,
-                               Xdata,
-                               XrowSize,
-                               Ydata + C * args.pad_l + YrowSize * args.pad_t,
-                               YrowSize,
-                               nullptr);
+  math::CopyMatrix<CPUContext>(
+      1,
+      X.dim32(1),
+      XrowSize,
+      Xdata,
+      XrowSize,
+      Ydata + C * args.pad_l + YrowSize * args.pad_t,
+      YrowSize,
+      nullptr);
 }
 
 void signQuantize(const TensorCPU& X, TensorCPU* XQ) {
   CAFFE_ENFORCE_GT(X.ndim(), 1);
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
-  const auto QC = divRoundUp(C,  8);
+  const auto QC = divRoundUp(C, 8);
   auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   XQ->Resize(XQs);
@@ -159,7 +170,8 @@ void signQuantize(const TensorCPU& X, TensorCPU* XQ) {
 
 void filterNormalization11(const TensorCPU& WQ, TensorCPU* WQN) {
   const auto F = WQ.dim32(0);
-  // In our NEON kernel we read up to TileSize, so align allocation to TileSize elements.
+  // In our NEON kernel we read up to TileSize, so align allocation to TileSize
+  // elements.
   WQN->Resize(divRoundUp(F, kGEMMTileSize) * kGEMMTileSize);
   const auto WQs = WQ.size() / F;
   const auto WQbits = 8 * WQs;
@@ -190,7 +202,11 @@ void filterNormalizationL1(const TensorCPU& W, TensorCPU* WL1) {
   }
 }
 
-void qim2col(const ConvArgs& args, const TensorCPU& XQ, const TensorCPU& WQ, TensorCPU* XQcol) {
+void qim2col(
+    const ConvArgs& args,
+    const TensorCPU& XQ,
+    const TensorCPU& WQ,
+    TensorCPU* XQcol) {
   // TODO: pass pre-resized output?
   // TODO: handle strides?
 
@@ -202,15 +218,18 @@ void qim2col(const ConvArgs& args, const TensorCPU& XQ, const TensorCPU& WQ, Ten
   const size_t KW = WQ.dim32(2);
   const size_t KC = WQ.dim32(3);
 
-  XQcol->Resize(XQ.dim32(0),
-                (XQ.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
-                (XQ.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
-                KH * KW * KC);
+  XQcol->Resize(
+      XQ.dim32(0),
+      (XQ.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
+      (XQ.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
+      KH * KW * KC);
 
-  if (args.pad_l == 0 && args.pad_r == 0 && args.pad_b == 0 && args.pad_t == 0 &&
-      args.stride_h == 1 && args.stride_w == 1 && KH == 1 && KW == 1) {
+  if (args.pad_l == 0 && args.pad_r == 0 && args.pad_b == 0 &&
+      args.pad_t == 0 && args.stride_h == 1 && args.stride_w == 1 && KH == 1 &&
+      KW == 1) {
     CAFFE_ENFORCE_EQ(XQ.size(), XQcol->size());
-    XQcol->ShareExternalPointer(const_cast<uint8_t*>(XQ.data<uint8_t>()), XQ.size());
+    XQcol->ShareExternalPointer(
+        const_cast<uint8_t*>(XQ.data<uint8_t>()), XQ.size());
     return;
   }
   const size_t OH = XQcol->dim32(1);
@@ -228,20 +247,25 @@ void qim2col(const ConvArgs& args, const TensorCPU& XQ, const TensorCPU& WQ, Ten
           if ((size_t)ih < (size_t)IH && (size_t)w_pad < (size_t)IW &&
               (size_t)((int32_t)w_pad + (int32_t)KW) < (size_t)IW) {
             // We can do a larger memcpy, of size KW * KC
-            size_t off = kh * KW * KC + ow * KH * KW * KC + oh * KH * KW * KC * OW +
-                         n * KH * KW * KC * OW * OH;
-            std::memcpy(&XQcoldata[off],
-                        &XQdata[((int32_t)w_pad) * KC + ih * IW * KC + n * IW * KC * IH],
-                        KW * KC);
+            size_t off = kh * KW * KC + ow * KH * KW * KC +
+                oh * KH * KW * KC * OW + n * KH * KW * KC * OW * OH;
+            std::memcpy(
+                &XQcoldata[off],
+                &XQdata
+                    [((int32_t)w_pad) * KC + ih * IW * KC + n * IW * KC * IH],
+                KW * KC);
           } else {
             for (size_t kw = 0; kw < KW; ++kw) {
               int32_t iw = (int32_t)kw + w_pad;
-              // Use unsigned integer math to avoid multiple comparisons (>= H, < 0).
-              size_t off = kw * KC + kh * KW * KC + ow * KH * KW * KC + oh * KH * KW * KC * OW +
-                           n * KH * KW * KC * OW * OH;
+              // Use unsigned integer math to avoid multiple comparisons (>= H,
+              // < 0).
+              size_t off = kw * KC + kh * KW * KC + ow * KH * KW * KC +
+                  oh * KH * KW * KC * OW + n * KH * KW * KC * OW * OH;
               if ((size_t)ih < (size_t)IH && (size_t)iw < (size_t)IW) {
                 std::memcpy(
-                    &XQcoldata[off], &XQdata[iw * KC + ih * IW * KC + n * KC * IW * IH], KC);
+                    &XQcoldata[off],
+                    &XQdata[iw * KC + ih * IW * KC + n * KC * IW * IH],
+                    KC);
               } else {
                 // This should be simply padded with zero.
                 std::memset(&XQcoldata[off], 0, KC);
@@ -254,9 +278,8 @@ void qim2col(const ConvArgs& args, const TensorCPU& XQ, const TensorCPU& WQ, Ten
   }
 }
 
-std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
-                                                const TensorCPU& W,
-                                                const TensorCPU* b) {
+std::unique_ptr<QConvState>
+create2b1bConvState(Workspace* ws, const TensorCPU& W, const TensorCPU* b) {
   auto state = std::make_unique<QConvState>();
   state->XQs.resize(k2b1bXBits);
   state->YQs.resize(k2b1bXBits);
@@ -294,7 +317,11 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   return state;
 }
 
-void run2b1bConvGeneric(QConvState* state, const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
+void run2b1bConvGeneric(
+    QConvState* state,
+    const ConvArgs& args,
+    const TensorCPU& X,
+    TensorCPU* Y) {
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
   if (run2b1bConvNeon(state, args, X, Y)) {
     return;
@@ -307,28 +334,30 @@ void run2b1bConvGeneric(QConvState* state, const ConvArgs& args, const TensorCPU
   Y->ResizeLike(*(state->YQs[0]));
   const auto F = state->WQ->dim(0);
   const auto N = Y->size() / F;
-  run2b1bUnification(state,
-                     N,
-                     F,
-                     state->WQN->data<float>(),
-                     state->YQs[0]->data<float>(),
-                     state->YQs[1]->data<float>(),
-                     F,
-                     Y->mutable_data<float>(),
-                     F,
-                     state->bias ? state->bias->data<float>() : nullptr);
+  run2b1bUnification(
+      state,
+      N,
+      F,
+      state->WQN->data<float>(),
+      state->YQs[0]->data<float>(),
+      state->YQs[1]->data<float>(),
+      F,
+      Y->mutable_data<float>(),
+      F,
+      state->bias ? state->bias->data<float>() : nullptr);
 }
 
-void run2b1bUnification(QConvState* state,
-                        size_t N,
-                        size_t C,
-                        const float* WQNVdata,
-                        const float* YQs0Vdata,
-                        const float* YQs1Vdata,
-                        size_t YQstride,
-                        float* Ydata,
-                        size_t Ystride,
-                        const float* bias) {
+void run2b1bUnification(
+    QConvState* state,
+    size_t N,
+    size_t C,
+    const float* WQNVdata,
+    const float* YQs0Vdata,
+    const float* YQs1Vdata,
+    size_t YQstride,
+    float* Ydata,
+    size_t Ystride,
+    const float* bias) {
   ConstEigenVectorArrayMap<float> WQNV(WQNVdata, C);
 
   for (size_t j = 0; j < N; ++j) {
@@ -337,11 +366,11 @@ void run2b1bUnification(QConvState* state,
     EigenVectorArrayMap<float> YNV(Ydata + Ystride * j, C);
     if (bias) {
       ConstEigenVectorArrayMap<float> BV(bias, C);
-      YNV = (std::pow<float>(2, k2b1bXBits) - 1) / 2 * WQNV + std::pow<float>(2, -1) * YQs0V +
-            std::pow<float>(2, 0) * YQs1V + BV;
+      YNV = (std::pow<float>(2, k2b1bXBits) - 1) / 2 * WQNV +
+          std::pow<float>(2, -1) * YQs0V + std::pow<float>(2, 0) * YQs1V + BV;
     } else {
-      YNV = (std::pow<float>(2, k2b1bXBits) - 1) / 2 * WQNV + std::pow<float>(2, -1) * YQs0V +
-            std::pow<float>(2, 0) * YQs1V;
+      YNV = (std::pow<float>(2, k2b1bXBits) - 1) / 2 * WQNV +
+          std::pow<float>(2, -1) * YQs0V + std::pow<float>(2, 0) * YQs1V;
     }
   }
 }
@@ -350,7 +379,8 @@ class QConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   QConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws), ws_(ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NHWC, "QConvOp only supports NHWC order");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NHWC, "QConvOp only supports NHWC order");
     OPERATOR_NEEDS_FEATURE(this->dilation_h() == 1, "");
     OPERATOR_NEEDS_FEATURE(this->dilation_w() == 1, "");
     OPERATOR_NEEDS_FEATURE(this->group_ == 1, "");

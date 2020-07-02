@@ -349,7 +349,7 @@ class RecurrentNetworkExecutorBase {
         // being read by another.
         if (!this->ignoreLinkDependencies()) {
           add_race_conflict_dependencies(
-            rnn_op.order, timestep_ops_template_, &dependent_ops);
+              rnn_op.order, timestep_ops_template_, &dependent_ops);
         }
 
         for (int i : dependent_ops) {
@@ -476,13 +476,17 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor(
     std::string timestep_blob,
     ArgumentHelper rnn_args);
 
-class CAFFE2_API ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
+class CAFFE2_API ThreadedRecurrentNetworkExecutor
+    : public RecurrentNetworkExecutorBase {
  public:
   ThreadedRecurrentNetworkExecutor(
       const NetDef& step_net_def,
       std::map<string, string>& recurrent_input_map,
       std::string timestep_blob)
-      : RecurrentNetworkExecutorBase(step_net_def, recurrent_input_map, timestep_blob),
+      : RecurrentNetworkExecutorBase(
+            step_net_def,
+            recurrent_input_map,
+            timestep_blob),
         failed_(false) {}
 
   ~ThreadedRecurrentNetworkExecutor() {

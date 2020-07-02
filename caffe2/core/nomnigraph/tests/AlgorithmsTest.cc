@@ -84,13 +84,12 @@ TEST(DominatorTree, Test2) {
   auto domFrontMap = nom::algorithm::dominanceFrontierMap(&graph, entry);
   using noderef = nom::Graph<std::string>::NodeRef;
   std::unordered_map<noderef, std::unordered_set<noderef>> checkMap = {
-    {n1, {n1}},
-    {n2, {n7}},
-    {n3, {n6}},
-    {n4, {n6}},
-    {n5, {n1, n7}},
-    {n6, {n7}}
-  };
+      {n1, {n1}},
+      {n2, {n7}},
+      {n3, {n6}},
+      {n4, {n6}},
+      {n5, {n1, n7}},
+      {n6, {n7}}};
   for (auto pair : domFrontMap) {
     EXPECT_EQ(pair.second, checkMap[pair.first]);
   }
@@ -123,4 +122,3 @@ TEST(Subgraph, InduceEdgesCycle) {
     EXPECT_TRUE(sg.hasEdge(edge));
   }
 }
-

@@ -621,16 +621,15 @@ TEST(Int8, DepthwiseConv3x3) {
   auto XQ = q({1, 3, 3, 3});
   XQ->scale = 0.5;
   XQ->zero_point = 127;
-  setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6,
-                                    7, 8, 2, 3, 4, 5, 2, 4, 4,
-                                    9, 8, 7, 6, 5, 4, 3, 2, 1});
+  setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6, 7, 8, 2, 3, 4,
+                                    5, 2, 4, 4, 9, 8, 7, 6, 5, 4, 3, 2, 1});
 
   auto WQ = q({3, 3, 3, 1});
   WQ->scale = 0.5;
   WQ->zero_point = 127;
-  setq(WQ.get(), std::vector<float>{1, -4, 3, 2, -9, 3, -8, 2, 6,
-                                    7, 8, -2, -3, 4, -5, -2, 4, 4,
-                                    -9, 8, -7, 6, -5, 4, 3, -2, 1});
+  setq(WQ.get(), std::vector<float>{1,  -4, 3,  2,  -9, 3,  -8, 2,  6,
+                                    7,  8,  -2, -3, 4,  -5, -2, 4,  4,
+                                    -9, 8,  -7, 6,  -5, 4,  3,  -2, 1});
   auto BQ = biasq({3}, XQ->scale * WQ->scale);
   biassetq(BQ.get(), {1, 2, 3});
   auto X = dq(*XQ);
@@ -682,16 +681,15 @@ TEST(Int8, DepthwiseConv5x5) {
   auto XQ = q({1, 5, 5, 1});
   XQ->scale = 0.5;
   XQ->zero_point = 127;
-  setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6,
-                                    7, 8, 2, 3, 4, 5, 2, 4, 4,
-                                    9, 8, 7, 6, 5, 4, 3});
+  setq(XQ.get(), std::vector<float>{1, 4, 3, 2, 9, 3, 8, 2, 6, 7, 8, 2, 3,
+                                    4, 5, 2, 4, 4, 9, 8, 7, 6, 5, 4, 3});
 
   auto WQ = q({1, 5, 5, 1});
   WQ->scale = 0.5;
   WQ->zero_point = 127;
-  setq(WQ.get(), std::vector<float>{1, -4, 3, 2, -9, 3, -8, 2, 6,
-                                    7, 8, -2, -3, 4, -5, -2, 4, 4,
-                                    -9, 8, -7, 6, -5, 4, 3});
+  setq(WQ.get(), std::vector<float>{1,  -4, 3,  2,  -9, 3,  -8, 2, 6,
+                                    7,  8,  -2, -3, 4,  -5, -2, 4, 4,
+                                    -9, 8,  -7, 6,  -5, 4,  3});
   auto BQ = biasq({1}, XQ->scale * WQ->scale);
   biassetq(BQ.get(), {1});
   auto X = dq(*XQ);

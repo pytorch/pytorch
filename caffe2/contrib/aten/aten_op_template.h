@@ -1,17 +1,15 @@
 #pragma once
-#include <unordered_map>
-#include <string>
 #include <ATen/ATen.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 
 // a map from descriptor strings (see [DESCRIPTORS])
 // to the key in the switch statement that implements them
-static std::unordered_map<std::string, int> op_to_key = {
-  ${mappings}
-};
+static std::unordered_map<std::string, int> op_to_key = {${mappings}};
 
 namespace caffe2 {
 
@@ -27,10 +25,12 @@ template <class Context>
 class ATenOp : public Operator<Context> {
  public:
   ATenOp(const OperatorDef& operator_def, Workspace* ws)
-  : Operator<Context>(operator_def, ws) {
+      : Operator<Context>(operator_def, ws) {
     VLOG(2) << "ATen OpDef: " << ProtoDebugString(operator_def) << "\n";
-    switch(findImplementation(operator_def)) {
-      ${implementations}
+    switch (findImplementation(operator_def)) {
+      $ {
+        implementations
+      }
       default:
         CAFFE_THROW("Unexpected key value for aten operator");
     }
@@ -40,24 +40,25 @@ class ATenOp : public Operator<Context> {
   bool RunOnDevice() override {
     return run_op();
   }
-private:
+
+ private:
   // actual operator implementation is initialized in ctor.
   std::function<bool()> run_op;
   at::Backend backend() const;
 
-  TypeMeta typeMetaFor(const at::Tensor & t) {
+  TypeMeta typeMetaFor(const at::Tensor& t) {
     return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
-    #define DEFINE_CASE(ctype,aten_name) \
-      case at::k##aten_name: \
-        return TypeMeta::Make<ctype>();
-    switch(st) {
+#define DEFINE_CASE(ctype, aten_name) \
+  case at::k##aten_name:              \
+    return TypeMeta::Make<ctype>();
+    switch (st) {
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
-    default:
-      CAFFE_THROW("Unknown ATen Type");
+      default:
+        CAFFE_THROW("Unknown ATen Type");
     }
-    #undef DEFINE_CASE
+#undef DEFINE_CASE
   }
 
   at::TensorOptions optionsFor(const Tensor& ten) {
@@ -72,10 +73,7 @@ private:
 
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
-    return at::from_blob(
-        ten.raw_mutable_data(),
-        ten.sizes(),
-        optionsFor(ten));
+    return at::from_blob(ten.raw_mutable_data(), ten.sizes(), optionsFor(ten));
   }
 
   at::Tensor peek(size_t i, size_t N) {
@@ -124,27 +122,29 @@ private:
     }
   }
 
-  template<typename T,
-          typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
-              nullptr>
-  int64_t extract(const at::Scalar &s) {
+  template <
+      typename T,
+      typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
+          nullptr>
+  int64_t extract(const at::Scalar& s) {
     return s.toLong();
   }
 
-  template<typename T,
-          typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
-              nullptr>
-  int64_t extract(const at::Scalar &s) {
+  template <
+      typename T,
+      typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::
+          type* = nullptr>
+  int64_t extract(const at::Scalar& s) {
     return s.toDouble();
   }
 
   void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
-    switch(scalar_type) {
-      #define DEFINE_CASE(ctype,aten_name) \
-        case at::k##aten_name: { \
-          auto value = extract<ctype>(scalar); \
-          assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
-        } break;
+    switch (scalar_type) {
+#define DEFINE_CASE(ctype, aten_name)                                      \
+  case at::k##aten_name: {                                                 \
+    auto value = extract<ctype>(scalar);                                   \
+    assignToValue<ctype>(dst, at::convert<ctype, decltype(value)>(value)); \
+  } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
 #undef DEFINE_CASE
       default:
@@ -158,21 +158,22 @@ private:
   }
   int findImplementation(const OperatorDef& operator_def) {
     CAFFE_ENFORCE(HasArgument("operator"));
-    std::string op = OperatorBase::GetSingleArgument<std::string>("operator", "");
+    std::string op =
+        OperatorBase::GetSingleArgument<std::string>("operator", "");
     // construct descriptor string ([DESCRIPTORS]) given the attributes
     // and inputs of this operator_def, and look up the implementation key
     // for this variant
     std::stringstream descriptor;
     descriptor << op;
     std::vector<std::string> attrs;
-    for(size_t i = 0; i < operator_def.arg_size(); i++) {
-      auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" )
+    for (size_t i = 0; i < operator_def.arg_size(); i++) {
+      auto& attr = operator_def.arg(i);
+      if (attr.name() == "operator" || attr.name() == "type")
         continue;
       attrs.push_back(attr.name());
     }
     std::sort(attrs.begin(), attrs.end());
-    for(auto & a : attrs)
+    for (auto& a : attrs)
       descriptor << "-" << a;
 
     std::string descriptor_sized =
@@ -189,20 +190,20 @@ private:
        << descriptor_sized;
     CAFFE_THROW(ss.str());
   }
-  at::Scalar readScalarAttribute(const std::string & name) {
-    if(OperatorBase::HasSingleArgumentOfType<int64_t>(name)) {
+  at::Scalar readScalarAttribute(const std::string& name) {
+    if (OperatorBase::HasSingleArgumentOfType<int64_t>(name)) {
       return OperatorBase::GetSingleArgument<int64_t>(name, 0);
     } else {
       CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<float>(name));
       return OperatorBase::GetSingleArgument<float>(name, 0);
     }
   }
-  template<typename T>
-  T readAttribute(const std::string & name) {
+  template <typename T>
+  T readAttribute(const std::string& name) {
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>(name));
     return OperatorBase::GetSingleArgument<T>(name, 0);
   }
-  std::vector<int64_t> readIntArrayRef(const std::string & name) {
+  std::vector<int64_t> readIntArrayRef(const std::string& name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
     return OperatorBase::GetRepeatedArgument<int64_t>(name, {});
   }
@@ -219,4 +220,4 @@ private:
   }
 };
 
-}
+} // namespace caffe2

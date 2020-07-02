@@ -69,7 +69,9 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   static constexpr int kNeonNoiseReadSize = kOutputChannels * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  explicit PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   bool RunOnDevice() override {
@@ -587,7 +589,9 @@ OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
 #ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
-    IDEEPFallbackOp<BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp, SkipIndices<0>>);
+    IDEEPFallbackOp<
+        BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp,
+        SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(
     PackedInt8BGRANHWCToNCHWCStylizerPreprocess,
     IDEEPFallbackOp<PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp>);

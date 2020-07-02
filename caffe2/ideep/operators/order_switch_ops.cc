@@ -15,7 +15,7 @@ class IDEEPNHWC2NCHWOp final : public IDEEPOperator {
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
     CAFFE_ENFORCE(X.get_desc().is_nhwc());
 
-    auto *Y = Output(OUTPUT);
+    auto* Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
 
     // NOTE: NHWC changes the shape in framework, but not in MKL-DNN
@@ -41,7 +41,7 @@ class IDEEPNCHW2NHWCOp final : public IDEEPOperator {
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
     CAFFE_ENFORCE(X.get_desc().is_nchw());
 
-    auto *Y = Output(OUTPUT);
+    auto* Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
 
     // NOTE: NHWC changes the shape in framework, but not in MKL-DNN

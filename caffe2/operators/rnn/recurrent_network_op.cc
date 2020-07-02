@@ -53,9 +53,7 @@ OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
 Internal RNN operator.
 )DOC");
 
-REGISTER_CPU_OPERATOR(
-    rnn_internal_apply_link,
-    RNNApplyLinkOp<CPUContext>);
+REGISTER_CPU_OPERATOR(rnn_internal_apply_link, RNNApplyLinkOp<CPUContext>);
 OPERATOR_SCHEMA(rnn_internal_apply_link)
     .NumInputs(2)
     .NumOutputs(2)
@@ -248,8 +246,7 @@ NetDef extractNetDef(const OperatorDef& op, const std::string& argName) {
     const auto netString =
         ArgumentHelper::GetSingleArgument<OperatorDef, string>(op, argName, "");
     CAFFE_ENFORCE(
-        TextFormat::ParseFromString(netString, &result),
-        "Invalid NetDef");
+        TextFormat::ParseFromString(netString, &result), "Invalid NetDef");
     return result;
 #else
     CAFFE_THROW("No valid NetDef for argument ", argName);
@@ -257,4 +254,4 @@ NetDef extractNetDef(const OperatorDef& op, const std::string& argName) {
   }
 }
 } // namespace detail
-}
+} // namespace caffe2

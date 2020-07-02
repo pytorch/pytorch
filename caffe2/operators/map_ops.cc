@@ -76,5 +76,5 @@ OPERATOR_SCHEMA(MapToKeyValue)
     .Input(0, "map blob", "Blob reference to the map")
     .Output(0, "key blob", "Blob reference to the key")
     .Output(1, "value blob", "Blob reference to the value");
-}
+} // namespace
 } // namespace caffe2

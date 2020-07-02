@@ -6,13 +6,16 @@ namespace caffe2 {
 
 namespace cast {
 
-inline TensorProto_DataType GetCastDataType(const ArgumentHelper& helper, std::string arg) {
+inline TensorProto_DataType GetCastDataType(
+    const ArgumentHelper& helper,
+    std::string arg) {
   TensorProto_DataType to;
   if (helper.HasSingleArgumentOfType<string>(arg)) {
     string s = helper.GetSingleArgument<string>(arg, "float");
     std::transform(s.begin(), s.end(), s.begin(), ::toupper);
 #ifndef CAFFE2_USE_LITE_PROTO
-    CAFFE_ENFORCE(TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
+    CAFFE_ENFORCE(
+        TensorProto_DataType_Parse(s, &to), "Unknown 'to' argument: ", s);
 #else
 
 // Manually implement in the lite proto case.
@@ -44,6 +47,6 @@ inline TensorProto_DataType GetCastDataType(const ArgumentHelper& helper, std::s
   return to;
 }
 
-};  // namespace cast
+}; // namespace cast
 
-};  // namespace caffe2
+}; // namespace caffe2

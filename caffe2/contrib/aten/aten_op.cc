@@ -46,7 +46,6 @@ void Set<at::BFloat16, CPUContext>(
   Set(0, b.x, (uint16_t*)v, c);
 }
 
-
 } // namespace math
 
 } // namespace caffe2

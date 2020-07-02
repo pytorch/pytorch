@@ -52,34 +52,32 @@ bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(
-  MultiClassAccuracy, MultiClassAccuracyOp<float, CPUContext>);
+    MultiClassAccuracy,
+    MultiClassAccuracyOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(MultiClassAccuracy)
-  .NumInputs(2)
-  .NumOutputs(2)
-  .SetDoc(R"DOC(
+    .NumInputs(2)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
 Respectively compute accuracy score for each class given a number of instances
 and predicted scores of each class for each instance.
 )DOC")
-  .Input(
-    0,
-    "prediction",
-    "2-D float tensor (N,D,) of predicted scores of each class for "
-    "each data. N is the number of instances, i.e., batch size. D is number of "
-    "possible classes/labels.")
-  .Input(
-    1,
-    "labels",
-    "1-D int tensor (N,) of labels for each instance.")
-  .Output(
-    0,
-    "accuracies",
-    "1-D float tensor (D,) of accuracy for each class. If a class has no "
-    "instance in the batch, its accuracy score is set to zero.")
-  .Output(
-    1,
-    "amounts",
-    "1-D int tensor (D,) of number of instances for each class in the batch.");
+    .Input(
+        0,
+        "prediction",
+        "2-D float tensor (N,D,) of predicted scores of each class for "
+        "each data. N is the number of instances, i.e., batch size. D is number of "
+        "possible classes/labels.")
+    .Input(1, "labels", "1-D int tensor (N,) of labels for each instance.")
+    .Output(
+        0,
+        "accuracies",
+        "1-D float tensor (D,) of accuracy for each class. If a class has no "
+        "instance in the batch, its accuracy score is set to zero.")
+    .Output(
+        1,
+        "amounts",
+        "1-D int tensor (D,) of number of instances for each class in the batch.");
 
 SHOULD_NOT_DO_GRADIENT(MultiClassAccuracy);
-}  // namespace caffe2
+} // namespace caffe2

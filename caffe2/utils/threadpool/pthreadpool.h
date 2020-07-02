@@ -13,7 +13,12 @@ typedef struct pthreadpool* legacy_pthreadpool_t;
 typedef void (*legacy_pthreadpool_function_1d_t)(void*, size_t);
 typedef void (*legacy_pthreadpool_function_1d_tiled_t)(void*, size_t, size_t);
 typedef void (*legacy_pthreadpool_function_2d_t)(void*, size_t, size_t);
-typedef void (*legacy_pthreadpool_function_2d_tiled_t)(void*, size_t, size_t, size_t, size_t);
+typedef void (*legacy_pthreadpool_function_2d_tiled_t)(
+    void*,
+    size_t,
+    size_t,
+    size_t,
+    size_t);
 typedef void (*legacy_pthreadpool_function_3d_tiled_t)(
     void*,
     size_t,

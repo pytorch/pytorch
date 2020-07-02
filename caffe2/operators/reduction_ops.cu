@@ -57,7 +57,6 @@ bool SumSqrElementsOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
-
 __global__ void colwise_max_gradient_kernel(
     const int batch_size,
     const int M,

@@ -45,14 +45,17 @@ and a bias blob and computes the output. {conv_doc})DOC";
         "bias",
         "The 1D bias blob that is added through the "
         "convolution; has size (M).");
-    schema.Output(0, "Y", relu_fused ?
-        "Output data blob that contains the result of the "
-        "convolution. The output dimensions are functions of the kernel size, "
-        "stride size, and pad lengths. Output will go through rectified linear "
-        "function, where y = max(0, x)." :
-        "Output data blob that contains the result of the "
-        "convolution. The output dimensions are functions of the kernel size, "
-        "stride size, and pad lengths.");
+    schema.Output(
+        0,
+        "Y",
+        relu_fused
+            ? "Output data blob that contains the result of the "
+              "convolution. The output dimensions are functions of the kernel size, "
+              "stride size, and pad lengths. Output will go through rectified linear "
+              "function, where y = max(0, x)."
+            : "Output data blob that contains the result of the "
+              "convolution. The output dimensions are functions of the kernel size, "
+              "stride size, and pad lengths.");
   };
 }
 

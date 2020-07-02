@@ -1,15 +1,15 @@
 #ifndef CAFFE2_CORE_BLOB_SERIALIZATION_H_
 #define CAFFE2_CORE_BLOB_SERIALIZATION_H_
 
-#include <limits>
 #include <future>
+#include <limits>
 
 #include <google/protobuf/repeated_field.h>
 
+#include <c10/util/typeid.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 
@@ -116,7 +116,6 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
   unique_ptr<BaseContext> context_;
 };
 
-
 /**
  * @brief TensorDeserializer is the deserializer for Tensors.
  *
@@ -220,7 +219,7 @@ inline void CopyFromProtoWithCast(
   context->template CopyFromCPU<DstType>(size, buffer.get(), dst);
 }
 
-}  // namespace detail
+} // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
 // Serialization Helpers
@@ -239,6 +238,6 @@ inline std::string SerializeBlobProtoAsString_EnforceCheck(
   return SerializeAsString_EnforceCheck(blob, blob.name().c_str());
 }
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_BLOB_SERIALIZATION_H_
+#endif // CAFFE2_CORE_BLOB_SERIALIZATION_H_

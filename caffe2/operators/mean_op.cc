@@ -72,9 +72,15 @@ Mean:
 </details>
 
 )DOC")
-    .Input(0, "X, Y, ...", "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
-    .Output(0, "M", "*(type: Tensor`<Ord>`)* Output tensor with the same dimensions as inputs. Contains "
-    "the mean values of the input tensors calculated element-wise.");
+    .Input(
+        0,
+        "X, Y, ...",
+        "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
+    .Output(
+        0,
+        "M",
+        "*(type: Tensor`<Ord>`)* Output tensor with the same dimensions as inputs. Contains "
+        "the mean values of the input tensors calculated element-wise.");
 
 class GetMeanGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

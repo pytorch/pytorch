@@ -89,7 +89,7 @@ pthreadpool_t nnpack_threadpool() {
   }
   return nnpack_threadpool_;
 }
-}
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // NNPACK Ops

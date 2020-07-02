@@ -113,4 +113,4 @@ A after Sum: [[10.  7. 11.]
         "*(type: Tensor`<float>`)* Second tensor to be added element-wise.")
     .Output(0, "C", "*(type: Tensor`<float>`)* Sum of A and B.")
     .InheritOnnxSchema();
-}
+} // namespace caffe2

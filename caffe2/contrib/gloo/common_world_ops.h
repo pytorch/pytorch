@@ -30,11 +30,14 @@ class CreateCommonWorld final : public Operator<Context> {
         rank_(OperatorBase::template GetSingleArgument<int>("rank", 0)),
         sync_(OperatorBase::template GetSingleArgument<bool>("sync", false)),
         transport_(OperatorBase::template GetSingleArgument<std::string>(
-                       "transport", "tcp")),
+            "transport",
+            "tcp")),
         interface_(OperatorBase::template GetSingleArgument<std::string>(
-                       "interface", "")),
+            "interface",
+            "")),
         mpi_rendezvous_(OperatorBase::template GetSingleArgument<bool>(
-                       "mpi_rendezvous", false)),
+            "mpi_rendezvous",
+            false)),
         status_blob_(
             OperatorBase::GetSingleArgument<std::string>("status_blob", "")),
         timeout_ms_(OperatorBase::GetSingleArgument<int>("timeout_ms", -1)),
@@ -49,8 +52,7 @@ class CreateCommonWorld final : public Operator<Context> {
     initialize();
   }
 
-  virtual ~CreateCommonWorld() {
-  }
+  virtual ~CreateCommonWorld() {}
 
   CommonWorld rendezvousWithMPI() {
 #if defined(GLOO_USE_MPI) && GLOO_USE_MPI
@@ -62,8 +64,8 @@ class CreateCommonWorld final : public Operator<Context> {
     return context;
 #else
     CAFFE_THROW(
-      "Gloo was not compiled with MPI support. ",
-      "Please recompile with -DUSE_MPI=1.");
+        "Gloo was not compiled with MPI support. ",
+        "Please recompile with -DUSE_MPI=1.");
 #endif
   }
 
@@ -128,11 +130,11 @@ class CreateCommonWorld final : public Operator<Context> {
     static std::once_flag once;
     static std::shared_ptr<::gloo::transport::Device> device;
     std::call_once(once, [&]() {
-        createDeviceAttr attr;
-        attr.transport = transport_;
-        attr.interface = interface_;
-        device = createDevice(attr);
-      });
+      createDeviceAttr attr;
+      attr.transport = transport_;
+      attr.interface = interface_;
+      device = createDevice(attr);
+    });
     device_ = device;
 
     // Context specific initialization.

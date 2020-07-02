@@ -39,4 +39,4 @@ TEST(ConvToNNPackTest, TestSimple) {
 
 } // namespace
 
-} // namespace Caffe2
+} // namespace caffe2

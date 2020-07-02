@@ -28,15 +28,19 @@ REGISTER_CPU_OPERATOR(IsMemberOf, IsMemberOfOp<CPUContext>);
 OPERATOR_SCHEMA(IsMemberOf)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef&, const vector<TensorShape>& input_types) {
-          vector<TensorShape> out(1);
-          out[0] = input_types[0];
-          out[0].set_data_type(TensorProto_DataType::TensorProto_DataType_BOOL);
-          return out;
-        })
-    .Arg("value", "*(type: []; default: -)* List of values to check for membership.")
-    .Arg("dtype", "*(type: TensorProto_DataType; default: -)* The data type for the elements of the output tensor. Strictly must be one of the types from DataType enum in TensorProto.")
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& input_types) {
+      vector<TensorShape> out(1);
+      out[0] = input_types[0];
+      out[0].set_data_type(TensorProto_DataType::TensorProto_DataType_BOOL);
+      return out;
+    })
+    .Arg(
+        "value",
+        "*(type: []; default: -)* List of values to check for membership.")
+    .Arg(
+        "dtype",
+        "*(type: TensorProto_DataType; default: -)* The data type for the elements of the output tensor. Strictly must be one of the types from DataType enum in TensorProto.")
     .SetDoc(R"DOC(
 The *IsMemberOf* op takes an input tensor *X* and a list of values as argument, and produces one output data tensor *Y*. The output tensor is the same shape as *X* and contains booleans. The output is calculated as the function *f(x) = x in value* and is applied to *X* elementwise.
 

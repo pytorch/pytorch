@@ -1,16 +1,17 @@
-#include <thread>  // NOLINT
+#include <thread> // NOLINT
 
-#include "caffe2/utils/simple_queue.h"
 #include <gtest/gtest.h>
+#include "caffe2/utils/simple_queue.h"
 
 namespace caffe2 {
 
-static std::unique_ptr<SimpleQueue<int> > gQueue;
+static std::unique_ptr<SimpleQueue<int>> gQueue;
 
 static void ConsumerFunction(int thread_idx) {
   int value;
   while (true) {
-    if (!gQueue->Pop(&value)) return;
+    if (!gQueue->Pop(&value))
+      return;
     VLOG(1) << "Emitting " << value << " from thread " << thread_idx;
   }
 }
@@ -21,7 +22,6 @@ static void ProducerFunction(int thread_idx, int start, int count) {
     gQueue->Push(i + start);
   }
 }
-
 
 TEST(SimpleQueueTest, SingleProducerSingleConsumer) {
   gQueue.reset(new SimpleQueue<int>());
@@ -45,7 +45,6 @@ TEST(SimpleQueueTest, SingleProducerDoubleConsumer) {
   consumer1.join();
 }
 
-
 TEST(SimpleQueueTest, DoubleProducerDoubleConsumer) {
   gQueue.reset(new SimpleQueue<int>());
   std::thread producer0(ProducerFunction, 0, 0, 10);
@@ -66,7 +65,4 @@ TEST(SimpleQueueDeathTest, CannotAddAfterQueueFinished) {
   ASSERT_THROW(gQueue->Push(0), EnforceNotMet);
 }
 
-
-}  // namespace caffe2
-
-
+} // namespace caffe2

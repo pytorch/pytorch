@@ -202,8 +202,8 @@ class CAFFE2_API GradientMakerBase {
 
  public:
   /**
-    * Returns map that returns the parameters that the gradients are for.
-    */
+   * Returns map that returns the parameters that the gradients are for.
+   */
   static CaffeMap<string, string> MatchGradsToParams(const OperatorDef& op) {
     // NOTE: how to go beyond string-matching?
     CaffeMap<string, string> m;

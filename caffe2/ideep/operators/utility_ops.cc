@@ -65,8 +65,8 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
         X.to_public(Y->template mutable_data<float>());
       } else {
-        CAFFE_THROW("Unsupported ideep type: ",
-                    static_cast<int>(X.get_data_type()));
+        CAFFE_THROW(
+            "Unsupported ideep type: ", static_cast<int>(X.get_data_type()));
       }
     }
     return true;
@@ -98,7 +98,7 @@ class IDEEPWeightedSumOp : public IDEEPOperator {
       CAFFE_ENFORCE(X.get_nelems() == nelems);
       CAFFE_ENFORCE(Input(i + 1).get_nelems() == w_nelems);
       inputs.push_back(X);
-      auto scale = static_cast<float *>(Input(i + 1).get_data_handle());
+      auto scale = static_cast<float*>(Input(i + 1).get_data_handle());
       scales.push_back(scale[0]);
     }
 

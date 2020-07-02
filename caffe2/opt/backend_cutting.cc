@@ -38,8 +38,6 @@ std::string ShowNode(NodeRef node) {
   }
 }
 
-
-
 struct VisitorContext {
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
       : predicate(func) {}

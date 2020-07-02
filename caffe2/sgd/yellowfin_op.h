@@ -109,36 +109,36 @@ class YellowFinOp final : public Operator<Context> {
 
  public:
   bool RunOnDevice() override {
-// Iter live on the CPU
+    // Iter live on the CPU
 
 #define CAFFE2_YF_READ_INPUT(INPUT_NAME, VAR_NAME)   \
   const auto& VAR_NAME##_tensor = Input(INPUT_NAME); \
   VAR_NAME##_ = VAR_NAME##_tensor.template data<T>();
 
-CAFFE2_YF_READ_INPUT(PARAM, param)
-CAFFE2_YF_READ_INPUT(MOMENT, moment)
-CAFFE2_YF_READ_INPUT(LR_AVG, lr_avg)
-CAFFE2_YF_READ_INPUT(MU_AVG, mu_avg)
-CAFFE2_YF_READ_INPUT(CURV_WIN, curv_win)
-CAFFE2_YF_READ_INPUT(G_AVG, g_avg)
-CAFFE2_YF_READ_INPUT(G2_AVG, g2_avg)
-CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
-CAFFE2_YF_READ_INPUT(GRAD, grad)
+    CAFFE2_YF_READ_INPUT(PARAM, param)
+    CAFFE2_YF_READ_INPUT(MOMENT, moment)
+    CAFFE2_YF_READ_INPUT(LR_AVG, lr_avg)
+    CAFFE2_YF_READ_INPUT(MU_AVG, mu_avg)
+    CAFFE2_YF_READ_INPUT(CURV_WIN, curv_win)
+    CAFFE2_YF_READ_INPUT(G_AVG, g_avg)
+    CAFFE2_YF_READ_INPUT(G2_AVG, g2_avg)
+    CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
+    CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
-CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
-CAFFE_ENFORCE_EQ(lr_avg_tensor.numel(), 1);
-CAFFE_ENFORCE_EQ(mu_avg_tensor.numel(), 1);
-CAFFE_ENFORCE_EQ(param_tensor.dim(), moment_tensor.dim());
-CAFFE_ENFORCE_EQ(param_tensor.dim(), g_avg_tensor.dim());
-CAFFE_ENFORCE_EQ(param_tensor.dim(), g2_avg_tensor.dim());
-CAFFE_ENFORCE_EQ(param_tensor.dim(), grad_tensor.dim());
-for (int i = 0; i < param_tensor.dim(); ++i) {
-  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), moment_tensor.dim32(i));
-  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g_avg_tensor.dim32(i));
-  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g2_avg_tensor.dim32(i));
-  CAFFE_ENFORCE_EQ(param_tensor.dim32(i), grad_tensor.dim32(i));
-}
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
+    CAFFE_ENFORCE_EQ(lr_avg_tensor.numel(), 1);
+    CAFFE_ENFORCE_EQ(mu_avg_tensor.numel(), 1);
+    CAFFE_ENFORCE_EQ(param_tensor.dim(), moment_tensor.dim());
+    CAFFE_ENFORCE_EQ(param_tensor.dim(), g_avg_tensor.dim());
+    CAFFE_ENFORCE_EQ(param_tensor.dim(), g2_avg_tensor.dim());
+    CAFFE_ENFORCE_EQ(param_tensor.dim(), grad_tensor.dim());
+    for (int i = 0; i < param_tensor.dim(); ++i) {
+      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), moment_tensor.dim32(i));
+      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g_avg_tensor.dim32(i));
+      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), g2_avg_tensor.dim32(i));
+      CAFFE_ENFORCE_EQ(param_tensor.dim32(i), grad_tensor.dim32(i));
+    }
 
     iter_ = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
@@ -155,7 +155,7 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
     g_norm2_max_avg_ = ++memory_it;
     distance_avg_ = ++memory_it;
 
-// Output data
+    // Output data
 
 #define CAFFE2_YF_READ_OUTPUT(OUTPUT_NAME, VAR_NAME)                           \
   auto VAR_NAME##_out_tensor =                                                 \
@@ -179,9 +179,10 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
     g_norm2_max_avg_out_ = ++out_memory_it;
     distance_avg_out_ = ++out_memory_it;
 
-#define CAFFE2_YF_INIT_VECTOR(NAME) \
-    ReinitializeTensor(&NAME##_tensor_, {D_}, at::dtype<T>().device(Context::GetDeviceType())); \
-    NAME##_ = NAME##_tensor_.template mutable_data<T>();
+#define CAFFE2_YF_INIT_VECTOR(NAME)                                            \
+  ReinitializeTensor(                                                          \
+      &NAME##_tensor_, {D_}, at::dtype<T>().device(Context::GetDeviceType())); \
+  NAME##_ = NAME##_tensor_.template mutable_data<T>();
 
     CAFFE2_YF_INIT_VECTOR(aux_vector)
     CAFFE2_YF_INIT_VECTOR(g_deb)
@@ -189,9 +190,10 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
     CAFFE2_YF_INIT_VECTOR(g_deb2)
 #undef CAFFE2_YF_INIT_VECTOR
 
-#define CAFFE2_YF_INIT_SCALAR(NAME) \
-      ReinitializeTensor(&NAME##_tensor_, {1}, at::dtype<T>().device(Context::GetDeviceType())); \
-      NAME##_ = NAME##_tensor_.template mutable_data<T>();
+#define CAFFE2_YF_INIT_SCALAR(NAME)                                           \
+  ReinitializeTensor(                                                         \
+      &NAME##_tensor_, {1}, at::dtype<T>().device(Context::GetDeviceType())); \
+  NAME##_ = NAME##_tensor_.template mutable_data<T>();
 
     CAFFE2_YF_INIT_SCALAR(aux_scalar)
     CAFFE2_YF_INIT_SCALAR(distance)

@@ -9,22 +9,31 @@ namespace caffe2 {
 
 namespace {
 __global__ void LabelCrossEntropyKernel(
-    const int N, const int D, const float* Xdata, const int* labeldata,
-    const float log_threshold, float* Ydata) {
+    const int N,
+    const int D,
+    const float* Xdata,
+    const int* labeldata,
+    const float log_threshold,
+    float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
     Ydata[i] = -logf(fmaxf(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
 __global__ void LabelCrossEntropyGradientKernel(
-    const int N, const int D, const float* Xdata, const int* labeldata,
-    const float* dYdata, const float log_threshold, float* dXdata) {
+    const int N,
+    const int D,
+    const float* Xdata,
+    const int* labeldata,
+    const float* dYdata,
+    const float log_threshold,
+    float* dXdata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     int idx = i * D + labeldata[i];
-    dXdata[idx] = - dYdata[i] / fmaxf(Xdata[idx], log_threshold);
+    dXdata[idx] = -dYdata[i] / fmaxf(Xdata[idx], log_threshold);
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
@@ -95,20 +104,20 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
 }
 
 namespace {
-__global__ void MakeTwoClassKernel(
-    const int N, const float* Xdata, float* Ydata) {
+__global__ void
+MakeTwoClassKernel(const int N, const float* Xdata, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     Ydata[i * 2] = 1.0 - Xdata[i];
     Ydata[i * 2 + 1] = Xdata[i];
   }
 }
-__global__ void MakeTwoClassGradientKernel(
-    const int N, const float* dYdata, float* dXdata) {
+__global__ void
+MakeTwoClassGradientKernel(const int N, const float* dYdata, float* dXdata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     dXdata[i] = dYdata[i * 2 + 1] - dYdata[i * 2];
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
@@ -423,10 +432,12 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(LabelCrossEntropy,
-                       LabelCrossEntropyOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(LabelCrossEntropyGradient,
-                       LabelCrossEntropyGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    LabelCrossEntropy,
+    LabelCrossEntropyOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    LabelCrossEntropyGradient,
+    LabelCrossEntropyGradientOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(
     SigmoidCrossEntropyWithLogits,
@@ -442,13 +453,13 @@ REGISTER_CUDA_OPERATOR(
     WeightedSigmoidCrossEntropyWithLogitsGradient,
     WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>);
 
-REGISTER_CUDA_OPERATOR(MakeTwoClass,
-                       MakeTwoClassOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(MakeTwoClassGradient,
-                       MakeTwoClassGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(MakeTwoClass, MakeTwoClassOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    MakeTwoClassGradient,
+    MakeTwoClassGradientOp<float, CUDAContext>);
 
-//TODO(surya) Add full GPU/CUDA support for the CrossEntropyOp
+// TODO(surya) Add full GPU/CUDA support for the CrossEntropyOp
 REGISTER_CUDA_OPERATOR(CrossEntropy, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(CrossEntropyGradient, GPUFallbackOp);
 
-}  // namespace caffe2
+} // namespace caffe2

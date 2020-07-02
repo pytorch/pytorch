@@ -15,8 +15,8 @@ std::shared_ptr<nvinfer1::ICudaEngine> BuildTrtEngine(
   auto trt_builder_cfg = TrtObject(trt_builder->createBuilderConfig());
   // TensorRTOp doesn't support dynamic shapes yet
   auto trt_network = TrtObject(trt_builder->createNetworkV2(
-      1U << static_cast<uint32_t>(nvinfer1::
-      NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)));
+      1U << static_cast<uint32_t>(
+          nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)));
 #else
   auto trt_network = TrtObject(trt_builder->createNetwork());
 #endif
@@ -50,8 +50,8 @@ std::shared_ptr<nvinfer1::ICudaEngine> BuildTrtEngine(
     trt_builder_cfg->setFlag(nvinfer1::BuilderFlag::kDEBUG);
   }
   trt_builder_cfg->setDefaultDeviceType(nvinfer1::DeviceType::kGPU);
-  return TrtObject(trt_builder->
-      buildEngineWithConfig(*trt_network.get(), *trt_builder_cfg));
+  return TrtObject(
+      trt_builder->buildEngineWithConfig(*trt_network.get(), *trt_builder_cfg));
 #else
   trt_builder->setMaxWorkspaceSize(max_workspace_size);
   trt_builder->setDebugSync(debug_builder);

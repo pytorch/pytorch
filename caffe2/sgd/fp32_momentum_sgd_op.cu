@@ -75,10 +75,10 @@ __global__ void FP32MomentumSGDKernel(
     }
   }
 #else
-   CUDA_KERNEL_ASSERT(false);
+  CUDA_KERNEL_ASSERT(false);
 #endif // CAFFE_HAS_CUDA_FP16
 }
-}
+} // namespace
 
 template <>
 void fp32_momentum_sgd_update<CUDAContext>(
@@ -137,4 +137,4 @@ This op is also functionally equivalent to the FP16MomentumSGDUpdateOp, however
 it expects FP32 data and performs its updates in FP32 precision.
 
 )DOC");
-}
+} // namespace caffe2

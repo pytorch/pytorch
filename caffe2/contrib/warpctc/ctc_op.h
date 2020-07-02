@@ -2,10 +2,10 @@
 
 #include <ctc.h>
 
+#include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/common_cudnn.h"
 
 #define CTC_CHECK(condition)           \
   do {                                 \
@@ -116,12 +116,12 @@ class CTCOp final : public Operator<Context> {
     return true;
   }
 
-private:
- bool is_test_;
- std::vector<int> default_input_lengths_;
+ private:
+  bool is_test_;
+  std::vector<int> default_input_lengths_;
 
- INPUT_TAGS(INPUTS, LABELS, LABEL_LENGTHS, INPUT_LENGTHS);
+  INPUT_TAGS(INPUTS, LABELS, LABEL_LENGTHS, INPUT_LENGTHS);
 };
-}
+} // namespace caffe2
 
 #undef CTC_CHECK

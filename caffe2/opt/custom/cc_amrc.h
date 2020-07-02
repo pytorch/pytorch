@@ -161,7 +161,8 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
         } else if (clipped < min_) {
           clipped = min_;
         }
-        output->template mutable_data<float>()[output_offset + inner_omp] = clipped;
+        output->template mutable_data<float>()[output_offset + inner_omp] =
+            clipped;
       }
       output_offset += axis_dim * after;
     }

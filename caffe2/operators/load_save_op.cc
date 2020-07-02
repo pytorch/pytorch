@@ -83,19 +83,26 @@ print("exists:", workspace.FetchBlob("exists"))
 </details>
 
 )DOC")
-    .Output(0, "exists", "*(type: Tensor`<bool>`)* Scalar boolean output "
-    "tensor. True if the db exists, else false.")
+    .Output(
+        0,
+        "exists",
+        "*(type: Tensor`<bool>`)* Scalar boolean output "
+        "tensor. True if the db exists, else false.")
     .Arg(
         "absolute_path",
         "*(type: int; default: 0)* If set to non-zero, save the db directly to "
         "the path specified by the `db` arg. If not set (default), prepend the "
         "path of the current root folder of the workspace to the path specified "
         "by the `db` arg.")
-    .Arg("db_name", "*(type: string)* Path to the db in question; see the "
-    "`absolute_path` arg details for options regarding the current root folder "
-    "of the workspace.")
-    .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
-    "\"leveldb\", \"minidb\").");
+    .Arg(
+        "db_name",
+        "*(type: string)* Path to the db in question; see the "
+        "`absolute_path` arg details for options regarding the current root folder "
+        "of the workspace.")
+    .Arg(
+        "db_type",
+        "*(type: string)* Type of db to save (options: \"lmdb\", "
+        "\"leveldb\", \"minidb\").");
 
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, INT_MAX)
@@ -142,10 +149,10 @@ print("Y:", workspace.FetchBlob("Y"))
 
 )DOC")
     .Input(
-      0,
-      "X, Y, ...",
-      "*(type: List(DBReader))* [OPTIONAL] List of DBReaders to load from. Can "
-      "use this instead of the `db`/`dbs` args.")
+        0,
+        "X, Y, ...",
+        "*(type: List(DBReader))* [OPTIONAL] List of DBReaders to load from. Can "
+        "use this instead of the `db`/`dbs` args.")
     .Arg(
         "absolute_path",
         "*(type: int; default: 0)* If set to non-zero, save the db directly to "
@@ -164,7 +171,9 @@ print("Y:", workspace.FetchBlob("Y"))
         "that match `strip_prefix` will be removed prior to saving. Also, "
         "characters that precede `strip_prefix` will be removed. Useful for "
         "removing device scope from blob names.")
-    .Arg("db", "*(type: string)* The output path of the db. See the "
+    .Arg(
+        "db",
+        "*(type: string)* The output path of the db. See the "
         "`absolute_path` arg details for options regarding the current root folder "
         "of the workspace.")
     .Arg(
@@ -172,7 +181,9 @@ print("Y:", workspace.FetchBlob("Y"))
         "*(type: List(string))* List of paths to dbs to load blobs from. See "
         "the `absolute_path` arg details for options regarding the current "
         "root folder of the workspace.")
-    .Arg("db_type", "(type: string)* Type of db to save (options: \"lmdb\", "
+    .Arg(
+        "db_type",
+        "(type: string)* Type of db to save (options: \"lmdb\", "
         "\"leveldb\", \"minidb\").")
     .Arg(
         "keep_device",
@@ -240,24 +251,30 @@ workspace.RunOperatorOnce(op)
         "the path specified by the `db` arg. If not set (default), prepend the "
         "path of the current root folder of the workspace to the path specified "
         "by the `db` arg.")
-     .Arg(
-         "strip_prefix",
-         "*(type: string, default: \"\")* Characters in the provided blob names "
-         "that match `strip_prefix` will be removed prior to saving. Also, "
-         "characters that precede `strip_prefix` will be removed. Useful for "
-         "removing device scope from blob names.")
+    .Arg(
+        "strip_prefix",
+        "*(type: string, default: \"\")* Characters in the provided blob names "
+        "that match `strip_prefix` will be removed prior to saving. Also, "
+        "characters that precede `strip_prefix` will be removed. Useful for "
+        "removing device scope from blob names.")
     .Arg(
         "blob_name_overrides",
         "*(List(string))* If set, used as blob names instead of original blob "
         "names. Must be same length as number of blobs.")
-    .Arg("db", "*(type: string)* The output path of the db. See the "
-    "`absolute_path` arg details for options regarding the current root folder "
-    "of the workspace.")
-    .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
-    "\"leveldb\", \"minidb\").")
-    .Arg("chunk_size", "*(type: string; default: kDefaultChunkSize)* The chunk "
-    "size to split tensor data into. If not set, caffe2_tensor_chunk_size will "
-    "be used")
+    .Arg(
+        "db",
+        "*(type: string)* The output path of the db. See the "
+        "`absolute_path` arg details for options regarding the current root folder "
+        "of the workspace.")
+    .Arg(
+        "db_type",
+        "*(type: string)* Type of db to save (options: \"lmdb\", "
+        "\"leveldb\", \"minidb\").")
+    .Arg(
+        "chunk_size",
+        "*(type: string; default: kDefaultChunkSize)* The chunk "
+        "size to split tensor data into. If not set, caffe2_tensor_chunk_size will "
+        "be used")
     .Input(0, "X", "*(type: Tensor)* Input tensor(s).");
 
 OPERATOR_SCHEMA(Checkpoint)
@@ -292,4 +309,4 @@ SHOULD_NOT_DO_GRADIENT(DBExists);
 SHOULD_NOT_DO_GRADIENT(Save);
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);
-}  // namespace caffe2
+} // namespace caffe2

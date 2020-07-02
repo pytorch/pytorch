@@ -13,8 +13,7 @@ class IDEEPExpandDimsOp final : public IDEEPOperator {
   using FALLBACK_OP = IDEEPFallbackOp<ExpandDimsOp<CPUContext>, SkipIndices<0>>;
 
   IDEEPExpandDimsOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws),
-        fallback_(operator_def, ws) {
+      : IDEEPOperator(operator_def, ws), fallback_(operator_def, ws) {
     dims_ = OperatorBase::GetRepeatedArgument<int>("dims");
     auto originalSize = dims_.size();
     CAFFE_ENFORCE_GT(originalSize, 0, "Parameter `dims` must be provided.");
@@ -66,7 +65,6 @@ class IDEEPExpandDimsOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-
 class IDEEPSqueezeOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
@@ -74,8 +72,7 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
   using FALLBACK_OP = IDEEPFallbackOp<SqueezeOp<CPUContext>, SkipIndices<0>>;
 
   IDEEPSqueezeOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws),
-        fallback_(operator_def, ws) {
+      : IDEEPOperator(operator_def, ws), fallback_(operator_def, ws) {
     dims_ = OperatorBase::GetRepeatedArgument<int>("dims");
     auto originalSize = dims_.size();
     CAFFE_ENFORCE_GT(originalSize, 0, "Parameter `dims` must be provided.");
@@ -123,7 +120,6 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);
 };
-
 
 REGISTER_IDEEP_OPERATOR(ExpandDims, IDEEPExpandDimsOp);
 REGISTER_IDEEP_OPERATOR(Squeeze, IDEEPSqueezeOp);

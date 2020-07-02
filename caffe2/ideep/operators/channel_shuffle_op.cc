@@ -48,7 +48,6 @@ class ChannelShuffleGradientOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
-
 REGISTER_IDEEP_OPERATOR(ChannelShuffle, ChannelShuffleOp);
 REGISTER_IDEEP_OPERATOR(ChannelShuffleGradient, ChannelShuffleGradientOp);
 

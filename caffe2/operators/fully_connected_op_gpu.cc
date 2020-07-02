@@ -138,7 +138,6 @@ bool FullyConnectedGradientOp<
   return RunFullyConnectedGradientOpOnCUDADevice(float16_compute_, this);
 }
 
-
 #ifndef __HIP_PLATFORM_HCC__
 
 // Require these to be defined otherwise TensorCore FC ops will end

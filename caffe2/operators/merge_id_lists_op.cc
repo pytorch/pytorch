@@ -28,5 +28,5 @@ within a batch. This can be an issue if ID_LIST are order sensitive.
     .Output(0, "merged_lengths", "Lengths of the merged ID_LISTs batch")
     .Output(1, "merged_values", "Values of the merged ID_LISTs batch");
 NO_GRADIENT(MergeIdLists);
-}
-}
+} // namespace
+} // namespace caffe2

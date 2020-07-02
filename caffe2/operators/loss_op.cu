@@ -6,4 +6,4 @@ REGISTER_CUDA_OPERATOR(AveragedLoss, AveragedLoss<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     AveragedLossGradient,
     AveragedLossGradient<float, CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

@@ -1,8 +1,8 @@
 #include "caffe2/opt/optimizer.h"
 
 #include "caffe2/opt/converter.h"
-#include "caffe2/opt/mobile.h"
 #include "caffe2/opt/fusion.h"
+#include "caffe2/opt/mobile.h"
 
 namespace caffe2 {
 namespace opt {
@@ -20,7 +20,7 @@ void workspaceOptimizations(nom::repr::NNModule* nn, Workspace* ws, int level) {
 void graphOptimzations(nom::repr::NNModule* nn, int level) {
   switch (level) {
     case 1:
-#ifdef USE_NNPACK 
+#ifdef USE_NNPACK
       opt::addNNPACK(nn, false);
       opt::fuseNNPACKConvRelu(nn);
 #endif
@@ -45,4 +45,3 @@ NetDef optimize(NetDef net, int level) {
 
 } // namespace opt
 } // namespace caffe2
-

@@ -21,7 +21,9 @@ class ZmqContext {
     CAFFE_ENFORCE_EQ(rc, 0);
   }
 
-  void* ptr() { return ptr_; }
+  void* ptr() {
+    return ptr_;
+  }
 
  private:
   void* ptr_;
@@ -41,10 +43,16 @@ class ZmqMessage {
     CAFFE_ENFORCE_EQ(rc, 0);
   }
 
-  zmq_msg_t* msg() { return &msg_; }
+  zmq_msg_t* msg() {
+    return &msg_;
+  }
 
-  void* data() { return zmq_msg_data(&msg_); }
-  size_t size() { return zmq_msg_size(&msg_); }
+  void* data() {
+    return zmq_msg_data(&msg_);
+  }
+  size_t size() {
+    return zmq_msg_size(&msg_);
+  }
 
  private:
   zmq_msg_t msg_;
@@ -90,8 +98,7 @@ class ZmqSocket {
     } else if (zmq_errno() == EAGAIN) {
       return 0;
     } else {
-      LOG(FATAL) << "Cannot send zmq message. Error number: "
-                      << zmq_errno();
+      LOG(FATAL) << "Cannot send zmq message. Error number: " << zmq_errno();
       return 0;
     }
   }
@@ -112,8 +119,7 @@ class ZmqSocket {
     } else if (zmq_errno() == EAGAIN || zmq_errno() == EINTR) {
       return 0;
     } else {
-      LOG(FATAL) << "Cannot receive zmq message. Error number: "
-                      << zmq_errno();
+      LOG(FATAL) << "Cannot receive zmq message. Error number: " << zmq_errno();
       return 0;
     }
   }
@@ -131,7 +137,6 @@ class ZmqSocket {
   void* ptr_;
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-
-#endif  // CAFFE2_UTILS_ZMQ_HELPER_H_
+#endif // CAFFE2_UTILS_ZMQ_HELPER_H_

@@ -7,11 +7,11 @@ namespace {
 USE_IDEEP_DEF_ALIASES();
 
 class IDEEPInt8FullyConnectedOp final : public IDEEPOperator {
-public:
+ public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
 
-  IDEEPInt8FullyConnectedOp(const OperatorDef &operator_def, Workspace *ws)
+  IDEEPInt8FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
@@ -63,8 +63,7 @@ public:
     }
 
     if (InputSize() > BIAS) {
-      ideep::inner_product_forward::compute(
-          X_in, filter_, bias_, Y_);
+      ideep::inner_product_forward::compute(X_in, filter_, bias_, Y_);
     } else {
       ideep::inner_product_forward::compute(X_in, filter_, Y_);
     }
@@ -74,7 +73,7 @@ public:
     return true;
   }
 
-private:
+ private:
   size_t axis_{1};
   size_t axis_w_{1};
   float scale_;
@@ -82,7 +81,7 @@ private:
 
   idtype Y_data_type_;
   itensor filter_, bias_, Y_;
-  iscale  Y_scales_;
+  iscale Y_scales_;
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
 
   INPUT_TAGS(INPUT, FILTER, BIAS);

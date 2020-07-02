@@ -67,19 +67,21 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       auto onnx_model_str =
           OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
       CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
-      auto debug_builder = OperatorBase::GetSingleArgument<int>("debug_builder", 0);
+      auto debug_builder =
+          OperatorBase::GetSingleArgument<int>("debug_builder", 0);
       auto max_workspace_size = OperatorBase::GetSingleArgument<int>(
           "max_workspace_size", 1024 * 1024 * 2);
 
       // Pull the weights from workspace and assembly it back to the onnx model,
       // notice that since we may have rewritten the net, we need to map the
       // weight names
-      auto initializers = OperatorBase::GetRepeatedArgument<std::string>("initializers");
+      auto initializers =
+          OperatorBase::GetRepeatedArgument<std::string>("initializers");
       CAFFE_ENFORCE_EQ(
           initializers.size() % 2, 0, "initializers should come in pairs");
       std::unordered_set<std::string> initializer_set;
       std::unordered_map<std::string, std::string> input_mapping;
-      for (auto it = initializers.begin(); it != initializers.end(); ++it)  {
+      for (auto it = initializers.begin(); it != initializers.end(); ++it) {
         auto key = *it++;
         input_mapping.emplace(key, *it);
         initializer_set.emplace(key);
@@ -87,7 +89,8 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       Workspace mapped_ws(ws, input_mapping);
       ::ONNX_NAMESPACE::ModelProto onnx_model;
       ParseProtoFromLargeString(onnx_model_str, &onnx_model);
-      BuildInitializationList(&mapped_ws, onnx_model.mutable_graph(), &initializer_set);
+      BuildInitializationList(
+          &mapped_ws, onnx_model.mutable_graph(), &initializer_set);
       onnx_model_str.clear();
       onnx_model.SerializeToString(&onnx_model_str);
 

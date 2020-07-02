@@ -3,4 +3,4 @@
 
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR(LearningRate, LearningRateOp<float, CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

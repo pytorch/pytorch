@@ -174,6 +174,8 @@ CAFFE2_API bool MatchStrings(string p, string s);
  * This ensures that each named arg that exists in the pattern exists in g_op,
  * is equal in value.
  */
-CAFFE2_API bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
+CAFFE2_API bool MatchArguments(
+    const OperatorDef& p_op,
+    const OperatorDef& g_op);
 
 } // namespace caffe2

@@ -14,8 +14,9 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
         scale_(this->template GetSingleArgument<float>("Y_scale", 1.0)),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)) {
-    OPERATOR_NEEDS_FEATURE(pad_l() == pad_r() && pad_t() == pad_b(),
-                           "Uneven padding not supported.");
+    OPERATOR_NEEDS_FEATURE(
+        pad_l() == pad_r() && pad_t() == pad_b(),
+        "Uneven padding not supported.");
     fusion_type_ = FUSION_UNKNOWN;
     last_input_ = BIAS_OR_INPUT_S;
     algo_ = ialgo::convolution_direct;
@@ -30,28 +31,32 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   virtual ~IDEEPInt8ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
-    const auto &X = Input(INPUT_X);
-    const auto &filter = Input(FILTER);
-    auto *Y = Output(OUTPUT);
+    const auto& X = Input(INPUT_X);
+    const auto& filter = Input(FILTER);
+    auto* Y = Output(OUTPUT);
 
     CAFFE_ENFORCE(X.has_scale());
     CAFFE_ENFORCE(4 == X.ndims() && 4 == filter.ndims());
-    CAFFE_ENFORCE(X.get_data_type() == idtype::s8
-        || X.get_data_type() == idtype::u8);
+    CAFFE_ENFORCE(
+        X.get_data_type() == idtype::s8 || X.get_data_type() == idtype::u8);
     CAFFE_ENFORCE(filter.get_dim(2) == kernel_h());
     CAFFE_ENFORCE(filter.get_dim(3) == kernel_w());
     CAFFE_ENFORCE(
         X.get_dim(1) == filter.get_dim(1) * group_,
         "Convolution op: input channels does not match: # of input channels ",
-        X.get_dim(1), " is not equal to kernel channels * group:",
-        filter.get_dim(1), "*", group_);
+        X.get_dim(1),
+        " is not equal to kernel channels * group:",
+        filter.get_dim(1),
+        "*",
+        group_);
 
     bool input_changed = (cached_X_descriptor_ != X.get_descriptor());
     if (input_changed) {
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
-    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    bool weights_changed =
+        (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed) {
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());
@@ -73,7 +78,8 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
               group_,
               algo_,
               iprop::forward_inference,
-              X_dt, X.get_dims());
+              X_dt,
+              X.get_dims());
       if (filter.get_desc() != expected_descriptor) {
         filter_.init(expected_descriptor);
         filter_.set_scale(filter.get_scale());
@@ -88,8 +94,10 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
         // Thus, we have to requantize it by current input and filter scales.
         auto bias = Input(BIAS_OR_INPUT_S);
         bias_.init({bias.get_dims(), idtype::s32});
-        iscale bias_scales (filter_.get_scale());
-        for (auto &scale : bias_scales) { scale *= X.get_scale()[0]; }
+        iscale bias_scales(filter_.get_scale());
+        for (auto& scale : bias_scales) {
+          scale *= X.get_scale()[0];
+        }
         bias_.set_scale(bias_scales);
         bias_.feed_from(bias);
       }
@@ -165,7 +173,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   FusionType fusion_type_;
 
   itensor filter_, bias_;
-  iscale  Y_scales_;
+  iscale Y_scales_;
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
   ideep::convolution_forward_params conv_param;
 
@@ -219,7 +227,10 @@ class IDEEPInt8ConvSumReluOp final : public IDEEPInt8ConvOp {
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Conv, DNNLOWP, IDEEPInt8ConvOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvRelu, DNNLOWP, IDEEPInt8ConvReluOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvSum, DNNLOWP, IDEEPInt8ConvSumOp);
-REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvSumRelu, DNNLOWP, IDEEPInt8ConvSumReluOp);
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(
+    Int8ConvSumRelu,
+    DNNLOWP,
+    IDEEPInt8ConvSumReluOp);
 
 OPERATOR_SCHEMA(Int8ConvSum)
     .NumInputs(2, 4)

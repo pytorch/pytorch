@@ -35,7 +35,6 @@ class IDEEPContext final : public BaseContext {
     ev->Record(IDEEP, this, err_msg);
   }
 
-
   inline void FinishDeviceComputation() {}
 
   inline rand_gen_type& RandGenerator() {

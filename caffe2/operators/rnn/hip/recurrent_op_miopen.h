@@ -64,8 +64,8 @@ class RecurrentBaseOp : public Operator<HIPContext> {
 };
 
 #define USE_RECURRENT_BASE_FUNCTIONS          \
-  USE_OPERATOR_FUNCTIONS(HIPContext);        \
-  using RecurrentBaseOp<T>::miopen_wrapper_;   \
+  USE_OPERATOR_FUNCTIONS(HIPContext);         \
+  using RecurrentBaseOp<T>::miopen_wrapper_;  \
   using RecurrentBaseOp<T>::rnnDesc_;         \
   using RecurrentBaseOp<T>::wDesc_;           \
   using RecurrentBaseOp<T>::hxDesc_;          \
@@ -76,7 +76,7 @@ class RecurrentBaseOp : public Operator<HIPContext> {
   using RecurrentBaseOp<T>::yDesc_;           \
   using RecurrentBaseOp<T>::cachedInputDims_; \
   using RecurrentBaseOp<T>::reserveNbytes_;   \
-  using RecurrentBaseOp<T>::miopenWsNbytes_;   \
+  using RecurrentBaseOp<T>::miopenWsNbytes_;  \
   using RecurrentBaseOp<T>::initialize;
 
 template <typename T>
@@ -133,7 +133,6 @@ class RecurrentGradientOp : public RecurrentBaseOp<T> {
       DROPOUT_STATES,
       RNN_SCRATCH_OUT);
 };
-
 
 } // namespace caffe2
 

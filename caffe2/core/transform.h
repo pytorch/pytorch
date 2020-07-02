@@ -171,4 +171,4 @@ CAFFE2_API NetDef ApplyTransformIfFaster(
     const int main_runs,
     const double improvement_threshold);
 
-} // namespace
+} // namespace caffe2

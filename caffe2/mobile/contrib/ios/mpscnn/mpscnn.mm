@@ -712,8 +712,8 @@ INIT_NEURON_OP(Sigmoid);
 
 struct ReluNeuronInit {
   static MPSCNNNeuron* t() {
-    return
-        [[MPSCNNNeuronReLU alloc] initWithDevice:getMPSCNNContext().device a:0];
+    return [[MPSCNNNeuronReLU alloc] initWithDevice:getMPSCNNContext().device
+                                                  a:0];
   }
 };
 INIT_NEURON_OP(Relu);
@@ -2267,7 +2267,8 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
 
     // bbox_deltas: (num_images, A * 4, H, W)
     CAFFE_ENFORCE_EQ(
-        bbox_deltas.sizes(), (vector<int64_t>{num_images, 4 * A, height, width}));
+        bbox_deltas.sizes(),
+        (vector<int64_t>{num_images, 4 * A, height, width}));
 
     // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
     CAFFE_ENFORCE_EQ(im_info_tensor.sizes(), (vector<int64_t>{num_images, 3}));

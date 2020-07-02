@@ -13,14 +13,10 @@ namespace caffe2 {
 
 class CAFFE2_API SignalHandler {
  public:
-  enum class Action {
-    NONE,
-    STOP
-  };
+  enum class Action { NONE, STOP };
 
   // Constructor. Specify what action to take when a signal is received.
-  SignalHandler(Action SIGINT_action,
-                Action SIGHUP_action);
+  SignalHandler(Action SIGINT_action, Action SIGHUP_action);
   ~SignalHandler();
 
   Action CheckForSignals();
@@ -42,4 +38,4 @@ CAFFE2_API void setPrintStackTracesOnFatalSignal(bool print);
 CAFFE2_API bool printStackTracesOnFatalSignal();
 #endif // defined(CAFFE2_SUPPORTS_SIGNAL_HANDLER)
 
-}  // namespace caffe2
+} // namespace caffe2

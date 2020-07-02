@@ -6,10 +6,10 @@
 #include <cstddef>
 #include <vector>
 
+#include <c10/util/typeid.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
 
 namespace caffe2 {
 

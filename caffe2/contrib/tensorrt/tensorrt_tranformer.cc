@@ -41,7 +41,9 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
-void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
+void DumpModel(
+    const ::ONNX_NAMESPACE::ModelProto& model,
+    const std::string& fname) {
   std::ofstream ff(fname);
   ff << ::ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
   ff.close();
@@ -240,7 +242,8 @@ OperatorDef TensorRTTransformer::BuildTrtOpLazy(
 
 OperatorDef TensorRTTransformer::BuildTrtOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, std::vector<int>>& output_size_hints) {
+    const std::unordered_map<std::string, std::vector<int>>&
+        output_size_hints) {
   OperatorDef op;
   op.set_type("TensorRT");
 
@@ -309,13 +312,14 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
           vf.push_back(static_cast<float>(i));
         }
         tf.mutable_raw_data()->assign(
-            reinterpret_cast<const char *>(vf.data()), sizeof(float) * vf.size());
+            reinterpret_cast<const char*>(vf.data()),
+            sizeof(float) * vf.size());
       } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
         tf.set_data_type(::ONNX_NAMESPACE::TensorProto::INT64);
         tf.mutable_raw_data()->assign(t.raw_data().data(), t.raw_data().size());
       } else {
-        CAFFE_THROW("Unsupported tensor data type for conversion: ",
-            t.data_type());
+        CAFFE_THROW(
+            "Unsupported tensor data type for conversion: ", t.data_type());
       }
       onnx_model.mutable_graph()->add_initializer()->CopyFrom(tf);
     }

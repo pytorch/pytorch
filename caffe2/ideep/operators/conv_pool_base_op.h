@@ -11,7 +11,7 @@ namespace caffe2 {
 class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
  public:
   IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-     : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {}
+      : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {}
   virtual ~IDEEPConvPoolOpBase() {}
 
   inline const ideep::tensor& Input(int index) {
@@ -40,7 +40,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     InferOutputSize(
         input_Tdims,
         output_channel,
-        StorageOrder::NCHW, //order_,
+        StorageOrder::NCHW, // order_,
         global_pooling_,
         legacy_pad_,
         dilation_,

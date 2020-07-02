@@ -10,9 +10,8 @@
 namespace caffe2 {
 namespace memonger {
 
-CAFFE2_API NetDef optimize_inference_net(
-    const NetDef& net,
-    const std::set<string>& static_blobs);
+CAFFE2_API NetDef
+optimize_inference_net(const NetDef& net, const std::set<string>& static_blobs);
 
 CAFFE2_API NetDef compute_blob_recycling_for_dag(
     const NetDef& net,
@@ -23,7 +22,7 @@ CAFFE2_API NetDef compute_blob_recycling_for_dag(
     const std::unordered_set<string>& dont_share_blob_names,
     const std::unordered_map<string, vector<int>>& blob_shapes);
 
-} // memonger
-} // caffe2
+} // namespace memonger
+} // namespace caffe2
 
 #endif

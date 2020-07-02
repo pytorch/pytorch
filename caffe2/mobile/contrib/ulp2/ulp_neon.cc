@@ -14,16 +14,20 @@ constexpr size_t kL1CacheSizeBytes = 16 * 1024;
 // Applies 2-bit uniform quantization to the floating point data at Xdata,
 // storing QC bytes into XQdata (i.e. reading 8 * QC floats from Xdata).
 // Requires QC to be a multiple of 8.
-inline void quantize2bNeon(size_t QC,
-                           const float* __restrict__ Xdata,
-                           float offset,
-                           float inter_center_distance,
-                           std::array<uint8_t*, k2b1bXBits> XQdata) {
+inline void quantize2bNeon(
+    size_t QC,
+    const float* __restrict__ Xdata,
+    float offset,
+    float inter_center_distance,
+    std::array<uint8_t*, k2b1bXBits> XQdata) {
   DCHECK_EQ(QC % 8, 0);
-  const auto offset_plus_2_inter_center_distance = vdupq_n_f32(offset + 2 * inter_center_distance);
-  const auto offset_plus_inter_center_distance = vdupq_n_f32(offset + inter_center_distance);
+  const auto offset_plus_2_inter_center_distance =
+      vdupq_n_f32(offset + 2 * inter_center_distance);
+  const auto offset_plus_inter_center_distance =
+      vdupq_n_f32(offset + inter_center_distance);
   const auto offset_ = vdupq_n_f32(offset);
-  const uint8x8_t shifts = {1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7};
+  const uint8x8_t shifts = {
+      1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7};
 
   for (size_t qc = 0; qc < QC; qc += 8) {
     std::array<std::array<uint8x8_t, 8>, k2b1bXBits> ps;
@@ -55,24 +59,29 @@ inline void quantize2bNeon(size_t QC,
         return vmovn_u16(vcombine_u16(vmovn_u32(a), vmovn_u32(b)));
       };
 
-      const auto x_geq_offset_plus_2_inter_center_distance =
-          join(vcgeq_s32(vreinterpretq_s32_f32(x0),
-                         vreinterpretq_s32_f32(offset_plus_2_inter_center_distance)),
-               vcgeq_s32(vreinterpretq_s32_f32(x1),
-                         vreinterpretq_s32_f32(offset_plus_2_inter_center_distance)));
-      const auto x_ge_offset =
-          join(vcgeq_s32(vreinterpretq_s32_f32(x0), vreinterpretq_s32_f32(offset_)),
-               vcgeq_s32(vreinterpretq_s32_f32(x1), vreinterpretq_s32_f32(offset_)));
+      const auto x_geq_offset_plus_2_inter_center_distance = join(
+          vcgeq_s32(
+              vreinterpretq_s32_f32(x0),
+              vreinterpretq_s32_f32(offset_plus_2_inter_center_distance)),
+          vcgeq_s32(
+              vreinterpretq_s32_f32(x1),
+              vreinterpretq_s32_f32(offset_plus_2_inter_center_distance)));
+      const auto x_ge_offset = join(
+          vcgeq_s32(vreinterpretq_s32_f32(x0), vreinterpretq_s32_f32(offset_)),
+          vcgeq_s32(vreinterpretq_s32_f32(x1), vreinterpretq_s32_f32(offset_)));
 
-      const auto x_lt_offset_plus_inter_center_distance =
-          join(vcltq_s32(vreinterpretq_s32_f32(x0),
-                         vreinterpretq_s32_f32(offset_plus_inter_center_distance)),
-               vcltq_s32(vreinterpretq_s32_f32(x1),
-                         vreinterpretq_s32_f32(offset_plus_inter_center_distance)));
+      const auto x_lt_offset_plus_inter_center_distance = join(
+          vcltq_s32(
+              vreinterpretq_s32_f32(x0),
+              vreinterpretq_s32_f32(offset_plus_inter_center_distance)),
+          vcltq_s32(
+              vreinterpretq_s32_f32(x1),
+              vreinterpretq_s32_f32(offset_plus_inter_center_distance)));
 
       const auto p1_mask = vmvn_u8(x_lt_offset_plus_inter_center_distance);
-      const auto p0_mask = vorr_u8(vand_u8(x_ge_offset, x_lt_offset_plus_inter_center_distance),
-                                   x_geq_offset_plus_2_inter_center_distance);
+      const auto p0_mask = vorr_u8(
+          vand_u8(x_ge_offset, x_lt_offset_plus_inter_center_distance),
+          x_geq_offset_plus_2_inter_center_distance);
       ps[0][j] = vand_u8(shifts, p0_mask);
       ps[1][j] = vand_u8(shifts, p1_mask);
     }
@@ -89,11 +98,12 @@ inline void quantize2bNeon(size_t QC,
   }
 }
 
-void uniformQuantize2b1bNeon(QConvState* state,
-                             const TensorCPU& X,
-                             const std::vector<std::unique_ptr<TensorCPU>>& XQ,
-                             float offset,
-                             float inter_center_distance) {
+void uniformQuantize2b1bNeon(
+    QConvState* state,
+    const TensorCPU& X,
+    const std::vector<std::unique_ptr<TensorCPU>>& XQ,
+    float offset,
+    float inter_center_distance) {
   CAFFE_ENFORCE_GT(X.ndim(), 1);
   const size_t C = X.dim32(X.ndim() - 1);
   const size_t N = X.size() / C;
@@ -116,15 +126,18 @@ void uniformQuantize2b1bNeon(QConvState* state,
   // We read/write B * K * 4 + 2 * B * (K / 8), so to fit inside C, we have
   // B = 4 * C / 17 K.
   // QCUnroll = 0;
-  const size_t rowsPerBlock =
-      std::max<size_t>(std::floor<size_t>(double(4 * kL1CacheSizeBytes) / double(17 * C)), 1);
+  const size_t rowsPerBlock = std::max<size_t>(
+      std::floor<size_t>(double(4 * kL1CacheSizeBytes) / double(17 * C)), 1);
   state->parallelFor(divRoundUp(N, rowsPerBlock), [&](size_t nb) {
-    for (size_t n = nb * rowsPerBlock; n < std::min<size_t>(nb * rowsPerBlock + rowsPerBlock, N);
+    for (size_t n = nb * rowsPerBlock;
+         n < std::min<size_t>(nb * rowsPerBlock + rowsPerBlock, N);
          ++n) {
       std::array<uint8_t*, k2b1bXBits> XQoff = {{
-          XQdata[0] + 0 + QC * n, XQdata[1] + 0 + QC * n,
+          XQdata[0] + 0 + QC * n,
+          XQdata[1] + 0 + QC * n,
       }};
-      quantize2bNeon(QCUnroll, &Xdata[0 + C * n], offset, inter_center_distance, XQoff);
+      quantize2bNeon(
+          QCUnroll, &Xdata[0 + C * n], offset, inter_center_distance, XQoff);
       for (size_t qc = QCUnroll; qc < QC; ++qc) {
         // compute the block in X.
         std::array<uint8_t, k2b1bXBits> p = {{0, 0}};
@@ -153,11 +166,12 @@ void uniformQuantize2b1bNeon(QConvState* state,
 }
 
 template <size_t TileSize, size_t TileDepthBytes>
-void uniformQuantize2b1bNeonPacked(QConvState* state,
-                                   const TensorCPU& X,
-                                   const std::vector<std::unique_ptr<TensorCPU>>& XQ,
-                                   float offset,
-                                   float inter_center_distance) {
+void uniformQuantize2b1bNeonPacked(
+    QConvState* state,
+    const TensorCPU& X,
+    const std::vector<std::unique_ptr<TensorCPU>>& XQ,
+    float offset,
+    float inter_center_distance) {
   const size_t M = X.size_to_dim(3);
   const size_t K = X.size() / M;
   const size_t QK = divRoundUp(K, 8);
@@ -174,10 +188,12 @@ void uniformQuantize2b1bNeonPacked(QConvState* state,
   CAFFE_ENFORCE_GT(offset, 0);
   CAFFE_ENFORCE_GT(inter_center_distance, 0);
   // Each worker loads an L1 cache sized block.
-  // We read/write B * K * TileSize * 4 + 2 * B * TileSize * (K / 8), so to fit inside C, we have
-  // B = 4 * C / (17 * K * TileSize).
+  // We read/write B * K * TileSize * 4 + 2 * B * TileSize * (K / 8), so to fit
+  // inside C, we have B = 4 * C / (17 * K * TileSize).
   const size_t tilesPerBlock = std::max<size_t>(
-      std::floor<size_t>(double(4 * kL1CacheSizeBytes) / double(17 * K * TileSize)), 1);
+      std::floor<size_t>(
+          double(4 * kL1CacheSizeBytes) / double(17 * K * TileSize)),
+      1);
   state->parallelFor(divRoundUp(numTiles, tilesPerBlock), [&](size_t nb) {
     for (size_t i = nb * tilesPerBlock;
          i < std::min<size_t>(nb * tilesPerBlock + tilesPerBlock, numTiles);
@@ -189,25 +205,38 @@ void uniformQuantize2b1bNeonPacked(QConvState* state,
             size_t m = i * TileSize + ii;
             size_t k = j * TileDepthBytes * 8;
             std::array<uint8_t*, k2b1bXBits> XQoff = {
-                {XQdata[0] + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                {XQdata[0] + TileDepthBytes * ii +
+                     TileDepthBytes * TileSize * j +
                      TileSize * TileDepthBytes * numTilesDepth * i,
-                 XQdata[1] + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                 XQdata[1] + TileDepthBytes * ii +
+                     TileDepthBytes * TileSize * j +
                      TileSize * TileDepthBytes * numTilesDepth * i}};
-            quantize2bNeon(TileDepthBytes, &Xdata[m * K + k], offset, inter_center_distance, XQoff);
+            quantize2bNeon(
+                TileDepthBytes,
+                &Xdata[m * K + k],
+                offset,
+                inter_center_distance,
+                XQoff);
           }
         } else {
           for (size_t ii = 0; ii < TileSize; ++ii) {
             size_t m = i * TileSize + ii;
             size_t k = j * TileDepthBytes * 8;
             std::array<uint8_t*, k2b1bXBits> XQoff = {
-                {XQdata[0] + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                {XQdata[0] + TileDepthBytes * ii +
+                     TileDepthBytes * TileSize * j +
                      TileSize * TileDepthBytes * numTilesDepth * i,
-                 XQdata[1] + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                 XQdata[1] + TileDepthBytes * ii +
+                     TileDepthBytes * TileSize * j +
                      TileSize * TileDepthBytes * numTilesDepth * i}};
             if (m < M && k + TileDepthBytes * 8 <= K) {
               // We can just read the stripe directly.
               quantize2bNeon(
-                  TileDepthBytes, &Xdata[m * K + k], offset, inter_center_distance, XQoff);
+                  TileDepthBytes,
+                  &Xdata[m * K + k],
+                  offset,
+                  inter_center_distance,
+                  XQoff);
             } else {
               // We need to pad the stripe to the full amount read by
               // quantize2bNeon.
@@ -215,7 +244,12 @@ void uniformQuantize2b1bNeonPacked(QConvState* state,
               if (m < M) {
                 std::copy(&Xdata[m * K + k], &Xdata[m * K + K], Xpad.begin());
               }
-              quantize2bNeon(TileDepthBytes, Xpad.data(), offset, inter_center_distance, XQoff);
+              quantize2bNeon(
+                  TileDepthBytes,
+                  Xpad.data(),
+                  offset,
+                  inter_center_distance,
+                  XQoff);
             }
           }
         }
@@ -227,7 +261,11 @@ void uniformQuantize2b1bNeonPacked(QConvState* state,
 // Packs a matrix (of size MxK) into a tiled array of size
 // (M/TileSize)x(K/TileDepthBytes)xTileSizexTileDepthBytes.
 template <size_t TileSize, size_t TileDepthBytes>
-void qpack_tiles(QConvState* state, const TensorCPU& X, size_t axis, TensorCPU* XP) {
+void qpack_tiles(
+    QConvState* state,
+    const TensorCPU& X,
+    size_t axis,
+    TensorCPU* XP) {
   const size_t M = X.size_to_dim(axis);
   const size_t QK = X.size() / M;
   const size_t numTiles = divRoundUp(M, TileSize);
@@ -240,7 +278,8 @@ void qpack_tiles(QConvState* state, const TensorCPU& X, size_t axis, TensorCPU* 
   // We read/write 2 * B * QK * TileSize bytes, so
   // B = C / (2 * QK * TileSize)
   const size_t tilesPerBlock = std::max<size_t>(
-      std::floor<size_t>(double(kL1CacheSizeBytes) / double(2 * TileSize * QK)), 1);
+      std::floor<size_t>(double(kL1CacheSizeBytes) / double(2 * TileSize * QK)),
+      1);
   state->parallelFor(divRoundUp(numTiles, tilesPerBlock), [&](size_t nb) {
     for (size_t i = nb * tilesPerBlock;
          i < std::min<size_t>(nb * tilesPerBlock + tilesPerBlock, numTiles);
@@ -251,10 +290,12 @@ void qpack_tiles(QConvState* state, const TensorCPU& X, size_t axis, TensorCPU* 
           for (auto ii = 0; ii < TileSize; ++ii) {
             auto m = i * TileSize + ii;
             auto qk = j * TileDepthBytes;
-            std::memcpy(&XPdata[TileDepthBytes * ii + TileDepthBytes * TileSize * j +
-                                TileSize * TileDepthBytes * numTilesDepth * i],
-                        &Xdata[m * QK + qk],
-                        TileDepthBytes);
+            std::memcpy(
+                &XPdata
+                    [TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                     TileSize * TileDepthBytes * numTilesDepth * i],
+                &Xdata[m * QK + qk],
+                TileDepthBytes);
           }
         } else {
           for (size_t ii = 0; ii < TileSize; ++ii) {
@@ -266,8 +307,9 @@ void qpack_tiles(QConvState* state, const TensorCPU& X, size_t axis, TensorCPU* 
                 // get value from X
                 pval = Xdata[m * QK + qk];
               }
-              XPdata[jj + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
-                     TileSize * TileDepthBytes * numTilesDepth * i] = pval;
+              XPdata
+                  [jj + TileDepthBytes * ii + TileDepthBytes * TileSize * j +
+                   TileSize * TileDepthBytes * numTilesDepth * i] = pval;
             }
           }
         }
@@ -282,13 +324,14 @@ void qpack_tiles(QConvState* state, const TensorCPU& X, size_t axis, TensorCPU* 
 // [M/TileSize][K/TileDepthBytes][TileSize][TileDepthBytes], which ensures all
 // the array accesses in this function is contiguous.
 template <size_t kUnrollM, size_t kUnrollN, size_t TileDepthBytes, typename F>
-void qgess_packed(const uint8_t* __restrict__ Ablock,
-                  const uint8_t* __restrict__ Bblock,
-                  float* __restrict__ Cblock,
-                  const size_t Cstride,
-                  const size_t QK,
-                  const size_t Nstart,
-                  F&& f) {
+void qgess_packed(
+    const uint8_t* __restrict__ Ablock,
+    const uint8_t* __restrict__ Bblock,
+    float* __restrict__ Cblock,
+    const size_t Cstride,
+    const size_t QK,
+    const size_t Nstart,
+    F&& f) {
   static_assert(kUnrollN % 8 == 0, "");
   static_assert(TileDepthBytes == 16, "");
   DCHECK_EQ(QK % 16, 0);
@@ -341,12 +384,18 @@ void qgess_packed(const uint8_t* __restrict__ Ablock,
     for (size_t nn = 0; nn < kUnrollN / 8; ++nn) {
       const int32x4_t K_ = vdupq_n_s32(QK * 8);
       const int16x4_t two = vdup_n_s16(2);
-      const int16x4_t acc0123_l = vreinterpret_s16_u16(vget_low_u16(acc[mm][nn]));
-      const int16x4_t acc0123_h = vreinterpret_s16_u16(vget_high_u16(acc[mm][nn]));
+      const int16x4_t acc0123_l =
+          vreinterpret_s16_u16(vget_low_u16(acc[mm][nn]));
+      const int16x4_t acc0123_h =
+          vreinterpret_s16_u16(vget_high_u16(acc[mm][nn]));
       const int32x4_t K_minus_2_acc0123_l = vmlsl_s16(K_, two, acc0123_l);
       const int32x4_t K_minus_2_acc0123_h = vmlsl_s16(K_, two, acc0123_h);
-      f(Crow + nn * 8 + 0, vcvtq_f32_s32(K_minus_2_acc0123_l), Nstart + nn * 8 + 0);
-      f(Crow + nn * 8 + 4, vcvtq_f32_s32(K_minus_2_acc0123_h), Nstart + nn * 8 + 4);
+      f(Crow + nn * 8 + 0,
+        vcvtq_f32_s32(K_minus_2_acc0123_l),
+        Nstart + nn * 8 + 0);
+      f(Crow + nn * 8 + 4,
+        vcvtq_f32_s32(K_minus_2_acc0123_h),
+        Nstart + nn * 8 + 4);
     }
   }
 }
@@ -355,7 +404,11 @@ void qgess_packed(const uint8_t* __restrict__ Ablock,
 // matrices, laid out in the standard format.
 template <size_t TileSize, size_t TileDepthBytes, typename F>
 inline void qgemm_nt_packed(
-    QConvState* state, const TensorCPU& A, const TensorCPU& B, TensorCPU* C, F&& f = F()) {
+    QConvState* state,
+    const TensorCPU& A,
+    const TensorCPU& B,
+    TensorCPU* C,
+    F&& f = F()) {
   CAFFE_ENFORCE_EQ(A.ndim(), 4);
   CAFFE_ENFORCE_EQ(B.ndim(), 4);
   CAFFE_ENFORCE_EQ(A.dim(2), TileSize);
@@ -376,18 +429,18 @@ inline void qgemm_nt_packed(
   const auto* Bdata = B.data<uint8_t>();
   auto* Cdata = C->mutable_data<float>();
 
-  // Assume TxT tile. Each input slice is of size T x (K/8) bytes, and the output
-  // is a tile of size T x T x sizeof(float) bytes. We want the sum of this to fit
-  // in L1 cache. This means for a block number of tiles B , we load B * T * K /
-  // 8 + B * T * K / 8 + B * B * T * T * sizeof(float).
+  // Assume TxT tile. Each input slice is of size T x (K/8) bytes, and the
+  // output is a tile of size T x T x sizeof(float) bytes. We want the sum of
+  // this to fit in L1 cache. This means for a block number of tiles B , we load
+  // B * T * K / 8 + B * T * K / 8 + B * B * T * T * sizeof(float).
 
   // If cache size = C, we get
   // B = 1/(32 * T) (sqrt(256 C + K^2) - K)
   // taking floor (by integer division), gives the result.
 
   // Assume 16KB L1 cache.
-  size_t tilesPerBlock =
-      std::floor((std::sqrt(256 * kL1CacheSizeBytes + K * K) - K) / (32 * TileSize));
+  size_t tilesPerBlock = std::floor(
+      (std::sqrt(256 * kL1CacheSizeBytes + K * K) - K) / (32 * TileSize));
   if (tilesPerBlock < 1) {
     tilesPerBlock = 1;
   }
@@ -404,12 +457,12 @@ inline void qgemm_nt_packed(
     const size_t nBlockIdx = mn % NNumBlocks;
     const size_t mTileStart = mBlockIdx * tilesPerBlock;
     const size_t nTileStart = nBlockIdx * tilesPerBlock;
-    for (size_t mBlockTileIdx = 0;
-         mBlockTileIdx < tilesPerBlock && mBlockTileIdx + mTileStart < MNumTiles;
+    for (size_t mBlockTileIdx = 0; mBlockTileIdx < tilesPerBlock &&
+         mBlockTileIdx + mTileStart < MNumTiles;
          ++mBlockTileIdx) {
       const size_t mTileIdx = mBlockTileIdx + mTileStart;
-      for (size_t nBlockTileIdx = 0;
-           nBlockTileIdx < tilesPerBlock && nBlockTileIdx + nTileStart < NNumTiles;
+      for (size_t nBlockTileIdx = 0; nBlockTileIdx < tilesPerBlock &&
+           nBlockTileIdx + nTileStart < NNumTiles;
            ++nBlockTileIdx) {
         const size_t nTileIdx = nBlockTileIdx + nTileStart;
         // A layout: [M/TileSize][QK / TileDepth][TileSize][TileDepth]
@@ -419,29 +472,40 @@ inline void qgemm_nt_packed(
         auto* Cblock = &Cdata[mTileIdx * TileSize * N + nTileIdx * TileSize];
         const size_t Cstride = N;
         qgess_packed<TileSize, TileSize, TileDepthBytes, F>(
-            Ablock, Bblock, Cblock, Cstride, QK, nTileIdx * TileSize, std::forward<F>(f));
+            Ablock,
+            Bblock,
+            Cblock,
+            Cstride,
+            QK,
+            nTileIdx * TileSize,
+            std::forward<F>(f));
       }
     }
   });
 }
 
-void run2b1bConvIm2ColGEMM(QConvState* state,
-                           const ConvArgs& args,
-                           const TensorCPU& X,
-                           TensorCPU* Y) {
+void run2b1bConvIm2ColGEMM(
+    QConvState* state,
+    const ConvArgs& args,
+    const TensorCPU& X,
+    TensorCPU* Y) {
   // TODO: packing + quantization in same block.
   const size_t KH = state->WQ->dim32(1);
   const size_t KW = state->WQ->dim32(2);
-  const size_t OH = (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1;
-  const size_t OW = (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1;
+  const size_t OH =
+      (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1;
+  const size_t OW =
+      (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1;
   const size_t OC = state->WQ->dim32(0);
   const size_t QK = KH * KW * divRoundUp(X.dim32(3), 8);
   Y->Resize(X.dim32(0), OH, OW, OC);
   if (!state->WQPacked) {
     state->WQPacked = std::make_unique<Tensor>(CPU);
-    qpack_tiles<kGEMMTileSize, kGEMMTileDepthBytes>(state, *(state->WQ), 1, state->WQPacked.get());
+    qpack_tiles<kGEMMTileSize, kGEMMTileDepthBytes>(
+        state, *(state->WQ), 1, state->WQPacked.get());
     CAFFE_ENFORCE_EQ(state->WQPacked->dim32(0), divRoundUp(OC, kGEMMTileSize));
-    CAFFE_ENFORCE_EQ(state->WQPacked->dim32(1), divRoundUp(QK, kGEMMTileDepthBytes));
+    CAFFE_ENFORCE_EQ(
+        state->WQPacked->dim32(1), divRoundUp(QK, kGEMMTileDepthBytes));
     CAFFE_ENFORCE_EQ(state->WQPacked->dim32(2), kGEMMTileSize);
     CAFFE_ENFORCE_EQ(state->WQPacked->dim32(3), kGEMMTileDepthBytes);
 
@@ -450,14 +514,16 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
     // with (2/3 bias + normalization), and setting bias to zero.
     if (state->bias) {
       for (size_t i = 0; i < state->bias->size(); ++i) {
-        state->WQN->mutable_data<float>()[i] += 2.0f / 3 * state->bias->data<float>()[i];
+        state->WQN->mutable_data<float>()[i] +=
+            2.0f / 3 * state->bias->data<float>()[i];
       }
     }
     state->bias.reset();
 
     // If we have to pad when we pack our weight tiles, then we need to adjust
     // the normalization factor by the number of zeros that we added.
-    const size_t QKPadding = divRoundUp(QK, kGEMMTileDepthBytes) * kGEMMTileDepthBytes - QK;
+    const size_t QKPadding =
+        divRoundUp(QK, kGEMMTileDepthBytes) * kGEMMTileDepthBytes - QK;
     if (QKPadding != 0) {
       for (size_t i = 0; i < state->WQN->size(); ++i) {
         state->WQN->mutable_data<float>()[i] -= QKPadding * 8;
@@ -466,8 +532,9 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
   }
   CAFFE_ENFORCE(!state->bias.get());
   // Since 1x1s are so common, we fuse the quantization + packing steps.
-  const bool is_1x1 = KH == 1 && KW == 1 && args.pad_l == 0 && args.pad_r == 0 && args.pad_b == 0 &&
-                      args.pad_t == 0 && args.stride_h == 1 && args.stride_w == 1;
+  const bool is_1x1 = KH == 1 && KW == 1 && args.pad_l == 0 &&
+      args.pad_r == 0 && args.pad_b == 0 && args.pad_t == 0 &&
+      args.stride_h == 1 && args.stride_w == 1;
 
   if (is_1x1) {
     CAFFE_ENFORCE_EQ(OH, X.dim32(1));
@@ -495,32 +562,35 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
     {
       const auto* __restrict__ WQNdata = state->WQN->data<float>();
       switch (i) {
-      case 0:
-        qgemm_nt_packed<kGEMMTileSize, kGEMMTileDepthBytes>(
-            state,
-            is_1x1 ? XQ : *(state->scratch),
-            *(state->WQPacked),
-            YQ0,
-            [WQNdata](float* __restrict__ acc, float32x4_t value, size_t channel) {
-              // acc[c] = 3/2 WQN[c] + 1/2 value[c];
-              const float32x4_t _32 = vdupq_n_f32(3.0f / 2);
-              const float32x4_t _12 = vdupq_n_f32(1.0f / 2);
-              const float32x4_t WQNc_32 = vmulq_f32(_32, vld1q_f32(WQNdata + channel));
-              const float32x4_t WQNc_32_value_12 = vmlaq_f32(WQNc_32, _12, value);
-              vst1q_f32(acc, WQNc_32_value_12);
-            });
-        break;
-      case 1:
-        qgemm_nt_packed<kGEMMTileSize, kGEMMTileDepthBytes>(
-            state,
-            is_1x1 ? XQ : *(state->scratch),
-            *(state->WQPacked),
-            YQ0,
-            [](float* __restrict__ acc, float32x4_t value, size_t channel) {
-              const float32x4_t curr = vld1q_f32(acc);
-              vst1q_f32(acc, vaddq_f32(curr, value));
-            });
-        break;
+        case 0:
+          qgemm_nt_packed<kGEMMTileSize, kGEMMTileDepthBytes>(
+              state,
+              is_1x1 ? XQ : *(state->scratch),
+              *(state->WQPacked),
+              YQ0,
+              [WQNdata](
+                  float* __restrict__ acc, float32x4_t value, size_t channel) {
+                // acc[c] = 3/2 WQN[c] + 1/2 value[c];
+                const float32x4_t _32 = vdupq_n_f32(3.0f / 2);
+                const float32x4_t _12 = vdupq_n_f32(1.0f / 2);
+                const float32x4_t WQNc_32 =
+                    vmulq_f32(_32, vld1q_f32(WQNdata + channel));
+                const float32x4_t WQNc_32_value_12 =
+                    vmlaq_f32(WQNc_32, _12, value);
+                vst1q_f32(acc, WQNc_32_value_12);
+              });
+          break;
+        case 1:
+          qgemm_nt_packed<kGEMMTileSize, kGEMMTileDepthBytes>(
+              state,
+              is_1x1 ? XQ : *(state->scratch),
+              *(state->WQPacked),
+              YQ0,
+              [](float* __restrict__ acc, float32x4_t value, size_t channel) {
+                const float32x4_t curr = vld1q_f32(acc);
+                vst1q_f32(acc, vaddq_f32(curr, value));
+              });
+          break;
       }
     }
   }
@@ -533,16 +603,30 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
     const size_t NP = YQ0->dim32(0);
     const size_t FP = YQ0->dim32(1);
     math::CopyMatrix<CPUContext>(
-        sizeof(float), N, F, YQ0->data<float>(), FP, Y->mutable_data<float>(), F, nullptr);
+        sizeof(float),
+        N,
+        F,
+        YQ0->data<float>(),
+        FP,
+        Y->mutable_data<float>(),
+        F,
+        nullptr);
   } else {
-    CAFFE_ENFORCE_EQ(Y->dim32(0), divRoundUp(X.dim32(0) * OH * OW, kGEMMTileSize) * kGEMMTileSize);
+    CAFFE_ENFORCE_EQ(
+        Y->dim32(0),
+        divRoundUp(X.dim32(0) * OH * OW, kGEMMTileSize) * kGEMMTileSize);
     CAFFE_ENFORCE_EQ(Y->dim32(1), OC);
     Y->ShrinkTo(X.dim32(0) * OH * OW);
-    Y->Reshape(std::vector<int64_t>{{int64_t(X.dim(0)), int64_t(OH), int64_t(OW), int64_t(OC)}});
+    Y->Reshape(std::vector<int64_t>{
+        {int64_t(X.dim(0)), int64_t(OH), int64_t(OW), int64_t(OC)}});
   }
 }
 
-bool run2b1bConvNeon(QConvState* state, const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
+bool run2b1bConvNeon(
+    QConvState* state,
+    const ConvArgs& args,
+    const TensorCPU& X,
+    TensorCPU* Y) {
   // TODO: insert specialized cases (e.g. depthwise convolutions, the direct
   // convolution.
   CAFFE_ENFORCE_EQ(X.ndim(), 4);

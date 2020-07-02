@@ -16,21 +16,17 @@ void initializeRecurrentInput(
 namespace {
 
 template <typename T>
-__global__
-void initRecurrentInput_kernel(
-    size_t stateSize,
-    const T* input,
-    T* state) {
+__global__ void
+initRecurrentInput_kernel(size_t stateSize, const T* input, T* state) {
   // index into appropriate target buffer
   const int block_id = blockIdx.x;
-  T* state_local = state + block_id*stateSize;
+  T* state_local = state + block_id * stateSize;
 
   // copy
-  for (int idx=threadIdx.x; idx < stateSize; idx+=blockDim.x) {
+  for (int idx = threadIdx.x; idx < stateSize; idx += blockDim.x) {
     state_local[idx] = input[idx];
   }
 }
-
 
 }; // namespace
 
@@ -41,8 +37,9 @@ void repeatCopy(
     const float* src,
     float* dst,
     CUDAContext* context) {
-    initRecurrentInput_kernel<float><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-        n, src, dst);
+  initRecurrentInput_kernel<float>
+      <<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          n, src, dst);
 }
 template <>
 void repeatCopy(
@@ -51,8 +48,9 @@ void repeatCopy(
     const at::Half* src,
     at::Half* dst,
     CUDAContext* context) {
-    initRecurrentInput_kernel<at::Half><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-        n, src, dst);
+  initRecurrentInput_kernel<at::Half>
+      <<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          n, src, dst);
 }
 
 }; // namespace detail
@@ -77,18 +75,13 @@ bool RNNApplyLinkOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(1));
 }
 
-REGISTER_CUDA_OPERATOR(
-    RecurrentNetwork,
-    RecurrentNetworkOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     RecurrentNetworkGradient,
     RecurrentNetworkGradientOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     rnn_internal_accumulate_gradient_input,
     AccumulateInputGradientOp<CUDAContext>);
-REGISTER_CUDA_OPERATOR(
-    rnn_internal_apply_link,
-    RNNApplyLinkOp<CUDAContext>);
-
+REGISTER_CUDA_OPERATOR(rnn_internal_apply_link, RNNApplyLinkOp<CUDAContext>);
 
 } // namespace caffe2

@@ -44,7 +44,8 @@ class IDEEPShapeOp : public IDEEPOperator {
     }
 
     output->Resize(numAxes);
-    auto out = reinterpret_cast<char*>(output->template mutable_data<int64_t>());
+    auto out =
+        reinterpret_cast<char*>(output->template mutable_data<int64_t>());
     for (int i = 0; i < numAxes; i++) {
       auto axis = axes_[i];
       CAFFE_ENFORCE_LT(axis, numDims, "Axis out of range");
@@ -63,7 +64,6 @@ class IDEEPShapeOp : public IDEEPOperator {
   INPUT_TAGS(DATA);
   OUTPUT_TAGS(OUTPUT);
 };
-
 
 REGISTER_IDEEP_OPERATOR(Shape, IDEEPShapeOp);
 

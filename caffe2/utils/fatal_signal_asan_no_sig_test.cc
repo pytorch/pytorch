@@ -4,9 +4,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include <array>
 #include <functional>
 #include <iostream>
-#include <array>
 
 #include "caffe2/core/common.h"
 

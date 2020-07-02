@@ -80,7 +80,7 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
   float ratio_;
   bool is_test_;
 
-  INPUT_TAGS(OUTPUT_GRAD , MASK);
+  INPUT_TAGS(OUTPUT_GRAD, MASK);
   OUTPUT_TAGS(INPUT_GRAD);
 };
 

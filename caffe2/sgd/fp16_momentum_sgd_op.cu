@@ -94,7 +94,7 @@ __global__ void FP16MomentumSGDKernel(
   }
 
 #else
-   CUDA_KERNEL_ASSERT(false);
+  CUDA_KERNEL_ASSERT(false);
 #endif // CAFFE_HAS_CUDA_FP16
 }
 
@@ -178,10 +178,10 @@ __global__ void FP16MomentumSGDFP32Kernel(
     }
   }
 #else
-   CUDA_KERNEL_ASSERT(false);
+  CUDA_KERNEL_ASSERT(false);
 #endif // CAFFE_HAS_CUDA_FP16
 }
-}
+} // namespace
 
 template <>
 void fp16_momentum_sgd_update<CUDAContext>(
@@ -236,8 +236,12 @@ void fp16_momentum_sgd_update<CUDAContext>(
     }
 
   } else {
-    CAFFE_ENFORCE(false, "FP16MomentumSGDUpdate not supported. Major: ",
-      prop.major, " Minor: ", prop.minor);
+    CAFFE_ENFORCE(
+        false,
+        "FP16MomentumSGDUpdate not supported. Major: ",
+        prop.major,
+        " Minor: ",
+        prop.minor);
   }
 }
 
@@ -267,4 +271,4 @@ it expects FP16 data and performs its updates in either FP16 precision
 (default), or FP32 precision if the 'fp32_update' flag is set to True.
 
 )DOC");
-}
+} // namespace caffe2

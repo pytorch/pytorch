@@ -51,11 +51,11 @@
 #include "caffe2/operators/box_with_nms_limit_op.h"
 
 #if __linux__ && defined(CAFFE2_USE_GLOO)
-#include <caffe2/contrib/gloo/common_world_ops.h>
-#include <caffe2/contrib/gloo/broadcast_ops.h>
-#include <caffe2/contrib/gloo/allreduce_ops.h>
 #include <caffe2/contrib/gloo/allgather_ops.h>
+#include <caffe2/contrib/gloo/allreduce_ops.h>
 #include <caffe2/contrib/gloo/barrier_ops.h>
+#include <caffe2/contrib/gloo/broadcast_ops.h>
+#include <caffe2/contrib/gloo/common_world_ops.h>
 #include <caffe2/contrib/gloo/reduce_scatter_ops.h>
 #endif
 
@@ -84,9 +84,7 @@ REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     ScatterAssign,
     IDEEPFallbackOp<ScatterAssignOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Cast,
-    IDEEPFallbackOp<CastOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Cast, IDEEPFallbackOp<CastOp<CPUContext>>);
 
 // filter operators
 REGISTER_IDEEP_OPERATOR(
@@ -119,7 +117,9 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<GivenTensorFillOp<int64_t, CPUContext>, SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(
     GivenTensorStringFill,
-    IDEEPFallbackOp<GivenTensorFillOp<std::string, CPUContext>, SkipIndices<0>>);
+    IDEEPFallbackOp<
+        GivenTensorFillOp<std::string, CPUContext>,
+        SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(Load, IDEEPFallbackOp<LoadOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Save, IDEEPFallbackOp<SaveOp<CPUContext>>);
 
@@ -144,7 +144,7 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     BoxWithNMSLimit,
-    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0,1,2>>);
+    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0, 1, 2>>);
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
@@ -158,9 +158,7 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PadImage,
     IDEEPFallbackOp<PadImageOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    PRelu,
-    IDEEPFallbackOp<PReluOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(PRelu, IDEEPFallbackOp<PReluOp<float, CPUContext>>);
 
 // ctc decoder operators
 REGISTER_IDEEP_OPERATOR(
@@ -179,24 +177,28 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     SoftmaxGradient,
     IDEEPFallbackOp<SoftmaxGradientOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Iter,
-    IDEEPFallbackOp<IterOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Iter, IDEEPFallbackOp<IterOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     LearningRate,
     IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     Abs,
     IDEEPFallbackOp<UnaryElementwiseOp<
-      TensorTypes<float>, CPUContext, AbsFunctor<CPUContext>>>);
+        TensorTypes<float>,
+        CPUContext,
+        AbsFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Atan,
     IDEEPFallbackOp<UnaryElementwiseOp<
-      TensorTypes<float>, CPUContext, AtanFunctor<CPUContext>>>);
+        TensorTypes<float>,
+        CPUContext,
+        AtanFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Sqrt,
     IDEEPFallbackOp<UnaryElementwiseOp<
-      TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
+        TensorTypes<float>,
+        CPUContext,
+        SqrtFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Sign,
     IDEEPFallbackOp<UnaryElementwiseOp<
@@ -205,16 +207,16 @@ REGISTER_IDEEP_OPERATOR(
         SignFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Div,
-    IDEEPFallbackOp<BinaryElementwiseOp<
-      NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
+    IDEEPFallbackOp<
+        BinaryElementwiseOp<NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Mul,
     IDEEPFallbackOp<
         BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Sub,
-    IDEEPFallbackOp<BinaryElementwiseOp<
-      NumericTypes, CPUContext, SubFunctor<CPUContext>>>);
+    IDEEPFallbackOp<
+        BinaryElementwiseOp<NumericTypes, CPUContext, SubFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Tanh,
     IDEEPFallbackOp<UnaryElementwiseOp<
@@ -247,8 +249,12 @@ REGISTER_IDEEP_OPERATOR(
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
-REGISTER_IDEEP_OPERATOR(TensorProtosDBInput, IDEEPFallbackOp<TensorProtosDBInput<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(CloseBlobsQueue, IDEEPFallbackOp<CloseBlobsQueueOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    TensorProtosDBInput,
+    IDEEPFallbackOp<TensorProtosDBInput<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    CloseBlobsQueue,
+    IDEEPFallbackOp<CloseBlobsQueueOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLoss,
     IDEEPFallbackOp<SoftmaxWithLossOp<float, CPUContext>>);
@@ -278,8 +284,8 @@ REGISTER_IDEEP_OPERATOR(
         SumReducer<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     ReduceMean,
-    IDEEPFallbackOp<ReduceOp<
-        TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>>);
+    IDEEPFallbackOp<
+        ReduceOp<TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     BatchMatMul,
     IDEEPFallbackOp<BatchMatMulOp<CPUContext>>);
@@ -296,18 +302,10 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     DestroyCommonWorld,
     IDEEPFallbackOp<DestroyCommonWorld>);
-REGISTER_IDEEP_OPERATOR(
-    Broadcast,
-    IDEEPFallbackOp<BroadcastOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Allreduce,
-    IDEEPFallbackOp<AllreduceOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Allgather,
-    IDEEPFallbackOp<AllgatherOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Barrier,
-    IDEEPFallbackOp<BarrierOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Broadcast, IDEEPFallbackOp<BroadcastOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Allreduce, IDEEPFallbackOp<AllreduceOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Allgather, IDEEPFallbackOp<AllgatherOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(Barrier, IDEEPFallbackOp<BarrierOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     ReduceScatter,
     IDEEPFallbackOp<ReduceScatterOp<CPUContext>>);

@@ -148,9 +148,12 @@ unmasked_data: [1 2 3 4 5 6]
 
 </details>
 )DOC")
-    .Input(0,"data","(*Tensor*): 1D input tensor(s)")
-    .Input(1,"mask","(*Tensor`<bool>`*): 1D boolean mask tensor(s)")
-    .Output(0, "unmasked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the unmasked input tensor");
+    .Input(0, "data", "(*Tensor*): 1D input tensor(s)")
+    .Input(1, "mask", "(*Tensor`<bool>`*): 1D boolean mask tensor(s)")
+    .Output(
+        0,
+        "unmasked_data",
+        "(*Tensor*): 1D tensor of same type as `data` input that contains the unmasked input tensor");
 
 NO_GRADIENT(BooleanUnmask)
-}
+} // namespace caffe2

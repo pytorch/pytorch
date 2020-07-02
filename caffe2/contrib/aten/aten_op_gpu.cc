@@ -4,9 +4,9 @@
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(ATen, ATenOp<CUDAContext>);
-template<>
+template <>
 at::Backend ATenOp<CUDAContext>::backend() const {
   return at::Backend::CUDA;
 }
 
-}
+} // namespace caffe2

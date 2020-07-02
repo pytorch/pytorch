@@ -16,4 +16,4 @@ through it.
 )DOC");
 
 NO_GRADIENT(StopGradient);
-}  // namespace caffe2
+} // namespace caffe2

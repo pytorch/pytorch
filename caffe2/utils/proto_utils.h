@@ -5,16 +5,16 @@
 #include <google/protobuf/message_lite.h>
 #else // CAFFE2_USE_LITE_PROTO
 #include <google/protobuf/message.h>
-#endif  // !CAFFE2_USE_LITE_PROTO
+#endif // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
-#include "caffe2/utils/proto_wrap.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/utils/proto_wrap.h"
 
 namespace caffe2 {
 
-using std::string;
 using ::google::protobuf::MessageLite;
+using std::string;
 
 // A wrapper function to return device name string for use in blob serialization
 // / deserialization. This should have one to one correspondence with
@@ -38,14 +38,19 @@ CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
 CAFFE2_API bool WriteStringToFile(const string& str, const char* filename);
 
 // Common interfaces that are supported by both lite and full protobuf.
-CAFFE2_API bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto);
+CAFFE2_API bool ReadProtoFromBinaryFile(
+    const char* filename,
+    MessageLite* proto);
 inline bool ReadProtoFromBinaryFile(const string filename, MessageLite* proto) {
   return ReadProtoFromBinaryFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename);
-inline void WriteProtoToBinaryFile(const MessageLite& proto,
-                                   const string& filename) {
+CAFFE2_API void WriteProtoToBinaryFile(
+    const MessageLite& proto,
+    const char* filename);
+inline void WriteProtoToBinaryFile(
+    const MessageLite& proto,
+    const string& filename) {
   return WriteProtoToBinaryFile(proto, filename.c_str());
 }
 
@@ -59,10 +64,11 @@ inline bool ParseFromString(const string& spec, MessageLite* proto) {
 }
 } // namespace TextFormat
 
-
 CAFFE2_API string ProtoDebugString(const MessageLite& proto);
 
-CAFFE2_API bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
+CAFFE2_API bool ParseProtoFromLargeString(
+    const string& str,
+    MessageLite* proto);
 
 // Text format MessageLite wrappers: these functions do nothing but just
 // allowing things to compile. It will produce a runtime error if you are using
@@ -71,8 +77,8 @@ inline bool ReadProtoFromTextFile(
     const char* /*filename*/,
     MessageLite* /*proto*/) {
   LOG(FATAL) << "If you are running lite version, you should not be "
-                  << "calling any text-format protobuffers.";
-  return false;  // Just to suppress compiler warning.
+             << "calling any text-format protobuffers.";
+  return false; // Just to suppress compiler warning.
 }
 inline bool ReadProtoFromTextFile(const string filename, MessageLite* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
@@ -82,23 +88,25 @@ inline void WriteProtoToTextFile(
     const MessageLite& /*proto*/,
     const char* /*filename*/) {
   LOG(FATAL) << "If you are running lite version, you should not be "
-                  << "calling any text-format protobuffers.";
+             << "calling any text-format protobuffers.";
 }
-inline void WriteProtoToTextFile(const MessageLite& proto,
-                                 const string& filename) {
+inline void WriteProtoToTextFile(
+    const MessageLite& proto,
+    const string& filename) {
   return WriteProtoToTextFile(proto, filename.c_str());
 }
 
 inline bool ReadProtoFromFile(const char* filename, MessageLite* proto) {
-  return (ReadProtoFromBinaryFile(filename, proto) ||
-          ReadProtoFromTextFile(filename, proto));
+  return (
+      ReadProtoFromBinaryFile(filename, proto) ||
+      ReadProtoFromTextFile(filename, proto));
 }
 
 inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
   return ReadProtoFromFile(filename.c_str(), proto);
 }
 
-#else  // CAFFE2_USE_LITE_PROTO
+#else // CAFFE2_USE_LITE_PROTO
 
 using ::google::protobuf::Message;
 
@@ -115,22 +123,25 @@ inline bool ReadProtoFromTextFile(const string filename, Message* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename);
+CAFFE2_API void WriteProtoToTextFile(
+    const Message& proto,
+    const char* filename);
 inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
   return WriteProtoToTextFile(proto, filename.c_str());
 }
 
 // Read Proto from a file, letting the code figure out if it is text or binary.
 inline bool ReadProtoFromFile(const char* filename, Message* proto) {
-  return (ReadProtoFromBinaryFile(filename, proto) ||
-          ReadProtoFromTextFile(filename, proto));
+  return (
+      ReadProtoFromBinaryFile(filename, proto) ||
+      ReadProtoFromTextFile(filename, proto));
 }
 
 inline bool ReadProtoFromFile(const string& filename, Message* proto) {
   return ReadProtoFromFile(filename.c_str(), proto);
 }
 
-#endif  // CAFFE2_USE_LITE_PROTO
+#endif // CAFFE2_USE_LITE_PROTO
 
 template <
     class IterableInputs = std::initializer_list<string>,
@@ -297,12 +308,18 @@ class C10_EXPORT ArgumentHelper {
 
 // Helper methods to get an argument from OperatorDef or NetDef given argument
 // name. Throws if argument does not exist.
-CAFFE2_API const Argument& GetArgument(const OperatorDef& def, const string& name);
+CAFFE2_API const Argument& GetArgument(
+    const OperatorDef& def,
+    const string& name);
 CAFFE2_API const Argument& GetArgument(const NetDef& def, const string& name);
 // Helper methods to get an argument from OperatorDef or NetDef given argument
 // name. Returns nullptr if argument does not exist.
-CAFFE2_API const Argument* GetArgumentPtr(const OperatorDef& def, const string& name);
-CAFFE2_API const Argument* GetArgumentPtr(const NetDef& def, const string& name);
+CAFFE2_API const Argument* GetArgumentPtr(
+    const OperatorDef& def,
+    const string& name);
+CAFFE2_API const Argument* GetArgumentPtr(
+    const NetDef& def,
+    const string& name);
 
 // Helper methods to query a boolean argument flag from OperatorDef or NetDef
 // given argument name. If argument does not exist, return default value.

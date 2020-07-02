@@ -34,14 +34,17 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(
         "size, C is the number of channels, and H and W are the height and the "
         "width of the data. The corresponding permutation of dimensions is "
         "used in the latter case.");
-    schema.Output(0, "Y", relu_fused ?
-        "Output data tensor from average pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes. Output will go through rectified linear "
-        "function, where y = max(0, x)." :
-        "Output data tensor from average pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes.");
+    schema.Output(
+        0,
+        "Y",
+        relu_fused
+            ? "Output data tensor from average pooling across the input "
+              "tensor. Dimensions will vary based on various kernel, stride, and pad "
+              "sizes. Output will go through rectified linear "
+              "function, where y = max(0, x)."
+            : "Output data tensor from average pooling across the input "
+              "tensor. Dimensions will vary based on various kernel, stride, and pad "
+              "sizes.");
   };
 }
 

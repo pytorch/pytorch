@@ -1,7 +1,9 @@
 #pragma once
 
 // Apple clang was fixed in 8.1
-#if defined(__apple_build_version__) && ((__clang_major__ < 8) || ((__clang_major__ == 8) && (__clang_minor__ < 1)))
+#if defined(__apple_build_version__) && \
+    ((__clang_major__ < 8) ||           \
+     ((__clang_major__ == 8) && (__clang_minor__ < 1)))
 #define __APPLE_NEED_FIX 1
 #endif
 
@@ -19,8 +21,7 @@
 // https://reviews.llvm.org/D16177
 static __inline float
     __attribute__((__always_inline__, __nodebug__, __target__("f16c")))
-_cvtsh_ss(unsigned short a)
-{
+    _cvtsh_ss(unsigned short a) {
   __v8hi v = {(short)a, 0, 0, 0, 0, 0, 0, 0};
   __v4sf r = __builtin_ia32_vcvtph2ps(v);
   return r[0];
@@ -28,7 +29,7 @@ _cvtsh_ss(unsigned short a)
 
 static __inline unsigned short
     __attribute__((__always_inline__, __nodebug__, __target__("f16c")))
-_cvtss_sh(float a, int imm8) {
+    _cvtss_sh(float a, int imm8) {
   unsigned short ret;
   *reinterpret_cast<at::Half*>(&ret) = a;
   return ret;

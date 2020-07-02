@@ -141,7 +141,7 @@ void device_reduce<at::Half>(
       0,
       reinterpret_cast<rocblas_half*>(out)));
 #elif HIP_VERSION < 210
-   CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
+  CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
 #else
   auto buffer_size = 1;
 

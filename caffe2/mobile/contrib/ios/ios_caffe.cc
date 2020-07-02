@@ -4,11 +4,12 @@
 #include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"
 #include "caffe2/predictor/predictor.h"
 
-Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
-                                        const std::string& predict_net_str,
-                                        bool disableMultithreadProcessing,
-                                        bool allowMetalOperators,
-                                        std::string& errorMessage) {
+Caffe2IOSPredictor* MakeCaffe2Predictor(
+    const std::string& init_net_str,
+    const std::string& predict_net_str,
+    bool disableMultithreadProcessing,
+    bool allowMetalOperators,
+    std::string& errorMessage) {
   caffe2::NetDef init_net, predict_net;
   init_net.ParseFromString(init_net_str);
   predict_net.ParseFromString(predict_net_str);
@@ -16,7 +17,10 @@ Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
   Caffe2IOSPredictor* predictor = NULL;
   try {
     predictor = Caffe2IOSPredictor::NewCaffe2IOSPredictor(
-        init_net, predict_net, disableMultithreadProcessing, allowMetalOperators);
+        init_net,
+        predict_net,
+        disableMultithreadProcessing,
+        allowMetalOperators);
   } catch (const std::exception& e) {
     std::string error = e.what();
     errorMessage.swap(error);
@@ -25,12 +29,13 @@ Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
   return predictor;
 }
 
-void GenerateStylizedImage(std::vector<float>& originalImage,
-                           const std::string& init_net_str,
-                           const std::string& predict_net_str,
-                           int height,
-                           int width,
-                           std::vector<float>& dataOut) {
+void GenerateStylizedImage(
+    std::vector<float>& originalImage,
+    const std::string& init_net_str,
+    const std::string& predict_net_str,
+    int height,
+    int width,
+    std::vector<float>& dataOut) {
   caffe2::NetDef init_net, predict_net;
   init_net.ParseFromString(init_net_str);
   predict_net.ParseFromString(predict_net_str);

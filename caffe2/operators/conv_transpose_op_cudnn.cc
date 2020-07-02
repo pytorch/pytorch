@@ -675,53 +675,54 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
     } else {
       // choose backward algorithm for filter
       {
-      constexpr int nalgo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
-      int valid_algos;
-      cudnnConvolutionBwdFilterAlgoPerf_t algos[nalgo];
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          top_desc_,
-          bottom_desc_,
-          conv_desc_,
-          filter_desc_,
-          nalgo,
-          &valid_algos,
-          algos));
-      bool found = false;
-      for (int i = 0; i < valid_algos; i++) {
-        auto a = algos[i];
-        if (a.memory <= cudnn_ws_nbytes_limit_) {
-          bwd_filter_algo_ = a.algo;
-          found = true;
-          break;
+        constexpr int nalgo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
+        int valid_algos;
+        cudnnConvolutionBwdFilterAlgoPerf_t algos[nalgo];
+        CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
+            cudnn_wrapper_.inline_cudnn_handle(),
+            top_desc_,
+            bottom_desc_,
+            conv_desc_,
+            filter_desc_,
+            nalgo,
+            &valid_algos,
+            algos));
+        bool found = false;
+        for (int i = 0; i < valid_algos; i++) {
+          auto a = algos[i];
+          if (a.memory <= cudnn_ws_nbytes_limit_) {
+            bwd_filter_algo_ = a.algo;
+            found = true;
+            break;
+          }
         }
-      }
-      CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN backward filter");
+        CAFFE_ENFORCE(
+            found, "Unable to find algorithms for cuDNN backward filter");
       }
       // choose backward algo for data
       {
-      constexpr int nalgo = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
-      int valid_algos;
-      cudnnConvolutionFwdAlgoPerf_t algos[nalgo];
-      CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm_v7(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          top_desc_,
-          filter_desc_,
-          conv_desc_,
-          bottom_desc_,
-          nalgo,
-          &valid_algos,
-          algos));
-      bool found = false;
-      for (int i = 0; i < valid_algos; i++) {
-        auto a = algos[i];
-        if (a.memory <= cudnn_ws_nbytes_limit_) {
-          algo_ = a.algo;
-          found = true;
-          break;
+        constexpr int nalgo = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
+        int valid_algos;
+        cudnnConvolutionFwdAlgoPerf_t algos[nalgo];
+        CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm_v7(
+            cudnn_wrapper_.inline_cudnn_handle(),
+            top_desc_,
+            filter_desc_,
+            conv_desc_,
+            bottom_desc_,
+            nalgo,
+            &valid_algos,
+            algos));
+        bool found = false;
+        for (int i = 0; i < valid_algos; i++) {
+          auto a = algos[i];
+          if (a.memory <= cudnn_ws_nbytes_limit_) {
+            algo_ = a.algo;
+            found = true;
+            break;
+          }
         }
-      }
-      CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN forward");
+        CAFFE_ENFORCE(found, "Unable to find algorithms for cuDNN forward");
       }
     }
     // get workspace for backwards filter algorithm

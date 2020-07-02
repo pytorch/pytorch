@@ -32,5 +32,5 @@ size_t sizeBytes(const Blob& blob) {
   return p ? p->sizeBytes(blob) : 0;
 }
 
-} // namespace BlobStats
-}
+} // namespace BlobStat
+} // namespace caffe2

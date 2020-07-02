@@ -12,7 +12,10 @@ namespace caffe2 {
 
 namespace {
 
-void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* ws) {
+void AddNoiseInput(
+    const vector<int64_t>& shape,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -27,12 +30,13 @@ void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* 
   }
 }
 
-void compareResizeNeareast(int N,
-                       int C,
-                       int H,
-                       int W,
-                       float wscale,
-                       float hscale) {
+void compareResizeNeareast(
+    int N,
+    int C,
+    int H,
+    int W,
+    float wscale,
+    float hscale) {
   Workspace ws;
 
   OperatorDef def1;

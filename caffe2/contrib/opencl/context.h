@@ -21,8 +21,9 @@ namespace caffe2 {
 struct OpenCLContextSingleton {
  private:
   OpenCLContextSingleton();
-  OpenCLContextSingleton(const OpenCLContextSingleton &) = delete;
+  OpenCLContextSingleton(const OpenCLContextSingleton&) = delete;
   OpenCLContextSingleton(OpenCLContextSingleton&&) = delete;
+
  public:
   static OpenCLContextSingleton& getInstance();
   cl::Platform platform;
@@ -93,11 +94,14 @@ class OpenCLContext final {
   }
 
   // OpenCL specific helper functions
-  cl::Kernel BuildKernel(const char* src, std::string additional_options = "", const char* fn_name = "K");
+  cl::Kernel BuildKernel(
+      const char* src,
+      std::string additional_options = "",
+      const char* fn_name = "K");
   static struct OpenCLContextSingleton& GetSingleton();
-  static std::string BuildArgumentList(std::vector<std::pair<std::string, std::string>> args);
+  static std::string BuildArgumentList(
+      std::vector<std::pair<std::string, std::string>> args);
 };
-
 
 } // namespace caffe2
 

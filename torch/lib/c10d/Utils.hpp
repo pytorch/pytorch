@@ -114,7 +114,6 @@ inline void assertTypeMatch(
   }
 }
 
-
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::IntArrayRef& sizes,
@@ -303,7 +302,8 @@ inline at::Tensor newLikeFlat(
   std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
+  return at::empty_strided(
+      sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {

@@ -133,8 +133,8 @@ void GRUUnitGradient<float, CUDAContext>(
           H_prev_diff,
           X_diff);
 }
-}
+} // namespace detail
 
 REGISTER_CUDA_OPERATOR(GRUUnit, GRUUnitOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(GRUUnitGradient, GRUUnitGradientOp<float, CUDAContext>);
-}
+} // namespace caffe2

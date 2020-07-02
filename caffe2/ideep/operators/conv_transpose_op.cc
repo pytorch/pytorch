@@ -28,12 +28,15 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
     CAFFE_ENFORCE_EQ(filter.ndims(), 4);
     CAFFE_ENFORCE_EQ(filter.get_dim(2), kernel_h());
     CAFFE_ENFORCE_EQ(filter.get_dim(3), kernel_w());
-    CAFFE_ENFORCE_EQ(filter.get_dim(0), X.get_dim(1),
-                     "filter number must be equal to input channel number");
+    CAFFE_ENFORCE_EQ(
+        filter.get_dim(0),
+        X.get_dim(1),
+        "filter number must be equal to input channel number");
 
     auto Y_dims = CalcOutputDims(X, filter.get_dim(1));
 
-    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    bool weights_changed =
+        (cached_weights_descriptor_ != filter.get_descriptor());
     if (!training_mode_ && weights_changed) {
       cached_weights_descriptor_ = filter.dup_descriptor();
       auto filter_in = filter;
@@ -60,16 +63,28 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
       const auto& bias = Input(BIAS);
       CAFFE_ENFORCE_EQ(bias.ndims(), 1, "bias must be 1D tensor");
       CAFFE_ENFORCE_EQ(
-          bias.get_dim(0), filter.get_dim(1),
+          bias.get_dim(0),
+          filter.get_dim(1),
           "bias dimension must be equal to output channel number");
 
       ideep::convolution_transpose_forward::compute(
-          X, transposed_filter, bias, Y_dims, *Y,
-          {stride_.begin(), stride_.end()} , pad_tl(), pad_br());
+          X,
+          transposed_filter,
+          bias,
+          Y_dims,
+          *Y,
+          {stride_.begin(), stride_.end()},
+          pad_tl(),
+          pad_br());
     } else {
       ideep::convolution_transpose_forward::compute(
-          X, transposed_filter, Y_dims, *Y,
-          {stride_.begin(), stride_.end()}, pad_tl(), pad_br());
+          X,
+          transposed_filter,
+          Y_dims,
+          *Y,
+          {stride_.begin(), stride_.end()},
+          pad_tl(),
+          pad_br());
     }
     return true;
   }
@@ -137,8 +152,13 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
       ideep::convolution_transpose_backward_data::compute(
-          dY, transposed_filter, X.get_dims(), *dX,
-          {stride_.begin(), stride_.end()}, pad_tl(), pad_br());
+          dY,
+          transposed_filter,
+          X.get_dims(),
+          *dX,
+          {stride_.begin(), stride_.end()},
+          pad_tl(),
+          pad_br());
     }
 
     return true;

@@ -6,7 +6,8 @@ namespace {
 
 class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
  public:
-  template<class... Args> explicit GetGPUMemoryUsageOp(Args&&... args)
+  template <class... Args>
+  explicit GetGPUMemoryUsageOp(Args&&... args)
       : Operator<CUDAContext>(std::forward<Args>(args)...) {}
   ~GetGPUMemoryUsageOp() override {}
 
@@ -17,8 +18,8 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
     std::vector<long> max_by_gpu = CUDAContext::MaxMemoryByGpu();
     CHECK_EQ(total_by_gpu.size(), max_by_gpu.size());
 
-
-    auto* stats = Output(0, {2, static_cast<int64_t>(total_by_gpu.size())}, at::dtype<long>());
+    auto* stats = Output(
+        0, {2, static_cast<int64_t>(total_by_gpu.size())}, at::dtype<long>());
     context_.CopyFromCPU<long>(
         total_by_gpu.size(),
         total_by_gpu.data(),
@@ -43,6 +44,6 @@ OPERATOR_SCHEMA(GetGPUMemoryUsage)
     )DOC");
 
 REGISTER_CUDA_OPERATOR(GetGPUMemoryUsage, GetGPUMemoryUsageOp);
-}
+} // namespace
 
 } // namespace caffe2

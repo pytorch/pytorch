@@ -70,8 +70,11 @@ shape: [2 3]
 </details>
 
       )DOC")
-    .Input(0,"X", "*(type: Tensor)* Input tensor.")
-    .Output(0,"shape", "*(type: Tensor)* Output tensor containing shape of input tensor.");
+    .Input(0, "X", "*(type: Tensor)* Input tensor.")
+    .Output(
+        0,
+        "shape",
+        "*(type: Tensor)* Output tensor containing shape of input tensor.");
 
 SHOULD_NOT_DO_GRADIENT(Shape);
 

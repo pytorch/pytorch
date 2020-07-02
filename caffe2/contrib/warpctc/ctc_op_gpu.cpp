@@ -12,7 +12,7 @@ ctcComputeInfo workspaceInfo<CUDAContext>(const CUDAContext& context) {
   result.stream = context.cuda_stream();
   return result;
 }
-}
+} // namespace detail
 
 REGISTER_CUDA_OPERATOR(CTC, CTCOp<float, CUDAContext>);
-}
+} // namespace caffe2

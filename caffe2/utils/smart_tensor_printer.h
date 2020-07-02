@@ -47,4 +47,4 @@ class CAFFE2_API SmartTensorPrinter {
 
   TensorPrinter tensorPrinter_;
 };
-}
+} // namespace caffe2

@@ -219,16 +219,24 @@ class SliceOp : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
-      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
-        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -281,13 +289,15 @@ class SliceGradientOp : public Operator<Context> {
   }
 
   template <typename SIndex>
-  bool DoRunWithType()  {
+  bool DoRunWithType() {
     auto* gdata = Output(0);
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
-      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -300,9 +310,13 @@ class SliceGradientOp : public Operator<Context> {
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
         ReinitializeTensor(
-            &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
         ReinitializeTensor(
-            &ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -323,7 +337,6 @@ class SliceGradientOp : public Operator<Context> {
   }
 
  private:
-
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;

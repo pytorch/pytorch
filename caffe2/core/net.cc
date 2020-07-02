@@ -48,8 +48,7 @@ NetBase::NetBase(
   }
 
   // Go through the operators and make sure that blobs are correctly made.
-  std::set<string> known_blobs(
-      external_input_.begin(), external_input_.end());
+  std::set<string> known_blobs(external_input_.begin(), external_input_.end());
   std::set<string> remaining_output(
       external_output_.begin(), external_output_.end());
   for (const auto& blob : known_blobs) {

@@ -469,7 +469,8 @@ std::vector<OpGraphNode> prepareChainGraphNodes(
     const std::vector<dag_utils::OperatorNode>& operator_nodes,
     const std::vector<std::vector<int>>& execution_chains) {
   std::unordered_map<int, int> op_to_chain_idx;
-  for (int chain_idx = 0; chain_idx < (int)execution_chains.size(); ++chain_idx) {
+  for (int chain_idx = 0; chain_idx < (int)execution_chains.size();
+       ++chain_idx) {
     const auto& chain_indices = execution_chains[chain_idx];
     for (const auto& chain_op_idx : chain_indices) {
       CAFFE_ENFORCE(!op_to_chain_idx.count(chain_op_idx));

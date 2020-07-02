@@ -4,16 +4,17 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
-#include "gtest/gtest.h"
 #include <cmath>
 #include <random>
+#include "gtest/gtest.h"
 
 namespace caffe2 {
 
-void AddConstInput(const vector<int64_t>& shape,
-                   const float value,
-                   const string& name,
-                   Workspace* ws) {
+void AddConstInput(
+    const vector<int64_t>& shape,
+    const float value,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -23,9 +24,10 @@ void AddConstInput(const vector<int64_t>& shape,
       tensor->numel(), value, tensor->template mutable_data<float>(), &context);
 }
 
-void AddNoiseInput(const vector<int64_t>& shape,
-                   const string& name,
-                   Workspace* ws) {
+void AddNoiseInput(
+    const vector<int64_t>& shape,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -44,20 +46,29 @@ inline float relativeError(float a, float b) {
   return std::abs(a - b) / (0.5f * (std::abs(a) + std::abs(b)));
 }
 
-void compare(int N, int inputC, int H, int W,
-             int outputC,
-             int kernelH, int kernelW, int strideH, int strideW,
-             int padT, int padL, int padB, int padR,
-             int adjH, int adjW,
-             float maxRelErr, float absErrForRelErrFailure) {
-  LOG(INFO) <<
-    "running N " << N << " inputC " << inputC << " H " << H << " W " << W <<
-    " outputC " << outputC <<
-    " kernelH " << kernelH << " kernelW " << kernelW <<
-    " strideH " << strideH << " strideW " << strideW <<
-    " padT " << padT << " padL " << padL <<
-    " padB " << padB << " padR " << padR <<
-    " adjH " << adjH << " adjW " << adjW;
+void compare(
+    int N,
+    int inputC,
+    int H,
+    int W,
+    int outputC,
+    int kernelH,
+    int kernelW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    int adjH,
+    int adjW,
+    float maxRelErr,
+    float absErrForRelErrFailure) {
+  LOG(INFO) << "running N " << N << " inputC " << inputC << " H " << H << " W "
+            << W << " outputC " << outputC << " kernelH " << kernelH
+            << " kernelW " << kernelW << " strideH " << strideH << " strideW "
+            << strideW << " padT " << padT << " padL " << padL << " padB "
+            << padB << " padR " << padR << " adjH " << adjH << " adjW " << adjW;
 
   Workspace ws;
 
@@ -125,11 +136,8 @@ void compare(int N, int inputC, int H, int W,
     for (int c = 0; c < Y1.dim32(1); ++c) {
       for (int h = 0; h < Y1.dim32(2); ++h) {
         for (int w = 0; w < Y1.dim32(3); ++w) {
-          int offset =
-            n * Y1.dim32(1) * Y1.dim32(2) * Y1.dim32(3) +
-            c * Y1.dim32(2) * Y1.dim32(3) +
-            h * Y1.dim32(3) +
-            w;
+          int offset = n * Y1.dim32(1) * Y1.dim32(2) * Y1.dim32(3) +
+              c * Y1.dim32(2) * Y1.dim32(3) + h * Y1.dim32(3) + w;
 
           auto v1 = Y1.data<float>()[offset];
           auto v2 = Y2.data<float>()[offset];
@@ -139,19 +147,15 @@ void compare(int N, int inputC, int H, int W,
 
           // For small values / small difference, the relative error
           // can be huge but the absolute error will be small
-          EXPECT_TRUE(relErr <= maxRelErr ||
-                      (absErr <= absErrForRelErrFailure)) <<
-            v1 << " " << v2 << " (rel err " << relErr << ") " <<
-            "(" << n << " " << c << " " << h << " " << w << ") " <<
-            "running N " << N << " inputC " << inputC <<
-            " H " << H << " W " << W <<
-            " outputC " << outputC <<
-            " kernelH " << kernelH << " kernelW " << kernelW <<
-            " strideH " << strideH << " strideW " << strideW <<
-            " padT " << padT << " padL " << padL <<
-            " padB " << padB << " padR " << padR <<
-            " adjH " << adjH << " adjW " << adjW;
-
+          EXPECT_TRUE(relErr <= maxRelErr || (absErr <= absErrForRelErrFailure))
+              << v1 << " " << v2 << " (rel err " << relErr << ") "
+              << "(" << n << " " << c << " " << h << " " << w << ") "
+              << "running N " << N << " inputC " << inputC << " H " << H
+              << " W " << W << " outputC " << outputC << " kernelH " << kernelH
+              << " kernelW " << kernelW << " strideH " << strideH << " strideW "
+              << strideW << " padT " << padT << " padL " << padL << " padB "
+              << padB << " padR " << padR << " adjH " << adjH << " adjW "
+              << adjW;
         }
       }
     }
@@ -168,7 +172,8 @@ int randInt(int a, int b) {
 }
 
 // TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
-#if (defined(__ARM_NEON__) || defined(__ARM_NEON)) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if (defined(__ARM_NEON__) || defined(__ARM_NEON)) && \
+    !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 TEST(ConvTransposeMobile, Test) {
   for (int i = 0; i < 10; ++i) {
     int n = randInt(1, 3);
@@ -185,16 +190,32 @@ TEST(ConvTransposeMobile, Test) {
     int padL = 0;
     int padR = 0;
     int adjH = randInt(0, 3);
-    if (adjH >= strideH) { adjH = strideH - 1; }
+    if (adjH >= strideH) {
+      adjH = strideH - 1;
+    }
     int adjW = randInt(0, 3);
-    if (adjW >= strideW) { adjW = strideW - 1; }
+    if (adjW >= strideW) {
+      adjW = strideW - 1;
+    }
 
-    caffe2::compare(n, planesIn, h, w,
-                    planesOut,
-                    kernelH, kernelW,
-                    strideH, strideW,
-                    padT, padL, padB, padR,
-                    adjH, adjW, 0.002f, 0.001f);
+    caffe2::compare(
+        n,
+        planesIn,
+        h,
+        w,
+        planesOut,
+        kernelH,
+        kernelW,
+        strideH,
+        strideW,
+        padT,
+        padL,
+        padB,
+        padR,
+        adjH,
+        adjW,
+        0.002f,
+        0.001f);
   }
 }
 #endif

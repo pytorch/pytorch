@@ -78,4 +78,4 @@ classes, it is considered a correct prediction.
         "accuracy");
 
 SHOULD_NOT_DO_GRADIENT(Accuracy);
-}  // namespace caffe2
+} // namespace caffe2

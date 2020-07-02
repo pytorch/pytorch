@@ -125,4 +125,4 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
 REGISTER_CUDA_OPERATOR(BooleanUnmask, BooleanUnmaskOp<CUDAContext>);
 
-} // caffe2
+} // namespace caffe2

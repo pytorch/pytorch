@@ -1,8 +1,8 @@
+#include <gtest/gtest.h>
 #include "caffe2/core/init.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/mpi/mpi_common.h"
-#include <gtest/gtest.h>
 
 C10_DEFINE_string(
     caffe_test_root,
@@ -43,8 +43,7 @@ const char kBcastNet[] = R"NET(
 
 TEST(MPITest, TestMPIBroadcast) {
   NetDef net_def;
-  CHECK(TextFormat::ParseFromString(
-      string(kBcastNet), &net_def));
+  CHECK(TextFormat::ParseFromString(string(kBcastNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
@@ -101,8 +100,7 @@ const char kReduceNet[] = R"NET(
 
 TEST(MPITest, TestMPIReduce) {
   NetDef net_def;
-  CHECK(TextFormat::ParseFromString(
-      string(kReduceNet), &net_def));
+  CHECK(TextFormat::ParseFromString(string(kReduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
@@ -163,8 +161,7 @@ const char kMPIAllgatherNet[] = R"NET(
 
 TEST(MPITest, TestMPIAllgather) {
   NetDef net_def;
-  CHECK(TextFormat::ParseFromString(
-      string(kMPIAllgatherNet), &net_def));
+  CHECK(TextFormat::ParseFromString(string(kMPIAllgatherNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
@@ -221,8 +218,7 @@ const char kMPIAllreduceNet[] = R"NET(
 
 TEST(MPITest, TestMPIAllreduce) {
   NetDef net_def;
-  CHECK(TextFormat::ParseFromString(
-      string(kMPIAllreduceNet), &net_def));
+  CHECK(TextFormat::ParseFromString(string(kMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
@@ -278,8 +274,7 @@ const char kInPlaceMPIAllreduceNet[] = R"NET(
 
 TEST(MPITest, TestInPlaceMPIAllreduce) {
   NetDef net_def;
-  CHECK(TextFormat::ParseFromString(
-      string(kInPlaceMPIAllreduceNet), &net_def));
+  CHECK(TextFormat::ParseFromString(string(kInPlaceMPIAllreduceNet), &net_def));
   // Let's set the network's constant fill value to be the mpi rank.
   auto* arg = net_def.mutable_op(1)->mutable_arg(1);
   CAFFE_ENFORCE_EQ(arg->name(), "value");
@@ -301,10 +296,9 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
   }
 }
 
-}  // namespace caffe2
+} // namespace caffe2
 
-
-GTEST_API_ int main(int argc, char **argv) {
+GTEST_API_ int main(int argc, char** argv) {
   int mpi_ret;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &mpi_ret);
   testing::InitGoogleTest(&argc, argv);

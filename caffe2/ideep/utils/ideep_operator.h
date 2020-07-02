@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ideep.hpp>
 #include <caffe2/core/operator.h>
 #include <caffe2/proto/caffe2_pb.h>
+#include <ideep.hpp>
 
 namespace caffe2 {
 
@@ -20,15 +20,14 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
-#define REGISTER_IDEEP_COMPARE_OPERATOR(Op)                    \
-  REGISTER_IDEEP_OPERATOR(                                     \
-      Op,                                                      \
-      IDEEPFallbackOp<BinaryElementwiseOp<                     \
-          TensorTypes<bool, int32_t, int64_t, float, double>,  \
-          CPUContext,                                          \
-          Op##Functor<CPUContext>,                             \
+#define REGISTER_IDEEP_COMPARE_OPERATOR(Op)                   \
+  REGISTER_IDEEP_OPERATOR(                                    \
+      Op,                                                     \
+      IDEEPFallbackOp<BinaryElementwiseOp<                    \
+          TensorTypes<bool, int32_t, int64_t, float, double>, \
+          CPUContext,                                         \
+          Op##Functor<CPUContext>,                            \
           FixedType<bool>>>)
-
 
 // IDEEPOperator is the base scaffolding of the operators that uses IDEEP. It
 // provides a few operators that are useful to IDEEP specific implementations.
@@ -38,8 +37,7 @@ class IDEEPOperator : public OperatorBase {
       : OperatorBase(operator_def, ws),
         context_(operator_def.device_option()),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-  }
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {}
   virtual ~IDEEPOperator() {}
 
   inline const ideep::tensor& Input(int index) {
@@ -58,7 +56,7 @@ class IDEEPOperator : public OperatorBase {
     // it is always just a re-route to RunOnDevice().
     try {
       StartAllObservers();
-      bool result =  RunOnDevice();
+      bool result = RunOnDevice();
       StopAllObservers();
       return result;
     } catch (EnforceNotMet& err) {
@@ -104,16 +102,16 @@ class IDEEPOperator : public OperatorBase {
   StorageOrder order_;
 };
 
-#define USE_IDEEP_OPERATOR_FUNCTIONS()                                         \
-  USE_OPERATOR_BASE_FUNCTIONS;                                                 \
-  /* using override */ using IDEEPOperator::Input;                             \
-  /* using override */ using IDEEPOperator::Output;                            \
-  /* using override */ using IDEEPOperator::order_;                            \
+#define USE_IDEEP_OPERATOR_FUNCTIONS()              \
+  USE_OPERATOR_BASE_FUNCTIONS;                      \
+  /* using override */ using IDEEPOperator::Input;  \
+  /* using override */ using IDEEPOperator::Output; \
+  /* using override */ using IDEEPOperator::order_; \
   /* using override */ using IDEEPOperator::context_;
 
-#define USE_SIMPLE_IDEEP_CTOR_DTOR(name)                                       \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : IDEEPOperator(operator_def, ws) {}                                     \
+#define USE_SIMPLE_IDEEP_CTOR_DTOR(name)               \
+  name(const OperatorDef& operator_def, Workspace* ws) \
+      : IDEEPOperator(operator_def, ws) {}             \
   virtual ~name() {}
 
 // Convert zero_point scales to min_max scales
@@ -121,9 +119,8 @@ class IDEEPOperator : public OperatorBase {
 //  The scales in operator is saved in FBGEMM format,
 //  while FBGEMM scales are the reciprocals of MKL-DNN scales.
 //  This function is provided to convert scales from FBGEMM to MKL-DNN
-inline ideep::scale_t ConvertScales(
-    const std::vector<float> scales_z) {
-  ideep::scale_t scales (scales_z);
+inline ideep::scale_t ConvertScales(const std::vector<float> scales_z) {
+  ideep::scale_t scales(scales_z);
   for (auto it = scales.begin(); it != scales.end(); it++) {
     *it = 1.0f / *it;
   }
@@ -131,7 +128,8 @@ inline ideep::scale_t ConvertScales(
 }
 
 inline ideep::tensor::dims CanonicalDims(
-    ideep::tensor::dims adims, int32_t axis) {
+    ideep::tensor::dims adims,
+    int32_t axis) {
   CAFFE_ENFORCE(axis < (int32_t)adims.size(), "Invalid axis!");
   CAFFE_ENFORCE(axis > (int32_t)-adims.size(), "Invalid axis!");
   if (adims.size() == 2 || axis == 1)
@@ -140,10 +138,16 @@ inline ideep::tensor::dims CanonicalDims(
     axis += (int32_t)adims.size();
   }
 
-  auto dim0 = std::accumulate(adims.begin(), adims.begin() + axis, 1,
-                              std::multiplies<ideep::tensor::dim_t>());
-  auto dim1 = std::accumulate(adims.begin() + axis, adims.end(), 1,
-                              std::multiplies<ideep::tensor::dim_t>());
+  auto dim0 = std::accumulate(
+      adims.begin(),
+      adims.begin() + axis,
+      1,
+      std::multiplies<ideep::tensor::dim_t>());
+  auto dim1 = std::accumulate(
+      adims.begin() + axis,
+      adims.end(),
+      1,
+      std::multiplies<ideep::tensor::dim_t>());
   return ideep::tensor::dims({dim0, dim1});
 }
 

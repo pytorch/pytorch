@@ -1,24 +1,26 @@
+#include "gtest/gtest.h"
 #include "ulp.h"
 #include "ulp_neon.h"
-#include "gtest/gtest.h"
 
 namespace caffe2 {
 
-void conv(const ConvArgs& args,
-          const TensorCPU& X,
-          const TensorCPU& W,
-          const TensorCPU* b,
-          TensorCPU* Y) {
+void conv(
+    const ConvArgs& args,
+    const TensorCPU& X,
+    const TensorCPU& W,
+    const TensorCPU* b,
+    TensorCPU* Y) {
   const auto N = X.dim32(0);
   const auto IH = X.dim32(1);
   const auto IW = X.dim32(2);
   const auto KH = W.dim32(1);
   const auto KW = W.dim32(2);
   const auto IC = W.dim32(3);
-  Y->Resize(X.dim32(0),
-            (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
-            (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
-            W.dim32(0));
+  Y->Resize(
+      X.dim32(0),
+      (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
+      (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
+      W.dim32(0));
   CHECK_EQ(W.dim32(3), X.dim32(3));
   const auto OH = Y->dim32(1);
   const auto OW = Y->dim32(2);
@@ -41,10 +43,12 @@ void conv(const ConvArgs& args,
                     kw + args.stride_w * ow - args.pad_l >= IW) {
                   continue;
                 }
-                const auto x =
-                    Xdata[ic + IC * (kw + args.stride_w * ow - args.pad_l) +
-                          IC * IW * (kh + args.stride_h * oh - args.pad_t) + n * IC * IW * IH];
-                const auto w = Wdata[ic + IC * kw + IC * KW * kh + IC * KW * KH * oc];
+                const auto x = Xdata
+                    [ic + IC * (kw + args.stride_w * ow - args.pad_l) +
+                     IC * IW * (kh + args.stride_h * oh - args.pad_t) +
+                     n * IC * IW * IH];
+                const auto w =
+                    Wdata[ic + IC * kw + IC * KW * kh + IC * KW * KH * oc];
                 acc += x * w;
               }
             }
@@ -134,15 +138,17 @@ TEST(ULP, QPadZero) {
         if (ih < 0 || ih >= XQ.dim32(1) || iw < 0 || iw >= XQ.dim32(2)) {
           EXPECT_EQ(XQPaddata[icq + ICQ * ow + ICQ * XQPad.dim32(2) * oh], 0);
         } else {
-          EXPECT_EQ(XQPaddata[icq + ICQ * ow + ICQ * XQPad.dim32(2) * oh],
-                    XQdata[icq + ICQ * iw + ICQ * XQ.dim32(2) * ih]);
+          EXPECT_EQ(
+              XQPaddata[icq + ICQ * ow + ICQ * XQPad.dim32(2) * oh],
+              XQdata[icq + ICQ * iw + ICQ * XQ.dim32(2) * ih]);
         }
       }
     }
   }
 }
 
-inline void gemmNT(int M, int N, int K, const float* A, const float* B, float* C) {
+inline void
+gemmNT(int M, int N, int K, const float* A, const float* B, float* C) {
   for (auto m = 0; m < M; ++m) {
     for (auto n = 0; n < N; ++n) {
       float acc = 0.0;
@@ -154,7 +160,8 @@ inline void gemmNT(int M, int N, int K, const float* A, const float* B, float* C
   }
 }
 
-inline void qgemmNT(int M, int N, int K, const uint8_t* A, const uint8_t* B, float* C) {
+inline void
+qgemmNT(int M, int N, int K, const uint8_t* A, const uint8_t* B, float* C) {
   CHECK_EQ(K % 8, 0);
   const int QK = K / 8;
   for (auto m = 0; m < M; ++m) {
@@ -179,7 +186,13 @@ void gemmTest(int64_t M, int64_t N, int64_t K) {
     signQuantize(X, &XQ);
     signQuantize(W, &WQ);
     YQ.Resize(M, N);
-    qgemmNT(M, N, K, XQ.data<uint8_t>(), WQ.data<uint8_t>(), YQ.mutable_data<float>());
+    qgemmNT(
+        M,
+        N,
+        K,
+        XQ.data<uint8_t>(),
+        WQ.data<uint8_t>(),
+        YQ.mutable_data<float>());
   }
   {
     Y.Resize(M, N);
@@ -220,7 +233,15 @@ TEST(QConv, ConvTest) {
   }
 }
 
-void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs args) {
+void ConvTest2b1b(
+    int IC,
+    int KH,
+    int KW,
+    int H,
+    int W,
+    int OC,
+    int N,
+    ConvArgs args) {
   args.stride_h = std::min(args.stride_h, KH);
   args.stride_w = std::min(args.stride_w, KW);
   args.pad_l = std::min(args.pad_l, KW - 1);
@@ -228,10 +249,12 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
   args.pad_t = std::min(args.pad_t, KH - 1);
   args.pad_b = std::min(args.pad_b, KH - 1);
 
-  LOG(INFO) << "IC: " << IC << ", KH: " << KH << ", KW: " << KW << ", H: " << H << ", W: " << W
-            << ", OC: " << OC << ", N: " << N << ", pad_l: " << args.pad_l
-            << ", pad_r: " << args.pad_r << ", pad_t: " << args.pad_t << ", pad_b: " << args.pad_b
-            << ", stride_h: " << args.stride_h << ", stride_w: " << args.stride_w;
+  LOG(INFO) << "IC: " << IC << ", KH: " << KH << ", KW: " << KW << ", H: " << H
+            << ", W: " << W << ", OC: " << OC << ", N: " << N
+            << ", pad_l: " << args.pad_l << ", pad_r: " << args.pad_r
+            << ", pad_t: " << args.pad_t << ", pad_b: " << args.pad_b
+            << ", stride_h: " << args.stride_h
+            << ", stride_w: " << args.stride_w;
   auto X = genTensor0123({N, H, W, IC});
   auto W_ = genTensor11({OC, KH, KW, IC});
   auto bias = genTensorUniform11({OC});
@@ -255,16 +278,17 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
     const auto F = WQ.dim(0);
     const auto N = YQ.size() / F;
 
-    run2b1bUnification(nullptr,
-                       N,
-                       F,
-                       WQN.data<float>(),
-                       YQs[0]->data<float>(),
-                       YQs[1]->data<float>(),
-                       F,
-                       YQ.mutable_data<float>(),
-                       F,
-                       bias.data<float>());
+    run2b1bUnification(
+        nullptr,
+        N,
+        F,
+        WQN.data<float>(),
+        YQs[0]->data<float>(),
+        YQs[1]->data<float>(),
+        F,
+        YQ.mutable_data<float>(),
+        F,
+        bias.data<float>());
   }
 
   {
@@ -310,7 +334,8 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
 
   // for (auto i = 0; i < Y.size(); ++i) {
   //   LOG(INFO) << "i: " << i << ", y[i]: " << Y.data<float>()[i]
-  //             << ", y2b1b[i]: " << Y2b1b.data<float>()[i] << ", yq[i]: " << YQ.data<float>()[i];
+  //             << ", y2b1b[i]: " << Y2b1b.data<float>()[i] << ", yq[i]: " <<
+  //             YQ.data<float>()[i];
   // }
 
   for (auto i = 0; i < Y.size(); ++i) {
@@ -380,79 +405,87 @@ TEST(QConv, 2b1bConvTestRandomized) {
     return r;
   };
   for (auto i = 0; i < 10; ++i) {
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 randInt(1, 4),
-                 randInt(1, 4),
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 64),
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        randInt(1, 4),
+        randInt(1, 4),
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 64),
+        randInt(1, 2),
+        rca());
     // Test 3x3 path.
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 3,
-                 3,
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 64),
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        3,
+        3,
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 64),
+        randInt(1, 2),
+        rca());
 
     // Test 3x3s2 path.
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 3,
-                 3,
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 64),
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        3,
+        3,
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 64),
+        randInt(1, 2),
+        rca());
     // Test 3x3 path with packing.
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 3,
-                 3,
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 8) * kGEMMTileSize,
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        3,
+        3,
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 8) * kGEMMTileSize,
+        randInt(1, 2),
+        rca());
     // Test 1x1 path
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 1,
-                 1,
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 64),
-                 randInt(1, 2),
-                 ca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        1,
+        1,
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 64),
+        randInt(1, 2),
+        ca());
 
     // Test 1x1 with direct packing
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 1,
-                 1,
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 4) * kGEMMTileSize,
-                 randInt(1, 2),
-                 ca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        1,
+        1,
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 4) * kGEMMTileSize,
+        randInt(1, 2),
+        ca());
     // Entirely arbitrary, no padding codepath.
-    ConvTest2b1b(randInt(1, 64) * 8,
-                 randInt(1, 4),
-                 randInt(1, 4),
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 128),
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64) * 8,
+        randInt(1, 4),
+        randInt(1, 4),
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 128),
+        randInt(1, 2),
+        rca());
     // Entirely arbitrary, mixed codepath.
-    ConvTest2b1b(randInt(1, 64),
-                 randInt(1, 4),
-                 randInt(1, 4),
-                 randInt(5, 12),
-                 randInt(5, 12),
-                 randInt(1, 128),
-                 randInt(1, 2),
-                 rca());
+    ConvTest2b1b(
+        randInt(1, 64),
+        randInt(1, 4),
+        randInt(1, 4),
+        randInt(5, 12),
+        randInt(5, 12),
+        randInt(1, 128),
+        randInt(1, 2),
+        rca());
   }
 }
 

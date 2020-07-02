@@ -76,7 +76,8 @@ class CAFFE2_API Caffe2InitializeRegistry {
   // using logging.
   bool RunRegisteredInitFunctionsInternal(
       vector<std::pair<InitFunction, const char*>>& functions,
-      int* pargc, char*** pargv) {
+      int* pargc,
+      char*** pargv) {
     for (const auto& init_pair : functions) {
       VLOG(1) << "Running init function: " << init_pair.second;
       if (!(*init_pair.first)(pargc, pargv)) {
@@ -88,13 +89,13 @@ class CAFFE2_API Caffe2InitializeRegistry {
   }
 
   Caffe2InitializeRegistry() {}
-  vector<std::pair<InitFunction, const char*> > early_init_functions_;
-  vector<std::pair<InitFunction, const char*> > init_functions_;
+  vector<std::pair<InitFunction, const char*>> early_init_functions_;
+  vector<std::pair<InitFunction, const char*>> init_functions_;
   std::unordered_map<std::string, InitFunction> named_functions_;
   bool early_init_functions_run_yet_ = false;
   bool init_functions_run_yet_ = false;
 };
-}  // namespace internal
+} // namespace internal
 
 CAFFE2_API bool unsafeRunCaffe2InitFunction(
     const char* name,
@@ -175,5 +176,5 @@ CAFFE2_API bool GlobalInit(int* pargc, char*** argv);
  * command line options to caffe2, no arguments are passed.
  */
 CAFFE2_API bool GlobalInit();
-}  // namespace caffe2
-#endif  // CAFFE2_CORE_INIT_H_
+} // namespace caffe2
+#endif // CAFFE2_CORE_INIT_H_

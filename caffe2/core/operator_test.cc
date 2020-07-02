@@ -1,8 +1,8 @@
 #include <iostream>
 
+#include <gtest/gtest.h>
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
-#include <gtest/gtest.h>
 
 namespace caffe2 {
 
@@ -209,8 +209,9 @@ TEST(OperatorDeathTest, DISABLED_CannotAccessRepeatedParameterWithWrongType) {
   auto args = op.GetRepeatedArgument<float>("arg0");
   EXPECT_EQ(args.size(), 1);
   EXPECT_FLOAT_EQ(args[0], 0.1f);
-  EXPECT_DEATH(op.GetRepeatedArgument<int>("arg0"),
-               "Argument does not have the right field: expected ints");
+  EXPECT_DEATH(
+      op.GetRepeatedArgument<int>("arg0"),
+      "Argument does not have the right field: expected ints");
 }
 #endif
 
@@ -336,11 +337,11 @@ class FooGradientDummyEngineOp : public JustTest {
 class GetFooGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-    return vector<OperatorDef>{
-        CreateOperatorDef(
-            "FooGradient", "",
-            std::vector<string>{GO(0)},
-            std::vector<string>{GI(0)})};
+    return vector<OperatorDef>{CreateOperatorDef(
+        "FooGradient",
+        "",
+        std::vector<string>{GO(0)},
+        std::vector<string>{GI(0)})};
   }
 };
 
@@ -357,8 +358,13 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   DeviceOption option;
   option.set_device_type(PROTO_CPU);
   OperatorDef def = CreateOperatorDef(
-      "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
-      std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
+      "Foo",
+      "",
+      std::vector<string>{"in"},
+      std::vector<string>{"out"},
+      std::vector<Argument>{arg},
+      option,
+      "DUMMY_ENGINE");
   vector<GradientWrapper> g_output(1);
   g_output[0].dense_ = "out_grad";
   GradientOpsMeta meta = GetGradientForOp(def, g_output);
@@ -625,4 +631,4 @@ TEST(IsTestArg, non_standard) {
       "JustTestWithNonStandardIsTestArg");
 }
 
-}  // namespace caffe2
+} // namespace caffe2

@@ -623,7 +623,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         N, // ldd
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0,   // solution index, reserved for future use
+        0, // solution index, reserved for future use
         0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(
@@ -1003,7 +1003,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0,   // solution index, reserved for future use
+        0, // solution index, reserved for future use
         0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
@@ -1145,7 +1145,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         ldc, // ldd
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0,   // solution index, reserved for future use
+        0, // solution index, reserved for future use
         0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(

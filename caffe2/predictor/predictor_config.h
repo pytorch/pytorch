@@ -41,7 +41,8 @@ struct CAFFE2_API PredictorConfig {
   std::shared_ptr<Workspace> ws;
 };
 
-CAFFE2_API Workspace makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
+CAFFE2_API Workspace
+makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
 
 CAFFE2_API PredictorConfig makePredictorConfig(
     const MetaNetDef& net,

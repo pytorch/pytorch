@@ -2,15 +2,15 @@
 #define NOM_TESTS_TEST_UTIL_H
 
 #include "caffe2/core/common.h"
-#include "nomnigraph/Graph/Graph.h"
-#include "nomnigraph/Graph/Algorithms.h"
-#include "nomnigraph/Representations/NeuralNet.h"
 #include "nomnigraph/Converters/Dot.h"
+#include "nomnigraph/Graph/Algorithms.h"
+#include "nomnigraph/Graph/Graph.h"
+#include "nomnigraph/Representations/NeuralNet.h"
 
 #include <map>
 
 class TestClass {
-public:
+ public:
   TestClass() {}
   ~TestClass() {}
 };
@@ -19,8 +19,7 @@ struct NNEquality {
   static bool equal(
       const typename nom::repr::NNGraph::NodeRef& a,
       const typename nom::repr::NNGraph::NodeRef& b) {
-    if (
-        !nom::repr::nn::is<nom::repr::NeuralNetOperator>(a) ||
+    if (!nom::repr::nn::is<nom::repr::NeuralNetOperator>(a) ||
         !nom::repr::nn::is<nom::repr::NeuralNetOperator>(b)) {
       return false;
     }
@@ -28,7 +27,9 @@ struct NNEquality {
     auto b_ = nom::repr::nn::get<nom::repr::NeuralNetOperator>(b);
 
     bool sameKind = a_->getKind() == b_->getKind();
-    if (sameKind && a_->getKind() == nom::repr::NeuralNetOperator::NNKind::GenericOperator) {
+    if (sameKind &&
+        a_->getKind() ==
+            nom::repr::NeuralNetOperator::NNKind::GenericOperator) {
       return a_->getName() == b_->getName();
     }
     return sameKind;
@@ -106,11 +107,14 @@ CAFFE2_API nom::Graph<std::string> createGraph();
 
 CAFFE2_API nom::Graph<std::string> createGraphWithCycle();
 
-std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node);
+std::map<std::string, std::string> BBPrinter(
+    typename nom::repr::NNCFGraph::NodeRef node);
 
-std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph::EdgeRef edge);
+std::map<std::string, std::string> cfgEdgePrinter(
+    typename nom::repr::NNCFGraph::EdgeRef edge);
 
-std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node);
+std::map<std::string, std::string> NNPrinter(
+    typename nom::repr::NNGraph::NodeRef node);
 
 CAFFE2_API nom::Graph<TestClass>::NodeRef createTestNode(
     nom::Graph<TestClass>& g);

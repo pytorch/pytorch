@@ -18,14 +18,14 @@ enum class StorageType {
 
 string asString(StorageType st) {
   switch (st) {
-  case StorageType::MPSTEMPORARYIMAGE:
-    return "MPSTEMPORARYIMAGE";
-  case StorageType::MPSIMAGE:
-    return "MPSIMAGE";
-  case StorageType::CPU:
-    return "CPU";
-  case StorageType::INVALID:
-    return "INVALID";
+    case StorageType::MPSTEMPORARYIMAGE:
+      return "MPSTEMPORARYIMAGE";
+    case StorageType::MPSIMAGE:
+      return "MPSIMAGE";
+    case StorageType::CPU:
+      return "CPU";
+    case StorageType::INVALID:
+      return "INVALID";
   }
 }
 
@@ -70,8 +70,11 @@ std::unordered_map<string, std::vector<StorageType>> inputStorageTypeMap = {
                               StorageType::CPU,
                               StorageType::CPU}}};
 std::unordered_map<string, std::vector<StorageType>> outputStorageTypeMap = {
-    {"MPSCNNGenerateProposalsCPP", std::vector<StorageType>{StorageType::CPU, StorageType::CPU}}};
-std::vector<string> opsNeedsSync = {"MPSCNNGenerateProposalsCPP", "CopyFromMPSCNN", "CopyToMPSCNN"};
+    {"MPSCNNGenerateProposalsCPP",
+     std::vector<StorageType>{StorageType::CPU, StorageType::CPU}}};
+std::vector<string> opsNeedsSync = {"MPSCNNGenerateProposalsCPP",
+                                    "CopyFromMPSCNN",
+                                    "CopyToMPSCNN"};
 
 struct Analysis {
   struct SSA {
@@ -86,7 +89,8 @@ struct Analysis {
   };
   std::vector<SSA> ssa;
   // blob name -> blob version -> blob information
-  std::unordered_map<std::string, std::unordered_map<size_t, BlobInfo>> blobInfoMap;
+  std::unordered_map<std::string, std::unordered_map<size_t, BlobInfo>>
+      blobInfoMap;
   int currentCommandBufferId = 0;
 };
 
@@ -116,17 +120,21 @@ void ssaAnalysis(Analysis& analysis, const NetDef& net) {
       }
       outVersions[s] = frontier[s];
       if (outputStorageTypeMap.find(op.type()) != outputStorageTypeMap.end()) {
-        analysis.blobInfoMap[s][frontier[s]].storageType = outputStorageTypeMap[op.type()][j];
+        analysis.blobInfoMap[s][frontier[s]].storageType =
+            outputStorageTypeMap[op.type()][j];
       } else if (op.type() == "CopyFromMPSCNN") {
         analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::CPU;
       } else if (isTemporaryImages.size() > 0) {
         if (isTemporaryImages.at(j)) {
-          analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::MPSTEMPORARYIMAGE;
+          analysis.blobInfoMap[s][frontier[s]].storageType =
+              StorageType::MPSTEMPORARYIMAGE;
         } else {
-          analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::MPSIMAGE;
+          analysis.blobInfoMap[s][frontier[s]].storageType =
+              StorageType::MPSIMAGE;
         }
       } else if (op.type().find("MPSCNN") != std::string::npos) {
-        analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::MPSTEMPORARYIMAGE;
+        analysis.blobInfoMap[s][frontier[s]].storageType =
+            StorageType::MPSTEMPORARYIMAGE;
       } else {
         analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::CPU;
       }
@@ -152,21 +160,27 @@ static void rewriteInput(OperatorDef* op, int i) {
   op->set_input(i, input + "_I");
 }
 
-static void insertOutputCopyFromMPSCNNOp(NetDef& predictNet, const std::string& cpu_blob) {
+static void insertOutputCopyFromMPSCNNOp(
+    NetDef& predictNet,
+    const std::string& cpu_blob) {
   auto* op = predictNet.add_op();
   op->set_type("CopyFromMPSCNN");
   op->add_input(cpu_blob + "_M");
   op->add_output(cpu_blob);
 }
 
-static void insertInputCopyFromMPSCNNOp(NetDef& predictNet, const std::string& cpu_blob) {
+static void insertInputCopyFromMPSCNNOp(
+    NetDef& predictNet,
+    const std::string& cpu_blob) {
   auto* op = predictNet.add_op();
   op->set_type("CopyFromMPSCNN");
   op->add_input(cpu_blob);
   op->add_output(cpu_blob + "_I");
 }
 
-static void insertInputCopyToMPSCNNOp(NetDef& predictNet, const std::string& gpu_blob) {
+static void insertInputCopyToMPSCNNOp(
+    NetDef& predictNet,
+    const std::string& gpu_blob) {
   auto* op = predictNet.add_op();
   op->set_type("CopyToMPSCNN");
   op->add_input(gpu_blob);
@@ -175,41 +189,49 @@ static void insertInputCopyToMPSCNNOp(NetDef& predictNet, const std::string& gpu
 
 void commandBufferAnalysis(Analysis& analysis, NetDef& def) {
   analysis.currentCommandBufferId = 0;
-  analysis.blobInfoMap[def.op(0).input(0)][0].commandBufferId = analysis.currentCommandBufferId;
+  analysis.blobInfoMap[def.op(0).input(0)][0].commandBufferId =
+      analysis.currentCommandBufferId;
   for (auto i = 0; i < def.op_size(); ++i) {
     auto op = def.op(i);
-    if (std::find(opsNeedsSync.begin(), opsNeedsSync.end(), op.type()) != opsNeedsSync.end()) {
+    if (std::find(opsNeedsSync.begin(), opsNeedsSync.end(), op.type()) !=
+        opsNeedsSync.end()) {
       analysis.currentCommandBufferId += 1;
       for (auto j = 0; j < op.output_size(); ++j) {
         auto outputBlob = op.output(j);
         auto version = analysis.ssa[i].outVersions[outputBlob];
-        analysis.blobInfoMap[outputBlob][version].commandBufferId = analysis.currentCommandBufferId;
+        analysis.blobInfoMap[outputBlob][version].commandBufferId =
+            analysis.currentCommandBufferId;
       }
     } else {
       int inputCommandBufferId = 0;
       for (auto j = 0; j < op.input_size(); ++j) {
         auto inputBlob = op.input(j);
         auto version = analysis.ssa[i].inVersions[inputBlob];
-        if (analysis.blobInfoMap.find(inputBlob) != analysis.blobInfoMap.end() &&
-            analysis.blobInfoMap[inputBlob][version].storageType == StorageType::MPSIMAGE) {
+        if (analysis.blobInfoMap.find(inputBlob) !=
+                analysis.blobInfoMap.end() &&
+            analysis.blobInfoMap[inputBlob][version].storageType ==
+                StorageType::MPSIMAGE) {
           analysis.currentCommandBufferId += 1;
           inputCommandBufferId = analysis.currentCommandBufferId;
         } else {
-          inputCommandBufferId =
-              fmax(inputCommandBufferId, analysis.blobInfoMap[inputBlob][version].commandBufferId);
+          inputCommandBufferId = fmax(
+              inputCommandBufferId,
+              analysis.blobInfoMap[inputBlob][version].commandBufferId);
         }
       }
       // command buffer same as input
       for (auto j = 0; j < op.output_size(); ++j) {
         auto outputBlob = op.output(j);
         auto version = analysis.ssa[i].outVersions[outputBlob];
-        analysis.blobInfoMap[outputBlob][version].commandBufferId = inputCommandBufferId;
+        analysis.blobInfoMap[outputBlob][version].commandBufferId =
+            inputCommandBufferId;
       }
     }
     for (auto j = 0; j < op.output_size(); ++j) {
       auto outputBlob = op.output(j);
       auto version = analysis.ssa[i].outVersions[outputBlob];
-      VLOG(2) << "command buffer analysis: " << outputBlob << " " << version << " "
+      VLOG(2) << "command buffer analysis: " << outputBlob << " " << version
+              << " "
               << analysis.blobInfoMap[outputBlob][version].commandBufferId;
     }
   }
@@ -234,7 +256,8 @@ NetDef mergeCopyFromMPSCNN(Analysis& analysis, NetDef& def) {
       auto blobName = op.input(0);
       auto version = analysis.ssa[i].inVersions[blobName];
       auto commandId = analysis.blobInfoMap[blobName][version].commandBufferId;
-      VLOG(2) << "Command buffer to ops:" << blobName << " " << version << " " << commandId;
+      VLOG(2) << "Command buffer to ops:" << blobName << " " << version << " "
+              << commandId;
       if (commandBufferToOps.find(commandId) == commandBufferToOps.end()) {
         commandBufferToOps[commandId] = std::vector<size_t>();
       }
@@ -252,9 +275,9 @@ NetDef mergeCopyFromMPSCNN(Analysis& analysis, NetDef& def) {
       // external output or internal use, if the data used by intermediate node,
       // we want to keep the first operator, otherwise, we want to keep
       // the last operator.
-      // [LATER]There might be cases when some of the data is for external output and
-      // others used by intermediate node, we'll need to have better heuristics
-      // for these cases.
+      // [LATER]There might be cases when some of the data is for external
+      // output and others used by intermediate node, we'll need to have better
+      // heuristics for these cases.
       auto externalUse = false;
       auto firstCopy = def.op(ops[0]);
       auto firstOutput = firstCopy.output(0);
@@ -296,7 +319,8 @@ NetDef mergeCopyFromMPSCNN(Analysis& analysis, NetDef& def) {
   mdef.CopyFrom(def);
   mdef.clear_op();
   for (auto i = 0; i < def.op_size(); ++i) {
-    if (std::find(opsToRemove.begin(), opsToRemove.end(), i) == opsToRemove.end()) {
+    if (std::find(opsToRemove.begin(), opsToRemove.end(), i) ==
+        opsToRemove.end()) {
       const auto& ogOp = def.op(i);
       auto op = mdef.add_op();
       op->CopyFrom(ogOp);
@@ -316,7 +340,8 @@ NetDef mergeCopyToMPSCNN(Analysis& analysis, NetDef& def) {
       auto blobName = op.input(0);
       auto version = analysis.ssa[i].inVersions[blobName];
       auto pair = make_pair(blobName, version);
-      if (std::find(copiedBlobs.begin(), copiedBlobs.end(), pair) == copiedBlobs.end()) {
+      if (std::find(copiedBlobs.begin(), copiedBlobs.end(), pair) ==
+          copiedBlobs.end()) {
         copiedBlobs.insert(pair);
       } else {
         opsToRemove.push_back(i);
@@ -327,7 +352,8 @@ NetDef mergeCopyToMPSCNN(Analysis& analysis, NetDef& def) {
   mdef.CopyFrom(def);
   mdef.clear_op();
   for (auto i = 0; i < def.op_size(); ++i) {
-    if (std::find(opsToRemove.begin(), opsToRemove.end(), i) == opsToRemove.end()) {
+    if (std::find(opsToRemove.begin(), opsToRemove.end(), i) ==
+        opsToRemove.end()) {
       const auto& ogOp = def.op(i);
       auto op = mdef.add_op();
       op->CopyFrom(ogOp);
@@ -355,13 +381,15 @@ bool addTempImageArgs(Analysis& analysis, NetDef& def) {
       auto inputBlob = op.input(j);
       auto version = analysis.ssa[i].inVersions[inputBlob];
       auto commandId = analysis.blobInfoMap[inputBlob][version].commandBufferId;
-      if (std::find(opsNeedsSync.begin(), opsNeedsSync.end(), op.type()) != opsNeedsSync.end()) {
+      if (std::find(opsNeedsSync.begin(), opsNeedsSync.end(), op.type()) !=
+          opsNeedsSync.end()) {
         synced.push_back(commandId);
         break;
       }
       if (std::find(synced.begin(), synced.end(), commandId) != synced.end() &&
           analysis.blobInfoMap.find(inputBlob) != analysis.blobInfoMap.end() &&
-          analysis.blobInfoMap[inputBlob][version].storageType == StorageType::MPSTEMPORARYIMAGE) {
+          analysis.blobInfoMap[inputBlob][version].storageType ==
+              StorageType::MPSTEMPORARYIMAGE) {
         VLOG(2) << "mpsimage blob:" << inputBlob << " " << version << " "
                 << "input " << j << " command: " << commandId;
         mpsImageBlobs.insert(make_pair(inputBlob, version));
@@ -381,7 +409,8 @@ bool addTempImageArgs(Analysis& analysis, NetDef& def) {
       for (auto j = 0; j < op->output_size(); ++j) {
         auto outputBlob = op->output(j);
         auto version = analysis.ssa[i].outVersions[outputBlob];
-        if (mpsImageBlobs.find(make_pair(outputBlob, version)) != mpsImageBlobs.end()) {
+        if (mpsImageBlobs.find(make_pair(outputBlob, version)) !=
+            mpsImageBlobs.end()) {
           setArg = true;
           isTempImages.push_back(0);
         } else {
@@ -415,15 +444,17 @@ NetDef insertCopies(const NetDef& def) {
   const auto& outputBlobVersion = analysis.ssa.back().outVersions[outputBlob];
 
   // This should hold true by definition of the SSA analysis.
-  CAFFE_ENFORCE(analysis.blobInfoMap[outputBlob].find(outputBlobVersion) ==
-                    analysis.blobInfoMap[outputBlob].end() ||
-                analysis.blobInfoMap[outputBlob][outputBlobVersion].inUsages.size() == 0);
+  CAFFE_ENFORCE(
+      analysis.blobInfoMap[outputBlob].find(outputBlobVersion) ==
+          analysis.blobInfoMap[outputBlob].end() ||
+      analysis.blobInfoMap[outputBlob][outputBlobVersion].inUsages.size() == 0);
   NetDef mdef;
   mdef.CopyFrom(def);
   mdef.clear_op();
 
   const auto& opKeyList = CPUOperatorRegistry()->Keys();
-  const auto& opKeySet = std::set<std::string>(opKeyList.begin(), opKeyList.end());
+  const auto& opKeySet =
+      std::set<std::string>(opKeyList.begin(), opKeyList.end());
 
   for (auto i = 0; i < def.op_size(); ++i) {
     const auto& ogOp = def.op(i);
@@ -444,7 +475,8 @@ NetDef insertCopies(const NetDef& def) {
       auto version = analysis.ssa[i].inVersions[inputBlob];
       // Check whether the blob is produced by previous operators
       if (analysis.blobInfoMap.find(inputBlob) != analysis.blobInfoMap.end() &&
-          analysis.blobInfoMap[inputBlob][version].storageType != StorageType::INVALID) {
+          analysis.blobInfoMap[inputBlob][version].storageType !=
+              StorageType::INVALID) {
         actualBlobType = analysis.blobInfoMap[inputBlob][version].storageType;
         VLOG(2) << "Found " << inputBlob << " " << j << " with type"
                 << asString(actualBlobType);
@@ -478,9 +510,10 @@ NetDef insertCopies(const NetDef& def) {
         opKeySet.find(op->type()) != opKeySet.end()) {
       // input used by multiple ops
       const auto& inputBlob = def.external_input(0);
-      if (std::find(analysis.blobInfoMap[inputBlob][0].inUsages.begin(),
-                    analysis.blobInfoMap[inputBlob][0].inUsages.end(),
-                    i) != analysis.blobInfoMap[inputBlob][0].inUsages.end()) {
+      if (std::find(
+              analysis.blobInfoMap[inputBlob][0].inUsages.begin(),
+              analysis.blobInfoMap[inputBlob][0].inUsages.end(),
+              i) != analysis.blobInfoMap[inputBlob][0].inUsages.end()) {
         for (auto j = 0; j < op->input_size(); ++j) {
           if (op->input(j) == def.external_input(0)) {
             op->set_input(j, "__METAL_INPUT_COPY__");
@@ -495,7 +528,8 @@ NetDef insertCopies(const NetDef& def) {
         // Assuming external output blob has unique name, e.g. only version 0
         // of the blob is used as the output
         if (op->output(j) == def.external_output(k) &&
-            analysis.blobInfoMap[op->output(j)][0].storageType != StorageType::CPU) {
+            analysis.blobInfoMap[op->output(j)][0].storageType !=
+                StorageType::CPU) {
           // copy output_M(MPSCNN) to output(CPU)
           insertOutputCopyFromMPSCNNOp(mdef, op->output(j));
           // rewrite output to output_M for the operator
@@ -525,7 +559,8 @@ NetDef rewriteForMetalI(const NetDef& def) {
   mdef.CopyFrom(def);
 
   const auto& opKeyList = CPUOperatorRegistry()->Keys();
-  const auto& opKeySet = std::set<std::string>(opKeyList.begin(), opKeyList.end());
+  const auto& opKeySet =
+      std::set<std::string>(opKeyList.begin(), opKeyList.end());
   for (auto i = 0; i < mdef.op_size(); ++i) {
     auto* op = mdef.mutable_op(i);
     const auto mpscnnOp = std::string("MPSCNN") + op->type();
@@ -556,7 +591,8 @@ NetDef setSpecialArgs(const NetDef& def) {
     auto* op = mdef.mutable_op(i);
     // setting post_nms_top_N for MPSCNNGenerateProposalsCPP to 36 due to the
     // texture array length constraint in RoIWarp
-    if (op->type() == "MPSCNNGenerateProposalsCPP" || op->type() == "GenerateProposalsCPP") {
+    if (op->type() == "MPSCNNGenerateProposalsCPP" ||
+        op->type() == "GenerateProposalsCPP") {
       auto* arg = op->mutable_arg(0);
       arg->set_i(36);
     }
@@ -564,15 +600,19 @@ NetDef setSpecialArgs(const NetDef& def) {
   return mdef;
 }
 
-bool tryConvertToMPSCNNIntermediateCopies(const NetDef& initNet,
-                                          const NetDef& predictNet,
-                                          NetDef* metalPredictNet) {
+bool tryConvertToMPSCNNIntermediateCopies(
+    const NetDef& initNet,
+    const NetDef& predictNet,
+    NetDef* metalPredictNet) {
 // iOS 10.0 and above.
-#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v)                                 \
-  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != \
-   NSOrderedAscending)
-#define SYSTEM_VERSION_EQUAL_TO(v) \
-  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
+#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) \
+  ([[[UIDevice currentDevice] systemVersion]       \
+       compare:v                                   \
+       options:NSNumericSearch] != NSOrderedAscending)
+#define SYSTEM_VERSION_EQUAL_TO(v)           \
+  ([[[UIDevice currentDevice] systemVersion] \
+       compare:v                             \
+       options:NSNumericSearch] == NSOrderedSame)
 
   if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0")) {
     LOG(ERROR) << "MPSCNN is only supported for ios version above 11.0.";
@@ -581,9 +621,11 @@ bool tryConvertToMPSCNNIntermediateCopies(const NetDef& initNet,
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO
 #undef SYSTEM_VERSION_EQUAL_TO
 
-  // The iOS GPU Family 3 v2 feature set. Introduced with the Apple A9 GPU and iOS 10.0.
-  // Don't instantiate the MPSCNNContext, as that compiles the kernel source.
-  if (![MTLCreateSystemDefaultDevice() supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
+  // The iOS GPU Family 3 v2 feature set. Introduced with the Apple A9 GPU and
+  // iOS 10.0. Don't instantiate the MPSCNNContext, as that compiles the kernel
+  // source.
+  if (![MTLCreateSystemDefaultDevice()
+          supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     LOG(ERROR) << "The iOS GPU is less than an A9, so MPSCNN is not available";
     return false;
   }
@@ -600,7 +642,8 @@ bool tryConvertToMPSCNNIntermediateCopies(const NetDef& initNet,
     LOG(INFO) << "MPSCNN is successfully enabled";
     return true;
   } catch (const std::exception& e) {
-    LOG(ERROR) << "Caught exception trying to convert NetDef to MPSCNN: " << e.what();
+    LOG(ERROR) << "Caught exception trying to convert NetDef to MPSCNN: "
+               << e.what();
     return false;
   }
 }

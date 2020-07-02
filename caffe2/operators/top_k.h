@@ -16,8 +16,7 @@ class TopKOp : public Operator<Context> {
   explicit TopKOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "k", k_, -1),
-        OP_SINGLE_ARG(int, "axis", axis_, -1) {
-  }
+        OP_SINGLE_ARG(int, "axis", axis_, -1) {}
 
   ~TopKOp() {}
 

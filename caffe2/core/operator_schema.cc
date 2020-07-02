@@ -4,17 +4,20 @@
 namespace caffe2 {
 
 OpSchema::OpSchema(const string& type, const string& file, const int line)
-   : type_(type), file_(file), line_(line), tensor_inference_function_(
-      [](const OperatorDef& def, const vector<TensorShape>&) {
-        vector<TensorShape> out;
-        for (int i = 0; i < def.output_size(); i++) {
-          TensorShape ts;
-          ts.set_unknown_shape(true);
-          out.push_back(ts);
-        }
-        return out;
-      }), device_inference_function_(
-      [](const OperatorDef& def) {
+    : type_(type),
+      file_(file),
+      line_(line),
+      tensor_inference_function_(
+          [](const OperatorDef& def, const vector<TensorShape>&) {
+            vector<TensorShape> out;
+            for (int i = 0; i < def.output_size(); i++) {
+              TensorShape ts;
+              ts.set_unknown_shape(true);
+              out.push_back(ts);
+            }
+            return out;
+          }),
+      device_inference_function_([](const OperatorDef& def) {
         auto op_device =
             def.has_device_option() ? def.device_option() : DeviceOption();
         vector<DeviceOption> in_dev(def.input_size(), op_device);
@@ -26,25 +29,25 @@ bool OpSchema::Verify(const OperatorDef& def) const {
   // Check the number of inputs.
   if (def.input_size() < min_input_ || def.input_size() > max_input_) {
     LOG(ERROR) << "Input size " << def.input_size()
-                    << " not in range [min=" << min_input_ << ", max="
-                    << max_input_ << "].";
+               << " not in range [min=" << min_input_ << ", max=" << max_input_
+               << "].";
     return false;
   }
   if (!num_inputs_allowed_(def.input_size())) {
     LOG(ERROR) << "Input size " << def.input_size()
-                    << " not in allowed input sizes.";
+               << " not in allowed input sizes.";
     return false;
   }
   // Check the number of outputs.
   if (def.output_size() < min_output_ || def.output_size() > max_output_) {
     LOG(ERROR) << "Output size " << def.output_size()
-                    << " not in range [min=" << min_output_ << ", max="
-                    << max_output_ << "].";
+               << " not in range [min=" << min_output_
+               << ", max=" << max_output_ << "].";
     return false;
   }
   if (!num_outputs_allowed_(def.output_size())) {
     LOG(ERROR) << "Output size " << def.output_size()
-                    << " not in allowed output sizes.";
+               << " not in allowed output sizes.";
     return false;
   }
   if (!num_inputs_outputs_allowed_(def.input_size(), def.output_size())) {
@@ -58,8 +61,8 @@ bool OpSchema::Verify(const OperatorDef& def) const {
     if (expected_nout != kCannotComputeNumOutputs &&
         def.output_size() != expected_nout) {
       LOG(ERROR) << "Output size " << def.output_size()
-                      << " not matching expected output size, which is "
-                      << expected_nout;
+                 << " not matching expected output size, which is "
+                 << expected_nout;
       return false;
     }
   }
@@ -70,8 +73,8 @@ bool OpSchema::Verify(const OperatorDef& def) const {
       // If an input is the same as an output but in-place is not opt-in
       // either as allowed or enforced, we will fail the verification.
       if (def.input(in_idx) == def.output(out_idx) &&
-          (!inplace_allowed_(in_idx, out_idx)
-          && !inplace_enforced_(in_idx, out_idx))) {
+          (!inplace_allowed_(in_idx, out_idx) &&
+           !inplace_enforced_(in_idx, out_idx))) {
         LOG(ERROR) << "Input index " << in_idx << " and output idx " << out_idx
                    << " (" << def.input(in_idx) << ")"
                    << " are set to be in-place but this is actually not "
@@ -80,9 +83,10 @@ bool OpSchema::Verify(const OperatorDef& def) const {
       }
       if (def.input(in_idx) != def.output(out_idx) &&
           inplace_enforced_(in_idx, out_idx)) {
-        LOG(ERROR) << "Input index " << in_idx << " (" << def.input(in_idx) << ")"
-                   << " and output idx " << out_idx
-                   << " (" << def.output(in_idx) << ")"
+        LOG(ERROR) << "Input index " << in_idx << " (" << def.input(in_idx)
+                   << ")"
+                   << " and output idx " << out_idx << " ("
+                   << def.output(in_idx) << ")"
                    << " are not in-place but should be as required by op "
                    << def.type();
         return false;
@@ -124,10 +128,9 @@ OpSchema& OpSchema::NumInputs(std::function<bool(int)> func) {
 }
 
 OpSchema& OpSchema::NumInputs(set<int> allowed_input_nums) {
-  return NumInputs(
-      [allowed_input_nums](int n)->bool {
-        return allowed_input_nums.count(n);
-      });
+  return NumInputs([allowed_input_nums](int n) -> bool {
+    return allowed_input_nums.count(n);
+  });
 }
 
 OpSchema& OpSchema::NumOutputs(int min, int max) {
@@ -146,10 +149,9 @@ OpSchema& OpSchema::NumOutputs(std::function<bool(int)> func) {
 }
 
 OpSchema& OpSchema::NumOutputs(set<int> allowed_output_nums) {
-  return NumOutputs(
-      [allowed_output_nums](int n)->bool {
-        return allowed_output_nums.count(n);
-      });
+  return NumOutputs([allowed_output_nums](int n) -> bool {
+    return allowed_output_nums.count(n);
+  });
 }
 
 OpSchema& OpSchema::NumInputsOutputs(std::function<bool(int, int)> func) {
@@ -163,7 +165,7 @@ OpSchema& OpSchema::OutputCalculator(std::function<int(int)> calc) {
 }
 
 OpSchema& OpSchema::SameNumberOfOutput() {
-  return OutputCalculator([](int n)->int { return n; } );
+  return OutputCalculator([](int n) -> int { return n; });
 }
 
 OpSchema& OpSchema::AllowInplace(std::function<bool(int, int)> inplace) {
@@ -172,10 +174,9 @@ OpSchema& OpSchema::AllowInplace(std::function<bool(int, int)> inplace) {
 }
 
 OpSchema& OpSchema::AllowInplace(set<std::pair<int, int>> inplace) {
-  return AllowInplace(
-      [inplace](int in, int out)->bool {
-        return inplace.count(std::make_pair(in, out));
-      });
+  return AllowInplace([inplace](int in, int out) -> bool {
+    return inplace.count(std::make_pair(in, out));
+  });
 }
 
 OpSchema& OpSchema::AllowOneToOneInplace() {
@@ -188,10 +189,9 @@ OpSchema& OpSchema::EnforceInplace(std::function<bool(int, int)> inplace) {
 }
 
 OpSchema& OpSchema::EnforceInplace(set<std::pair<int, int>> inplace) {
-  return EnforceInplace(
-      [inplace](int in, int out)->bool {
-        return inplace.count(std::make_pair(in, out));
-      });
+  return EnforceInplace([inplace](int in, int out) -> bool {
+    return inplace.count(std::make_pair(in, out));
+  });
 }
 
 OpSchema& OpSchema::EnforceOneToOneInplace() {
@@ -316,7 +316,8 @@ DEFINE_STANDARG_ARG(IsTest, is_test)
 
 #undef DEFINE_STANDARG_ARG
 
-OpSchema& OpSchema::Input(const int n, const char* name, const char* description) {
+OpSchema&
+OpSchema::Input(const int n, const char* name, const char* description) {
   if (input_desc_.size() <= (unsigned)n) {
     input_desc_.resize(n + 1);
   }
@@ -324,7 +325,8 @@ OpSchema& OpSchema::Input(const int n, const char* name, const char* description
   return *this;
 }
 
-OpSchema& OpSchema::Output(const int n, const char* name, const char* description) {
+OpSchema&
+OpSchema::Output(const int n, const char* name, const char* description) {
   if (output_desc_.size() <= (unsigned)n) {
     output_desc_.resize(n + 1);
   }
@@ -520,4 +522,4 @@ CaffeMap<string, OpSchema>& OpSchemaRegistry::map() {
   return map;
 }
 
-}  // namespace caffe2
+} // namespace caffe2

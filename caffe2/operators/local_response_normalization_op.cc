@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-template<>
+template <>
 bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
@@ -35,9 +35,11 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // go through the images
   for (int n = 0; n < N; ++n) {
     // compute the padded square
-    math::Sqr<float, CPUContext>(image_size, Xdata + image_size * n,
-                                 padded_square_data + pre_pad_ * H * W,
-                                 &context_);
+    math::Sqr<float, CPUContext>(
+        image_size,
+        Xdata + image_size * n,
+        padded_square_data + pre_pad_ * H * W,
+        &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
       math::Axpy<float, float, CPUContext>(
@@ -74,7 +76,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   return true;
 }
 
-template<>
+template <>
 bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // Note(Yangqing): This one is copied from my Decaf implementation. How many
   // variants have I written...?
@@ -165,9 +167,11 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // go through the images
   for (int n = 0; n < N; ++n) {
     // compute the padded square
-    math::Sqr<float, CPUContext>(image_size, Xdata + image_size * n,
-                                 padded_ratio_data + pre_pad_ * H * W,
-                                 &context_);
+    math::Sqr<float, CPUContext>(
+        image_size,
+        Xdata + image_size * n,
+        padded_ratio_data + pre_pad_ * H * W,
+        &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
       math::Axpy<float, float, CPUContext>(
@@ -211,12 +215,17 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   for (int n = 0; n < N; ++n) {
     // first, compute diff_i * y_i / s_i
     math::Mul<float, CPUContext>(
-        image_size, dYdata + offset, Ydata + offset,
-        padded_ratio_data + inverse_pre_pad * H * W, &context_);
+        image_size,
+        dYdata + offset,
+        Ydata + offset,
+        padded_ratio_data + inverse_pre_pad * H * W,
+        &context_);
     math::Div<float, CPUContext>(
-        image_size, padded_ratio_data + inverse_pre_pad * H * W,
+        image_size,
+        padded_ratio_data + inverse_pre_pad * H * W,
         scale_data + offset,
-        padded_ratio_data + inverse_pre_pad * H * W, &context_);
+        padded_ratio_data + inverse_pre_pad * H * W,
+        &context_);
     // Now, compute the accumulated ratios and the bottom diff
     math::Set<float, CPUContext>(
         accum_ratio.numel(), 0., accum_ratio_data, &context_);
@@ -227,8 +236,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < C; ++c) {
       for (int hw = 0; hw < H * W; ++hw) {
         accum_ratio_data[hw] += padded_ratio_data[(c + size_ - 1) * H * W + hw];
-        dXdata[offset] =
-            dYdata[offset] * pow(scale_data[offset], -beta_) -
+        dXdata[offset] = dYdata[offset] * pow(scale_data[offset], -beta_) -
             cache_ratio * accum_ratio_data[hw] * Xdata[offset];
         accum_ratio_data[hw] -= padded_ratio_data[c * H * W + hw];
         ++offset;
@@ -520,10 +528,11 @@ class GetLRNGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-      "LRNGradient", "",
-      vector<string>{I(0), O(0), GO(0)},
-      vector<string>{GI(0)});
+        "LRNGradient",
+        "",
+        vector<string>{I(0), O(0), GO(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(LRN, GetLRNGradient);
-}  // namespace caffe2
+} // namespace caffe2

@@ -1,7 +1,7 @@
 #include <caffe2/ideep/ideep_utils.h>
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
-#include "caffe2/operators/utility_ops.h"
 #include "caffe2/operators/elementwise_add_op.h"
+#include "caffe2/operators/utility_ops.h"
 
 using namespace caffe2;
 
@@ -12,8 +12,9 @@ class IDEEPSumOp final : public IDEEPOperator {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
   using FALLBACK_SUM = IDEEPFallbackOp<SumOp<CPUContext>, SkipIndices<0>>;
-  using FALLBACK_ADD = IDEEPFallbackOp<BinaryElementwiseOp<
-    NumericTypes, CPUContext, AddFunctor<CPUContext>>, SkipIndices<0>>;
+  using FALLBACK_ADD = IDEEPFallbackOp<
+      BinaryElementwiseOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>,
+      SkipIndices<0>>;
 
   IDEEPSumOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),

@@ -1,14 +1,14 @@
+#include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <cerrno>
+#include <fstream>
 #include <istream>
 #include <ostream>
-#include <fstream>
-#include <algorithm>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
+#include <c10/core/CPUAllocator.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -22,14 +22,15 @@
 namespace caffe2 {
 namespace serialize {
 
-size_t istream_read_func(void *pOpaque, mz_uint64 file_ofs, void *pBuf, size_t n) {
+size_t
+istream_read_func(void* pOpaque, mz_uint64 file_ofs, void* pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamReader*>(pOpaque);
   return self->read(file_ofs, static_cast<char*>(pBuf), n);
 }
 
 static std::string basename(const std::string& name) {
   size_t start = 0;
-  for(size_t i = 0; i < name.size(); ++i) {
+  for (size_t i = 0; i < name.size(); ++i) {
     if (name[i] == '\\' || name[i] == '/') {
       start = i + 1;
     }
@@ -39,7 +40,7 @@ static std::string basename(const std::string& name) {
     return "";
 
   size_t end = name.size();
-  for(size_t i = end; i > start; --i) {
+  for (size_t i = end; i > start; --i) {
     if (name[i - 1] == '.') {
       end = i - 1;
       break;
@@ -94,8 +95,8 @@ void PyTorchStreamReader::init() {
   mz_zip_reader_init(ar_.get(), size, 0);
   valid("reading zip archive");
 
-  // figure out the archive_name (i.e. the zip folder all the other files are in)
-  // all lookups to getRecord will be prefixed by this folder
+  // figure out the archive_name (i.e. the zip folder all the other files are
+  // in) all lookups to getRecord will be prefixed by this folder
   int n = mz_zip_reader_get_num_files(ar_.get());
   if (n == 0) {
     CAFFE_THROW("archive does not contain any files");
@@ -116,7 +117,8 @@ void PyTorchStreamReader::init() {
   at::DataPtr version_ptr;
   size_t version_size;
   std::tie(version_ptr, version_size) = getRecord("version");
-  std::string version(static_cast<const char*>(version_ptr.get()), version_size);
+  std::string version(
+      static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
   AT_ASSERTM(
       version_ >= kMinSupportedFileFormatVersion,
@@ -197,7 +199,8 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   std::vector<std::string> out;
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
-    mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
+    mz_zip_reader_get_filename(
+        ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
     out.push_back(buf);
   }
   return out;
@@ -214,13 +217,15 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 }
 
 // return dataptr, size
-std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
+std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
+    const std::string& name) {
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
   at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
+  mz_zip_reader_extract_to_mem(
+      ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
 
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
@@ -242,9 +247,9 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
       "reading file header");
   size_t filename_len = read_le_16(local_header + MZ_ZIP_LDH_FILENAME_LEN_OFS);
   size_t extra_len = read_le_16(local_header + MZ_ZIP_LDH_EXTRA_LEN_OFS);
-  return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
+  return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len +
+      extra_len;
 }
-
 
 PyTorchStreamReader::~PyTorchStreamReader() {
   mz_zip_clear_last_error(ar_.get());
@@ -276,8 +281,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)>& writer_func)
-    : archive_name_("archive"),
-      writer_func_(writer_func) {
+    : archive_name_("archive"), writer_func_(writer_func) {
   setup(archive_name_);
 }
 

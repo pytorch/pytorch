@@ -14,5 +14,5 @@ CAFFE2_API caffe2::NetDef OptimizeForBackend(
     std::function<bool(const caffe2::OperatorDef&)> supports,
     std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
     bool debug = false);
-}
+} // namespace opt
 } // namespace caffe2

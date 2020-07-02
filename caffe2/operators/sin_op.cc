@@ -80,11 +80,11 @@ Y: [0.74903965 0.17938434 0.5313141  0.04957259 0.60336035]
 </details>
 
 )DOC")
-.Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
-.Output(
-    0,
-    "Y",
-    "*(type: Tensor`<float>`)* Output tensor calculated as the sine of the input tensor, element-wise.");
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
+    .Output(
+        0,
+        "Y",
+        "*(type: Tensor`<float>`)* Output tensor calculated as the sine of the input tensor, element-wise.");
 
 OPERATOR_SCHEMA(SinGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 

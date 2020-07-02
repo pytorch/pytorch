@@ -11,7 +11,7 @@ class IDEEPTransposeOp final : public IDEEPOperator {
 
   IDEEPTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        axes_(this->template GetRepeatedArgument<int>("axes")){ }
+        axes_(this->template GetRepeatedArgument<int>("axes")) {}
   ~IDEEPTransposeOp() override {}
 
   bool RunOnDevice() override {

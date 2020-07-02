@@ -236,7 +236,9 @@ Github Links:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
 
     )DOC")
-    .Arg("counter_name", "(*str*): name of the timer object; if not set use output name")
+    .Arg(
+        "counter_name",
+        "(*str*): name of the timer object; if not set use output name")
     .Output(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object");
 
 OPERATOR_SCHEMA(TimerEnd)
@@ -249,7 +251,10 @@ Github Links:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
 
     )DOC")
-    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op");
+    .Input(
+        0,
+        "timer",
+        "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op");
 
 OPERATOR_SCHEMA(TimerGetAndEnd)
     .NumInputs(1)
@@ -324,8 +329,14 @@ nanos: [252250]
 </details>
 
       )DOC")
-    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
-    .Output(0, "nanos", "(*Tensor`<int64>`*): scalar tensor containing time in nanoseconds");
+    .Input(
+        0,
+        "timer",
+        "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
+    .Output(
+        0,
+        "nanos",
+        "(*Tensor`<int64>`*): scalar tensor containing time in nanoseconds");
 
 OPERATOR_SCHEMA(TimerGet)
     .NumInputs(1)
@@ -337,8 +348,14 @@ Github Links:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
 
     )DOC")
-    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
-    .Output(0, "nanos", "(*Tensor`<int64>`*): scalar containing time in nanoseconds");
+    .Input(
+        0,
+        "timer",
+        "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
+    .Output(
+        0,
+        "nanos",
+        "(*Tensor`<int64>`*): scalar containing time in nanoseconds");
 
 CAFFE_KNOWN_TYPE(TimerInstance*);
 CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);

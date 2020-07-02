@@ -12,9 +12,10 @@
 // Define enabled when building for iOS or Android devices
 #if defined(__ANDROID__)
 #define C10_ANDROID 1
-#elif (defined(__APPLE__) &&                                            \
-       (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#elif (                   \
+    defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
 #define C10_IOS 1
 #endif // ANDROID / IOS
 
-#endif  // CAFFE2_UTILS_THREADPOOL_COMMON_H_
+#endif // CAFFE2_UTILS_THREADPOOL_COMMON_H_

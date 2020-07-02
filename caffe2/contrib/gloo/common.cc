@@ -36,8 +36,8 @@ std::shared_ptr<::gloo::transport::Device> createDevice(
     return ::gloo::transport::ibverbs::CreateDevice(ibverbsAttr);
 #else
     CAFFE_THROW(
-      "Gloo was not compiled with ibverbs support. ",
-      "Please recompile with -DUSE_IBVERBS=1.");
+        "Gloo was not compiled with ibverbs support. ",
+        "Please recompile with -DUSE_IBVERBS=1.");
 #endif
   }
 

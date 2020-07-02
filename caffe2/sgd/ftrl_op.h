@@ -75,4 +75,4 @@ class SparseFtrlOp final : public Operator<CPUContext> {
   void DoRun();
 };
 
-}
+} // namespace caffe2

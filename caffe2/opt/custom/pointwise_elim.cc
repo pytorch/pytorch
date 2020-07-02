@@ -1,5 +1,5 @@
-#include "caffe2/core/logging.h"
 #include "caffe2/opt/custom/pointwise_elim.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/opt/nql/graphmatcher.h"
 #include "caffe2/opt/passes.h"
 #include "nomnigraph/Representations/NeuralNet.h"

@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-template<>
+template <>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -362,10 +362,12 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 }
 
 // L2
-REGISTER_CPU_OPERATOR(SquaredL2Distance,
-                      SquaredL2DistanceOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
-                      SquaredL2DistanceGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2Distance,
+    SquaredL2DistanceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2DistanceGradient,
+    SquaredL2DistanceGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(SquaredL2Distance)
     .NumInputs(2)
@@ -385,7 +387,8 @@ class GetSquaredL2DistanceGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "SquaredL2DistanceGradient", "",
+        "SquaredL2DistanceGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0), GI(1)});
   }
@@ -758,4 +761,4 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(DotProductWithPadding, GetDotProductWithPaddingGradient);
-}  // namespace caffe2
+} // namespace caffe2

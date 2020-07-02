@@ -30,29 +30,30 @@
 #endif
 
 #include <cmath>
-#include <random>
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <random>
 
 namespace caffe2 {
 
-void AddConstInput(const vector<int64_t>& shape,
-                   const float value,
-                   const string& name,
-                   Workspace* ws) {
+void AddConstInput(
+    const vector<int64_t>& shape,
+    const float value,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
-  math::Set<float, CPUContext>(tensor->size(), value,
-                               tensor->mutable_data<float>(),
-                               &context);
+  math::Set<float, CPUContext>(
+      tensor->size(), value, tensor->mutable_data<float>(), &context);
 }
 
-void AddNoiseInput(const vector<int64_t>& shape,
-                   const string& name,
-                   Workspace* ws) {
+void AddNoiseInput(
+    const vector<int64_t>& shape,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -60,12 +61,8 @@ void AddNoiseInput(const vector<int64_t>& shape,
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
-    tensor->size(),
-    0.0f, 10.0f,
-    tensor->mutable_data<float>(),
-    &context);
+      tensor->size(), 0.0f, 10.0f, tensor->mutable_data<float>(), &context);
 }
-
 
 float snpe_run(int iters, Workspace& ws) {
   const int H = 227;
@@ -80,10 +77,12 @@ float snpe_run(int iters, Workspace& ws) {
   def.add_input("X_snpe");
   def.add_output("snpeout");
   std::ostringstream model_buffer;
-  std::ifstream file("/data/local/tmp/squeeze_net.dlc", std::ios::in|std::ios::binary);
+  std::ifstream file(
+      "/data/local/tmp/squeeze_net.dlc", std::ios::in | std::ios::binary);
   CAFFE_ENFORCE(file.is_open(), "Couldn't open test model.");
   model_buffer << file.rdbuf();
-  CAFFE_ENFORCE(model_buffer.str().length() > 0, "Couldn't load model into string.");
+  CAFFE_ENFORCE(
+      model_buffer.str().length() > 0, "Couldn't load model into string.");
   def.add_arg()->CopyFrom(MakeArgument("model_buffer", model_buffer.str()));
 
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
@@ -106,7 +105,8 @@ float caffe2_run(int iters, Workspace& ws) {
   const int C = 3;
 
   ReadProtoFromBinaryFile("/data/local/tmp/squeeze_init_net.pb", &init_net);
-  ReadProtoFromBinaryFile("/data/local/tmp/squeeze_predict_net.pb", &predict_net);
+  ReadProtoFromBinaryFile(
+      "/data/local/tmp/squeeze_predict_net.pb", &predict_net);
   ws.RunNetOnce(init_net);
   POPULATE_DATA("data", (caffe2::vector<int64_t>{N, C, H, W}), chw);
   predict_net.set_name("SqueezeNet");
@@ -130,7 +130,7 @@ float caffe2_run(int iters, Workspace& ws) {
   return us;
 }
 
-} // caffe2
+} // namespace caffe2
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
@@ -148,7 +148,9 @@ int main(int argc, char** argv) {
   caffe2::Blob* snpe_out_blob = ws.GetBlob("snpeout");
   auto& snpe_tensor = snpe_out_blob->Get<caffe2::TensorCPU>();
 
-  CAFFE_ENFORCE(snpe_tensor.size() == caffe2_tensor.size(), "Outputs are not the same!\n");
+  CAFFE_ENFORCE(
+      snpe_tensor.size() == caffe2_tensor.size(),
+      "Outputs are not the same!\n");
 
   float total_diff = 0;
   float KL_divergence = 0;
@@ -170,20 +172,22 @@ int main(int argc, char** argv) {
       JS_divergence += 0.5 * P * log(P / Q) + 0.5 * Q * log(Q / P);
     }
     total_diff += diff;
-    if (diff / avg > 0.10 && avg > 0.01) { // 10% difference and a non trivial confidence
+    if (diff / avg > 0.10 &&
+        avg > 0.01) { // 10% difference and a non trivial confidence
       std::cout << "Diff: " << diff << " (" << P << " vs " << Q << ")\n";
     }
   }
 
-  float avg_diff = total_diff; // Avg difference as percentage (not a great metric)
+  float avg_diff =
+      total_diff; // Avg difference as percentage (not a great metric)
   printf("Average difference is %f%%\n", avg_diff * 100);
   printf("JS Divergence is %f\n", JS_divergence); // Jensen-Shannon
   printf("KL Divergence is %f\n", KL_divergence); // Kullback-Leibler
   printf("Predicted %d with %f%% confidence\n", max_index, max * 100);
 
-  printf ("Caffe2: %f microseconds.\n", t_caffe2);
-  printf ("SNPE: %f microseconds.\n", t_snpe);
-  printf ("SNPE impl %fx faster\n", t_caffe2/t_snpe);
+  printf("Caffe2: %f microseconds.\n", t_caffe2);
+  printf("SNPE: %f microseconds.\n", t_snpe);
+  printf("SNPE impl %fx faster\n", t_caffe2 / t_snpe);
   return 0;
 }
 #else

@@ -3,10 +3,7 @@
 namespace caffe2 {
 namespace {
 
-TEST(ContextTest, BasicInit) {
+TEST(ContextTest, BasicInit) {}
 
-}
-
-}  // namespace
-}  // namespace caffe2
-
+} // namespace
+} // namespace caffe2

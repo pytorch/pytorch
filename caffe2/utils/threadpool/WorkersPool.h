@@ -65,7 +65,9 @@ struct AllocAligned {
 // Deleter object for unique_ptr for an aligned object
 template <typename T>
 struct AlignedDeleter {
-  void operator()(T* p) const { AllocAligned<T>::release(p); }
+  void operator()(T* p) const {
+    AllocAligned<T>::release(p);
+  }
 };
 
 // make_unique that guarantees alignment
@@ -130,10 +132,11 @@ inline int Do256NOPs() {
 // so as to avoid permanently spinning.
 //
 template <typename T>
-T WaitForVariableChange(std::atomic<T>* var,
-                        T initial_value,
-                        std::condition_variable* cond,
-                        std::mutex* mutex) {
+T WaitForVariableChange(
+    std::atomic<T>* var,
+    T initial_value,
+    std::condition_variable* cond,
+    std::mutex* mutex) {
   // If we are on a platform that supports it, spin for some time.
   {
     int nops = 0;
@@ -163,7 +166,8 @@ T WaitForVariableChange(std::atomic<T>* var,
       new_value = var->load(std::memory_order_relaxed);
       return new_value != initial_value;
     });
-    DCHECK_NE(static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
+    DCHECK_NE(
+        static_cast<size_t>(new_value), static_cast<size_t>(initial_value));
     return new_value;
   }
 }
@@ -246,17 +250,21 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
     std::lock_guard<std::mutex> g(state_mutex_);
     DCHECK(new_state != state_.load(std::memory_order_relaxed));
     switch (state_.load(std::memory_order_relaxed)) {
-    case State::ThreadStartup:
-      DCHECK(new_state == State::Ready);
-      break;
-    case State::Ready:
-      DCHECK(new_state == State::HasWork || new_state == State::ExitAsSoonAsPossible);
-      break;
-    case State::HasWork:
-      DCHECK(new_state == State::Ready || new_state == State::ExitAsSoonAsPossible);
-      break;
-    default:
-      abort();
+      case State::ThreadStartup:
+        DCHECK(new_state == State::Ready);
+        break;
+      case State::Ready:
+        DCHECK(
+            new_state == State::HasWork ||
+            new_state == State::ExitAsSoonAsPossible);
+        break;
+      case State::HasWork:
+        DCHECK(
+            new_state == State::Ready ||
+            new_state == State::ExitAsSoonAsPossible);
+        break;
+      default:
+        abort();
     }
     state_.store(new_state, std::memory_order_relaxed);
     state_cond_.notify_one();
@@ -275,22 +283,22 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       // Get a state to act on
       // In the 'Ready' state, we have nothing to do but to wait until
       // we switch to another state.
-      State state_to_act_upon =
-          WaitForVariableChange(&state_, State::Ready, &state_cond_, &state_mutex_);
+      State state_to_act_upon = WaitForVariableChange(
+          &state_, State::Ready, &state_cond_, &state_mutex_);
 
       // We now have a state to act on, so act.
       switch (state_to_act_upon) {
-      case State::HasWork:
-        // Got work to do! So do it, and then revert to 'Ready' state.
-        DCHECK(task_.load());
-        (*task_).Run();
-        task_ = nullptr;
-        ChangeState(State::Ready);
-        break;
-      case State::ExitAsSoonAsPossible:
-        return;
-      default:
-        abort();
+        case State::HasWork:
+          // Got work to do! So do it, and then revert to 'Ready' state.
+          DCHECK(task_.load());
+          (*task_).Run();
+          task_ = nullptr;
+          ChangeState(State::Ready);
+          break;
+        case State::ExitAsSoonAsPossible:
+          return;
+        default:
+          abort();
       }
     }
   }
@@ -359,7 +367,8 @@ class WorkersPool {
     }
     counter_to_decrement_when_ready_.Reset(workers_count - workers_.size());
     while (workers_.size() < workers_count) {
-      workers_.push_back(MakeAligned<Worker>::make(&counter_to_decrement_when_ready_));
+      workers_.push_back(
+          MakeAligned<Worker>::make(&counter_to_decrement_when_ready_));
     }
     counter_to_decrement_when_ready_.Wait();
   }

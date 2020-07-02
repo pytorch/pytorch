@@ -348,4 +348,4 @@ REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPoolFunctor>);
 REGISTER_CUDA_OPERATOR(
     LpPoolGradient,
     PoolGradientOp<float, CUDAContext, LpPoolFunctor>);
-}
+} // namespace caffe2

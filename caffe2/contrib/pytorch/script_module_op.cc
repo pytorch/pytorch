@@ -133,9 +133,7 @@ REGISTER_BLOB_SERIALIZER(
     ScriptModuleSerializer);
 // NB: the first argument to REGISTER_BLOB_DESERIALIZER macro doesn't really
 // need to be a real type, it just get converted to string
-REGISTER_BLOB_DESERIALIZER(
-    torch::jit::Module,
-    ScriptModuleDeserializer);
+REGISTER_BLOB_DESERIALIZER(torch::jit::Module, ScriptModuleDeserializer);
 
 OPERATOR_SCHEMA(ScriptModule)
     .NumInputs(1, INT_MAX)

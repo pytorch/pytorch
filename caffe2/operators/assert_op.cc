@@ -60,6 +60,6 @@ Assertion Passed!
         "error_msg",
         "(*string*): custom error message to be thrown when the input does not pass assertion",
         false)
-    .Input(0,"X","(*Tensor*): input tensor");
+    .Input(0, "X", "(*Tensor*): input tensor");
 
 } // namespace caffe2

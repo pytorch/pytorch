@@ -9,7 +9,7 @@ namespace detail {
 
 // proxy to a class because of partial specialization limitations for functions
 
-template<typename T, class Context, int FixedSize>
+template <typename T, class Context, int FixedSize>
 struct ScaleImpl {
   inline void operator()(
       const int N,
@@ -22,7 +22,7 @@ struct ScaleImpl {
 };
 
 // Put light-weight implementations in .h file to enable inlining
-template<typename T>
+template <typename T>
 struct ScaleImpl<T, CPUContext, 1> {
   inline void operator()(
       const int N,
@@ -35,7 +35,7 @@ struct ScaleImpl<T, CPUContext, 1> {
   }
 };
 
-template<typename T, class Context, int FixedSize>
+template <typename T, class Context, int FixedSize>
 struct AxpyImpl {
   inline void operator()(
       const int N,
@@ -48,7 +48,7 @@ struct AxpyImpl {
 };
 
 // Put light-weight implementations in .h file to enable inlining
-template<typename T>
+template <typename T>
 struct AxpyImpl<T, CPUContext, 1> {
   inline void operator()(
       const int N,
@@ -61,8 +61,7 @@ struct AxpyImpl<T, CPUContext, 1> {
   }
 };
 
-
-}  // namespace detail
+} // namespace detail
 
 template <typename T, class Context, int FixedSize>
 inline void ScaleFixedSize(
@@ -84,7 +83,7 @@ inline void AxpyFixedSize(
   detail::AxpyImpl<T, Context, FixedSize>()(N, alpha, x, y, context);
 }
 
-}  // namespace math
-}  // namespace caffe2
+} // namespace math
+} // namespace caffe2
 
-#endif  // CAFFE2_UTILS_MATH_DETAIL_H_
+#endif // CAFFE2_UTILS_MATH_DETAIL_H_

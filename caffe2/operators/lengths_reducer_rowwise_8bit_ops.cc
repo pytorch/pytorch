@@ -230,4 +230,4 @@ NO_GRADIENT(SparseLengthsSum8BitsRowwise);
 NO_GRADIENT(SparseLengthsWeightedSum8BitsRowwise);
 NO_GRADIENT(SparseLengthsMean8BitsRowwise);
 NO_GRADIENT(SparseLengthsWeightedMean8BitsRowwise);
-}
+} // namespace caffe2

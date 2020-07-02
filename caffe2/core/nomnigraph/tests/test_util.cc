@@ -1,18 +1,18 @@
 #include "test_util.h"
 
-#include <string>
 #include <sstream>
+#include <string>
 
 namespace {
 
 template <typename T>
 std::string to_string(T value) {
-    std::ostringstream os;
-    os << value;
-    return os.str();
+  std::ostringstream os;
+  os << value;
+  return os.str();
 }
 
-}
+} // namespace
 
 nom::Graph<std::string> createGraph() {
   nom::Graph<std::string> graph;
@@ -61,17 +61,19 @@ nom::Graph<std::string> createGraphWithCycle() {
   return graph;
 }
 
-std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node) {
+std::map<std::string, std::string> BBPrinter(
+    typename nom::repr::NNCFGraph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
   auto& bb = node->data();
   labelMap["label"] = to_string((unsigned long long)node) + "\\n";
   for (const auto& instr : bb.getInstructions()) {
-    assert(isa<nom::repr::NeuralNetOperator>(instr->data()) &&
-           "Invalid instruction.");
-    auto *op = dyn_cast<nom::repr::NeuralNetOperator>(instr->data().get());
+    assert(
+        isa<nom::repr::NeuralNetOperator>(instr->data()) &&
+        "Invalid instruction.");
+    auto* op = dyn_cast<nom::repr::NeuralNetOperator>(instr->data().get());
     bool hasOutput = false;
-    for (const auto &outEdge : instr->getOutEdges()) {
-      auto *output =
+    for (const auto& outEdge : instr->getOutEdges()) {
+      auto* output =
           dyn_cast<nom::repr::NeuralNetData>(outEdge->head()->data().get());
       labelMap["label"] += " " + output->getName();
       hasOutput = true;
@@ -80,8 +82,8 @@ std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::Node
       labelMap["label"] += " = ";
     }
     labelMap["label"] += op->getName();
-    for (const auto &inEdge : instr->getInEdges()) {
-      auto *arg =
+    for (const auto& inEdge : instr->getInEdges()) {
+      auto* arg =
           dyn_cast<nom::repr::NeuralNetData>(inEdge->tail()->data().get());
       labelMap["label"] += " " + arg->getName();
     }
@@ -91,7 +93,8 @@ std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::Node
   return labelMap;
 };
 
-std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph::EdgeRef edge) {
+std::map<std::string, std::string> cfgEdgePrinter(
+    typename nom::repr::NNCFGraph::EdgeRef edge) {
   std::map<std::string, std::string> labelMap;
   if (edge->data() == -1) {
     labelMap["label"] = "F";
@@ -101,18 +104,20 @@ std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph:
   return labelMap;
 };
 
-std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node) {
+std::map<std::string, std::string> NNPrinter(
+    typename nom::repr::NNGraph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
   assert(node->data() && "Node doesn't have data, can't render it");
   if (isa<nom::repr::NeuralNetOperator>(node->data())) {
-    auto *op = dyn_cast<nom::repr::NeuralNetOperator>(node->data().get());
+    auto* op = dyn_cast<nom::repr::NeuralNetOperator>(node->data().get());
     labelMap["label"] =
         op->getName() + " (" + to_string((unsigned long long)node) + ")";
     labelMap["shape"] = "box";
   } else if (isa<nom::repr::Data>(node->data())) {
     auto tensor = dyn_cast<nom::repr::NeuralNetData>(node->data().get());
     labelMap["label"] = tensor->getName();
-    labelMap["label"] += "_" + to_string(tensor->getVersion()) + " " + to_string((unsigned long long)node);
+    labelMap["label"] += "_" + to_string(tensor->getVersion()) + " " +
+        to_string((unsigned long long)node);
   }
   return labelMap;
 };

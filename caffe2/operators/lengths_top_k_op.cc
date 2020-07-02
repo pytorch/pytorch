@@ -11,7 +11,8 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
   const int* input_len = Y.template data<int>();
 
   auto output_dims = std::vector<int64_t>({N, k_});
-  auto* output_topk_values = Output(TOPK_VALUES_OUT, output_dims, at::dtype<T>());
+  auto* output_topk_values =
+      Output(TOPK_VALUES_OUT, output_dims, at::dtype<T>());
   auto* output_topk_indices =
       Output(TOPK_INDICES_OUT, output_dims, at::dtype<int>());
   T* output_topk_values_data = output_topk_values->template mutable_data<T>();

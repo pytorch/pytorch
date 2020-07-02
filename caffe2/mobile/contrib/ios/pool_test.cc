@@ -12,7 +12,10 @@ namespace caffe2 {
 
 namespace {
 
-void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* ws) {
+void AddNoiseInput(
+    const vector<int64_t>& shape,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -27,20 +30,21 @@ void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* 
   }
 }
 
-void compareMaxPooling(int N,
-                       int C,
-                       int H,
-                       int W,
-                       int kernelH,
-                       int kernelW,
-                       int strideH,
-                       int strideW,
-                       int padT,
-                       int padL,
-                       int padB,
-                       int padR,
-                       float maxRelErr = 1.0e-5f,
-                       float absErrForRelErrFailure = 1.0e-5f) {
+void compareMaxPooling(
+    int N,
+    int C,
+    int H,
+    int W,
+    int kernelH,
+    int kernelW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    float maxRelErr = 1.0e-5f,
+    float absErrForRelErrFailure = 1.0e-5f) {
   Workspace ws;
 
   OperatorDef def1;
@@ -83,15 +87,17 @@ void compareMaxPooling(int N,
           float v = std::numeric_limits<float>::lowest();
           for (int h = hstart; h < hend; ++h) {
             for (int w = wstart; w < wend; ++w) {
-              const auto* Xdata =
-                  X.data<float>() + n * X.dim(1) * X.dim(2) * X.dim(3) + c * X.dim(2) * X.dim(3);
+              const auto* Xdata = X.data<float>() +
+                  n * X.dim(1) * X.dim(2) * X.dim(3) + c * X.dim(2) * X.dim(3);
               const int input_index = h * W + w;
               v = std::max(v, Xdata[input_index]);
             }
           }
-          EXPECT_EQ(Y.data<float>()[n * Y.dim(1) * Y.dim(2) * Y.dim(3) + c * Y.dim(2) * Y.dim(3) +
-                                    ph * Y.dim(3) + pw],
-                    v);
+          EXPECT_EQ(
+              Y.data<float>()
+                  [n * Y.dim(1) * Y.dim(2) * Y.dim(3) +
+                   c * Y.dim(2) * Y.dim(3) + ph * Y.dim(3) + pw],
+              v);
         }
       }
     }
@@ -111,7 +117,8 @@ void runMaxPool(int kernel, int stride, int pad) {
   int W = randInt(50, 100);
   int planesOut = randInt(1, 6);
 
-  compareMaxPooling(N, C, H, W, kernel, kernel, stride, stride, pad, pad, pad, pad);
+  compareMaxPooling(
+      N, C, H, W, kernel, kernel, stride, stride, pad, pad, pad, pad);
 }
 
 TEST(PoolOp, MaxPool2x2s2p0Randomized) {
@@ -156,6 +163,5 @@ TEST(PoolOp, MaxPoolFullyRandomized) {
   }
 }
 } // unnamed namespace
-
 
 } // namespace caffe2

@@ -231,11 +231,12 @@ bool SliceImplGpu(
 
 } // namespace
 
-template<>
+template <>
 class SliceOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  template<class... Args> explicit SliceOp(Args&&... args)
+  template <class... Args>
+  explicit SliceOp(Args&&... args)
       : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
@@ -255,16 +256,24 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() > 1) {
-      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
-      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
-        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -281,6 +290,7 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
     return SliceImplGpu<SIndex, CUDAContext>(
         output, data, starts_host_, ends_host_, &context_);
   }
+
  private:
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
@@ -288,7 +298,7 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
   Tensor starts_host_;
   Tensor ends_host_;
 
-};  // class SliceOp<CUDAContext>
+}; // class SliceOp<CUDAContext>
 
 REGISTER_CUDA_OPERATOR(Slice, SliceOp<CUDAContext>);
 
@@ -296,7 +306,8 @@ template <>
 class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  template<class... Args> explicit SliceGradientOp(Args&&... args)
+  template <class... Args>
+  explicit SliceGradientOp(Args&&... args)
       : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
@@ -318,8 +329,10 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
-      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -331,8 +344,14 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
-        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -351,13 +370,13 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
           nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
     }
   }
- private:
 
+ private:
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_;
   Tensor ends_host_;
-};  // class SliceGradientOp<CUDAContext>
+}; // class SliceGradientOp<CUDAContext>
 REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<CUDAContext>);
 } // namespace caffe2

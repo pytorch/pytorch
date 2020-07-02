@@ -26,27 +26,27 @@ __global__ void transform_kernel(
     Out* out) {
   const int n = blockIdx.x;
 
-  const int nStride = C*H*W;
+  const int nStride = C * H * W;
 
   // pointers to data for this image
-  const In* input_ptr = &in[n*nStride];
-  Out* output_ptr = &out[n*nStride];
+  const In* input_ptr = &in[n * nStride];
+  Out* output_ptr = &out[n * nStride];
 
   // either read or write uncoalesced - try reading
-  for (int c=0; c < C; ++c) {
-    for (int h=threadIdx.y; h < H; h += blockDim.y) {
-      for (int w=threadIdx.x; w < W; w += blockDim.x) {
-        int in_idx = c + C*w + C*W*h;  // HWC
-        int out_idx = c*H*W + h*W + w;  // CHW
+  for (int c = 0; c < C; ++c) {
+    for (int h = threadIdx.y; h < H; h += blockDim.y) {
+      for (int w = threadIdx.x; w < W; w += blockDim.x) {
+        int in_idx = c + C * w + C * W * h; // HWC
+        int out_idx = c * H * W + h * W + w; // CHW
 
-        output_ptr[out_idx] = convert::To<float,Out>(
-          (convert::To<In,float>(input_ptr[in_idx])-mean[c]) * std[c]);
+        output_ptr[out_idx] = convert::To<float, Out>(
+            (convert::To<In, float>(input_ptr[in_idx]) - mean[c]) * std[c]);
       }
     }
   }
 }
 
-}
+} // namespace
 
 template <typename T_IN, typename T_OUT, class Context>
 
@@ -60,10 +60,15 @@ bool TransformOnGPU(
   auto* input_data = X.template data<T_IN>();
   auto* output_data = Y->template mutable_data<T_OUT>();
 
-  transform_kernel<
-    T_IN, T_OUT><<<N, dim3(16, 16), 0, context->cuda_stream()>>>(
-      N, C, H, W, mean.template data<float>(), std.template data<float>(),
-      input_data, output_data);
+  transform_kernel<T_IN, T_OUT><<<N, dim3(16, 16), 0, context->cuda_stream()>>>(
+      N,
+      C,
+      H,
+      W,
+      mean.template data<float>(),
+      std.template data<float>(),
+      input_data,
+      output_data);
   return true;
 };
 
@@ -81,4 +86,4 @@ template bool TransformOnGPU<uint8_t, at::Half, CUDAContext>(
     Tensor& std,
     CUDAContext* context);
 
-}  // namespace caffe2
+} // namespace caffe2

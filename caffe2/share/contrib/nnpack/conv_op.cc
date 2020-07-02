@@ -3,7 +3,6 @@
 
 #include "caffe2/core/common.h"
 
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -131,10 +130,9 @@ NNPACKConvOp::getConvolutionTransformStrategy() const {
   return nnp_convolution_transform_strategy_compute;
 }
 
-nnp_activation
-NNPACKConvOp::getActivationType() const {
-  auto activation = OperatorBase::GetSingleArgument<std::string>(
-    "activation", "identity");
+nnp_activation NNPACKConvOp::getActivationType() const {
+  auto activation =
+      OperatorBase::GetSingleArgument<std::string>("activation", "identity");
   if (activation == "identity") {
     return nnp_activation_identity;
   } else if (activation == "Relu") {

@@ -8,10 +8,10 @@
 #include <exception>
 #include <functional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <typeinfo>
 #include <vector>
-#include <sstream>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
@@ -32,8 +32,8 @@
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/TensorBody.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -155,7 +155,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
-        TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
+        TORCH_RETHROW(
+            enf, "Offending Blob name: ", debug_def().input(idx), ".");
       }
       throw enf;
     }
@@ -179,7 +180,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         return tensor;
       } catch (::caffe2::EnforceNotMet& enf) {
         if (has_debug_def()) {
-          TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
+          TORCH_RETHROW(
+              enf, "Offending Blob name: ", debug_def().input(idx), ".");
         }
         throw enf;
       }

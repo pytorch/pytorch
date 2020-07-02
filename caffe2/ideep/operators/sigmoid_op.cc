@@ -10,8 +10,7 @@ class IDEEPSigmoidOp final : public IDEEPOperator {
   USE_IDEEP_OPERATOR_FUNCTIONS();
 
   IDEEPSigmoidOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws) {
-  }
+      : IDEEPOperator(operator_def, ws) {}
   ~IDEEPSigmoidOp() override {}
 
   bool RunOnDevice() override {
@@ -25,7 +24,6 @@ class IDEEPSigmoidOp final : public IDEEPOperator {
   }
 
  private:
-  
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);
 };
@@ -36,8 +34,7 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   USE_IDEEP_OPERATOR_FUNCTIONS();
 
   IDEEPSigmoidGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws) {
-  }
+      : IDEEPOperator(operator_def, ws) {}
   ~IDEEPSigmoidGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -51,7 +48,6 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   }
 
  private:
-
   INPUT_TAGS(OUTPUT, OUTPUT_GRAD);
   OUTPUT_TAGS(INPUT_GRAD);
 };

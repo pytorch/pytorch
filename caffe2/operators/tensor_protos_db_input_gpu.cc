@@ -4,4 +4,4 @@
 
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR(TensorProtosDBInput, TensorProtosDBInput<CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

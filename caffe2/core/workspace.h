@@ -47,8 +47,8 @@ struct CAFFE2_API StopOnSignal {
 class CAFFE2_API Workspace {
  public:
   typedef std::function<bool(int)> ShouldContinue;
-  typedef CaffeMap<string, unique_ptr<Blob> > BlobMap;
-  typedef CaffeMap<string, unique_ptr<NetBase> > NetMap;
+  typedef CaffeMap<string, unique_ptr<Blob>> BlobMap;
+  typedef CaffeMap<string, unique_ptr<NetBase>> NetMap;
   /**
    * Initializes an empty workspace.
    */
@@ -172,7 +172,9 @@ class CAFFE2_API Workspace {
   /**
    * Return the root folder of the workspace.
    */
-  const string& RootFolder() { return root_folder_; }
+  const string& RootFolder() {
+    return root_folder_;
+  }
   /**
    * Checks if a blob with the given name is present in the current workspace.
    */
@@ -274,8 +276,9 @@ class CAFFE2_API Workspace {
   /**
    * Runs a plan that has multiple nets and execution steps.
    */
-  bool RunPlan(const PlanDef& plan_def,
-               ShouldContinue should_continue = StopOnSignal{});
+  bool RunPlan(
+      const PlanDef& plan_def,
+      ShouldContinue should_continue = StopOnSignal{});
 
   /*
    * Returns a CPU threadpool instance for parallel execution of
@@ -331,6 +334,6 @@ class CAFFE2_API Workspace {
   C10_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_WORKSPACE_H_
+#endif // CAFFE2_CORE_WORKSPACE_H_

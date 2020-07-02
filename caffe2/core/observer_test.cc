@@ -87,7 +87,7 @@ unique_ptr<NetBase> CreateNetTestHelper(Workspace* ws, bool isDAG = false) {
 
   return CreateNet(net_def, ws);
 }
-}
+} // namespace
 
 TEST(ObserverTest, TestNotify) {
   auto count_before = counter.load();

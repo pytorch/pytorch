@@ -17,4 +17,4 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     GivenTensorBoolFill,
     GivenTensorFillOp<bool, CUDAContext>);
-}
+} // namespace caffe2
