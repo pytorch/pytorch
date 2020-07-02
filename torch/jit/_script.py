@@ -14,7 +14,7 @@ import pickle
 
 import torch
 import torch._jit_internal as _jit_internal
-from torch.jit._recursive import ScriptMethodStub
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch._six import with_metaclass, get_function_from_type
