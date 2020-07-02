@@ -62,8 +62,9 @@ bool IsErasableSequence(const Node* loop_node, size_t i) {
 
   const auto* init_seq_node = loop_node->inputs()[i]->node();
   const auto init_seq_node_kind = init_seq_node->kind();
-  if ((init_seq_node_kind != ::c10::onnx::SequenceEmpty)
-      && (init_seq_node_kind != ::c10::prim::ListConstruct || init_seq_node->inputs().size() != 0)) {
+  if ((init_seq_node_kind != ::c10::onnx::SequenceEmpty) &&
+      (init_seq_node_kind != ::c10::prim::ListConstruct ||
+       init_seq_node->inputs().size() != 0)) {
     // Initial sequence must be empty.
     return false;
   }
@@ -76,7 +77,7 @@ bool IsErasableSequence(const Node* loop_node, size_t i) {
   return true;
 }
 
-void FixupONNXLoopNodeInputs(Node *node) {
+void FixupONNXLoopNodeInputs(Node* node) {
   if (node->kind() != ::c10::onnx::Loop) {
     return;
   }
@@ -125,13 +126,14 @@ void FixupONNXLoopNodeInputs(Node *node) {
 //      -> (%22, %17)
 //  %res_seq : Tensor[] = onnx::SplitToSequence[keepdims=0](%res)
 //  return (%res_seq)
-std::vector<Value*> ConvertSequenceDependencies(Node *node, int opset_version) {
+std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::Loop) {
     return node->outputs().vec();
   }
 
   if (opset_version >= 13) {
-    // Sequence type as loop-carried dependencies should be supported by ONNX ospet 13.
+    // Sequence type as loop-carried dependencies should be supported by ONNX
+    // ospet 13.
     return node->outputs().vec();
   }
 
@@ -199,8 +201,6 @@ std::vector<Value*> ConvertSequenceDependencies(Node *node, int opset_version) {
     loop_node->eraseOutput(idx - 2);
   }
 
-  // std::vector<Value*> new_outputs(loop_node->outputs().begin(), loop_node->outputs().begin() + (loop_node->outputs().size() - idx_to_remove.size()));
-  // new_outputs.insert(new_outputs.end(), split_outputs.begin(), split_outputs.end());
   return new_outputs;
 }
 
@@ -214,7 +214,7 @@ void ConvertSequenceDependencies(Block* block, int opset_version) {
 }
 } // anonymous namespace
 
-std::vector<Value*> FixupONNXLoopNode(Node *node, int opset_version) {
+std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
@@ -222,7 +222,7 @@ std::vector<Value*> FixupONNXLoopNode(Node *node, int opset_version) {
   return new_outputs;
 }
 
-std::vector<Value*> FixupONNXIfNode(Node *node, int opset_version) {
+std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return node->outputs().vec();
   }
@@ -246,16 +246,14 @@ std::vector<Value*> FixupONNXIfNode(Node *node, int opset_version) {
 
 std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
   switch (n->kind()) {
-    case ::c10::onnx::Loop:
-    {
+    case ::c10::onnx::Loop: {
       return FixupONNXLoopNode(n, opset_version);
     }
-    case ::c10::onnx::If:
-    {
+    case ::c10::onnx::If: {
       return FixupONNXIfNode(n, opset_version);
     }
     default:
-    return n->outputs().vec();
+      return n->outputs().vec();
   }
 }
 
