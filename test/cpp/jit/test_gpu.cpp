@@ -2825,7 +2825,7 @@ void testGPU_FusionReduction5() {
   Fusion& fusion = *prog.fusion_;
   FusionGuard fg(&fusion);
 
-  const int bdimx = 128;
+  const int bdimx = 64;
   const int bdimy = 8;
 
   // Set up your input tensor views
