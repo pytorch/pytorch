@@ -47,7 +47,10 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
-    ]] + ["torch/csrc/autograd/VariableTypeManual.cpp"]
+    ]] + [
+        "torch/csrc/autograd/TraceTypeManual.cpp",
+        "torch/csrc/autograd/VariableTypeManual.cpp",
+    ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
@@ -301,6 +304,7 @@ libtorch_core_jit_sources = sorted(jit_sources_common + jit_sources_full)
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
+    "torch/csrc/autograd/TraceTypeManual.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
