@@ -5,6 +5,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <typeindex>
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -795,12 +796,12 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<Type> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
+TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap();
 
 template<typename T>
 c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
-  auto res = tmap.find(typeid(T).name());
+  auto res = tmap.find(std::type_index(typeid(T)));
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
   }
@@ -810,7 +811,7 @@ c10::ClassTypePtr getCustomClassType() {
 template<typename T>
 inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
-  return tmap.find(typeid(T).name()) != tmap.end();
+  return tmap.find(std::type_index(typeid(T))) != tmap.end();
 }
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
