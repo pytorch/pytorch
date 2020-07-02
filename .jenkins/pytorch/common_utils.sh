@@ -66,7 +66,7 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-TORCHVISION_COMMIT=d0fd7392bceb4aef40098fdbb9a35041cb8d0c8a
+TORCHVISION_COMMIT=c2e8a00885e68ae1200eb6440f540e181d9125de
 
 function install_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit
@@ -77,7 +77,10 @@ function install_torchvision() {
 function checkout_install_torchvision() {
   git clone https://github.com/pytorch/vision
   pushd vision
-  git checkout "$TORCHVISION_COMMIT"
+  # git checkout "$TORCHVISION_COMMIT"
+  git remote add fmassa https://github.com/fmassa/vision-1.git
+  git fetch fmassa
+  git checkout fix-image-ext-test
   time python setup.py install
   popd
 }
