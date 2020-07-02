@@ -243,11 +243,9 @@ def get_deepspeech(device):
 
     sample_rate = 16000
     window_size = 0.02
-    window_stride = 0.01
     window = "hamming"
     audio_conf = dict(sample_rate=sample_rate,
                       window_size=window_size,
-                      window_stride=window_stride,
                       window=window,
                       noise_dir=None)
 
@@ -362,6 +360,7 @@ def get_transformer(device):
         def forward(self, src, has_mask=True):
             if has_mask:
                 device = src.device
+                # This will be created once during warmup
                 if self.src_mask is None or self.src_mask.size(0) != len(src):
                     mask = self._generate_square_subsequent_mask(len(src)).to(device)
                     self.src_mask = mask
