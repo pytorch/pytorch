@@ -2,17 +2,16 @@
 
 set -ex
 
-if [[ "$UBUNTU_VERSION" == "14.04" ]]; then
-  # cmake 2 is too old
-  cmake3=cmake3
-else
-  cmake3=cmake
-fi
-
-if [[ "$UBUNTU_VERSION" == "18.04" ]]; then
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to check for
+#   "$UBUNTU_VERSION" == "18.04"*
+# instead of
+#   "$UBUNTU_VERSION" == "18.04"
+if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
   cmake3="cmake=3.10*"
 else
-  cmake3="${cmake3}=3.5*"
+  cmake3="cmake=3.5*"
 fi
 
 # Install common dependencies
@@ -51,14 +50,15 @@ apt-get install -y --no-install-recommends \
 
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
-if ! wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
+VALGRIND_VERSION=3.15.0
+if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
 then
-  wget https://sourceware.org/ftp/valgrind/valgrind-3.14.0.tar.bz2
+  wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
 fi
-tar -xjf valgrind-3.14.0.tar.bz2
-cd valgrind-3.14.0
+tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
+cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make
+make -j 4
 sudo make install
 cd ../../
 rm -rf valgrind_build

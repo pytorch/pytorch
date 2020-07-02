@@ -109,9 +109,6 @@ static PyObject* wrap_tuple_fn(Args ... args)
 namespace {
   auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
   auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
-  #if PY_MAJOR_VERSION == 2
-  auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
-  #endif
   binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 }
 
@@ -121,11 +118,7 @@ static PySequenceMethods THPSize_as_sequence = {
   wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
   wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
   nullptr,                                          /* sq_item */
-#if PY_MAJOR_VERSION == 2
-  wrap_tuple_fn<decltype(&sq_slice), &sq_slice>,
-#else
   nullptr,                                          /* sq_slice */
-#endif
   nullptr,                                          /* sq_ass_item */
   nullptr,                                          /* sq_ass_slice */
   nullptr                                           /* sq_contains */

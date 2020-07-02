@@ -243,6 +243,6 @@ class MPIReceiveTensorOp final : public Operator<Context> {
   OUTPUT_TAGS(OUTPUT, SRC_OUT, TAG_OUT);
 };
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_MPI_MPI_OPS_H_
+#endif // CAFFE2_MPI_MPI_OPS_H_

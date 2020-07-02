@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Parallel.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/api/include/torch/types.h>
 #include <cstdint>
@@ -87,5 +88,23 @@ using at::set_num_interop_threads;
 inline bool equal_if_defined(Tensor t1, Tensor t2) {
   return ((!t1.defined() && !t2.defined()) || (t1.defined() && t2.defined() && torch::equal(t1, t2)));
 }
+
+// RecordFunction API
+using at::RecordFunctionCallback;
+using at::addThreadLocalCallback;
+using at::hasThreadLocalCallbacks;
+using at::clearThreadLocalCallbacks;
+using at::addGlobalCallback;
+using at::removeCallback;
+using at::hasGlobalCallbacks;
+using at::clearGlobalCallbacks;
+using at::hasCallbacks;
+using at::clearCallbacks;
+using at::enableRecordFunction;
+using at::isRecordFunctionEnabled;
+using at::RecordFunctionGuard;
+using at::DisableRecordFunctionGuard;
+using at::CallbackHandle;
+using at::RecordFunction;
 
 } // namespace torch

@@ -3,6 +3,9 @@
 Quantization
 ============
 
+.. warning ::
+     Quantization is in beta and subject to change.
+
 Introduction to Quantization
 ----------------------------
 
@@ -189,12 +192,16 @@ Basic activations are supported.
 
 * :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
 * :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
-* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling 
+* :meth:`~torch.nn.functional.elu` - ELU
+* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
+* :meth:`~torch.nn.functional.hardsigmoid` - Hardsigmoid
+* :meth:`~torch.nn.functional.hardswish` - Hardswish
+* :meth:`~torch.nn.functional.hardtanh` - Hardtanh
 * :meth:`~torch.nn.functional.upsample` - Upsampling
-* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling 
+* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
 
 ``torch.nn.intrinsic``
@@ -207,8 +214,11 @@ accuracy
 * ``torch.nn.intrinsic`` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
+  * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
@@ -223,6 +233,7 @@ accuracy
   inference (no BatchNorm variants as it's usually folded into convolution for
   inference):
   * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
+  * :class:`~torch.nn.intrinsic.quantized.ConvReLU1d` — 1D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
 
@@ -237,7 +248,7 @@ Layers for the quantization-aware training
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-* Functions for quantization:
+* Functions for eager mode quantization:
 
   * :func:`~torch.quantization.add_observer_` — Adds observer for the leaf
     modules (if quantization configuration is provided)
@@ -254,24 +265,18 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.propagate_qconfig_` — Propagates quantization
     configurations through the module hierarchy and assign them to each leaf
     module
-  * :func:`~torch.quantization.quantize` — Converts a float module to quantized version
-  * :func:`~torch.quantization.quantize_dynamic` — Converts a float module to
-    dynamically quantized version
-  * :func:`~torch.quantization.quantize_qat` — Converts a float module to
-    quantized version used in quantization aware training
+  * :func:`~torch.quantization.quantize` — Function for eager mode post training static quantization
+  * :func:`~torch.quantization.quantize_dynamic` — Function for eager mode post training dynamic quantization
+  * :func:`~torch.quantization.quantize_qat` — Function for eager mode quantization aware training function
   * :func:`~torch.quantization.swap_module` — Swaps the module with its
     quantized counterpart (if quantizable and if it has an observer)
-
-* :func:`~torch.quantization.default_eval_fn` — Default evaluation function
+  * :func:`~torch.quantization.default_eval_fn` — Default evaluation function
   used by the :func:`torch.quantization.quantize`
-* :func:`~torch.quantization.fuse_modules`
-* :class:`~torch.quantization.FakeQuantize` — Module for simulating the
-  quantization/dequantization at training time
-* Default Observers. The rest of observers are available from
-  ``torch.quantization.observer``:
-  * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
-  * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
-  * :class:`~torch.quantization.Observer` — Abstract base class for observers
+  * :func:`~torch.quantization.fuse_modules`
+
+* Functions for graph mode quantization:
+  * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
+  * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
@@ -298,28 +303,37 @@ Layers for the quantization-aware training
       quantized. Inserts the :class:`~torch.quantization.QuantStub` and
     * :class:`~torch.quantization.DeQuantStub`
 
-Observers for computing the quantization parameters
+* Observers for computing the quantization parameters
+  * Default Observers. The rest of observers are available from
+    ``torch.quantization.observer``:
+    * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
+    * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
+  * :class:`~torch.quantization.Observer` — Abstract base class for observers
+  * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
+    parameters from the running minimum and maximum of the observed tensor inputs
+    (per tensor variant)
+  * :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the
+    quantization parameters from the running averages of the minimums and
+    maximums of the observed tensor inputs (per tensor variant)
+  * :class:`~torch.quantization.PerChannelMinMaxObserver` — Derives the
+    quantization parameters from the running minimum and maximum of the observed
+    tensor inputs (per channel variant)
+  * :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives
+    the quantization parameters from the running averages of the minimums and
+    maximums of the observed tensor inputs (per channel variant)
+  * :class:`~torch.quantization.HistogramObserver` — Derives the quantization
+    parameters by creating a histogram of running minimums and maximums.
 
-* :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
-  parameters from the running minimum and maximum of the observed tensor inputs
-  (per tensor variant)
-* :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the
-  quantization parameters from the running averages of the minimums and
-  maximums of the observed tensor inputs (per tensor variant)
-* :class:`~torch.quantization.PerChannelMinMaxObserver` — Derives the
-  quantization parameters from the running minimum and maximum of the observed
-  tensor inputs (per channel variant)
-* :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives
-  the quantization parameters from the running averages of the minimums and
-  maximums of the observed tensor inputs (per channel variant)
-* :class:`~torch.quantization.HistogramObserver` — Derives the quantization
-  parameters by creating a histogram of running minimums and maximums.
 * Observers that do not compute the quantization parameters:
     * :class:`~torch.quantization.RecordingObserver` — Records all incoming
       tensors. Used for debugging only.
     * :class:`~torch.quantization.NoopObserver` — Pass-through observer. Used
       for situation when there are no quantization parameters (i.e.
       quantization to ``float16``)
+
+* FakeQuantize module
+  * :class:`~torch.quantization.FakeQuantize` — Module for simulating the
+    quantization/dequantization at training time
 
 ``torch.nn.quantized``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -335,6 +349,7 @@ Quantized version of standard NN layers.
   quantized versions
 * :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized
   versions of stateless operations like ``torch.add``
+* :class:`~torch.nn.quantized.Conv1d` — 1D convolution
 * :class:`~torch.nn.quantized.Conv2d` — 2D convolution
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
@@ -342,6 +357,15 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
+* :class:`~torch.nn.quantized.ELU` — ELU
+* :class:`~torch.nn.quantized.Hardswish` — Hardswish
+* :class:`~torch.nn.quantized.BatchNorm2d` — BatchNorm2d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.BatchNorm3d` — BatchNorm3d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm1d` — InstanceNorm1d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm2d` — InstanceNorm2d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm3d` — InstanceNorm3d. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -359,12 +383,18 @@ quantization output parameters)
 
 * :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
 * :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
+* :func:`~torch.nn.quantized.functional.avg_pool3d` — 3D average pooling
+* :func:`~torch.nn.quantized.functional.conv1d` — 1D convolution
 * :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
 * :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
+* :func:`~torch.nn.quantized.functional.elu` — ELU
+* :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
+* :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
+* :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
@@ -578,14 +608,29 @@ then quantized.
 
 .. automodule:: torch.nn.intrinsic
 
+ConvBn1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBn1d
+    :members:
+
 ConvBn2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBn2d
     :members:
 
+ConvBnReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvBnReLU1d
+    :members:
+
 ConvBnReLU2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: ConvBnReLU2d
+    :members:
+
+ConvReLU1d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU1d
     :members:
 
 ConvReLU2d
@@ -685,12 +730,14 @@ Functional interface
 
 .. autofunction:: relu
 .. autofunction:: linear
+.. autofunction:: conv1d
 .. autofunction:: conv2d
 .. autofunction:: conv3d
 .. autofunction:: max_pool2d
 .. autofunction:: adaptive_avg_pool2d
 .. autofunction:: avg_pool2d
 .. autofunction:: interpolate
+.. autofunction:: hardswish
 .. autofunction:: upsample
 .. autofunction:: upsample_bilinear
 .. autofunction:: upsample_nearest
@@ -706,6 +753,21 @@ ReLU
 ReLU6
 ~~~~~~~~~~~~~~~
 .. autoclass:: ReLU6
+    :members:
+
+ELU
+~~~~~~~~~~~~~~~
+.. autoclass:: ELU
+    :members:
+
+Hardswish
+~~~~~~~~~~~~~~~
+.. autoclass:: Hardswish
+    :members:
+
+Conv1d
+~~~~~~~~~~~~~~~
+.. autoclass:: Conv1d
     :members:
 
 Conv2d
@@ -741,6 +803,41 @@ DeQuantize
 Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
+    :members:
+
+BatchNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm2d
+    :members:
+
+BatchNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm3d
+    :members:
+
+LayerNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: LayerNorm
+    :members:
+
+GroupNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: GroupNorm
+    :members:
+
+InstanceNorm1d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm1d
+    :members:
+
+InstanceNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm2d
+    :members:
+
+InstanceNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm3d
     :members:
 
 torch.nn.quantized.dynamic

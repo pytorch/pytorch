@@ -10,8 +10,12 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace c10d {
+
+constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
+constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 
 class Reducer {
  public:
@@ -23,7 +27,9 @@ class Reducer {
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
+      std::vector<std::vector<bool>> expect_sparse_gradients,
+      int64_t bucket_bytes_cap,
+      bool find_unused_parameters);
 
   ~Reducer() noexcept(false);
 
@@ -73,6 +79,7 @@ class Reducer {
   size_t next_bucket_;
 
   bool has_marked_unused_parameters_;
+  const bool find_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -92,6 +99,10 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
+  void verify_replicas_within_process();
+
+  void verify_replica0_across_processes();
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -104,9 +115,27 @@ class Reducer {
 
   void finalize_bucket_dense(Bucket& replica);
 
-  void finalize_bucket_sparse(Bucket& replica);
-
   void finalize_backward();
+
+  // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
+  // the buckets
+  void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
+  std::vector<std::vector<size_t>> rebuildBuckets();
+
+  using GradCallback =
+      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  void runGradCallbackForVariable(
+      torch::autograd::Variable& variable,
+      GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -122,6 +151,14 @@ class Reducer {
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
+
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
@@ -186,11 +223,28 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  // Following variables are to help build dynamic bucket order
+  bool has_rebuilt_bucket_;
+  std::vector<at::Tensor> rebuilt_params_;
+  std::vector<int64_t> rebuilt_param_indices_;
+  const int64_t bucket_bytes_cap_;
+
+  struct RpcContext {
+    using ContextPtr = torch::distributed::autograd::ContextPtr;
+    // The shared_ptr is to hold the context instance.
+    ContextPtr context_ptr_holder;
+    std::atomic<ContextPtr::element_type*> context_ptr{nullptr};
+
+    void set(ContextPtr&& new_context_ptr);
+  };
+  RpcContext rpc_context_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
-    const std::vector<bool>& expect_sparse_gradient = {});
+    const std::vector<bool>& expect_sparse_gradient = {},
+    const std::vector<int64_t>& tensor_indices = {});
 
 } // namespace c10d

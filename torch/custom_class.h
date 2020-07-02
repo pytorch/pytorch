@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -68,9 +69,9 @@ class class_ {
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::intrusive_ptr<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::intrusive_ptr<CurClass>)), classTypePtr});
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::tagged_capsule<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::tagged_capsule<CurClass>)), classTypePtr});
 
     registerCustomClass(classTypePtr);
   }
@@ -114,6 +115,17 @@ class class_ {
   class_& def(std::string name, Func f) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
     defineMethod(std::move(name), std::move(wrapped_f));
+    return *this;
+  }
+
+  /// This is an unsafe method registration API added for adding custom JIT backend support via custom
+  /// C++ classes. It is not for general purpose use.
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+    auto qualMethodName = qualClassName + "." + name;
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName, std::move(schema), std::move(func));
+    classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
     return *this;
   }
 
@@ -176,7 +188,7 @@ class class_ {
             std::move(setstate_wrapper)));
 
     // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
+    auto getstate_schema = classTypePtr->getMethod("__getstate__").getSchema();
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
@@ -190,21 +202,21 @@ class class_ {
     TORCH_CHECK(
         *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->python_str());
+        first_arg_type->repr_str());
     TORCH_CHECK(
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
+    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
         (*arg_type == *ser_type),
         "__setstate__'s argument should be the same type as the "
         "return value of __getstate__. Got ",
-        arg_type->python_str(),
+        arg_type->repr_str(),
         " but expected ",
-        ser_type->python_str());
+        ser_type->repr_str());
 
     return *this;
   }

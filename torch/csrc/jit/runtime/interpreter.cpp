@@ -2,14 +2,15 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -19,6 +20,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #ifdef USE_DISTRIBUTED
@@ -72,6 +74,55 @@ TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
 }
 
 namespace {
+
+// Insert explicit prim::MethodCall nodes after prim::Enter nodes
+// to actually call __enter__ on the object. All prim::Enter does
+// is push the object onto the stack of currently entered objects.
+// This is necessary because emitting two instructions for a
+// prim::Enter nodes (one ENTER to push onto the entered objects
+// stack and one CALL to call __enter__) does not work; the
+// accounting that determines when to move a value out of a register
+// is based on the number of uses it has in the IR.
+void insertEnterMethodCalls(Graph& g) {
+  std::vector<Block*> block_queue;
+  std::vector<Node*> enter_nodes;
+  block_queue.emplace_back(g.block());
+
+  // Traverse the graph while drilling down into blocks belonging to
+  // a node and add all encountered prim::Enter nodes to enter_nodes.
+  while (!block_queue.empty()) {
+    Block* block = block_queue.back();
+    block_queue.pop_back();
+
+    for (auto node : block->nodes()) {
+      if (node->kind() == prim::Enter) {
+        enter_nodes.emplace_back(node);
+        continue;
+      }
+
+      for (auto& node_block : node->blocks()) {
+        block_queue.emplace_back(node_block);
+      }
+    }
+  }
+
+  // For each prim::Enter, emit a prim::MethodCall after it that actually
+  // calls __enter__ on the object.
+  for (auto& enter : enter_nodes) {
+    auto cls = enter->input(0)->type()->expect<ClassType>();
+
+    MatchedSchema enter_matched_schema = matchSchema(
+        cls->findMethod("__enter__")->getSchema(),
+        enter->input(0)->node()->sourceRange(),
+        g,
+        {enter->input(0)},
+        {});
+
+    Node* call = g.insertMethodCall("__enter__", enter_matched_schema)->node();
+    call->moveAfter(enter);
+    enter->replaceAllUsesWith(call);
+  }
+}
 
 // insert Drop nodes to kill references for anything unused:
 // this can happen in a few places, e.g. when a node returns
@@ -324,6 +375,7 @@ struct CanEmitInline {
 // pre-processing that happens once per graph
 struct PreprocessGraph {
   PreprocessGraph(Graph& g) : graph(g.copy()) {
+    insertEnterMethodCalls(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
     insertLastUses(*graph);
@@ -784,6 +836,15 @@ struct CodeImpl {
     insertInstruction(WARN);
   }
 
+  void emitEnter(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(ENTER);
+  }
+
+  void emitExit(Node* node) {
+    insertInstruction(EXIT);
+  }
+
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -814,7 +875,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
@@ -857,6 +918,12 @@ struct CodeImpl {
         break;
       case aten::warn:
         emitWarn(node);
+        break;
+      case prim::Enter:
+        emitEnter(node);
+        break;
+      case prim::Exit:
+        emitExit(node);
         break;
     }
   }
@@ -923,6 +990,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // minimizing the total number or register
   std::vector<IValue> registers;
 
+  // A stack of objects that have been __enter__'d.
+  std::vector<IValue> entered_objects;
+
   // A Frame captures function's state
   // (e.g. `pc` and `base_pointer`)
   // Each Frame corresponds to a call to a `Frame::function`
@@ -943,6 +1013,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // unique to every frame with prim::profile across all threads
     c10::optional<size_t> id;
     static std::atomic<size_t> num_frames;
+
+    // RecordFunction object associated with this frame
+    std::unique_ptr<at::RecordFunction> record_function;
+    // symbol table for a frame
+    ShapeSymbolTable symbols2dims;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -1020,8 +1095,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     frames.back().pc = af->pc + 1;
-    RECORD_TORCHSCRIPT_FUNCTION(fn->name(), last(stack, code.num_inputs()));
     enterFrame(code, stack.size() - code.num_inputs());
+    if (at::hasCallbacks() && at::isRecordFunctionEnabled()) {
+      auto rec_fn = std::make_unique<at::RecordFunction>(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (rec_fn->active) {
+        if (rec_fn->needs_inputs) {
+          rec_fn->before(fn->name(), last(stack, code.num_inputs()));
+        } else {
+          rec_fn->before(fn->name());
+        }
+        frames.back().record_function = std::move(rec_fn);
+      }
+    }
     *af = ActiveFrame(frames.back());
   }
 
@@ -1045,13 +1131,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
+          case ENTER: {
+            auto obj = peek(stack, 0, 1);
+            TORCH_INTERNAL_ASSERT(obj.isObject());
+            entered_objects.push_back(obj);
+            ++af.pc;
+          } break;
+          case EXIT: {
+            auto obj = entered_objects.back().toObject();
+            auto& f = obj->type()->getMethod("__exit__");
+            push(stack, obj);
+            entered_objects.pop_back();
+            push(stack, IValue());
+            push(stack, IValue());
+            push(stack, IValue());
+            runGraphFunction(stack, &f, &af);
+          } break;
           case OP:
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case OPN:
             stack.push_back(inst.N);
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case LOAD:
@@ -1142,14 +1244,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            auto function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
-            if (!function->isGraphFunction()) {
-              runBuiltinFunction(stack, function, &af);
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
+            if (!function.isGraphFunction()) {
+              runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, function, &af);
+              runGraphFunction(stack, &function, &af);
             }
           } break;
           case RET:
@@ -1184,13 +1287,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), dist_autograd_context_id_));
+                      state_,
+                      std::move(stack_),
+                      dist_autograd_context_id_,
+                      std::move(tls_state_)));
                 }
 
                private:
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
+                // preserve the original ThreadLocalState
+                at::ThreadLocalState tls_state_;
               };
 
               // we are suspending, so we need to reset the stack to where we
@@ -1246,8 +1354,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto t = stack.back().toTensor();
               const TypePtr& expected = af.types[inst.X];
-              auto pttp = tensorTypeInCurrentExecutionContext(t);
-              push(stack, pttp->isSubtypeOf(expected));
+              auto expected_type = expected->cast<TensorType>();
+              if (t.defined() &&
+                  !frames.back().symbols2dims.bindSymbolicShapes(
+                      t.sizes(), expected_type->symbolic_sizes())) {
+                push(stack, false);
+              } else {
+                push(stack, expected_type->matchTensor(t));
+              }
             }
             ++af.pc;
           } break;
@@ -1352,6 +1466,24 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
     } catch (std::exception& e) {
       frames.back().pc = af.pc;
+      for (auto it = entered_objects.rbegin(), end = entered_objects.rend();
+           it != end;
+           ++it) {
+        auto& f = it->toObject()->type()->getMethod("__exit__");
+        Stack stack;
+        push(stack, *it);
+        push(stack, IValue());
+        push(stack, IValue());
+        push(stack, IValue());
+        try {
+          f.run(stack);
+        } catch (std::exception& e) {
+          std::ostringstream ss;
+          ss << "The following operation failed in the TorchScript interpreter.\n";
+          formatStackTrace(ss);
+          ss << "RuntimeError: " << ExceptionMessage(e) << "\n";
+        }
+      }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       handleError(ExceptionMessage(e), is_jit_exception);
       return false;
@@ -1511,7 +1643,12 @@ void InterpreterContinuation::operator()() {
   auto prev_dist_id = DistAutogradContainer::currentContextId();
   DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
 #endif
-  state.runAsync(stack);
+  if (tls_state_ != c10::nullopt) {
+    at::ThreadLocalStateGuard g(*tls_state_);
+    state.runAsync(stack);
+  } else {
+    state.runAsync(stack);
+  }
 #ifdef USE_DISTRIBUTED
   DistAutogradContainer::forceCurrentContextId(prev_dist_id);
 #endif

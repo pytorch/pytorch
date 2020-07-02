@@ -38,7 +38,7 @@ class TORCH_API LoopNest {
   void prepareForCodegen();
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
-  void reorderAxis(Tensor* t, For* a, For* b);
+  void reorderAxis(For* a, For* b);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
@@ -68,6 +68,8 @@ class TORCH_API LoopNest {
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
   std::vector<const Buf*> temp_bufs_;
+  // Holds the initializer Expr of buffers that have been initialized.
+  std::unordered_map<const Buf*, const Expr*> buf_initializers_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);

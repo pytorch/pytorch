@@ -16,17 +16,18 @@ Tensor empty_with_tail_padding(
     const DimnameList maybe_names) {
   auto* const allocator_ptr = c10::GetDefaultMobileCPUAllocator();
   const int64_t nelements = prod_intlist(size);
+  size_t size_bytes = nelements * dtype.itemsize();
 
-  Tensor tensor(
-      c10::make_intrusive<c10::TensorImpl>(
-          c10::Storage{
-              dtype,
-              nelements,
-              allocator_ptr->allocate(nelements * dtype.itemsize()),
-              allocator_ptr,
-              /*resizable=*/true,
-          },
-          DispatchKeySet{DispatchKey::CPU}));
+  Tensor tensor(c10::make_intrusive<c10::TensorImpl>(
+      c10::Storage{
+          c10::Storage::use_byte_size_t(),
+          size_bytes,
+          allocator_ptr->allocate(size_bytes),
+          allocator_ptr,
+          /*resizable=*/true,
+      },
+      DispatchKeySet{DispatchKey::CPU},
+      dtype));
 
   return namedinference::propagate_names_if_nonempty(
       tensor.resize_(size, memory_format),

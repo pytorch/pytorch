@@ -226,15 +226,17 @@ struct MutationRemover {
 
  private:
   bool newMemoryLocation(Value* v) {
-    // bail on nodes with side effects, blocks, or graphs
+    // bail on nodes with side effects, blocks, or graph / graph inputs
     Node* n = v->node();
     bool unhandled_node = n->blocks().size() != 0 ||
-        n->hasAttribute(attr::Subgraph) || n->hasSideEffects();
+        n->hasAttribute(attr::Subgraph) || n->hasSideEffects() ||
+        (v->node()->kind() == prim::Param);
 
     // if the output isn't contained or alias by the inputs to its node, it's
     // unique
     return !unhandled_node &&
-        !aliasDb_->mayContainAlias(v->node()->inputs(), v);
+        !aliasDb_->mayContainAlias(v->node()->inputs(), v) &&
+        !(v->node()->kind() == prim::Param);
   }
 
   bool inplaceOpVariant(Node* n) {
@@ -294,6 +296,38 @@ struct MutationRemover {
         mutated_value->node(), mutating_op);
   }
 
+  bool tryMakeUnaliasedIfOutputAndMutationAtomic(
+      Value* mutated_value,
+      Node* mutating_op) {
+    // if cond:
+    //    x = op()
+    // else:
+    //    x = op()
+    // x = add_(1)
+    // if x in both blocks have no other uses and are unaliased in the graph,
+    // and we make the if node and the mutation atomic,
+    // then removing mutation add_ does not change observable semantics
+
+    if (mutated_value->node()->kind() != prim::If) {
+      return false;
+    }
+
+    auto if_node = mutated_value->node();
+    auto offset = mutated_value->offset();
+    auto true_value = if_node->blocks().at(0)->outputs().at(offset);
+    auto false_value = if_node->blocks().at(1)->outputs().at(offset);
+
+    if (true_value->uses().size() > 1 || false_value->uses().size() > 1) {
+      return false;
+    }
+
+    if (!newMemoryLocation(true_value) || !newMemoryLocation(false_value)) {
+      return false;
+    }
+
+    return aliasDb_->moveBeforeTopologicallyValid(if_node, mutating_op);
+  }
+
   void RemoveListMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
@@ -346,18 +380,15 @@ struct MutationRemover {
       }
 
       Value* mutated_value = node->inputs().at(0);
-      if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
+      if (!tryMakeCreationAndMutationAtomic(mutated_value, node) &&
+          !tryMakeUnaliasedIfOutputAndMutationAtomic(mutated_value, node)) {
         continue;
       }
 
       auto schema_name = node->schema().name();
       auto new_schema = schema_name.substr(0, schema_name.size() - 1);
       auto new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
-      new_node->setSourceRange(node->sourceRange());
-      new_node->setScope(node->scope());
-      if (auto cs = node->callstack()) {
-        new_node->setCallStack(*cs);
-      }
+      new_node->copyMetadata(node);
       new_node->insertBefore(node);
       for (Value* input : node->inputs()) {
         new_node->addInput(input);

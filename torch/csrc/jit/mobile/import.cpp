@@ -2,12 +2,14 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
+#include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -113,7 +115,8 @@ void parseMethods(
       auto ins_item = ins.toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
-          "There should be three parts in an instruction.");
+          "There should be three parts in an instruction. The function name is ",
+          function_name);
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
@@ -232,7 +235,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     auto setstate = mcu->find_function(method_name);
     auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
       auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
         return custom_class_type;
       }
       return nullptr;
@@ -246,7 +249,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
       Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__")->run(stack);
+      custom_class_type->getMethod("__setstate__").run(stack);
       return obj;
     } else {
       auto dict = std::move(input).toGenericDict();
@@ -297,9 +300,31 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  return deserializer.deserialize(device);
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnterLoadModel();
+  }
+  try {
+    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+    BytecodeDeserializer deserializer(std::move(reader));
+    mobile::Module result = deserializer.deserialize(std::move(device));
+    std::string name = result.name();
+    if (observer) {
+      observer->onExitLoadModel(name);
+    }
+    return result;
+  } catch (const std::exception& ex) {
+    if (observer) {
+      observer->onFailLoadModel(
+          "Error occured during loading model: " + (std::string)ex.what());
+    }
+    TORCH_CHECK(false, ex.what());
+  } catch (...) {
+    if (observer) {
+      observer->onFailLoadModel("unknown exception");
+    }
+    TORCH_CHECK(false, "unknown exception");
+  }
 }
 
 } // namespace jit

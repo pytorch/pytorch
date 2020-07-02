@@ -35,22 +35,12 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
       *type()->name(), src, resolver ? resolver : nativeResolver(), &self);
 }
 
-Object Object::deepcopy() const {
-  c10::IValue::HashAliasedIValueMap memo;
-  return deepcopy(memo);
+Object Object::copy() const {
+  return Object(_ivalue()->copy());
 }
 
-Object Object::deepcopy(c10::IValue::HashAliasedIValueMap& memo) const {
-  Object obj(_ivalue()->compilation_unit(), type());
-
-  // Deepcopy slots. If a slot is a module - recursively copy it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    obj._ivalue()->setAttr(type()->getAttributeName(i), s.deepcopy(memo));
-  }
-
-  return obj;
+Object Object::deepcopy() const {
+  return Object(_ivalue()->deepcopy());
 }
 
 } // namespace jit

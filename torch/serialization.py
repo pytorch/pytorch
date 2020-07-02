@@ -243,7 +243,7 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name):
-        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(str(name)))
 
     def __exit__(self, *args):
         self.file_like.write_end_of_file()
@@ -327,24 +327,30 @@ def _check_dill_version(pickle_module):
                 pickle_module.__version__
             ))
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
 
     Args:
         obj: saved object
-        f: a file-like object (has to implement write and flush) or a string
-           containing a file name
+        f: a file-like object (has to implement write and flush) or a string or
+           os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
-    .. warning::
-        If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
-        as a valid file-like object. This is because the write method should return
-        the number of bytes written; :meth:`StringIO.write()` does not do this.
+    .. note::
+        A common PyTorch convention is to save tensors using .pt file extension.
 
-        Please use something like :class:`io.BytesIO` instead.
+    .. note::
+        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
+        for more details.
+
+    .. note::
+        The 1.6 release of PyTorch switched ``torch.save`` to use a new
+        zipfile-based file format. ``torch.load`` still retains the ability to
+        load files in the old format. If for any reason you want ``torch.save``
+        to use the old format, pass the kwarg ``_use_new_zipfile_serialization=False``.
 
     Example:
         >>> # Save to file
@@ -356,12 +362,11 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
     """
     _check_dill_version(pickle_module)
 
-    if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f) as opened_file:
-            _save(obj, opened_file, pickle_module, pickle_protocol)
-            return
-
     with _open_file_like(f, 'wb') as opened_file:
+        if _use_new_zipfile_serialization:
+            with _open_zipfile_writer(opened_file) as opened_zipfile:
+                _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+                return
         _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
@@ -473,7 +478,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         if storage.device.type == 'cpu':
             # If it's on the CPU we can directly copy it into the zip file
             num_bytes = storage.size() * storage.element_size()
-            buf = io.BytesIO()
             zip_file.write_record(name, storage.data_ptr(), num_bytes)
         else:
             # Copy to a buffer, then serialize that
@@ -517,7 +521,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     Args:
         f: a file-like object (has to implement :meth:`read`, :meth`readline`, :meth`tell`, and :meth`seek`),
-            or a string containing a file name
+            or a string or os.PathLike object containing a file name
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
@@ -570,7 +574,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
-            with _open_zipfile_reader(f) as opened_zipfile:
+            with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
@@ -768,6 +772,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         if offset is not None:
             offset = f.tell()
 
+    torch._utils._validate_loaded_sparse_tensors()
+
     return result
 
 
@@ -810,14 +816,12 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def load_tensor(obj, size, key, location):
-        loaded_storages[key] = restore_location(obj, location)
+    def load_tensor(data_type, size, key, location):
         name = 'data/{}'.format(key)
-        size_long = struct.pack("<Q", size)
-        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
-        offset = None
-        is_real_file = False
-        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+        dtype = data_type(0).dtype
+
+        storage = zip_file.get_storage_from_record(name, size, dtype).storage()
+        loaded_storages[key] = restore_location(storage, location)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -828,7 +832,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
         data_type, key, location, size = data
         if key not in loaded_storages:
-            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+            load_tensor(data_type, size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
         return storage
 
@@ -837,6 +841,8 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
+
+    torch._utils._validate_loaded_sparse_tensors()
 
     return result
 

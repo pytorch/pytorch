@@ -61,14 +61,8 @@ static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, s
   THPObjectPtr r(PyObject_CallMethod(fildes, "read", "i", nbytes));
   if (!r) throw python_error();
 
-  // read output is String (Python 2) / Bytes (Python 3)
-#if PY_MAJOR_VERSION >= 3
   auto size = PyBytes_GET_SIZE(r.get());
   const void* py_buf = PyBytes_AsString(r.get());
-#else
-  auto size = PyString_GET_SIZE(r.get());
-  const void* py_buf = PyString_AsString(r.get());
-#endif
 
   // we read EOF
   if (size == 0) {
@@ -83,13 +77,9 @@ static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, s
 
 // Either does fildes.readinto(buf) or fildes.write(buf)
 static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
-#if PY_MAJOR_VERSION >= 3
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
-#else
-  THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
-#endif
   if (!memview) throw python_error();
 
   char* method = "write";

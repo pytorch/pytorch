@@ -292,11 +292,12 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         weight_ih, weight_hh, bias_ih, bias_hh)
                 else:
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(
-                        weight_ih.float())
+                        weight_ih.float(), bias_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(
-                        weight_hh.float())
+                        weight_hh.float(), bias_hh)
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh, bias_ih, bias_hh)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
+                        packed_ih, packed_hh)
 
                 setattr(self, 'cell_params_{}_{}'.format(layer, suffix), cell_params)
                 self.all_weights.append(cell_params)
@@ -489,6 +490,8 @@ class QuantizedGRU(QuantizedRNNBase):
 
 
 def quantize_rnn_cell_modules(module):
+    warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -533,6 +536,8 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 
 def quantize_rnn_modules(module, dtype=torch.int8):
+    warnings.warn("quantize_rnn_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:

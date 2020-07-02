@@ -11,7 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -362,6 +362,7 @@ struct alignas(2) Half {
 // end up deciding to use for half-precision complex numbers.
 template<>
 struct alignas(4) complex<Half> {
+  using value_type = Half;
   Half real_;
   Half imag_;
   complex() = default;
@@ -376,35 +377,6 @@ struct alignas(4) complex<Half> {
   inline operator std::complex<float>() const {
     return {real_, imag_};
   }
-};
-
-template <typename T>
-struct is_complex_t : public std::false_type {};
-
-template <typename T>
-struct is_complex_t<std::complex<T>> : public std::true_type {};
-
-template <typename T>
-struct is_complex_t<c10::complex<T>> : public std::true_type {};
-
-
-// Extract double from std::complex<double>; is identity otherwise
-// TODO: Write in more idiomatic C++17
-template <typename T>
-struct scalar_value_type {
-  using type = T;
-};
-template <typename T>
-struct scalar_value_type<std::complex<T>> {
-  using type = T;
-};
-template <typename T>
-struct scalar_value_type<c10::complex<T>> {
-  using type = T;
-};
-template <>
-struct scalar_value_type<complex<Half>> {
-  using type = Half;
 };
 
 // In some versions of MSVC, there will be a compiler error when building.

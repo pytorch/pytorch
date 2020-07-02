@@ -4,10 +4,11 @@
 
 void THStorage_(copy)(THStorage *storage, THStorage *src)
 {
-  THArgCheck(storage->numel() == src->numel(), 2, "size mismatch");
+  THArgCheck(storage->nbytes() == src->nbytes(), 2, "size mismatch");
   scalar_t *scalar_src = THStorage_(data)(src);
   scalar_t *data = THStorage_(data)(storage);
-  for (ptrdiff_t i = 0; i < storage->numel(); ++i) {
+  uint64_t numel = storage->nbytes() / sizeof(scalar_t);
+  for (ptrdiff_t i = 0; i < numel; ++i) {
     data[i] = scalar_src[i];
   }
 }
@@ -15,15 +16,16 @@ void THStorage_(copy)(THStorage *storage, THStorage *src)
 // NOTE: for performance, these macros generally use the raw data pointer in the inner loops,
 // rather than repeated THStorage_(data) calls.
 
-#define IMPLEMENT_THStorage_COPY(TYPENAMESRC) \
-void THStorage_(copy##TYPENAMESRC)(THStorage *storage, TH##TYPENAMESRC##Storage *src) \
-{ \
-  ptrdiff_t i;                                                          \
-  auto data = THStorage_(data)(storage);                                \
-  auto src_data = TH##TYPENAMESRC##Storage_data(src);                   \
-  for(i = 0; i < storage->numel(); i++)                                    \
-    data[i] = static_cast<scalar_t>(src_data[i]);                           \
-}
+#define IMPLEMENT_THStorage_COPY(TYPENAMESRC)                \
+  void THStorage_(copy##TYPENAMESRC)(                        \
+      THStorage * storage, TH##TYPENAMESRC##Storage * src) { \
+    ptrdiff_t i;                                             \
+    auto data = THStorage_(data)(storage);                   \
+    auto src_data = TH##TYPENAMESRC##Storage_data(src);      \
+    uint64_t numel = storage->nbytes() / sizeof(scalar_t);   \
+    for (i = 0; i < numel; i++)                              \
+      data[i] = static_cast<scalar_t>(src_data[i]);          \
+  }
 
 // TODO: Add cross-dtype storage copy for complex storage
 #if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)

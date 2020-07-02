@@ -58,19 +58,18 @@ bool isDecomposableNorm(Node* normalize_op) {
 RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            const int64_t ndim = pop(stack).toInt();
            auto self = pop(stack).toTensor();
            c10::SmallVector<int64_t, 8> sizes(ndim, 1);
            AT_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_ncf_view(Tensor(a) self, int[] input_shape, int normalized_ndim) -> Tensor(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            const int64_t normalized_ndim = pop(stack).toInt();
            auto input_shape = pop(stack).toIntList();
            auto self = pop(stack).toTensor();
@@ -80,7 +79,6 @@ RegisterOperators reg_ops(
              sizes.at(i) = input_shape.get(i);
            }
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema())});
 
