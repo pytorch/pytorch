@@ -35,7 +35,7 @@ from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
 from torch.jit._script import Attribute, ScriptModule
 from torch.jit._trace import trace, trace_module, TracedModule, TracerWarning, TracingCheckError, \
-    is_tracing, ONNXTracedModule, _unique_state_dict, _flatten
+    is_tracing, ONNXTracedModule, _unique_state_dict, _flatten, TopLevelTracedModule
 from torch.jit._state import _python_cu, _enabled
 
 _jit_script_class_compile = torch._C._jit_script_class_compile
