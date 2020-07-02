@@ -18,17 +18,11 @@ from typing import Optional, List
 
 import collections
 import contextlib
-import copy
 import functools
-import inspect
 import os
 import pathlib
-import pickle
-import re
 import sys
-import textwrap
 import warnings
-import weakref
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
