@@ -41,9 +41,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
       .typed<Tensor & (Tensor &, const Tensor &, bool)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    c10::Dispatcher::singleton()
-        .redispatch<Tensor &, Tensor &, const Tensor &, bool>(
-            op, c10::DispatchKey::Tracer, self, src, non_blocking);
+    self.copy_(src, non_blocking);
   }
 
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -71,11 +69,8 @@ Tensor& resize_(
       .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    c10::Dispatcher::singleton()
-        .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(
-            op, c10::DispatchKey::Tracer, self, size, std::move(optional_memory_format));
+    self.resize_(size, std::move(optional_memory_format));
   }
-
   return self;
 }
 
@@ -95,9 +90,7 @@ Tensor& resize_as_(
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    c10::Dispatcher::singleton()
-        .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(
-            op, c10::DispatchKey::Tracer, self, the_template, std::move(optional_memory_format));
+    self.resize_as_(the_template, std::move(optional_memory_format));
   }
   return self;
 }
@@ -119,8 +112,7 @@ Tensor detach(const Tensor & self) {
       .typed<Tensor (const Tensor &)>();
   auto result = [&]() {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return c10::Dispatcher::singleton()
-        .redispatch<Tensor, const Tensor &>(op, c10::DispatchKey::Tracer, self);
+    return self.detach();
   }();
 
 #if !defined(PYTORCH_DISABLE_TRACING)
@@ -149,8 +141,7 @@ Tensor & detach_(Tensor & self) {
       .typed<Tensor & (Tensor &)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    c10::Dispatcher::singleton()
-        .redispatch<Tensor &, Tensor &>(op, c10::DispatchKey::Tracer, self);
+    self.detach_();
   }
 
 #if !defined(PYTORCH_DISABLE_TRACING)
