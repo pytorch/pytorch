@@ -632,7 +632,7 @@ getClassConverter() {
 }
 
 template <typename T>
-TORCH_API std::function<T(void)> wrapPropagateTLSState(std::function<T(void)> callback) {
+std::function<T(void)> wrapPropagateTLSState(std::function<T(void)> callback) {
   return [tls_state = at::ThreadLocalState(), callback = std::move(callback)]() {
     at::ThreadLocalStateGuard g(tls_state);
     // Propagate value returned by callback().

@@ -424,7 +424,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
  fut->addCallback(wrapPropagateTLSState(cb_that_requires_tls_state));
   */
   template <typename T>
-  std::function<T(void)> wrapPropagateTLSState(
+  TORCH_API std::function<T(void)> wrapPropagateTLSState(
       std::function<T(void)> callback);
 
 // Input is a list of Futures with the same target type.
