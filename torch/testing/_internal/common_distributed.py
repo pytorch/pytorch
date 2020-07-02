@@ -230,6 +230,7 @@ class MultiProcessTestCase(TestCase):
         super().tearDown()
         for p in self.processes:
             p.terminate()
+        self.processes = []
 
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
