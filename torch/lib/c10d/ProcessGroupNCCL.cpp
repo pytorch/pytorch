@@ -205,8 +205,15 @@ void ProcessGroupNCCL::WorkNCCL::abortNCCLComms() {
   }
 }
 
-// Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
+  // Call Synchronize without a timeout. We use this method to avoid adding a
+  // timeout argument to the public synchronize API.
+  synchronizeInternal();
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
@@ -215,11 +222,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
+    // Use the passed in timeout if provided, otherwise use the default
+    // opTimeout for each WorkNCCL object.
+    std::chrono::milliseconds workTimeout =
+        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - workStartTime_) > opTimeout_) {
+              currentTimepoint - workStartTime_) > workTimeout) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -257,8 +268,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds /* unused */) {
-  synchronize();
+bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
 }
