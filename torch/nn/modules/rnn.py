@@ -521,7 +521,7 @@ class LSTM(RNNBase):
         ``CUBLAS_WORKSPACE_CONFIG=:16:8``
         or
         ``CUBLAS_WORKSPACE_CONFIG=:4096:2``.
-    
+
     .. _cuDNN 8 Release Notes: https://docs.nvidia.com/deeplearning/sdk/cudnn-release-notes/rel_8.html
 
     .. include:: ../cudnn_persistent_rnn.rst
