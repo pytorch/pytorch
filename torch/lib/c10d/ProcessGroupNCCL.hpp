@@ -110,7 +110,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    private:
     // Helper function for synchronize
-    void synchronizeInternal(std::chrono::milliseconds timeout = kNoTimeout);
+    void synchronizeInternal(std::chrono::milliseconds timeout);
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
