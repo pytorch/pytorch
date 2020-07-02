@@ -138,8 +138,6 @@ QuantFusionInfo getBinaryOpScalarFusionInfo(
 
   const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
   std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
-  const auto& extra_quantized_op_arg_list =
-      getExtraArgList(extra_quantized_op_args);
   std::string op_replacement = getAtenOpPattern(
       graph_header, quantized_op_name, extra_quantized_op_args);
 
@@ -159,7 +157,6 @@ QuantFusionInfo getClampOpFusionInfo(
   for (const auto& qparam : input_qparams) {
     header_args.push_back("%r" + qparam);
   }
-  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
   const auto& extra_header_arg_list = getExtraArgList(header_args);
   std::string graph_header = "graph(%a_quant" + extra_header_arg_list + "):";
   std::string op_pattern = graph_header;
