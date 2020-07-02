@@ -7,7 +7,7 @@ from utils import make_functional, load_weights
 from scipy.optimize import linear_sum_assignment
 
 def get_resnet18(device):
-    N = 10
+    N = 32
     model = models.resnet18(pretrained=False)
     criterion = torch.nn.CrossEntropyLoss()
     model.to(device)
@@ -26,15 +26,15 @@ def get_resnet18(device):
     return forward, params
 
 def get_fcn_resnet(device):
-    N = 10
+    N = 8
     criterion = torch.nn.MSELoss()
     model = models.fcn_resnet50(pretrained=False, pretrained_backbone=False)
     model.to(device)
     params, names = make_functional(model)
 
-    inputs = torch.rand([N, 3, 224, 224], device=device)
+    inputs = torch.rand([N, 3, 480, 480], device=device)
     # Given model has 21 classes
-    labels = torch.rand([N, 21, 224, 224], device=device)
+    labels = torch.rand([N, 21, 480, 480], device=device)
 
     def forward(*new_params):
         load_weights(model, names, new_params)
@@ -442,7 +442,7 @@ def get_detr(device):
             return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
     # All values below are from CLI defaults
-    N = 10
+    N = 2
     num_classes = 91
     hidden_dim = 256
     nheads = 8
