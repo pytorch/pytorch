@@ -1573,7 +1573,7 @@ jobs:
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
         build_type: prebuilt
-        artifacts: ~/workspace/build_android_artifacts/artifacts.tgz
+        artifacts: /home/circleci/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1650,7 +1650,7 @@ jobs:
           time docker push ${output_image}
     - upload_binary_size_for_android_build:
         build_type: prebuilt-single
-        artifacts: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
+        artifacts: /home/circleci/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
