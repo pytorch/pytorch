@@ -1,5 +1,7 @@
 import cimodel.data.simple.util.branch_filters
-from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_NDK
+from cimodel.data.simple.util.docker_constants import (
+    DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK
+)
 
 
 class AndroidJob:
@@ -34,6 +36,7 @@ class AndroidJob:
             "name": full_job_name,
             "build_environment": "\"{}\"".format(build_env_name),
             "docker_image": "\"{}\"".format(DOCKER_IMAGE_NDK),
+            "requires": [DOCKER_REQUIREMENT_NDK]
         }
 
         if self.is_master_only:
