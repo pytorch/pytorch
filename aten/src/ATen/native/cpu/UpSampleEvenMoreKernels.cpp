@@ -199,14 +199,9 @@ void upsample_bicubic2d_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  auto memory_format = input.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    std::cout << " TODO: cl path... " << std::endl;
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_bicubic2d", [&] {
-      cpu_upsample_bicubic<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
-    });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_bicubic2d", [&] {
+    cpu_upsample_bicubic<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
+  });
 }
 
 void upsample_bicubic2d_backward_kernel_impl(

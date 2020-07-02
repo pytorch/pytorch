@@ -36,7 +36,7 @@ static void upsample_bicubic2d_out_cpu_template(
       output_height,
       output_width);
 
-  output.resize_({nbatch, channels, output_height, output_width});
+  output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
 
   AT_ASSERT(
       input_height > 0 && input_width > 0 && output_height > 0 &&
