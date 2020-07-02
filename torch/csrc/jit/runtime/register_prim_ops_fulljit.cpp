@@ -671,6 +671,13 @@ void hashValue(Stack* stack) {
   push(stack, int64_t(hash));
 }
 
+// When a number is exactly halfway between two integers, use this trick to
+// enforce rounding to even. Note, floor rounds to -inf.
+double round_to_even(double a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+}
+
 RegisterOperators reg2({
 
     Operator(
@@ -923,7 +930,7 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
+    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
