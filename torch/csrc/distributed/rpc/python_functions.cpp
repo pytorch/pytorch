@@ -124,7 +124,6 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
         c10::make_intrusive<JitFuture>(PyObjectType::get());
     futureResponseMessage->addCallback(
         at::wrapPropagateTLSState<void>([jitFuture, futureResponseMessage]() {
-          TORCH_INTERNAL_ASSERT(futureResponseMessage->completed(), "WTF!");
           if (futureResponseMessage->hasError()) {
             jitFuture->setError(futureResponseMessage->error()->what());
           } else {
@@ -139,7 +138,6 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
         c10::make_intrusive<JitFuture>(NoneType::get());
     futureResponseMessage->addCallback(
         at::wrapPropagateTLSState<void>([futureResponseMessage, jitFuture]() {
-          TORCH_INTERNAL_ASSERT(futureResponseMessage->completed(), "WTF!");
           if (futureResponseMessage->hasError()) {
             jitFuture->setError(futureResponseMessage->error()->what());
           } else {
