@@ -345,18 +345,6 @@
         - THTensor* other
 ]]
 [[
-  name: _th_dot
-  backend_types: {CUDA: [floating_point]}
-  cname: dot
-  backends:
-    CUDA
-  variants: function
-  return: accreal
-  arguments:
-    - arg: THTensor* self
-    - arg: THTensor* tensor
-]]
-[[
   name: _th_cross_kernel
   cname: crossKernel
   variants:
