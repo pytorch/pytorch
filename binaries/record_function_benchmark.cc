@@ -63,8 +63,6 @@ int main(int argc, char** argv) {
   at::enableRecordFunction();
   setupBenchmarkCallbacks();
 
-  at::enableRecordFunction();
-
   auto duration = runBench(kSmallTensorSize, FLAGS_warmup_iter);
   std::cout << "Warmup time: " << duration << " us." << std::endl;
 
