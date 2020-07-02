@@ -56,7 +56,7 @@ def default_collate(batch):
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]
-        if elem_type.__name__ == 'ndarray':
+        if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
             # array of string classes and object
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(default_collate_err_msg_format.format(elem.dtype))
