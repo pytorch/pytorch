@@ -17,7 +17,7 @@ namespace {
 //      It should also handle autograd.
 Operator createOperatorFromC10_withTracingHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
+  return Operator(op, [op](Stack* stack) {
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -34,7 +34,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
       tracer::recordSourceLocation(node);
       const auto& args = op.schema().arguments();
       int i = 0;
-      for (auto iter = stack.end() - input_size; iter != stack.end();
+      for (auto iter = stack->end() - input_size; iter != stack->end();
            ++iter, ++i) {
         // TODO we need to refactor graph APIs (e.g., addInputs)
         // appropriately; after that, we can get rid of the giant if-else
@@ -123,16 +123,16 @@ Operator createOperatorFromC10_withTracingHandledHere(
 #ifdef USE_STATIC_DISPATCH
     {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
-      op.callBoxed(&stack);
+      op.callBoxed(stack);
     }
 #else
-    op.callBoxed(&stack);
+    op.callBoxed(stack);
 #endif // USE_STATIC_DISPATCH
 
     if (tracer_state) {
       jit::tracer::setTracingState(std::move(tracer_state));
       int i = 0;
-      for (auto iter = stack.end() - output_size; iter != stack.end();
+      for (auto iter = stack->end() - output_size; iter != stack->end();
            ++iter, ++i) {
         const auto& type = op.schema().returns()[i].type();
         if (type->isSubtypeOf(TensorType::get())) {
@@ -155,17 +155,12 @@ Operator createOperatorFromC10_withTracingHandledHere(
         }
       }
     }
-
-    return 0;
   });
 }
 
 Operator createOperatorFromC10_withTracingNotHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
-    op.callBoxed(&stack);
-    return 0;
-  });
+  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {
