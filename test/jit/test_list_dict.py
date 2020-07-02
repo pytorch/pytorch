@@ -1445,6 +1445,15 @@ class TestDict(JitTestCase):
 
         test_func(test_dict_constructor, ())
 
+        def test_dict_initializer_list():
+            a = {"1": torch.tensor(1), "2": torch.tensor(2)}
+            output_order = []
+            for key in a:
+                output_order.append(a[key])
+            return output_order
+
+        test_func(test_dict_initializer_list, ())
+
         def test_dict_error():
             a = dict()
             a[1] = 2

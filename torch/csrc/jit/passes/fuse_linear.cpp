@@ -21,10 +21,21 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
     return is_int_constant(match, vmap, "beta", 1);
   };
 
+  // check %weight_t is produced by `aten::t` to make sure
+  // we can transform the pattern to `aten::linear`
+  auto weight_transposed =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& match_vmap = match.values_map;
+        auto v = match_vmap.at(vmap.at("weight_t"));
+        return v->node()->kind() == Symbol::aten("t");
+      };
+
   // replace addmm pattern to linear
   SubgraphRewriter addmm_to_linear;
   addmm_to_linear.RegisterRewritePattern(addmm_pattern, fused_linear_addmm);
-  addmm_to_linear.runOnGraph(graph, {aten_add_alpha_is_one, beta_is_one});
+  addmm_to_linear.runOnGraph(
+      graph, {aten_add_alpha_is_one, beta_is_one, weight_transposed});
 
   std::string matmul_add_pattern = R"IR(
     graph(%input, %weight_t, %bias, %alpha):
@@ -40,7 +51,8 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter matmuladd_to_linear;
   matmuladd_to_linear.RegisterRewritePattern(
       matmul_add_pattern, fused_linear_matmul);
-  matmuladd_to_linear.runOnGraph(graph, aten_add_alpha_is_one);
+  matmuladd_to_linear.runOnGraph(
+      graph, {aten_add_alpha_is_one, weight_transposed});
 
   std::string matmul_pattern = R"IR(
     graph(%input, %weight_t):
@@ -57,7 +69,7 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter matmul_to_linear;
   matmul_to_linear.RegisterRewritePattern(
       matmul_pattern, fused_linear_bias_none);
-  matmul_to_linear.runOnGraph(graph);
+  matmul_to_linear.runOnGraph(graph, weight_transposed);
 
   // clean up extra transpose for the weight of aten::linear
   std::string linear_weight_extra_transpose = R"IR(

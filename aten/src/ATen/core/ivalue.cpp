@@ -631,28 +631,16 @@ getClassConverter() {
   return classConverter;
 }
 
-void ivalue::Future::addCallback(
-    std::function<void(void)> callback,
-    bool propagateTLSState) {
-  std::function<void(void)> cb;
-  if (propagateTLSState) {
-    // Save thread local state and restore it in the callback.
-    at::ThreadLocalState tls_state;
-    cb = [tls_state = std::move(tls_state), callback = std::move(callback)] {
-      at::ThreadLocalStateGuard g(tls_state);
-      callback();
-    };
-  } else {
-    cb = std::move(callback);
-  }
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (completed()) {
-    lock.unlock();
-    cb();
-    return;
-  }
-  callbacks_.emplace_back(std::move(cb));
+template <typename T>
+TORCH_API std::function<T(void)> wrapPropagateTLSState(std::function<T(void)> callback) {
+  return [tls_state = at::ThreadLocalState(), callback = std::move(callback)]() {
+    at::ThreadLocalStateGuard g(tls_state);
+    // Propagate value returned by callback().
+    return callback();
+  };
 }
+template std::function<c10::IValue(void)> at::wrapPropagateTLSState<c10::IValue>(std::function<c10::IValue(void)> callback);
+template std::function<void(void)> at::wrapPropagateTLSState<void>(std::function<void(void)> callback);
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {

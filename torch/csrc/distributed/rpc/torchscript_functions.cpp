@@ -54,18 +54,15 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback(
-      [futPtr](const FutureMessage& futMessage) {
-        if (futMessage.hasError()) {
-          c10::ivalue::Future::FutureError jitFutErr(
-              futMessage.error()->what());
-          futPtr->setError(std::move(jitFutErr));
-        } else {
-          futPtr->markCompleted(
-              deserializeRespToIValue(futMessage.constValue()));
-        }
-      },
-      /* propagateTLSState */ true);
+  futMessage->addCallback(at::wrapPropagateTLSState<void>([futPtr,
+                                                           futMessage]() {
+    if (futMessage->hasError()) {
+      c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
+      futPtr->setError(std::move(jitFutErr));
+    } else {
+      futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
+    }
+  }));
   return futPtr;
 }
 
@@ -111,10 +108,9 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
     fm->addCallback(
-        [forkId{userRRefPtr->forkId()}](const FutureMessage& fm) {
-          callback::confirmPendingUser(fm, forkId);
-        },
-        /* propagateTLSState */ true);
+        at::wrapPropagateTLSState<void>([fm, forkId{userRRefPtr->forkId()}]() {
+          callback::confirmPendingUser(*fm, forkId);
+        }));
 
     return userRRefPtr;
   } else {
@@ -137,11 +133,10 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
-    fm->addCallback(
-        [ownerRRefId = ownerRRefPtr->rrefId()](const FutureMessage& fm) {
-          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
-        },
-        /* propagateTLSState */ true);
+    fm->addCallback(at::wrapPropagateTLSState<void>(
+        [fm, ownerRRefId = ownerRRefPtr->rrefId()]() {
+          callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
+        }));
     return ownerRRefPtr;
   }
 }

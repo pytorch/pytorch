@@ -286,7 +286,6 @@ bool isRecordFunctionEnabled() {
 void enableRecordFunction(bool enable) {
   c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
 }
-
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   if (hasCallbacks() && isRecordFunctionEnabled()) {
     manager().init(*this);
@@ -310,6 +309,7 @@ uint64_t RecordFunction::currentThreadId() {
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!active) {
+    LOG(INFO) << "Before: no active CBs!";
     return;
   }
   name_ = StringView(name);

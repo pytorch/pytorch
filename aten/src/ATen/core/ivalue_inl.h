@@ -328,9 +328,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(
-      std::function<void(void)> callback,
-      bool propagateTLSState = false);
+  void addCallback(std::function<void(void)> callback) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed()) {
+      lock.unlock();
+      callback();
+      return;
+    }
+    callbacks_.emplace_back(std::move(callback));
+  }
 
   /**
    * Add a callback to the future, and return another Future to hold the return
@@ -339,8 +345,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
-      TypePtr type,
-      bool propagateTLSState = false) {
+      TypePtr type) {
     auto fut = c10::make_intrusive<Future>(type);
     // Cannot move capture std::function in lambda, because it cannot deduce
     // the template type for std::function. Hence use std::bind to explicitly
@@ -353,8 +358,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             fut->setError(e.what());
           }
         },
-        std::move(callback)),
-        propagateTLSState);
+        std::move(callback)));
     return fut;
   }
 
@@ -413,6 +417,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;
 };
+
+/*
+  Wrap a callback with TLS state. This will cause the callback to run with the
+  thread local state of the caller thread. Example usage:
+ fut->addCallback(wrapPropagateTLSState(cb_that_requires_tls_state));
+  */
+  template <typename T>
+  std::function<T(void)> wrapPropagateTLSState(
+      std::function<T(void)> callback);
 
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.

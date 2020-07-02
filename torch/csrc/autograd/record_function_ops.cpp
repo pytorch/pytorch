@@ -1,7 +1,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <ATen/ThreadLocalState.h>
-
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
@@ -10,9 +10,12 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(at::RecordFunction);
 } // namespace caffe2
 
+// using namespace at;
+
 namespace torch {
 namespace autograd {
 namespace profiler {
+
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
@@ -72,10 +75,10 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         return fut->constValue();
       };
   // Define a future that completes after the profiling callbacks are run.
-  auto profiledFut = fut->then(
-      futureProfilingFunc,
-      fut->elementType(),
-      /* propagate TLS state */ true);
+  auto profiledFut = fut->then(at::wrapPropagateTLSState<c10::IValue>(
+      futureProfilingFunc),
+      fut->elementType()
+      );
   return profiledFut;
 }
 
@@ -93,14 +96,13 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
-        [](jit::Stack& stack) {
+        [](jit::Stack* stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();
           auto profiledFut = _call_end_callbacks_on_fut(tensor, fut);
           // return future that completes when profiling callbacks have run.
           jit::push(stack, std::move(profiledFut));
-          return 0;
         },
         aliasAnalysisFromSchema()),
 });
