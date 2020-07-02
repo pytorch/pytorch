@@ -1435,6 +1435,10 @@ class ShapePropagator {
 
     static const auto factory_like_with_ndim = [](Node* node,
                                                   int dim) -> type_vec_t {
+      auto tt = node->input(0)->type()->expect<TensorType>();
+      auto in_type = tt->scalarType();
+      auto in_dev = tt->device();
+
       at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
@@ -1442,11 +1446,6 @@ class ShapePropagator {
       at::optional<IValue> maybe_device_option = node->get(attr::device);
       if (!maybe_device_option)
         return {};
-
-      auto tt = node->input(0)->type()->expect<TensorType>();
-
-      auto in_type = tt->scalarType();
-      auto in_dev = tt->device();
 
       if (!maybe_device_option->isNone()) {
         in_dev = maybe_device_option->toDevice();
