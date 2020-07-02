@@ -96,7 +96,7 @@ class Linear(Module):
         )
 
 
-# This class exists soley for Transformer; it has an annotation stating
+# This class exists solely for Transformer; it has an annotation stating
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
     bias: Tensor
