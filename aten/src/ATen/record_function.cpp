@@ -215,8 +215,6 @@ thread_local bool tls_record_function_enabled_ = true;
 const double kLowProb = 0.001;
 thread_local int tries_left_ = 0;
 
-} // namespace
-
 int sample_geometric() {
   static thread_local auto gen =
       std::make_unique<std::mt19937>(std::random_device()());
