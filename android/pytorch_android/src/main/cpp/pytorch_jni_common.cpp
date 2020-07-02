@@ -48,6 +48,7 @@ constexpr static int kTensorDTypeFloat64 = 6;
 
 constexpr static int kTensorMemoryFormatContiguous = 1;
 constexpr static int kTensorMemoryFormatChannelsLast = 2;
+constexpr static int kTensorMemoryFormatChannelsLast3d = 3;
 
 template <typename K = jobject, typename V = jobject>
 struct JHashMap
@@ -136,6 +137,14 @@ static at::Tensor newAtTensor(
         torch::IntArrayRef(c10::get_channels_last_strides_2d(sizes)),
         at::TensorOptions(typeMeta).memory_format(
             at::MemoryFormat::ChannelsLast));
+  } else if (jmemoryFormat == kTensorMemoryFormatChannelsLast3d) {
+    auto sizes = torch::IntArrayRef(shapeVec);
+    return torch::from_blob(
+        jni->GetDirectBufferAddress(jbuffer.get()),
+        sizes,
+        torch::IntArrayRef(c10::get_channels_last_strides_3d(sizes)),
+        at::TensorOptions(typeMeta).memory_format(
+            at::MemoryFormat::ChannelsLast3d));
   }
   return torch::from_blob(
       jni->GetDirectBufferAddress(jbuffer.get()),
