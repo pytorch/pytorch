@@ -62,13 +62,14 @@ def udf_with_torch_ops(device=-1):
 # Events (operator invocations) that are expected to be ran as part of the above
 # function.
 EXPECTED_REMOTE_EVENTS = [
-    "ones",
-    "ones",
-    "add",
-    "mul",
-    "relu",
-    "threshold",
-    "sigmoid",
+    "aten::ones",
+    "aten::ones",
+    "aten::add",
+    "aten::mul",
+    "aten::relu",
+    "aten::threshold",
+    "aten::sigmoid",
+    "aten::sigmoid",
 ]
 
 
