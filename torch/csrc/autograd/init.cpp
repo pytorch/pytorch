@@ -60,6 +60,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
   });
+  m.def("_set_empty_test_observer", [](bool is_global, double sampling_prob) {
+    auto cb = at::RecordFunctionCallback(
+        [](const at::RecordFunction&) {},
+        [](const at::RecordFunction&) {})
+      .needsInputs(true)
+      .samplingProb(sampling_prob);
+    if (is_global) {
+      at::addGlobalCallback(cb);
+    } else {
+      at::addThreadLocalCallback(cb);
+    }
+  });
+  m.def("_clear_callbacks", []() {
+    at::clearCallbacks();
+  });
 
   Py_RETURN_TRUE;
 }
