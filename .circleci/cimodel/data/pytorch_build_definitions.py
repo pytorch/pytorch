@@ -7,8 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
-
+from cimodel.data.simple.util.docker_constants import gen_docker_image
 
 
 @dataclass
@@ -50,7 +49,8 @@ class Conf:
 
         cuda_parms = []
         if self.cuda_version:
-            cuda_parms.extend([f"cuda{self.cuda_version}", "cudnn7"])
+            cudnn = "cudnn8" if self.cuda_version.startswith("11.") else "cudnn7"
+            cuda_parms.extend(["cuda" + self.cuda_version, cudnn])
         if self.rocm_version:
             cuda_parms.extend([f"rocm{self.rocm_version}"])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
@@ -62,10 +62,14 @@ class Conf:
 
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
+        image_name, _ = gen_docker_image(base_build_env_name)
+        return miniutils.quote(image_name)
 
-        image_path = gen_docker_image_path(base_build_env_name,
-                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
-        return miniutils.quote(image_path)
+    def gen_docker_image_requires(self):
+        parms_source = self.parent_build or self
+        base_build_env_name = "-".join(parms_source.get_parms(True))
+        _, image_requires = gen_docker_image(base_build_env_name)
+        return image_requires
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
@@ -112,6 +116,7 @@ class Conf:
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
+            job_def["requires"] = [self.gen_docker_image_requires()]
 
         if not self.is_important:
             job_def["filters"] = gen_filter_dict()
@@ -235,8 +240,7 @@ def instantiate_configs():
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
-            # TODO The gcc version is orthogonal to CUDA version?
+        if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
             parms_list.append(cuda_gcc_version)
 

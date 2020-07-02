@@ -1091,6 +1091,35 @@ graph(%Ra, %Rb):
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
 
+    def test_shape_analysis_unsqueeze_in_loop(self):
+        input_str = """graph(%x.1 : Tensor):
+          %4 : bool = prim::Constant[value=1]()
+          %1 : int = prim::Constant[value=2]()
+          %7 : int = prim::Constant[value=0]()
+          # CHECK: FloatTensor = prim::Loop
+          %x : Tensor = prim::Loop(%1, %4, %x.1)
+            # CHECK: : FloatTensor):
+            block0(%i : int, %x.6 : Tensor):
+              # CHECK: FloatTensor = aten::unsqueeze
+              %x.3 : Tensor = aten::unsqueeze(%x.6, %7)
+              -> (%4, %x.3)
+          return (%x)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
+        FileCheck().run(input_str, graph)
+
+    def test_shape_analysis_masked_select(self):
+        input_str = """graph(%0 : Float(),
+          %1 : Bool()):
+          # CHECK: Float(*) = aten::masked_select
+          %2 : Tensor = aten::masked_select(%0, %1) # test/test_jit.py:15261:0
+          return (%2)"""
+        graph = parse_ir(input_str)
+        x = torch.ones(1, dtype=torch.float32)[0]
+        mask = x.ge(0.5)
+        torch._C._jit_pass_complete_shape_analysis(graph, (x, mask), False)
+        FileCheck().run(input_str, graph)
+
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
     def test_verify(self):
@@ -10382,6 +10411,15 @@ a")
         res = m(data)
         FileCheck().check_not("aten::dropout").run(str(m.graph))
         torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
+
+    def test_unfold_zero_dim(self):
+        def fn(x):
+            return x.unfold(0, 1, 1)
+
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.tensor(0.39),), False)
+        out_dims = fn(torch.tensor(0.3923)).ndim
+        self.assertEqual(graph.findNode("aten::unfold").output().type().dim(), out_dims)
 
     def test_mm_batching(self):
 

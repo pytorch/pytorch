@@ -7,8 +7,6 @@ from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
-import caffe2.python.onnx.backend as backend
-from verify import verify
 
 import torchvision
 
@@ -785,39 +783,6 @@ class TestUtilityFuns(TestCase):
         ort_outs2 = ort_sess.run(None, ort_inputs)
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
-
-    def test_unused_initializers(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
-                self.k_proj = torch.nn.Linear(5, 5, bias=True)
-
-            def forward(self, x):
-                x = self.conv2(x)
-                return x
-
-        x = torch.randn(20, 16, 50, 100)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
-        _, params_dict, __ = utils._model_to_graph(Model(), (x, ), do_constant_folding=False,
-                                                   operator_export_type=OperatorExportTypes.ONNX)
-
-        assert len(params_dict) == 2
-
-    def test_modifying_params(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.param = torch.nn.Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        verify(MyModel(), x, backend, do_constant_folding=False)
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
