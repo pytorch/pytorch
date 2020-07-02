@@ -122,12 +122,14 @@ PyObject* c10d_init(PyObject* _unused) {
               std::vector<std::vector<size_t>>,
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
-              int64_t>(),
+              int64_t,
+              bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
+          py::arg("find_unused_parameters") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",

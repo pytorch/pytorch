@@ -113,8 +113,8 @@ template <>
 OnnxAttributes::get(const std::string& key) const;
 
 template <>
-::google::protobuf::RepeatedField<float>
-OnnxAttributes::get(const std::string& key) const;
+::google::protobuf::RepeatedField<float> OnnxAttributes::get(
+    const std::string& key) const;
 
 template <>
 const TensorProto* OnnxAttributes::get(const std::string& key) const;
@@ -137,7 +137,7 @@ class CAFFE2_API Caffe2Backend {
   // from releasing the object
   Caffe2Backend(DummyName* dummy = nullptr) {
     if (dummy) {
-      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName *){});
+      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName*) {});
     } else {
       dummy_ = std::make_shared<DummyName>();
     }
@@ -173,7 +173,9 @@ class CAFFE2_API Caffe2Backend {
       bool include_initializers,
       const std::vector<Caffe2Ops>& extras);
 
-  void CheckOpSchemaArguments(const caffe2::OpSchema& schema, const caffe2::OperatorDef& op);
+  void CheckOpSchemaArguments(
+      const caffe2::OpSchema& schema,
+      const caffe2::OperatorDef& op);
 
   Caffe2Ops OnnxNodeToCaffe2Ops(
       const ModelProto& init_model,
@@ -217,16 +219,19 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  std::string PreprocessSliceIndexTensor(OnnxNode* onnx_node,
-                                                        Caffe2Ops& ret,
-                                                        std::string indices_tensor,
-                                                        std::string axes_tensor,
-                                                        std::string rank_tensor,
-                                                        std::string zero_tensor,
-                                                        std::string one_tensor,
-                                                        int default_value);
+  std::string PreprocessSliceIndexTensor(
+      OnnxNode* onnx_node,
+      Caffe2Ops& ret,
+      std::string indices_tensor,
+      std::string axes_tensor,
+      std::string rank_tensor,
+      std::string zero_tensor,
+      std::string one_tensor,
+      int default_value);
 
-  Caffe2Ops CreateDynamicSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
+  Caffe2Ops CreateDynamicSlice(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
   Caffe2Ops CreateSplit(OnnxNode* onnx_node, const ConversionContext& ctx);
 
@@ -240,7 +245,9 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateNonZeroOp(OnnxNode* onnx_node, const ConversionContext& ctx);
 
-  Caffe2Ops CreateMultinomialOp(OnnxNode* onnx_node, const ConversionContext& ctx);
+  Caffe2Ops CreateMultinomialOp(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,

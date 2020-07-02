@@ -2,10 +2,11 @@
 
 import torch
 from torch import Tensor
-from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar, Type
+from typing import (Any, BinaryIO, Callable, ContextManager, Iterator, List, NamedTuple,
+        Optional, overload, Sequence, Tuple, TypeVar, Type, Union)
 from torch._six import inf
 
-from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number, Device
+from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
 
 import builtins
 
@@ -90,9 +91,6 @@ class qscheme: ...
 # Defined in torch/csrc/utils/tensor_qschemes.cpp
 per_tensor_affine: qscheme = ...
 
-# Defined in torch/csrc/generic/Storage.cpp
-class Storage: ...
-
 # Defined in torch/csrc/autograd/python_function.cpp
 class _FunctionBase(object):
     ...
@@ -167,6 +165,24 @@ default_generator: Generator
 # Defined in torch/csrc/jit/python/script_init.cpp
 class FileCheck(object):
     # TODO
+    ...
+
+# Defined in torch/csrc/jit/python/init.cpp
+class PyTorchFileReader(object):
+    @overload
+    def __init__(self, name: str) -> None: ...
+    @overload
+    def __init__(self, buffer: BinaryIO) -> None: ...
+    def get_record(self, name: str) -> bytes: ...
+    ...
+
+class PyTorchFileWriter(object):
+    @overload
+    def __init__(self, name: str) -> None: ...
+    @overload
+    def __init__(self, buffer: BinaryIO) -> None: ...
+    def write_record(self, name: str, data: bytes, size: _int) -> None: ...
+    def write_end_of_file(self) -> None: ...
     ...
 
 # Defined in torch/csrc/Generator.cpp

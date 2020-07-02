@@ -40,25 +40,22 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
   rewriter.RegisterRewritePattern(add_inplace_relu_1, add_inplace_relu_fused);
 
-  std::string add_out_relu_0 = R"(
+  std::string add_out_relu = R"(
     graph(%a, %b, %alpha, %out):
         %add_res = aten::add(%a, %b, %alpha, %out)
-        %res = aten::relu(%add_res)
+        %res = aten::relu_(%add_res)
         return (%res))";
   std::string add_out_relu_fused = R"(
     graph(%a, %b, %alpha, %out):
         %res = aten::add_relu(%a, %b, %alpha, %out)
         return (%res))";
-  rewriter.RegisterRewritePattern(add_out_relu_0, add_out_relu_fused);
 
-  std::string add_out_relu_1 = R"(
-    graph(%a, %b, %alpha, %out):
-        %add_res = aten::add(%a, %b, %alpha, %out)
-        %res = aten::relu_(%add_res)
-        return (%res))";
-  rewriter.RegisterRewritePattern(add_out_relu_1, add_out_relu_fused);
+  rewriter.RegisterRewritePattern(add_out_relu, add_out_relu_fused);
 
   rewriter.runOnGraph(graph);
+  // NB: Patterns that are left out are add_ + relu and add_out + relu
+  // This is because inplace mutation of the testor done by add_ will be lost if
+  // inplace mutatation of the same tensor actually does add+relu
 }
 } // namespace
 

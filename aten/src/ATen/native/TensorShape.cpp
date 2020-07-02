@@ -762,7 +762,12 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor result = at::empty(target_size, self.options());
+  Tensor result;
+  if (self.is_quantized()) {
+    result = at::empty_quantized(target_size, self);
+  } else {
+    result = at::empty(target_size, self.options());
+  }
 
   // return an empty tensor if one of the repeat dimensions is zero
   if (zero_tensor) {
