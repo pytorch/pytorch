@@ -765,6 +765,22 @@ class TestTracer(JitTestCase):
         self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(g, (x,))
 
+    def test_inplace_copy_force_outplace(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def f(x):
+            out = Variable(torch.zeros(x.size()))
+            out.copy_(x)
+            return out
+
+        g, outputs, inputs = torch.jit._get_trace_graph(
+            f, (x, ), return_inputs=True, _force_outplace=True)
+        self.run_pass('dce', g)
+        m = self.createFunctionFromGraph(g)
+        self.assertEqual(outputs, m(*inputs))
+        self.assertExportImport(g, (x,))
+        FileCheck().check("expand_as").run(str(g))
+
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

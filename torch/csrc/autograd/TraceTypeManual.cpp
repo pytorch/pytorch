@@ -73,7 +73,7 @@ Tensor& resize_(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     c10::Dispatcher::singleton()
         .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(
-            op, c10::DispatchKey::Tracer, self, size, optional_memory_format);
+            op, c10::DispatchKey::Tracer, self, size, std::move(optional_memory_format));
   }
 
   return self;
@@ -97,7 +97,7 @@ Tensor& resize_as_(
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     c10::Dispatcher::singleton()
         .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(
-            op, c10::DispatchKey::Tracer, self, the_template, optional_memory_format);
+            op, c10::DispatchKey::Tracer, self, the_template, std::move(optional_memory_format));
   }
   return self;
 }
