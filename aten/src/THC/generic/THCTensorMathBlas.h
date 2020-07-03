@@ -2,7 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathBlas.h"
 #else
 
-THC_API accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t, THCTensor *batch1, THCTensor *batch2, scalar_t beta, scalar_t alpha);
 
 #endif

@@ -36,7 +36,7 @@
 
 #ifdef _MSC_VER
 static INIT_ONCE init_guard;
-BOOL CALLBACK init_win(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContex);
+BOOL CALLBACK pytorch_qnnp_init_win(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContex);
 #else
 static pthread_once_t init_guard = PTHREAD_ONCE_INIT;
 #endif
@@ -262,7 +262,7 @@ enum pytorch_qnnp_status pytorch_qnnp_initialize(void) {
     return pytorch_qnnp_status_out_of_memory;
   }
 #ifdef _MSC_VER
-  InitOnceExecuteOnce(&init_guard, init_win, NULL, NULL);
+  InitOnceExecuteOnce(&init_guard, pytorch_qnnp_init_win, NULL, NULL);
 #else
   pthread_once(&init_guard, &init);
 #endif
@@ -279,7 +279,7 @@ enum pytorch_qnnp_status pytorch_qnnp_deinitialize(void) {
 }
 
 #ifdef _MSC_VER
-BOOL CALLBACK init_win(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContex) {
+BOOL CALLBACK pytorch_qnnp_init_win(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContex) {
   init();
   return TRUE;
 }

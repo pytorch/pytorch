@@ -165,6 +165,36 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
 
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasOperation_t opa = _cublasOpFromChar(transa);
+    cublasOperation_t opb = _cublasOpFromChar(transb);
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    GEMM_CHECK_ARGVALUES(c10::complex<double>);
+    TORCH_CUDABLAS_CHECK(cublasZgemm(
+        handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
+        lda, reinterpret_cast<const cuDoubleComplex*>(b), ldb, reinterpret_cast<const cuDoubleComplex*>(&beta),
+        reinterpret_cast<cuDoubleComplex*>(c), ldc));
+  }
+#endif
+
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasOperation_t opa = _cublasOpFromChar(transa);
+    cublasOperation_t opb = _cublasOpFromChar(transb);
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    GEMM_CHECK_ARGVALUES(c10::complex<float>);
+    TORCH_CUDABLAS_CHECK(cublasCgemm(
+        handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
+        lda, reinterpret_cast<const cuComplex*>(b), ldb, reinterpret_cast<const cuComplex*>(&beta),
+        reinterpret_cast<cuComplex*>(c), ldc));
+  }
+#endif
+
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -285,7 +315,6 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       0));
 }
 #endif
-
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
@@ -432,6 +461,46 @@ void ger(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar
 template void ger<float>(int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda);
 template void ger<double>(int64_t m, int64_t n, double alpha, double *x, int64_t incx, double *y, int64_t incy, double *a, int64_t lda);
 
+/* LEVEL 1 BLAS FUNCTIONS */
+
+template <>
+void dot<double>(CUDABLAS_DOT_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDdot(handle, n, x, incx, y, incy, result));
+}
+
+template <>
+void dot<float>(CUDABLAS_DOT_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSdot(handle, n, x, incx, y, incy, result));
+}
+
+template <>
+void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
+#if CUDA_VERSION >= 8000
+  TORCH_CUDABLAS_CHECK(cublasDotEx(
+      handle,
+      n,
+      x,
+      CUDA_R_16F,
+      incx,
+      y,
+      CUDA_R_16F,
+      incy,
+      result,
+      CUDA_R_16F,
+      CUDA_R_32F));
+#elif HIP_VERSION >= 210
+  TORCH_CUDABLAS_CHECK(rocblas_hdot(
+      handle,
+      n,
+      reinterpret_cast<const rocblas_half*>(x),
+      incx,
+      reinterpret_cast<const rocblas_half*>(y),
+      incy,
+      reinterpret_cast<rocblas_half*>(result)));
+#else
+  AT_ERROR("Cublas_Hdot requires CUDA 8.0+");
+#endif
+}
 
 } // namespace blas
 } // namespace cuda
