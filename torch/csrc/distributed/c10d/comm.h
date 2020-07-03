@@ -22,16 +22,15 @@ class GradBucket {
 
 struct CommHookInterface {
  public:
-  virtual std::shared_ptr<torch::jit::Future> operate(
+  virtual c10::intrusive_ptr<torch::jit::Future> operate(
       const GradBucket& bucket) = 0;
 };
 
-class __attribute__((visibility("default"))) PythonCommHook
-    : public CommHookInterface {
+class TORCH_API PythonCommHook : public CommHookInterface {
  public:
   PythonCommHook(py::object state, py::object hook);
 
-  std::shared_ptr<torch::jit::Future> operate(
+  c10::intrusive_ptr<torch::jit::Future> operate(
       const GradBucket& bucket) override;
 
  private:

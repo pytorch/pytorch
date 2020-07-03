@@ -204,7 +204,7 @@ class Reducer {
     // Keep work handle around when this set of buckets is being reduced.
     std::shared_ptr<c10d::ProcessGroup::Work> work;
 
-    std::shared_ptr<torch::jit::Future> future_work;
+    c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.

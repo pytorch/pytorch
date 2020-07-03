@@ -84,15 +84,17 @@ GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
 
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
-std::shared_ptr<torch::jit::Future> PythonCommHook::operate(
+c10::intrusive_ptr<torch::jit::Future> PythonCommHook::operate(
     const GradBucket& bucket) {
-  return hook_(state_, bucket.tensors_)
-      .cast<std::shared_ptr<torch::jit::Future>>();
+  // return hook_(state_, bucket.tensors_)
+  //     .cast<std::shared_ptr<torch::jit::Future>>();
 
   // Below return doesn't work. need to think about it.
 
-  // c10::intrusive_ptr<c10::ivalue::Future> fut;
-  // return hook_(state_, bucket.tensors_)
-  //             .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
+  c10::intrusive_ptr<torch::jit::Future> fut;
+
+  return hook_(state_, bucket.tensors_)
+      .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()
+      ->fut;
 };
 } // namespace c10d

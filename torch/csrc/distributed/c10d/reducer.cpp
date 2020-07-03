@@ -1071,14 +1071,14 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 }
 
 void Reducer::register_comm_hook(py::object state, py::object comm_hook) {
-  Reducer::register_comm_hook_internal(std::make_unique<PythonCommHook> (std::move(state), std::move(comm_hook)));
+  Reducer::register_comm_hook_internal(
+      std::make_unique<PythonCommHook>(std::move(state), std::move(comm_hook)));
 }
 
-void Reducer::register_comm_hook_internal(std::unique_ptr<CommHookInterface> iface){
-
+void Reducer::register_comm_hook_internal(
+    std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
-      comm_hook_ == nullptr,
-      "register_comm_hook can only be called once.");
+      comm_hook_ == nullptr, "register_comm_hook can only be called once.");
 
   comm_hook_ = std::move(iface);
 }

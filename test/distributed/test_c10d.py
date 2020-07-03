@@ -2989,6 +2989,52 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
                 m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
 
+    @requires_gloo()
+    def test_ddp_comm_hook_future_passing(self):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        class tedt_ddep_comm_hook(nn.Module):
+            def __init__(self):
+                super(tedt_ddep_comm_hook, self).__init__()
+                self.t0 = Task()
+
+            def forward(self, x, rank):
+                return self.t0(x + rank)
+
+        def run_and_verify_grad(model):
+            # Run forward
+            output = model(8, self.rank)
+
+            # # The grads of all parameters should be None at this point.
+            [self.assertIsNone(p.grad) for p in model.parameters()]
+
+            # Run backward
+            output.mean().backward()
+
+            # # # Now locally unused parameter should have grad updated on all ranks.
+            [self.assertIsNotNone(p.grad) for p in model.parameters()]
+            print([p.grad for p in model.parameters()])
+
+        def dummy_hook(state, bucket):
+            print(bucket)
+            fut = torch.futures.Future()
+            fut.set_result([torch.ones(2, 2)])
+            return fut
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            tedt_ddep_comm_hook().cpu(),
+            process_group=process_group
+        )
+        # dist.GradBucket([torch.ones(2, 2)])
+        cpu_model.reducer.register_comm_hook(None, dummy_hook)
+        run_and_verify_grad(cpu_model)
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
