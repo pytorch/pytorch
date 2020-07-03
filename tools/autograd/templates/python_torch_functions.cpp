@@ -424,6 +424,14 @@ static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
 
 static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs);
 
+static PyObject * THPVariable_sparse_gcs_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.sparse_gcs_tensor", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::sparse_gcs_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -501,6 +509,7 @@ static PyMethodDef torch_functions[] = {
   {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_gcs_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_gcs_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_sparse_coo_tensor_unsafe", (PyCFunction)(void(*)(void))THPVariable__sparse_coo_tensor_unsafe, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_validate_sparse_coo_tensor_args", (PyCFunction)(void(*)(void))THPVariable__validate_sparse_coo_tensor_args, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
