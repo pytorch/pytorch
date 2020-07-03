@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "custom_backend.h"
+
 // Load a module lowered for the custom backend from \p path and test that
 // it can be executed and produces correct results.
 void load_serialized_lowered_module_and_execute(const std::string& path) {
@@ -29,6 +31,7 @@ int main(int argc, const char* argv[]) {
   }
   const std::string path_to_exported_script_module = argv[1];
 
+  std::cout << "Testing " << torch::custom_backend::getBackendName() << "\n";
   load_serialized_lowered_module_and_execute(path_to_exported_script_module);
 
   std::cout << "OK\n";

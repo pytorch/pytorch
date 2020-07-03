@@ -284,6 +284,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
+    "torch/csrc/distributed/rpc/metrics/registry.cpp",
 ]
 
 jit_sources_full = [
