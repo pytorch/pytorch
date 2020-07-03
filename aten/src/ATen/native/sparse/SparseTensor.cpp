@@ -141,32 +141,11 @@ namespace {
   }
 }
 
-Tensor sparse_csr_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
-  return at::ones({2,3});
-}
-
-Tensor sparse_csr_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_) {
-  Tensor values = expand_values_if_needed(values_);
-
-  // if sizes are not given, it is inferred as being (indices.size(0)+1)
-  int64_t sparse_dim = indices.size(0)-1;
-  if (sparse_dim == 0) {
-    sparse_dim = 1;
-  }
-  
-  return values;
-}
-
-Tensor new_with_dims_and_tensor_sparse_csr(int64_t sparse_dim, const Tensor& pointers, const Tensor& indices,
-                                           const Tensor& values_, ArrayRef<int64_t> size) {
-  return values_;
-}
-
-Tensor sparse_csr_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
+Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
   Tensor values = expand_values_if_needed(values_);
   // make sure that indicies do not contain any entries that are greater than the dim.
   int64_t sparse_dim = indices.size(0)-1;
-  return at::_sparse_csr_tensor_with_dims_and_tensors(sparse_dim, pointers, indices, values, size);
+  return values;
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
