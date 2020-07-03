@@ -169,7 +169,49 @@ commands:
               echo "This is not a pull request, skipping..."
             fi
 
-
+  upload_binary_size_for_android_build:
+    description: "Upload binary size data for Android build"
+    parameters:
+      build_type:
+        type: string
+        default: ""
+      artifacts:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: "Binary Size - Set Python Version"
+          no_output_timeout: "1m"
+          command: pyenv global 3.7.0
+      - run:
+          name: "Binary Size - Install Dependencies"
+          no_output_timeout: "5m"
+          command: |
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry pip3 install requests
+      - run:
+          name: "Binary Size - Untar Artifacts"
+          no_output_timeout: "5m"
+          command: |
+            # The artifact file is created inside docker container, which contains the result binaries.
+            # Now unpackage it into the project folder. The subsequent script will scan project folder
+            # to locate result binaries and report their sizes.
+            # If artifact file is not provided it assumes that the project folder has been mounted in
+            # the docker during build and already contains the result binaries, so this step can be skipped.
+            export ARTIFACTS="<< parameters.artifacts >>"
+            if [ -n "${ARTIFACTS}" ]; then
+              tar xf "${ARTIFACTS}" -C ~/project
+            fi
+      - run:
+          name: "Binary Size - Upload << parameters.build_type >>"
+          no_output_timeout: "5m"
+          command: |
+            cd ~/project
+            export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
+            export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            python3 .circleci/scripts/upload_binary_size_to_scuba.py android
 
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
@@ -1529,26 +1571,9 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
-    - run:
-        name: save binary size
-        no_output_timeout: "5m"
-        command: |
-          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
-          echo "docker-id: $id"
-          cat \<< EOL | docker exec -u jenkins -i "$id" bash
-          # ============================== Begin Docker ==============================
-          cd workspace
-          source ./env
-          export ANDROID_BUILD_TYPE="prebuild"
-          export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
-          export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
-          export CIRCLE_SHA1="${CIRCLE_SHA1}"
-          export CIRCLE_BRANCH="${CIRCLE_BRANCH}"
-          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
-          python .circleci/scripts/upload_binary_size_to_scuba.py android
-          # ==============================  End Docker  ==============================
-          EOL
+    - upload_binary_size_for_android_build:
+        build_type: prebuilt
+        artifacts: /home/circleci/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1631,26 +1656,9 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           time docker push ${output_image}
-    - run:
-        name: save binary size
-        no_output_timeout: "5m"
-        command: |
-          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
-          echo "docker-id: $id"
-          cat \<< EOL | docker exec -u jenkins -i "$id" bash
-          # ============================== Begin Docker ==============================
-          cd workspace
-          source ./env
-          export ANDROID_BUILD_TYPE="prebuild-single"
-          export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
-          export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
-          export CIRCLE_SHA1="${CIRCLE_SHA1}"
-          export CIRCLE_BRANCH="${CIRCLE_BRANCH}"
-          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
-          python .circleci/scripts/upload_binary_size_to_scuba.py android
-          # ==============================  End Docker  ==============================
-          EOL
+    - upload_binary_size_for_android_build:
+        build_type: prebuilt-single
+        artifacts: /home/circleci/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
