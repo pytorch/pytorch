@@ -12530,6 +12530,14 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(t[0] == a[0])
             self.assertTrue(t[steps - 1] == a[steps - 1])
 
+        start = 0.0004
+        end = 0
+        steps = 204
+        t = torch.linspace(start, end, steps, device=device, dtype=dtype)
+        self.assertTrue(t[0] == start)
+        self.assertTrue(t[steps - 1] == end)
+
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
     @dtypes(torch.float, torch.double)
