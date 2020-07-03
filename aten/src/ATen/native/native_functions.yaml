@@ -1019,7 +1019,7 @@
   variants: function, method
   dispatch:
     CPU: dot
-    CUDA: legacy::cuda::_th_dot
+    CUDA: dot_cuda
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
 
