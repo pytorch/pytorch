@@ -10,17 +10,17 @@ from torch.testing._internal.dist_utils import (
     dist_init,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
-    TestDdpComparison,
-    TestDdpUnderDistAutograd,
+    DdpComparisonTest,
+    DdpUnderDistAutogradTest,
 )
 import torch.distributed.rpc as rpc
 
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class TestDdpUnderDistAutogradTensorPipe(
+class TensorPipeAgentDdpUnderDistAutogradTest(
     TensorPipeRpcAgentTestFixture,
-    TestDdpUnderDistAutograd,
+    DdpUnderDistAutogradTest,
     MultiProcessTestCase,
 ):
     def setUp(self):
@@ -34,9 +34,9 @@ class TestDdpUnderDistAutogradTensorPipe(
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class TestDdpComparisonTensorPipe(
+class TensorPipeAgentDdpComparisonTest(
     TensorPipeRpcAgentTestFixture,
-    TestDdpComparison,
+    DdpComparisonTest,
     MultiProcessTestCase,
 ):
     def setUp(self):

@@ -282,7 +282,7 @@ def set_shutdown_signal():
     with shutdown_signal:
         shutdown_signal.notify()
 
-class TestDdpUnderDistAutograd(RpcAgentTestFixture):
+class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -431,7 +431,7 @@ class TestDdpUnderDistAutograd(RpcAgentTestFixture):
         self._do_test(DdpMode.INSIDE)
 
 
-class TestDdpComparison(RpcAgentTestFixture):
+class DdpComparisonTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -560,7 +560,7 @@ class TestDdpComparison(RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id)
                 )
             )
@@ -623,7 +623,7 @@ class TestDdpComparison(RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id)
                 )
             )
@@ -632,7 +632,7 @@ class TestDdpComparison(RpcAgentTestFixture):
                 layer3.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer3.module_rref, context_id)
                 )
             )
