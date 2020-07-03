@@ -190,7 +190,7 @@ class Trainer:
         rank: int,
     ):
         self.rank = rank
-        self.trainer_group = dist.new_group(TRAINER_RANKS)
+        self.trainer_group = dist.new_group(TRAINER_RANKS) if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE) else None
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
@@ -220,7 +220,8 @@ class Trainer:
         )
 
     def destroy_pg(self):
-        dist.destroy_process_group(self.trainer_group)
+        if self.trainer_group:
+            dist.destroy_process_group(self.trainer_group)
 
     def train_batch(self, mini_batch: FeatureSet):
         grads_dict = None

@@ -7,6 +7,12 @@
 namespace torch {
 namespace jit {
 
+struct PatternReplaceInfo {
+  std::string pattern;
+  std::string replacement;
+  std::vector<MatchFilter> filters = {};
+};
+
 namespace {
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
@@ -22,10 +28,30 @@ graph(%a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
         return (%r) )";
+  std::string linear_fp16_with_cast = R"(
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %false):
+        %fp16_tensor = aten::to(%w, %dtype_fp16, %false, %false)
+        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %false, %false)
+        %r = aten::linear(%a_dq, %fp32_tensor, %b)
+        return (%r) )";
+  std::string linear_fp16_with_prepack = R"(
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %false):
+        %packed_params = quantized::linear_prepack_fp16(%w, %b)
+        %w_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack_fp16(%packed_params)
+        %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
+        return (%r) )";
 
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph);
+  std::vector<PatternReplaceInfo> patterns_and_replacements = {
+      {linear_with_quant, linear_with_quant_prepack},
+      {linear_fp16_with_cast,
+       linear_fp16_with_prepack,
+       {is_half_dtype, is_float_dtype, is_false_value}}};
+
+  for (const auto& entry : patterns_and_replacements) {
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(entry.pattern, entry.replacement);
+    rewriter.runOnGraph(graph, entry.filters);
+  }
 }
 
 void insertPrepackUnpackForConv(std::shared_ptr<Graph>& graph) {
@@ -71,16 +97,15 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
-  std::vector<std::vector<std::string>> patterns_and_replacements = {
+  std::vector<PatternReplaceInfo> patterns_and_replacements = {
       {conv1d_with_quant, conv1d_with_quant_prepack},
       {conv2d_with_quant, conv2d_with_quant_prepack},
       {conv3d_with_quant, conv3d_with_quant_prepack}};
-  for (const auto& item : patterns_and_replacements) {
+
+  for (const auto& entry : patterns_and_replacements) {
     SubgraphRewriter rewriter;
-    const auto& pattern = item[0];
-    const auto& replacement = item[1];
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(entry.pattern, entry.replacement);
+    rewriter.runOnGraph(graph, entry.filters);
   }
 }
 

@@ -528,6 +528,7 @@ jobs:
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
+            hostname
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1250,14 +1251,6 @@ jobs:
 
   binary_windows_upload:
     <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
     docker:
       - image: continuumio/miniconda
     steps:
@@ -7132,6 +7125,30 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:fff7795428560442086f7b2bb6004b65245dc11a"
           resource_class: large
       - pytorch_linux_build:
+          name: pytorch_linux_xenial_rocm3_3_py3_6_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-rocm3.3-py3.6-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.3-py3.6:be76e8fd-44e2-484d-b090-07e0cc3a56f0"
+          resource_class: xlarge
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_rocm3_3_py3_6_test
+          requires:
+            - pytorch_linux_xenial_rocm3_3_py3_6_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-rocm3.3-py3.6-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.3-py3.6:be76e8fd-44e2-484d-b090-07e0cc3a56f0"
+          resource_class: pytorch/amd-gpu
+      - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:fff7795428560442086f7b2bb6004b65245dc11a"
@@ -7404,6 +7421,54 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
+          name: pytorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7:fff7795428560442086f7b2bb6004b65245dc11a"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_test
+          requires:
+            - pytorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7:fff7795428560442086f7b2bb6004b65245dc11a"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_build:
+          name: pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7:fff7795428560442086f7b2bb6004b65245dc11a"
+      - pytorch_linux_test:
+          name: pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_test
+          requires:
+            - pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-libtorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7:fff7795428560442086f7b2bb6004b65245dc11a"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_6_clang9_build
           build_environment: "pytorch-linux-bionic-py3.6-clang9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:fff7795428560442086f7b2bb6004b65245dc11a"
@@ -7534,12 +7599,6 @@ workflows:
           build_environment: pytorch-linux-xenial-py3-clang5-mobile-code-analysis
           build_only: "1"
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:fff7795428560442086f7b2bb6004b65245dc11a
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
       - pytorch_linux_test:
           build_environment: pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test

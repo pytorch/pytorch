@@ -427,6 +427,15 @@ static void bindGetDeviceProperties(PyObject* module) {
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+  TORCH_WARN(
+    "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
+    "asan is currently not compatible with torch.cuda module, "
+    "you might get unexpected behavior (eg. out of memory, crash, etc.), "
+    "please rebuild pytorch without asan if you need to use this module");
+#endif
+#endif
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   poison_fork();
