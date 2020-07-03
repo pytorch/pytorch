@@ -1100,6 +1100,46 @@ void InsertObserversHelper::fillBoundaryValueMap(
   }
 }
 
+void makeAppendNonInplace(std::shared_ptr<Graph>& graph) {
+  std::string append_pattern = R"IR(
+graph(%list, %x):
+    %ignore : Tensor[] = aten::append(%list, %x)
+    return (%ignore) )IR";
+
+  /* Rewrite the above pattern to
+  std::string append_replacement = R"IR(
+graph(%list, %x):
+    %x_list : Tensor[]  = prim::ListConstruct(%x)
+    %result : Tensor[] = aten::add(%list, %x_list)
+    return (%result) )IR";
+   this is not supported by subgraph rewriter, so we'll do
+   this manually.
+  */
+
+  GRAPH_DUMP("Before replace append", graph);
+  const PatternInfo& append_pattern_info =
+      PatternInfo::parse_from_str(append_pattern);
+  const Graph& append_graph = *append_pattern_info.pattern_graph;
+  const auto& append_vmap = append_pattern_info.vmap;
+  const auto& matches = findPatternMatches(append_graph, *graph);
+  for (const auto& match : matches) {
+    auto append_node = match.values_map.at(append_vmap.at("ignore"))->node();
+    Value* list_val = append_node->input(0);
+    Value* x = append_node->input(1);
+    WithInsertPoint ins(append_node);
+    Node* x_list_node = graph->createList(TensorType::get(), {x});
+    graph->insertNode(x_list_node);
+    Node* add_node =
+        graph->create(Symbol::aten("add"), {list_val, x_list_node->output()});
+    graph->insertNode(add_node);
+    add_node->output()->setType(ListType::ofTensors());
+    list_val->replaceAllUsesAfterNodeWith(add_node, add_node->output());
+    append_node->removeAllInputs();
+    append_node->destroy();
+  }
+  GRAPH_DUMP("After replace append", graph);
+}
+
 void InsertObserversHelper::preprocess(
     Module& module,
     const std::string& method_name) {
@@ -1116,6 +1156,7 @@ void InsertObserversHelper::preprocess(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
+  makeAppendNonInplace(graph);
 }
 
 void InsertObserversHelper::analyze(
@@ -1520,6 +1561,7 @@ void InsertObserversHelper::propagateObservedProperty(
           observed_values_.count(v) || block_observed_values.count(v);
     }
     if (all_observed) {
+      GRAPH_DEBUG("Pass through observed property in node:", *output->node());
       // This is to propagate observed property through
       // all ops that doesn't require observation
       block_observed_values.insert(output);
