@@ -1433,6 +1433,36 @@ class ShapePropagator {
           dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };
 
+    static const auto factory_like_with_ndim = [](Node* node,
+                                                  int dim) -> type_vec_t {
+      auto tt = node->input(0)->type()->expect<TensorType>();
+      auto in_type = tt->scalarType();
+      auto in_dev = tt->device();
+
+      at::optional<IValue> maybe_layout_option = node->get(attr::layout);
+      if (!maybe_layout_option)
+        return {};
+
+      at::optional<IValue> maybe_device_option = node->get(attr::device);
+      if (!maybe_device_option)
+        return {};
+
+      if (!maybe_device_option->isNone()) {
+        in_dev = maybe_device_option->toDevice();
+      }
+
+      at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+      if (!maybe_dtype_option)
+        return {};
+
+      if (!maybe_dtype_option->isNone()) {
+        in_type = maybe_dtype_option->toScalarType();
+      }
+
+      return {TensorType::create(
+          in_type, in_dev, dim, /*requires_grad=*/c10::nullopt)};
+    };
+
     // Requirements:
     //   dims           : preserved
     //   scalar type    : equal to value of dtype
@@ -1456,7 +1486,7 @@ class ShapePropagator {
           if (auto type =
                   node->namedInput(attr::self)->type()->cast<TensorType>()) {
             if (type->dim()) {
-              return factory_with_ndim(node, *type->dim());
+              return factory_like_with_ndim(node, *type->dim());
             }
           }
           return {};
