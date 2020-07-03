@@ -1,5 +1,5 @@
 import torch
-from typing import Union, Sequence, List, Tuple
+from typing import Any, List, Sequence, Tuple, Union
 
 import builtins
 
@@ -29,3 +29,15 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
 Device = Union[_device, str, None]
+
+# Storage protocol implemented by ${Type}StorageBase classes
+class Storage(object):
+    _cdata: int
+
+    def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool) -> None:
+        ...
+
+    def size(self) -> int:
+        ...
+
+    ...

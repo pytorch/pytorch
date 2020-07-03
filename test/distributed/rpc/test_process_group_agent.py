@@ -4,8 +4,8 @@ import unittest
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
-    TestDdpComparison,
-    TestDdpUnderDistAutograd,
+    DdpComparisonTest,
+    DdpUnderDistAutogradTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     RemoteModuleTest,
@@ -57,11 +57,11 @@ class ProcessGroupRemoteModuleTestWithSpawn(RemoteModuleTest, SpawnHelper):
     pass
 
 
-class ProcessGroupTestDdpUnderDistAutogradWrapper(TestDdpUnderDistAutograd, SpawnHelper):
+class ProcessGroupDdpUnderDistAutogradTest(DdpUnderDistAutogradTest, SpawnHelper):
     pass
 
 
-class ProcessGroupTestDdpComparison(TestDdpComparison, SpawnHelper):
+class ProcessGroupDdpComparisonTest(DdpComparisonTest, SpawnHelper):
     pass
 
 
