@@ -1795,6 +1795,10 @@
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
   use_c10_dispatcher: full
 
+- func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
+  dispatch:
+    CPU, CUDA: _compute_linear_combination
+
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method

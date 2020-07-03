@@ -7537,7 +7537,24 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.complex64)
+    def test_matrix_exp_utils(self, device, dtype):
+        # test linear combination
+        def run_test(coeff_shape, data_shape):
+            coeffs = torch.rand(*coeff_shape, device=device, dtype=torch.float)
+            x = torch.rand(coeff_shape[1], *data_shape, device=device, dtype=dtype)
+            res1 = torch._compute_linear_combination(x, coeffs)
+            res2 = (x.unsqueeze(0) * coeffs.view(*coeff_shape, *([1] * len(data_shape)))).sum(1)
+            self.assertEqual(res1, res2, atol=1e-5, rtol=0.0)
+
+        run_test([5, 3], [2, 2])
+        run_test([5, 3], [100, 100])
+        run_test([3, 4], [3, 3, 3])
+        run_test([3, 4], [3, 3, 3, 3])
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_matrix_exp_boundary_cases(self, device, dtype):
 
         with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating types"):

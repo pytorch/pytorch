@@ -13,6 +13,7 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/FunctionOfAMatrixUtils.h>
 
 namespace at {
 namespace native {
@@ -698,64 +699,70 @@ constexpr int total_n_degs = 6;
 constexpr int fact_array_size = 5;
 constexpr std::array<float, fact_array_size> fact = {1., 1., 2., 6., 24.};
 
-// Iterates over first `n_batch_dims` and applies `f` to each element.
-// TODO: this implementation is not efficient, it simply iterates over
-// batch elements in a serial for-loop.
-template <typename func_t>
-void batch_apply(at::ArrayRef<Tensor> tensors, int64_t n_batch_dims, const func_t& f) {
-  // no-op if batch is empty
-  if (n_batch_dims <= 0) {
-    return;
-  }
-
-  std::vector<Tensor> tensors_view;
-  for (auto& tensor : tensors) {
-    std::vector<int64_t> tensor_view_sizes = {-1};
-    for (auto d = n_batch_dims; d < tensor.dim(); ++d) {
-      tensor_view_sizes.push_back(tensor.size(d));
-    }
-    auto tensor_squashed_batch_dims = tensor.view(tensor_view_sizes);
-    tensors_view.push_back(tensor_squashed_batch_dims);
-  }
-
-  for (
-    int64_t input_idx = 0;
-    input_idx < tensors_view[0].size(0);
-    ++input_idx) {
-    std::vector<Tensor> input_selected;
-    for (auto& tensor_view : tensors_view) {
-      auto curr_input = tensor_view.select(0, input_idx);
-      input_selected.push_back(curr_input);
-    }
-    f(input_selected);
-  }
-}
-
-Tensor matrix_power(const Tensor& matrices, const Tensor& powers) {
-  if (matrices.dim() > 2) {
-    auto res = at::empty(matrices.sizes(), matrices.options());
-
-    batch_apply(
-      {res, matrices, powers},
-      matrices.dim() - 2,
-      [](auto tensors) {
-        auto& out = tensors[0];
-        auto& in = tensors[1];
-        int64_t n = tensors[2].template item<int64_t>();
-        out.copy_(at::matrix_power(in, n));
-      }
-    );
-
-    return res;
-  }
-  else {
-    int64_t n = powers.template item<int64_t>();
-    return at::matrix_power(matrices, n);
-  }
-}
-
 Tensor operator_1_norm(const Tensor& tensor) {
   return std::get<0>(tensor.abs().sum(-2).max(-1));
+}
+
+// Allocates a buffers of uninitialized or zero values
+// of shape [n_copies, a.size()]
+Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
+  if (is_zero) {
+    return at::zeros(
+      {n_copies, a.size(0), a.size(1), a.size(2)},
+      a.options().memory_format(at::MemoryFormat::Contiguous)
+    );
+  }
+  else {
+    return at::empty(
+      {n_copies, a.size(0), a.size(1), a.size(2)},
+      a.options().memory_format(at::MemoryFormat::Contiguous)
+    );
+  }
+}
+
+// Makes `buffer` to store `num_matrices` number of matrices needed for
+// compute the matrix exponentials of different orders, i.e.
+// first `num_matrices` matrices from the list l := {I, A, A^2, A^3, A^6}
+// in a contiguous block of memory such that
+// buffer[0, ...] = l[0], // I
+// buffer[1, ...] = l[1], // A
+// ...
+// buffer[num_matrices - 1, ...] = l[num_matries - 1]
+void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
+  // fill I
+  buffer.select(0, 0).copy_(
+    at::eye(a.size(-1), buffer.options()).expand_as(a)
+  );
+
+  // fill a
+  buffer.select(0, 1).copy_(a);
+
+  // fill a^2
+  if (2 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 2), // out for a^2
+      buffer.select(0, 1),
+      buffer.select(0, 1)
+    );
+  }
+
+  // fill a^3
+  if (3 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 3), // out for a^3
+      buffer.select(0, 1),
+      buffer.select(0, 2)
+    );
+  }
+
+  // fill a^6
+  if (4 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 4),
+      buffer.select(0, 3),
+      buffer.select(0, 3)
+    );
+  }
 }
 
 Tensor compute_T1(const Tensor& A) {
@@ -797,7 +804,7 @@ Tensor compute_T8(const Tensor& A) {
 template <typename scalar_t>
 Tensor compute_T12(const Tensor& A) {
   constexpr int num_prods = 4;
-  constexpr array2d<scalar_t, num_prods, num_prods> b = {{
+  array2d<scalar_t, num_prods, num_prods> b = {{
     {
       9.0198e-16,
       0.46932117595418237389,
@@ -824,26 +831,22 @@ Tensor compute_T12(const Tensor& A) {
     }
   }};
 
-  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto& A2 = at::matmul(A, A);
-  const auto& A3 = at::matmul(A2, A);
-  std::array<
-    std::reference_wrapper<const Tensor>,
-    num_prods> As = {I, A, A2, A3};
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device of type `A.device().type()`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  ).to(A.device().type());
 
-  std::array<Tensor, num_prods> Bs;
-  for (int i = 0; i < num_prods; ++i) {
-    Bs[i] = at::zeros(A.sizes(), A.options());
-  }
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
 
-  for (int i = 0; i < num_prods; ++i) {
-    for (int j = 0; j < num_prods; ++j) {
-      Bs[i] += b[i][j] * As[j];
-    }
-  }
+  auto Bs = at::native::_compute_linear_combination(As, bs);
 
-  const auto& A6 = Bs[2] + at::matmul(Bs[3], Bs[3]);
-  const auto& res = Bs[0] + at::matmul(Bs[1] + A6, A6);
+  const auto A6 = Bs.select(0, 2) + at::matmul(Bs.select(0, 3), Bs.select(0, 3));
+  const auto res = Bs.select(0, 0) + at::matmul(Bs.select(0, 1) + A6, A6);
 
   return res;
 }
@@ -851,7 +854,7 @@ Tensor compute_T12(const Tensor& A) {
 template <typename scalar_t>
 Tensor compute_T18(const Tensor& A) {
   constexpr int num_prods = 5;
-  constexpr array2d<scalar_t, num_prods, num_prods> b = {{
+  array2d<scalar_t, num_prods, num_prods> b = {{
     {
       0.,
       -1.00365581030144618291e-01,
@@ -889,63 +892,80 @@ Tensor compute_T18(const Tensor& A) {
     }
   }};
 
-  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto& A2 = at::matmul(A, A);
-  const auto& A3 = at::matmul(A2, A);
-  const auto& A6 = at::matmul(A3, A3);
-  std::array<
-    std::reference_wrapper<const Tensor>,
-    num_prods> As = {I, A, A2, A3, A6};
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device of type `A.device().type()`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  ).to(A.device().type());
 
-  std::array<Tensor, num_prods> Bs;
-  for (int i = 0; i < num_prods; ++i) {
-    Bs[i] = at::zeros(A.sizes(), A.options());
-  }
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
 
-  for (int i = 0; i < num_prods; ++i) {
-    for (int j = 0; j < num_prods; ++j) {
-      Bs[i] += b[i][j] * As[j];
-    }
-  }
+  auto Bs = at::native::_compute_linear_combination(As, bs);
 
-  const auto& A9 = at::matmul(Bs[0], Bs[4]) + Bs[3];
-  const auto& res = Bs[1] + at::matmul(Bs[2] + A9, A9);
-
+  const auto A9 = at::matmul(Bs.select(0, 0), Bs.select(0, 4)) + Bs.select(0, 3);
+  const auto res = Bs.select(0, 1) + at::matmul(Bs.select(0, 2) + A9, A9);
   return res;
 }
 
 template <typename scalar_t>
-Tensor mexp_impl(const Tensor& a, std::array<scalar_t, total_n_degs> thetas) {
-  auto norm = operator_1_norm(a);
+void mexp_impl(
+  Tensor& res,
+  const Tensor& a,
+  std::array<scalar_t, total_n_degs> thetas,
+  bool compute_highest_degree_approx = false
+) {
+  const auto norm = operator_1_norm(a);
 
-  auto norm_value = norm.template item<scalar_t>();
-  constexpr std::array<
-    Tensor(*)(const Tensor&),
-    total_n_degs - 1> 
-  compute_Ts = {
-    compute_T1, compute_T2, compute_T4,
-    compute_T8<scalar_t>, compute_T12<scalar_t>
-  };
+  if (!compute_highest_degree_approx) {
+    constexpr std::array<
+      Tensor(*)(const Tensor&),
+      total_n_degs - 1> 
+    compute_Ts = {
+      compute_T1, compute_T2, compute_T4,
+      compute_T8<scalar_t>, compute_T12<scalar_t>
+    };
 
-  for (int i = 0; i < total_n_degs - 1; ++i) {
-    if (norm_value <= thetas[i]) {
-      return compute_Ts[i](a);
+    for (int i = 0; i < total_n_degs - 1; ++i) {
+      if ((norm <= thetas[i]).all().template item<bool>()) {
+        res.copy_(compute_Ts[i](a));
+        return;
+      }
     }
   }
 
   // Scale
-  auto s = at::max(at::zeros_like(norm),
-              at::ceil(at::log2(norm / thetas[total_n_degs - 1]))).to(at::kLong);
-  auto pow2s = at::pow(2, s);
-  auto a_scaled = a / pow2s.unsqueeze(-1).unsqueeze(-1);
+  const auto s = at::max(
+    at::zeros_like(norm),
+    at::ceil(at::log2(norm / thetas[total_n_degs - 1])))
+    .unsqueeze(-1).unsqueeze(-1).to(at::kLong);
+  const auto pow2s = at::pow(2, s);
+  const auto a_scaled = a / pow2s;
 
   // Square
-  return matrix_power(compute_T18<scalar_t>(a_scaled), pow2s);
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+  const auto s_cpu = s.to(at::kCPU);
+  for (int64_t i = 0; i < a.size(0); ++i) {
+    auto s_val = s_cpu.select(0, i).template item<int>();
+    auto mexp = mexp_scaled.select(0, i);
+    for (int p = 0; p < s_val; ++p) {
+      mexp = at::matmul(mexp, mexp);
+    }
+    res.select(0, i).copy_(mexp);
+  }
 }
 
-// matrix exponential of a single matrix
-Tensor mexp(const Tensor& a) {
-  if (a.scalar_type() == at::ScalarType::Float) {
+// matrix exponential
+Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
+  auto res = at::empty_like(a);
+  auto res_3d = res.view({-1, a.size(-2), a.size(-1)});
+  const auto a_3d = a.view({-1, a.size(-2), a.size(-1)});
+
+  if (a.scalar_type() == at::ScalarType::Float
+      || a.scalar_type() == at::ScalarType::ComplexFloat) {
     constexpr std::array<float, total_n_degs> thetas_float = {
       1.192092800768788e-07, // deg 1
       5.978858893805233e-04, // deg 2
@@ -954,9 +974,10 @@ Tensor mexp(const Tensor& a) {
       1.461661507209034e+00, // deg 12
       3.010066362817634e+00  // deg 18
     };
-    return mexp_impl<float>(a, thetas_float);
+
+    mexp_impl<float>(res_3d, a_3d, thetas_float, compute_highest_degree_approx);
   }
-  else { // if Double
+  else { // if Double or ComplexDouble
     constexpr std::array<double, total_n_degs> thetas_double = {
       2.220446049250313e-16, // deg 1
       2.580956802971767e-08, // deg 2
@@ -965,8 +986,11 @@ Tensor mexp(const Tensor& a) {
       2.996158913811580e-01, // deg 12
       1.090863719290036e+00  // deg 18
     };
-    return mexp_impl<double>(a, thetas_double);
+
+    mexp_impl<double>(res_3d, a_3d, thetas_double, compute_highest_degree_approx);
   }
+
+  return res;
 }
 
 // Based on:
@@ -1024,16 +1048,19 @@ Tensor matrix_exp(const Tensor& a) {
   }
   else {
     auto res = at::empty(a.sizes(), a.options());
-    batch_apply(
-      {res, a},
-      a.dim() - 2,
-      [](auto tensors) {
-        auto& out = tensors[0];
-        auto& in = tensors[1];
-
-        out.copy_(mexp(in));
+    if (a.device().type() == at::kCPU) {
+      auto res_3d = res.view({-1, res.size(-2), res.size(-1)});
+      auto const a_3d = a.view({-1, a.size(-2), a.size(-1)});
+      // iterate over matrices in a batch
+      for (int64_t i = 0; i < a_3d.size(0); ++i) {
+        res_3d.select(0, i).copy_(
+          mexp(a_3d.select(0, i))
+        );
       }
-    );
+    }
+    else { // if CUDA
+      res.copy_(mexp(a, true));
+    }
     return res;
   }
 }
