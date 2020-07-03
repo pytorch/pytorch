@@ -2251,11 +2251,12 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
                 self.dropout = torch.nn.Dropout()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
-                x = self.conv(x)
+                x = self.conv1(x)
                 # add_scalar
                 x = x + 3
                 # mul_scalar
@@ -2316,7 +2317,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 y = []
                 y.append(x)
                 x, _ = y
-                x = self.conv(x)
+                x = self.conv2(x)
                 return x
 
         data = torch.rand(1, 3, 10, 10)
@@ -2336,14 +2337,18 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # TODO: the checks are problematic, we need to split all checks
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_count("quantized::conv2d", 2, exactly=True) \
-                   .check("aten::dequantize") \
+                   .run(m.graph)
+
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
+                   .run(m.graph)
+
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
 
         FileCheck().check("quantized::add_scalar") \
                    .check("quantized::mul_scalar") \
+                   .check("aten::append(") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
