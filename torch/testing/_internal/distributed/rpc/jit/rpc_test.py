@@ -1074,7 +1074,7 @@ class JitRpcTest(
             profiled_name = f"rpc_async_jit#({qual_name})#({worker_name(self.rank)})->({dst_worker_name})"
             self.assertEqual(profiled_name, rpc_async_jit_event.name)
             remote_events = [event for event in function_events if event.is_remote]
-            # All remote eevnts should have taken place on dst_rank
+            # All remote events should have taken place on dst_rank
             remote_event_node_ids = {
                 remote_event.node_id for remote_event in remote_events
             }
