@@ -36,9 +36,6 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 #endif
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::copy_", "")
-      .typed<Tensor & (Tensor &, const Tensor &, bool)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.copy_(src, non_blocking);
@@ -64,9 +61,6 @@ Tensor& resize_(
   }
 #endif
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::resize_", "")
-      .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.resize_(size, std::move(optional_memory_format));
@@ -85,9 +79,6 @@ Tensor& resize_as_(
   }
 #endif
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::resize_as_", "")
-      .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.resize_as_(the_template, std::move(optional_memory_format));
@@ -107,9 +98,6 @@ Tensor detach(const Tensor & self) {
   }
 #endif
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::detach", "")
-      .typed<Tensor (const Tensor &)>();
   auto result = [&]() {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return self.detach();
@@ -136,9 +124,6 @@ Tensor & detach_(Tensor & self) {
   }
 #endif
 
-  static auto op = c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::detach_", "")
-      .typed<Tensor & (Tensor &)>();
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.detach_();
