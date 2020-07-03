@@ -42,6 +42,7 @@ DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
+DEFINE_DISPATCH(lcm_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -840,11 +841,31 @@ Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
 
 Tensor gcd(const Tensor& self, const Tensor& other) {  
   Tensor result = at::empty({0}, self.options());
-  return native::gcd_out(result, self, other);
+  return at::gcd_out(result, self, other);
 }
 
 Tensor& gcd_(Tensor& self, const Tensor& other) {
-  return native::gcd_out(self, self, other);
+  return at::gcd_out(self, self, other);
+}
+
+Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(isIntegralType(self.scalar_type(), /*includeBool=*/ true),
+              "LCM computation requires integral types; given type is ", 
+              self.scalar_type());
+  auto precomputed_gcd = at::gcd(self, other);
+  auto iter = TensorIterator::binary_op(result, precomputed_gcd, at::mul(self, other),
+                                        /*check_mem_overlap=*/ true);
+  lcm_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor lcm(const Tensor& self, const Tensor& other) {  
+  Tensor result = at::empty({0}, self.options());
+  return at::lcm_out(result, self, other);
+}
+
+Tensor& lcm_(Tensor& self, const Tensor& other) {
+  return at::lcm_out(self, self, other);
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
