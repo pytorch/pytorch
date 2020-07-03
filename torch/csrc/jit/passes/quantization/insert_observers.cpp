@@ -34,7 +34,6 @@ using QConfigTypePtrMap =
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
-using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
