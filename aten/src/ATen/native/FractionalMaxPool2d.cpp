@@ -15,13 +15,15 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
   int inputSize,
   int outputSize,
   int poolSize) {
-  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-    static_cast<scalar_t>(outputSize - 1);
   std::vector<int> sequence(outputSize);
+  if (outputSize > 1) {
+    scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+      static_cast<scalar_t>(outputSize - 1);
 
-  for (int i = 0; i < outputSize - 1; ++i) {
-    sequence[i] =
-      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    for (int i = 0; i < outputSize - 1; ++i) {
+      sequence[i] =
+        static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    }
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -63,7 +65,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
           int inputWStart = sequenceW[w];
 
           scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-          int64_t maxIndex = -1;
+          int64_t maxIndex = 0;
 
           int h2, w2;
           for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
@@ -73,15 +75,12 @@ static void fractional_max_pool2d_out_single_batch_frame(
 
               int planeIndex = h2 * inputW + w2;
               scalar_t val = inputForPlane[planeIndex];
-              if (val > maxVal) {
+              if (val > maxVal || std::isnan(val)) {
                 maxVal = val;
                 maxIndex = planeIndex;
               }
             }
           }
-
-          AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
-          AT_ASSERT(maxIndex != -1);
 
           outputForPlane[h * outputW + w] = maxVal;
           indicesForPlane[h * outputW + w] = maxIndex;
