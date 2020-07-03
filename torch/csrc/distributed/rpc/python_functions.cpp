@@ -122,8 +122,10 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
+    std::weak_ptr wp = futureResponseMessage;
     futureResponseMessage->addCallback(
-        at::wrapPropagateTLSState<void>([jitFuture, futureResponseMessage]() {
+        at::wrapPropagateTLSState<void>([jitFuture, wp]() {
+          auto futureResponseMessage = wp.lock();
           if (futureResponseMessage->hasError()) {
             jitFuture->setError(futureResponseMessage->error()->what());
           } else {
@@ -136,8 +138,10 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   } else {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(NoneType::get());
+    std::weak_ptr wp = futureResponseMessage;
     futureResponseMessage->addCallback(
-        at::wrapPropagateTLSState<void>([futureResponseMessage, jitFuture]() {
+        at::wrapPropagateTLSState<void>([wp, jitFuture]() {
+          auto futureResponseMessage = wp.lock();
           if (futureResponseMessage->hasError()) {
             jitFuture->setError(futureResponseMessage->error()->what());
           } else {
@@ -260,8 +264,10 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
+    std::weak_ptr wp = fm;
     fm->addCallback(
-        at::wrapPropagateTLSState<void>([forkId{userRRef->forkId()}, fm]() {
+        at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
+          auto fm = wp.lock();
           callback::confirmPendingUser(*fm, forkId);
         }));
     return PyRRef(userRRef);
@@ -283,8 +289,10 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
+    std::weak_ptr wp = fm;
     fm->addCallback(at::wrapPropagateTLSState<void>(
-        [fm, ownerRRefId = ownerRRef->rrefId()]() {
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto fm = wp.lock();
           callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
         }));
     return PyRRef(ownerRRef);
@@ -315,8 +323,10 @@ PyRRef pyRemotePythonUdf(
     userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
+    std::weak_ptr wp = fm;
     fm->addCallback(
-        at::wrapPropagateTLSState<void>([fm, forkId{userRRef->forkId()}]() {
+        at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
+          auto fm = wp.lock();
           callback::confirmPendingUser(*fm, forkId);
         }));
     return PyRRef(userRRef);
@@ -334,9 +344,10 @@ PyRRef pyRemotePythonUdf(
         isAsyncExecution);
 
     ownerRRef->registerOwnerCreationFuture(fm);
-
+    std::weak_ptr wp = fm;
     fm->addCallback(at::wrapPropagateTLSState<void>(
-        [fm, ownerRRefId = ownerRRef->rrefId()]() {
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto fm = wp.lock();
           auto deletedRRef =
               callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
           if (deletedRRef && deletedRRef->isPyObj()) {

@@ -54,8 +54,9 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback(at::wrapPropagateTLSState<void>([futPtr,
-                                                           futMessage]() {
+  std::weak_ptr wp = futMessage;
+  futMessage->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
+    auto futMessage = wp.lock();
     if (futMessage->hasError()) {
       c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
       futPtr->setError(std::move(jitFutErr));
@@ -107,8 +108,10 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     userRRefPtr->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
+    std::weak_ptr wp = fm;
     fm->addCallback(
-        at::wrapPropagateTLSState<void>([fm, forkId{userRRefPtr->forkId()}]() {
+        at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
+          auto fm = wp.lock();
           callback::confirmPendingUser(*fm, forkId);
         }));
 
@@ -133,8 +136,10 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
+    std::weak_ptr wp = fm;
     fm->addCallback(at::wrapPropagateTLSState<void>(
-        [fm, ownerRRefId = ownerRRefPtr->rrefId()]() {
+        [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
+          auto fm = wp.lock();
           callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
         }));
     return ownerRRefPtr;

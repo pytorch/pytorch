@@ -1078,6 +1078,7 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty_meta(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
@@ -1670,6 +1671,7 @@
     CUDA: _logcumsumexp_out_cuda
 
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
@@ -3024,6 +3026,7 @@
       SparseCUDA: _sparse_sum_backward_cuda
 
 - func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
 
 - func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
@@ -3035,10 +3038,12 @@
     SparseCPU: softmax_sparse_cpu
 
 - func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU: softmax_backward_sparse_cpu
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
 
 - func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
@@ -3050,6 +3055,7 @@
     SparseCPU: log_softmax_sparse_cpu
 
 - func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU: log_softmax_backward_sparse_cpu
 
@@ -4998,6 +5004,7 @@
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU, CUDA: unfold_backward
