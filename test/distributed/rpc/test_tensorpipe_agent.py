@@ -4,8 +4,8 @@ import unittest
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
-    TestDdpComparison,
-    TestDdpUnderDistAutograd,
+    DdpComparisonTest,
+    DdpUnderDistAutogradTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import DistAutogradTest
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
@@ -38,11 +38,11 @@ class TensorPipeDistOptimizerTestWithSpawn(DistOptimizerTest, SpawnHelper):
     pass
 
 
-class TensorPipeTestDdpUnderDistAutograd(TestDdpUnderDistAutograd, SpawnHelper):
+class TensorPipeDdpUnderDistAutogradTest(DdpUnderDistAutogradTest, SpawnHelper):
     pass
 
 
-class TensorPipeTestDdpComparison(TestDdpComparison, SpawnHelper):
+class TensorPipeDdpComparisonTest(DdpComparisonTest, SpawnHelper):
     pass
 
 
