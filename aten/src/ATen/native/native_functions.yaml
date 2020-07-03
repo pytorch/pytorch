@@ -3324,7 +3324,7 @@
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
-- func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, *, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 

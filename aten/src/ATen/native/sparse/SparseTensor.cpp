@@ -141,7 +141,8 @@ namespace {
   }
 }
 
-Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
+Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, const Tensor& reduction,
+                         ArrayRef<int64_t> size, Scalar fill_value, const TensorOptions& options) {
   Tensor values = expand_values_if_needed(values_);
   // make sure that indicies do not contain any entries that are greater than the dim.
   int64_t sparse_dim = indices.size(0)-1;
