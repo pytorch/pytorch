@@ -856,6 +856,7 @@ def method_tests():
         ('nanprod', prod_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', (), [0]),
         ('nanprod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', (), [0]),
         ('nanprod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', (), [0]),
+        ('nanprod', prod_single_zero(S), NO_ARGS, 'single_zero'),
         ('nanprod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
         ('nanprod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', (), [0]),
         ('nanprod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),

@@ -157,7 +157,6 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.mul_`,:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.mv`, :func:`torch.mv`",:ref:`contracts_away_dims-doc`
    :attr:`Tensor.names`,See documentation
-   ":meth:`Tensor.nanprod`, :func:`torch.nanprod`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.narrow`, :func:`torch.narrow`",:ref:`keeps_input_names-doc`
    :attr:`Tensor.ndim`,None
    :meth:`Tensor.ndimension`,None

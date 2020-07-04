@@ -355,15 +355,6 @@ Tensor& nanprod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdi
   return at::native::nanprod_out_impl(result, self, dim, keepdim, dtype);
 }
 
-Tensor nanprod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  return at::nanprod(self, dimname_to_position(self, dim), keepdim, dtype);
-}
-
-Tensor& nanprod_out(Tensor& result, const Tensor& self, Dimname dim,
-                    bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::nanprod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
-}
-
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();

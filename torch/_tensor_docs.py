@@ -2019,7 +2019,7 @@ In-place version of :meth:`~Tensor.mvlgamma`
 
 add_docstr_all('nanprod',
                r"""
-nanprod(dim=None, keepdim=False, dtype=Nnone) -> Tensor
+nanprod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.nanprod`
 """)

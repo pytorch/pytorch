@@ -4713,8 +4713,7 @@ add_docstr(torch.nanprod,
            r"""
 nanprod(input, dtype=None) -> Tensor
 
-Returns the product of all elements excluding ``NaN`` values in the
-:attr:`input` tensor.
+Returns the product of all elements in the input tensor, treating ``NaN`` values as ones.
 
 Args:
     {input}
@@ -4730,7 +4729,7 @@ Example::
 .. function:: nanprod(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim` excluding `NaN` values.
+dimension :attr:`dim`, treating ``NaN`` values as ones.
 
 {keepdim_details}
 
