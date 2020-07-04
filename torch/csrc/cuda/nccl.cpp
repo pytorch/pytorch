@@ -91,6 +91,8 @@ ncclDataType_t get_data_type(const Tensor& t) {
       return ncclChar;
     case at::kByte:
       return ncclChar;
+    case at::kBool:
+      return ncclChar;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
