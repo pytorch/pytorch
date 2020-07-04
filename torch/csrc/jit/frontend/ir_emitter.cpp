@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -27,6 +28,7 @@
 #include <atomic>
 #include <climits>
 #include <set>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -373,9 +375,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
-              << simple_parent->type()->python_str()
+              << simple_parent->type()->repr_str()
               << " but is now being assigned to a value of type "
-              << as_simple_value->type()->python_str();
+              << as_simple_value->type()->repr_str();
 
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
@@ -396,9 +398,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
-            << annotated_type->python_str()
+            << annotated_type->repr_str()
             << " but is being assigned to a value of type "
-            << as_simple_value->type()->python_str();
+            << as_simple_value->type()->repr_str();
       }
       insertStore(name, loc, std::move(as_simple_value), annotated_type);
     } else {
@@ -411,6 +413,17 @@ struct Environment {
   }
   Value* getVar(const Ident& ident) {
     return getSugaredVar(ident)->asValue(ident.range(), method);
+  }
+
+  void throwVarNotFoundError(
+      const std::string& ident,
+      const SourceRange& range) {
+    // check if this value was not emitted in an if statement because of a
+    // type mismatch. if it was, then we print a more informative error msg
+    if (auto msg = findVariableTypeError(ident)) {
+      throw ErrorReport(range) << *msg << "and was used here";
+    }
+    throw ErrorReport(range) << "undefined value " << ident;
   }
 
   SugaredValuePtr getSugaredVar(
@@ -463,6 +476,7 @@ struct Environment {
                "__round__",
                std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
@@ -508,18 +522,27 @@ struct Environment {
     }
 
     if (!retval && required) {
-      // check if this value was not emitted in an if statement because of a
-      // type mismatch. if it was, then we print a more informative error msg
-      if (auto msg = findVariableTypeError(ident)) {
-        throw ErrorReport(range) << *msg << "and was used here";
-      }
-      throw ErrorReport(range) << "undefined value " << ident;
+      throwVarNotFoundError(ident, range);
     }
     return retval;
   }
 
   Value* getVar(const std::string& ident, const SourceRange& range) {
     return getSugaredVar(ident, range)->asValue(range, method);
+  }
+
+  void removeVar(const Ident& ident, bool check_if_removed = false) {
+    bool removed = false;
+
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      auto a = runner->value_table.erase(ident.name());
+      auto b = runner->type_table.erase(ident.name());
+      removed = a || b;
+    }
+
+    if (check_if_removed && !removed) {
+      throwVarNotFoundError(ident.name(), ident.range());
+    }
   }
 
   std::vector<std::string> definedVariables() {
@@ -617,6 +640,9 @@ struct to_ir {
     // it only needs to run once.
     CanonicalizeModifiedLoops(graph);
 
+    // Convert Ops to a Normalized Form
+    NormalizeOps(graph);
+
     runCleanupPasses(graph);
   }
 
@@ -699,7 +725,7 @@ struct to_ir {
   // see [setstate type]
   static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    auto getstate = self->getClassType()->getMethod("__getstate__");
+    auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
       throw ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
@@ -710,7 +736,7 @@ struct to_ir {
     getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
-        ->getSchema()
+        .getSchema()
         .returns()
         .at(0)
         .type();
@@ -900,26 +926,30 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+    if (stmt.expr().kind() == TK_SUBSCRIPT) {
+      Subscript subscript(stmt.expr());
+      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(stmt.range())
+            << "del statements only support deletion at a single index, "
+               "slicing is not supported"
+               " (see https://github.com/pytorch/pytorch/issues/31430)";
+      }
+      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+      const SourceRange& val_range = subscript.value().range();
+      Value* idx = emitExpr(subscript_exprs[0]);
+      Value* val = sv->asValue(val_range, method);
+      auto node = graph->create(aten::Delete, {val, idx}, 0)
+                      ->setSourceRange(stmt.range());
+      graph->insertNode(node);
+    } else if (stmt.expr().kind() == TK_VAR) {
+      Var var(stmt.expr());
+      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
+    } else {
       throw ErrorReport(stmt.range())
-          << "del statements are only supported for list"
-             " and dict item deletion";
+          << "del statements are only supported for deleting"
+             " list and dict items and variables";
     }
-    Subscript subscript(stmt.expr());
-    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      throw ErrorReport(stmt.range())
-          << "del statements only support deletion at a single index, "
-             "slicing is not supported"
-             " (see https://github.com/pytorch/pytorch/issues/31430)";
-    }
-    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-    const SourceRange& val_range = subscript.value().range();
-    Value* idx = emitExpr(subscript_exprs[0]);
-    Value* val = sv->asValue(val_range, method);
-    auto node = graph->create(aten::Delete, {val, idx}, 0)
-                    ->setSourceRange(stmt.range());
-    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -943,8 +973,8 @@ struct to_ir {
       if (!result->type()->isSubtypeOf(result_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
-            << result_type->python_str() << " but is actually of type "
-            << result->type()->python_str();
+            << result_type->repr_str() << " but is actually of type "
+            << result->type()->repr_str();
       }
     } else {
       result_type = def_stack_.back().merged_return_type_;
@@ -955,9 +985,9 @@ struct to_ir {
       if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
-            << result_type->python_str()
+            << result_type->repr_str()
             << " but this return statement returns a value of type "
-            << result->type()->python_str();
+            << result->type()->repr_str();
       }
       result_type = merged_result_type.value();
     }
@@ -1016,6 +1046,9 @@ struct to_ir {
           break;
         case TK_DELETE:
           emitDelete(Delete(stmt));
+          break;
+        case TK_WITH:
+          emitWith(With(stmt));
           break;
         default:
           throw ErrorReport(stmt)
@@ -1131,7 +1164,7 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(emitExpr(expr));
+        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
@@ -1179,11 +1212,19 @@ struct to_ir {
         throw ErrorReport(loc)
             << "Expected list type annotation for list comprehension"
                ", found "
-            << type_hint->python_str();
+            << type_hint->repr_str();
       }
       list_value->setType(type_hint);
       type_set = true;
     }
+
+    // comprehension introduces it's own scope. no variable assigned
+    // leaks into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
       if (!type_set) {
@@ -1195,6 +1236,7 @@ struct to_ir {
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
     return list_value;
   }
 
@@ -1238,13 +1280,19 @@ struct to_ir {
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if ((lhs.staticIf() && *lhs.staticIf()) ||
+          (rhs->staticIf() && *rhs->staticIf())) {
+        static_if = true;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() || *rhs->staticIf();
       }
     } else {
       new_result = emitIfExpr(loc, lhs, get_continue_expr, get_const_expr);
       refinements = lhs.refinements().And(rhs->refinements());
-      if (lhs.staticIf() && rhs->staticIf()) {
+      if (((lhs.staticIf() && !*lhs.staticIf()) ||
+           (rhs->staticIf() && !*rhs->staticIf()))) {
+        static_if = false;
+      } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() && *rhs->staticIf();
       }
     }
@@ -1282,8 +1330,8 @@ struct to_ir {
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
       throw ErrorReport(range)
-          << "if-expression's true branch has type " << true_type->python_str()
-          << " but false branch has type " << false_type->python_str();
+          << "if-expression's true branch has type " << true_type->repr_str()
+          << " but false branch has type " << false_type->repr_str();
     }
 
     // Add op outputs
@@ -1291,21 +1339,20 @@ struct to_ir {
 
     return expr_value;
   }
-  Value* emitToBool(Value* v) {
-    SourceRange loc = v->node()->sourceRange();
+  Value* emitToBool(const SourceRange& loc, Value* v) {
     Value* out;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
       out = asSimple(bool_cast->call(loc, method, {v}, {}, 0));
     } catch (...) {
       throw ErrorReport(loc) << "Could not cast value of type "
-                             << v->type()->python_str() << " to bool";
+                             << v->type()->repr_str() << " to bool";
     }
     // cast value not response for checking output type
     if (!out->type()->isSubtypeOf(BoolType::get())) {
       throw ErrorReport(loc)
           << "expected a bool expression for condition but found "
-          << out->type()->python_str();
+          << out->type()->repr_str();
     }
     return out;
   }
@@ -1464,8 +1511,8 @@ struct to_ir {
       if (!unified) {
         ErrorReport error(loc);
         error << "Type mismatch: " << x << " is set to type "
-              << tv->type()->python_str() << " in the true branch"
-              << " and type " << fv->type()->python_str()
+              << tv->type()->repr_str() << " in the true branch"
+              << " and type " << fv->type()->repr_str()
               << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
@@ -1481,21 +1528,13 @@ struct to_ir {
   }
 
   CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
-    auto obj = emitExpr(objExpr);
-    const auto& type = obj->type();
+    auto obj = emitSugaredExpr(objExpr, 1);
     if (attrExpr.kind() != TK_STRINGLITERAL) {
       throw ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal";
     }
-    auto cls = type->cast<ClassType>();
-    if (!cls) {
-      throw ErrorReport(objExpr)
-          << "hasattr's first argument must be an object, got "
-          << type->python_str() << " instead";
-    }
-
     const std::string& name = StringLiteral(attrExpr).text();
-    const bool hasAttr = cls->hasAttribute(name);
+    const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 
@@ -1538,9 +1577,9 @@ struct to_ir {
             return false;
           }
           if ((typ->isSubtypeOf(AnyListType::get()) &&
-                  maybeOfKind(ListType::Kind, actual_type)) ||
+               maybeOfKind(ListType::Kind, actual_type)) ||
               (typ->isSubtypeOf(AnyTupleType::get()) &&
-                  maybeOfKind(TupleType::Kind, actual_type))) {
+               maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
@@ -1621,7 +1660,7 @@ struct to_ir {
       Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
-        out = emitToBool(emitExpr(cond.value()));
+        out = emitToBool(cond.value().range(), emitExpr(cond.value()));
       } else {
         WithInsertPoint insert(n);
         out = graph->insertConstant(true, range);
@@ -1718,6 +1757,82 @@ struct to_ir {
     emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
   }
 
+  void emitWith(const With& stmt) {
+    auto targets = stmt.targets();
+    // Keep a stack of entered objects so they can be exited
+    // in the right order.
+    std::stack<Value*> entered;
+
+    for (const auto& target : targets) {
+      Expr e = target.target();
+
+      auto* rhs = emitExpr(e);
+      auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
+      entered.push(rhs);
+      auto rhsClass = rhs->type()->expect<ClassType>();
+
+      if (!rhsClass) {
+        throw ErrorReport(e.range())
+            << "With item expression does not return a class type";
+      }
+
+      auto* enterMethod = rhsClass->findMethod("__enter__");
+      auto* exitMethod = rhsClass->findMethod("__exit__");
+
+      if (!enterMethod || !exitMethod) {
+        throw ErrorReport(e.range())
+            << "Object returned by with item expression does not define __enter__ and __exit__ methods";
+      }
+
+      // Check the schema of __enter__.
+      auto& enterSchema = enterMethod->getSchema();
+      if (enterSchema.arguments().size() != 1) {
+        throw ErrorReport(e.range())
+            << "__enter__ must have only one argument and one return value";
+      }
+
+      // Check the schema of __exit__.
+      auto& exitSchema = exitMethod->getSchema();
+      if (exitSchema.arguments().size() != 4) {
+        throw ErrorReport(e.range())
+            << "__exit__ must have four arguments and no return value";
+      } else {
+        if (exitSchema.returns().at(0).type() != NoneType::get()) {
+          throw ErrorReport(e.range()) << "__exit__ must have no return value";
+        }
+
+        for (unsigned i = 1; i < 4; ++i) {
+          if (exitSchema.arguments().at(i).type() != AnyType::get()) {
+            throw ErrorReport(e.range())
+                << "argument " << i
+                << " of __exit__ must have Any type; TorchScript does not currently support passing exception type, value, or traceback to the __exit__ function.";
+          }
+        }
+      }
+
+      // Set the output of the enter node to be the return type of __enter__.
+      n->output(0)->setType(enterSchema.returns().at(0).type());
+
+      // Set i = e.__enter__() so that references to i in the body of the with
+      // will resolve correctly.
+      if (target.var().present()) {
+        Var i = target.var().get();
+        environment_stack->setVar(i.range(), i.name().name(), n->output(0));
+      }
+    }
+
+    emitStatements(stmt.body());
+
+    // Insert all the corresponding prim::Exit nodes.
+    while (!entered.empty()) {
+      auto* input = entered.top();
+      entered.pop();
+      auto* n = graph->create(prim::Exit);
+      graph->insertNode(n);
+      n->addInput(input);
+    }
+  }
+
   // Currently we do not support assigning exceptions to variables,
   // a = Exception("hi")
   // raise a
@@ -1791,6 +1906,8 @@ struct to_ir {
         return use_inplace_op ? aten::div_ : aten::div;
       case '*':
         return use_inplace_op ? aten::mul_ : aten::mul;
+      case '%':
+        return use_inplace_op ? aten::fmod_ : aten::fmod;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1811,6 +1928,8 @@ struct to_ir {
             std::string("__itruediv__"), std::string("__truediv__"));
       case '*':
         return std::make_pair(std::string("__imul__"), std::string("__mul__"));
+      case '%':
+        return std::make_pair(std::string("__imod__"), std::string("__mod__"));
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1863,9 +1982,7 @@ struct to_ir {
     environment_stack->setVar(lhs.range(), lhs.name().name(), result);
   }
 
-  Value* emitAugAssignmentHelper(
-      const AugAssign& stmt,
-      Value* lhs) {
+  Value* emitAugAssignmentHelper(const AugAssign& stmt, Value* lhs) {
     if (lhs->type()->kind() == TypeKind::ClassType) {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
@@ -1879,13 +1996,13 @@ struct to_ir {
       // __iadd__ is not present)
       auto type = lhs->type()->expect<ClassType>();
       std::string magic_method_name;
-      if (type->getMethod(in_place_method_name)) {
+      if (type->findMethod(in_place_method_name)) {
         magic_method_name = in_place_method_name;
-      } else if (type->getMethod(out_of_place_method_name)) {
+      } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
-            << "Cannot emit inplace op on " << type->python_str()
+            << "Cannot emit inplace op on " << type->repr_str()
             << " since it does not define an " << in_place_method_name << " or "
             << out_of_place_method_name << " method";
       }
@@ -1917,7 +2034,7 @@ struct to_ir {
     const TypePtr type = sliceable->type();
     if (subscriptExprs.size() != 1) {
       throw ErrorReport(subscriptExprs)
-          << "Sliced expression not yet supported for " << type->python_str()
+          << "Sliced expression not yet supported for " << type->repr_str()
           << " augmented assignment. "
           << "File a bug if you want this";
     }
@@ -1931,7 +2048,7 @@ struct to_ir {
 
     if (elemType == nullptr) {
       throw ErrorReport(lhs)
-          << type->python_str() << " does not support augmented assignment.";
+          << type->repr_str() << " does not support augmented assignment.";
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =
@@ -2003,6 +2120,28 @@ struct to_ir {
     }
   }
 
+  NamedValue emitValueToTensor(
+      const NamedValue& value,
+      const NamedValue& matchTypeOf) {
+    // Add implicit conversion of int/float/bool types to tensors
+    // Used in emitSubscriptAssign to convert:
+    //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
+    // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
+    const auto kind = value.type()->kind();
+    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
+        kind == c10::TypeKind::FloatType) {
+      auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
+      auto device = graph->insert(prim::device, {matchTypeOf}, {});
+      auto converted = graph->insert(
+          aten::tensor,
+          {value},
+          {NamedValue("dtype", dtype), NamedValue("device", device)});
+      return NamedValue(value.loc(), converted);
+    }
+
+    return value;
+  }
+
   // Emit mutating assignments like `foo[0] = bar`
   void emitSubscriptAssign(
       const SourceRange& stmtRange,
@@ -2031,10 +2170,14 @@ struct to_ir {
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
+
+      // rhs must be a tensor, implicitly convert int/float/bool
+      const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
+
       if (tensorIndices.size() == 0) {
         // Common case: we only tried to index with int and slices. Copy the
         // RHS into the resulting tensor.
-        graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
+        graph->insert(aten::copy_, {slicedArg, convertedRhs}, {}, stmtRange);
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
         // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
@@ -2044,7 +2187,10 @@ struct to_ir {
                                  ->output();
 
         graph->insert(
-            aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
+            aten::index_put_,
+            {slicedArg, indices, convertedRhs},
+            {},
+            stmtRange);
       }
       // Otherwise, this is a list or a classtype.
       // Dispatch to aten::_set_item to both select and assign
@@ -2202,10 +2348,41 @@ struct to_ir {
         if (stmt.type().present()) {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
+        auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
+        // START BC HACK
+        //
+        // For old serialized quantized RNN modules, switch
+        // quantized::linear_prepack to quantized::linear_prepack_legacy. We
+        // changed linear_prepack to return a TorchBind class and not a
+        // cpp_custom_type_hack tensor anymore, but the old serialized models
+        // are tightly coupled with the type_hack version. If we still create a
+        // Tensor here, then the quantized_lstm.legacy overload can kick in in
+        // forward_impl(), and the module will still run correctly.
+        if (method.qualname() ==
+            "__torch__.torch.nn.quantized.dynamic.modules.rnn.PackedParameter.__setstate__") {
+          if (auto sv =
+                  std::dynamic_pointer_cast<SimpleValue>(rhs_sugared_val)) {
+            Node* rhs_node = sv->getValue()->node();
+            if (rhs_node->kind() ==
+                Symbol::fromQualString("quantized::linear_prepack")) {
+              std::vector<NamedValue> inputs;
+              for (Value* i : rhs_node->inputs()) {
+                inputs.emplace_back(i);
+              }
+              Value* new_val = rhs_node->owningGraph()->insert(
+                  Symbol::fromQualString("quantized::linear_prepack_legacy"),
+                  inputs,
+                  {},
+                  rhs_node->sourceRange());
+              rhs_sugared_val = std::make_shared<SimpleValue>(new_val);
+            }
+          }
+        }
+        // END BC HACK
         environment_stack->setSugaredVar(
             v.range(),
             v.name().name(),
-            emitSugaredExpr(rhs, 1, type),
+            std::move(rhs_sugared_val),
             /*annotated_type=*/type);
       } break;
       case TK_TUPLE_LITERAL:
@@ -2227,9 +2404,14 @@ struct to_ir {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
+
+    TypePtr type_hint = nullptr;
+    if (stmt.type().present()) {
+      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+    }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
-    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
@@ -2444,8 +2626,8 @@ struct to_ir {
         std::stringstream why_not;
         if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
           throw ErrorReport(apply.inputs())
-              << "expected an expression of type " << type->python_str()
-              << " but found " << expr->type()->python_str() << "\n"
+              << "expected an expression of type " << type->repr_str()
+              << " but found " << expr->type()->repr_str() << "\n"
               << why_not.str();
         }
 
@@ -2746,9 +2928,13 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+    auto rpcMinInputs = 2;
+    auto rpcMaxInputs = 5; // NOLINT
+    if (apply.inputs().size() < rpcMinInputs ||
+        apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
           << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
           << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
           << "rpc_async(dst_worker_name, user_callable, args)\n"
           << "rpc_async(dst_worker_name, user_callable)\n"
@@ -2780,7 +2966,9 @@ struct to_ir {
     // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
     // If `args` and `kwargs` are an empty tuple and an empty dict,
     // respectively, users are allowed to not pass `args` and `kwargs`.
-    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    TreeList args_kwargs_timeout_trees(
+        input_trees.begin() + 2, input_trees.end());
 
     // Get user callable.
     const auto& callablePtrs = user_callable_function_value->callees();
@@ -2799,11 +2987,11 @@ struct to_ir {
     std::vector<NamedValue> kwargs;
     // Get args and kwargs as `NamedValue`s.
     // Similar to getNamedValues(..) and emitAttributes(..).
-    if (args_kwargs_trees.size() >= 1) {
+    if (args_kwargs_timeout_trees.size() >= 1) {
       // Unroll args from a Var that is known to be a Tuple.
-      auto& args_tree = args_kwargs_trees[0];
+      auto& args_tree = args_kwargs_timeout_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
-                                       ->asTuple(args_tree->range(), method);
+                                      ->asTuple(args_tree->range(), method);
       args.reserve(entry_sugared_values.size());
       for (const auto& entrie_sugared_value : entry_sugared_values) {
         args.emplace_back(
@@ -2815,7 +3003,8 @@ struct to_ir {
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
 
@@ -2834,7 +3023,7 @@ struct to_ir {
       rpc_async_node->addInput(dst_worker_name_value);
       rpc_async_node->addInput(userCallableQualNameValue);
 
-      for (const auto& tree : args_kwargs_trees) {
+      for (const auto& tree : args_kwargs_timeout_trees) {
         rpc_async_node->addInput(emitExpr(Expr(tree)));
       }
     }
@@ -2946,7 +3135,7 @@ struct to_ir {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
                 << "Expected a List type hint but instead got "
-                << type_hint->python_str();
+                << type_hint->repr_str();
           }
         } else if (!values.empty()) {
           std::stringstream ss;
@@ -2964,8 +3153,8 @@ struct to_ir {
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
-                << elem_type->python_str() << " but found "
-                << v->type()->python_str() << " instead.\n"
+                << elem_type->repr_str() << " but found "
+                << v->type()->repr_str() << " instead.\n"
                 << ss.str();
           }
         }
@@ -3016,8 +3205,8 @@ struct to_ir {
               throw ErrorReport(trees[i])
                   << "Dict " << what
                   << " must contain only a single type, expected: "
-                  << type->python_str() << " but found "
-                  << values[i]->type()->python_str() << " instead.\n"
+                  << type->repr_str() << " but found "
+                  << values[i]->type()->repr_str() << " instead.\n"
                   << ss.str();
             }
           }
@@ -3168,11 +3357,40 @@ struct to_ir {
           return dim + 1;
         }
       }
-      TypePtr type_hint = OptionalType::ofTensor();
+      TypePtr type_hint;
       if (subscript_expr.kind() == TK_NONE) {
         type_hint = NoneType::get();
       }
       auto index = emitExpr(subscript_expr, type_hint);
+
+      // Accept list as subscript but convert it to a Tensor
+      // since it's equivalent to indexing with Tensor.
+      // The list can be a list literal or list variable.
+      // Advanced indexing using list:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[[0, 1, 5]]  # or
+      //   return x[[0, 1], [0, 1]]  # or
+      //   return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]  # or
+      //   ls = [0, 1]
+      //   return x[ls]
+      // Statements above are equivalent to advanced indexing using Tensor:
+      // @torch.jit.script
+      // def f(x):
+      //   return x[torch.tensor([0, 1, 5])]  # or
+      //   return x[torch.tensor([0, 1]), torch.tensor([0, 1])]  # or
+      //   return x[torch.tensor([[0, 1], [0, 1]]),
+      //            torch.tensor([[0, 1], [0, 1]])]  # or
+      //   ls = [0, 1]
+      //   return x[torch.tensor(ls)]
+      if (index->type()->kind() == c10::TypeKind::ListType) {
+        // Always create index tensor as LongTensor.
+        // This is to match Pytorch eager frontend behavior which accepts
+        // indexing with float list.
+        index = graph->insert(
+            aten::tensor, {index}, {NamedValue("dtype", c10::kLong)});
+      }
+
       exprs[expr_idx] = index;
       if (index->type()->isSubtypeOf(NoneType::get())) {
         if (is_reverse) {
@@ -3196,8 +3414,8 @@ struct to_ir {
       } else {
         throw ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
-            << index->type()->python_str()
-            << "'. Only ints, slices, and tensors are supported";
+            << index->type()->repr_str()
+            << "'. Only ints, slices, lists and tensors are supported";
       }
     };
 
@@ -3352,7 +3570,7 @@ struct to_ir {
       if (elems.size() == 0 ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
-            << "Cannot index into a " << tuple_typ->python_str()
+            << "Cannot index into a " << tuple_typ->repr_str()
             << " with a non-integer literal because we cannot resolve the output type";
       }
       output_type = elems[0];
@@ -3413,8 +3631,31 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return std::make_shared<SimpleValue>(emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs));
+      // TODO @wconstab refactor using Symbol instead of string compare
+      if (sv->kind() == "module") {
+        // Slicing isn't currently implemented for Sequential/ModuleList,
+        // but is implemented for Tuples, so a quick workaround is to
+        // convert to a tuple of Modules for slicing support.
+        auto s_tuple_val =
+            sv->asTupleValue(val_range, method)->asValue(val_range, method);
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto begin =
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        if (slice.end().present()) {
+          auto end =
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, end);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        } else {
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        }
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3467,41 +3708,6 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
-c10::QualifiedName CompilationUnit::mangle(
-    const c10::QualifiedName& name) const {
-  static const std::string manglePrefix = "___torch_mangle_";
-  std::vector<std::string> atoms = name.atoms();
-
-  // Search for an already-existing mangle namespace.
-  // If the name is already mangled, just bump the integer.
-  for (auto& atom : atoms) {
-    auto pos = atom.find(manglePrefix);
-    if (pos != std::string::npos) {
-      auto num = atom.substr(pos + manglePrefix.size());
-      // current mangle index in the name
-      size_t num_i = c10::stoi(num);
-      // bump the mangleIndex_ to num_i + 1
-      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
-      std::string newAtomPrefix;
-      newAtomPrefix.reserve(atom.size());
-      // Append the part of the name up to the end of the prefix
-      newAtomPrefix.append(atom, 0, pos);
-      newAtomPrefix.append(manglePrefix);
-      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
-      // increment mangleIndex_ until the type is not defined
-      while (get_type(QualifiedName(atoms))) {
-        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
-      }
-      return QualifiedName(atoms);
-    }
-  }
-
-  // Otherwise add a mangle namespace right before the basename
-  TORCH_INTERNAL_ASSERT(!atoms.empty());
-  atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
-  return QualifiedName(atoms);
-}
-
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
@@ -3528,7 +3734,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
-    ErrorReport::CallStack call(call_name);
+    ErrorReport::CallStack call(call_name, def.range());
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())

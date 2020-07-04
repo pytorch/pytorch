@@ -1,6 +1,7 @@
 # this code should be common among cwrap and ATen preprocessing
 # for now, I have put it in one place but right now is copied out of cwrap
 
+import copy
 
 def parse_arguments(args):
     new_args = []
@@ -21,6 +22,8 @@ def parse_arguments(args):
 
 def set_declaration_defaults(declaration):
     if 'schema_string' not in declaration:
+        # This happens for legacy TH bindings like
+        # _thnn_conv_depthwise2d_backward
         declaration['schema_string'] = ''
     if 'matches_jit_signature' not in declaration:
         declaration['matches_jit_signature'] = False
@@ -38,13 +41,26 @@ def set_declaration_defaults(declaration):
             declaration['name'], declaration['overload_name'])
     else:
         declaration['type_wrapper_name'] = declaration['name']
+    # TODO: Uggggh, parsing the schema string here, really???
+    declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+    if declaration['schema_string']:
+        declaration['unqual_schema_string'] = declaration['schema_string'].split('::')[1]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
+    else:
+        declaration['unqual_schema_string'] = ''
+        declaration['unqual_operator_name_with_overload'] = ''
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
-        declaration['options'] = [{'arguments': declaration['arguments']}]
+        declaration['options'] = [{
+            'arguments': copy.deepcopy(declaration['arguments']),
+            'schema_order_arguments': copy.deepcopy(declaration['schema_order_arguments']),
+        }]
         del declaration['arguments']
+        del declaration['schema_order_arguments']
     # Parse arguments (some of them can be strings)
     for option in declaration['options']:
         option['arguments'] = parse_arguments(option['arguments'])
+        option['schema_order_arguments'] = parse_arguments(option['schema_order_arguments'])
     # Propagate defaults from declaration to options
     for option in declaration['options']:
         for k, v in declaration.items():

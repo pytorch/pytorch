@@ -1,6 +1,7 @@
 #include "glow_net_transform.h"
 
 #include <caffe2/opt/onnxifi_transformer.h>
+#include <caffe2/opt/shape_info.h>
 #include <caffe2/utils/string_utils.h>
 
 #include <unordered_set>
@@ -26,6 +27,11 @@ C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
     "Minimum number of ops for a subgraph to be lowered to backend");
+
+C10_DEFINE_int32(
+    onnxifi_timeout_ms,
+    0,
+    "Timeout limit for onnxifi inference in milliseconds. 0 means no timeout");
 
 C10_DEFINE_string(
     onnxifi_shape_hints,
@@ -62,6 +68,10 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   }
   auto tokens = caffe2::split(',', str);
   for (const auto& token : tokens) {
+    if (token == "-1") {
+      net_position_list.emplace(-1);
+      continue;
+    }
     auto range = caffe2::split('-', token);
     if (range.size() == 1) {
       net_position_list.emplace(std::stoi(range[0]));
@@ -102,7 +112,11 @@ void onnxifi(
     bool use_onnx,
     size_t max_batch_size,
     size_t max_seq_size,
-    bool load_model_by_blob) {
+    bool load_model_by_blob,
+    bool predictor_net_ssa_rewritten) {
+  // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
+  splitSparseLengthsSumSparse(net, *ws);
+
   // Clean up the external input/output of the net
   net->mutable_external_input()->Clear();
   net->mutable_external_output()->Clear();
@@ -127,37 +141,12 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.loop_test = FLAGS_onnxifi_loop_test_mode;
+  opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
+  opts.timeout = FLAGS_onnxifi_timeout_ms;
 
-  auto more_shape_hints = shape_hints;
+  ShapeInfoMap more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
-    auto hints = caffe2::split(';', FLAGS_onnxifi_shape_hints);
-    for (const auto& hint : hints) {
-      auto kv = caffe2::split(':', hint);
-      if (kv.size() == 2) {
-        auto dims = caffe2::split(',', kv.back());
-        TensorShape input;
-        if (kv.front().find("int8") != std::string::npos) {
-          input.set_data_type(TensorProto_DataType_UINT8);
-        } else {
-          input.set_data_type(TensorProto_DataType_FLOAT);
-        }
-        bool valid = true;
-        for (const auto& d : dims) {
-          try {
-            input.add_dims(std::stoi(d));
-          } catch (const std::exception& e) {
-            valid = false;
-            CAFFE_THROW("Cannot parse shape hint: ", hint);
-          }
-        }
-        if (valid) {
-          more_shape_hints.emplace(
-              kv.front(), constructShapeInfoWithDefaultDimType(input));
-        }
-      } else {
-        CAFFE_THROW("Cannot parse shape hint: ", hint);
-      }
-    }
+    parseShapeInfoMapFromString(FLAGS_onnxifi_shape_hints, more_shape_hints);
   }
 
   // Before applying backlist, make sure the ops in the net all have an net_pos;

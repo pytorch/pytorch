@@ -11,7 +11,7 @@ link_directories(${LLVM_LIBRARY_DIRS})
 # Main executable
 add_executable(analyzer
   analyzer.cpp
-  op_dependency.cpp
+  op_deps_pass.cpp
 )
 
 set_target_properties(analyzer PROPERTIES

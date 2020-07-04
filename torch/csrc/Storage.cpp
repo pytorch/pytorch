@@ -24,6 +24,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/Storage.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/Storage.cpp>

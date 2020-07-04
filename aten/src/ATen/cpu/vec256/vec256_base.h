@@ -1,20 +1,37 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+//
+// Note [Do not compile initializers with AVX]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// If you define a static initializer in this file, the initialization will use
+// AVX instructions because these object files are compiled with AVX enabled.
+// We need to avoid non-trivial global data in these architecture specific files
+// because there's no way to guard the global initializers with CPU capability
+// detection.
+//
+// See https://github.com/pytorch/pytorch/issues/37577 for an instance
+// of this bug in the past.
+
 #include <cstring>
 #include <functional>
 #include <cmath>
 #include <type_traits>
 #include <bitset>
 
+#include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
+#include <c10/macros/Macros.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -28,6 +45,13 @@ namespace at {
 namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
+// at::Half should be treated as floating point
+template <typename T>
+struct is_floating_point:
+    std::integral_constant<bool,
+      std::is_floating_point<T>::value ||
+      std::is_same<T, at::Half>::value> {
+};
 
 template<size_t n> struct int_of_size;
 
@@ -50,7 +74,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 template <class T>
 struct Vec256 {
 private:
-  T values[32 / sizeof(T)];
+  __at_align32__ T values[32 / sizeof(T)];
 public:
   using value_type = T;
   // Note [constexpr static function to avoid odr-usage compiler bug]
@@ -99,6 +123,14 @@ public:
   Vec256(Args... vals) {
     values = { vals... };
   }
+  // This also implies const T& operator[](int idx) const
+  inline operator const T*() const {
+    return values;
+  }
+  // This also implies T& operator[](int idx)
+  inline operator T*() {
+    return values;
+  }
   template <int64_t mask_>
   static Vec256<T> blend(const Vec256<T>& a, const Vec256<T>& b) {
     int64_t mask = mask_;
@@ -128,7 +160,8 @@ public:
     }
     return vec;
   }
-  static Vec256<T> arange(T base = static_cast<T>(0), T step = static_cast<T>(1)) {
+  template<typename step_t>  // step sometimes requires a higher precision type (e.g., T=int, step_t=double)
+  static Vec256<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
     Vec256 vec;
     for (int64_t i = 0; i < size(); i++) {
       vec.values[i] = base + i * step;
@@ -159,12 +192,6 @@ public:
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
-  const T& operator[](int idx) const {
-    return values[idx];
-  }
-  T& operator[](int idx) {
-    return values[idx];
-  }
   int zero_mask() const {
     // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     int mask = 0;
@@ -190,20 +217,20 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!std::is_floating_point<other_t_abs>::value && !c10::is_complex_t<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex_t<other_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
-            typename std::enable_if<std::is_floating_point<float_t_abs>::value, int>::type = 0>
+            typename std::enable_if<is_floating_point<float_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
-    return map(std::abs);
+    return map([](T x) -> T { return std::abs(x); });
   }
   template <typename complex_t_abs = T,
             typename std::enable_if<c10::is_complex_t<complex_t_abs>::value, int>::type = 0>
@@ -305,7 +332,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
   Vec256<T> fmod(const Vec256<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
     static_assert(std::is_same<U, T>::value, "U must be T");
@@ -398,6 +425,7 @@ public:
 private:
   template <typename Op>
   inline Vec256<T> binary_pred(const Vec256<T>& other, Op op) const {
+    // All bits are set to 1 if the pred is true, otherwise 0.
     Vec256<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (op(values[i], other.values[i])) {
@@ -416,6 +444,25 @@ public:
   Vec256<T> operator<=(const Vec256<T>& other) const { return binary_pred(other, std::less_equal<T>()); }
   Vec256<T> operator>(const Vec256<T>& other) const { return binary_pred(other, std::greater<T>()); }
   Vec256<T> operator<(const Vec256<T>& other) const { return binary_pred(other, std::less<T>()); }
+
+private:
+  template <typename Op>
+  inline Vec256<T> binary_pred_bool(const Vec256<T>& other, Op op) const {
+    // 1 if the pred is true, otherwise 0.
+    Vec256<T> vec;
+    for (int i = 0; i != size(); ++ i) {
+      vec[i] = bool(op(values[i], other.values[i]));
+    }
+    return vec;
+  }
+
+public:
+  Vec256<T> eq(const Vec256<T>& other) const { return binary_pred_bool(other, std::equal_to<T>()); }
+  Vec256<T> ne(const Vec256<T>& other) const { return binary_pred_bool(other, std::not_equal_to<T>()); }
+  Vec256<T> gt(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater<T>()); }
+  Vec256<T> ge(const Vec256<T>& other) const { return binary_pred_bool(other, std::greater_equal<T>()); }
+  Vec256<T> lt(const Vec256<T>& other) const { return binary_pred_bool(other, std::less<T>()); }
+  Vec256<T> le(const Vec256<T>& other) const { return binary_pred_bool(other, std::less_equal<T>()); }
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
@@ -606,35 +653,94 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   return c;
 }
 
-template <class T, typename Op, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
+struct Vec256i;
+
+#ifdef CPU_CAPABILITY_AVX2
+
+template <class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
-  using iT = int_same_size_t<T>;
-  iT buffer[Vec256<T>::size()];
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    auto a_val = a[i];
-    auto b_val = b[i];
-    iT *i_a_ptr = reinterpret_cast<iT*>(&a_val);
-    iT *i_b_ptr = reinterpret_cast<iT*>(&b_val);
-    buffer[i] = op(*i_a_ptr, *i_b_ptr);
+  __m256i buffer;
+  __m256i a_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)a));
+  __m256i b_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)b));
+  buffer = op(a_buffer, b_buffer);
+  __at_align32__ T results[Vec256<T>::size()];
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(results), buffer);
+  return Vec256<T>::loadu(results);
+}
+
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+  // We enclose _mm256_and_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_and_si256(a, b); });
+}
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+  // We enclose _mm256_or_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_or_si256(a, b); });
+}
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+  // We enclose _mm256_xor_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_xor_si256(a, b); });
+}
+
+#else
+
+template<class T, typename Op>
+static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
+  static constexpr uint32_t element_no = 32 / sizeof(intmax_t);
+  __at_align32__ intmax_t buffer[element_no];
+  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
+  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
+  for (uint32_t i = 0U; i < element_no; ++ i) {
+    buffer[i] = op(a_ptr[i], b_ptr[i]);
   }
   return Vec256<T>::loadu(buffer);
 }
 
-template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_and<int_same_size_t<T>>());
+  return bitwise_binary_op(a, b, std::bit_and<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_or<int_same_size_t<T>>());
+  return bitwise_binary_op(a, b, std::bit_or<intmax_t>());
 }
-template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_xor<int_same_size_t<T>>());
+  return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
+}
+
+#endif
+
+template <typename T>
+inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+  a = a + b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a - b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a / b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a % b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a * b;
+  return a;
 }
 
 template <typename T>
-inline T fmadd(const T& a, const T& b, const T& c) {
+inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
   return a * b + c;
 }
 

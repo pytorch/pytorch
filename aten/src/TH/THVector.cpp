@@ -14,10 +14,6 @@
 #include <TH/vector/AVX.h>
 #endif
 
-#if defined(USE_AVX2)
-#include <TH/vector/AVX2.h>
-#endif
-
 #include <TH/generic/THVectorDefault.cpp>
 #include <TH/THGenerateAllTypes.h>
 

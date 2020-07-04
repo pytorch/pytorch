@@ -112,6 +112,10 @@ ExprHandle tanh(const ExprHandle& v) {
   return Intrinsics::make(kTanh, v);
 }
 
+ExprHandle sigmoid(const ExprHandle& v) {
+  return Intrinsics::make(kSigmoid, v);
+}
+
 ExprHandle exp(const ExprHandle& v) {
   return Intrinsics::make(kExp, v);
 }
@@ -201,6 +205,18 @@ ExprHandle ifThenElse(
     const ExprHandle& t,
     const ExprHandle& f) {
   return IfThenElse::make(c, t, f);
+}
+
+ExprHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype) {
+  return ExprHandle(
+      new Buf(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+}
+
+ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
+  return Buf::make("", dims, dtype);
 }
 
 } // namespace tensorexpr

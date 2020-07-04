@@ -3,8 +3,11 @@
 #include <cstdint>
 #include <type_traits>
 #include <c10/util/Exception.h>
+#include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
+#include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -44,8 +47,11 @@ struct static_unroll<func, end, end> {
   static inline C10_HOST_DEVICE void with_args(Args... args) {}
 };
 
+// helper structs to be used with static_unroll to load arguments
+// one by one
+
 template<int arg_index>
-struct load_with_policy {
+struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
   static __device__ void apply(policy_t &self, args_t *args, int idx) {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
@@ -57,7 +63,67 @@ struct load_with_policy {
   }
 };
 
+template<int arg_index>
+struct unroll_load_helper {
+  template <typename args_t, typename policy_t, typename offset_t, typename loader_t>
+  static __device__ void apply(policy_t &self, args_t *args, offset_t offset, loader_t loader, int j) {
+    using arg_t = std::tuple_element_t<arg_index, args_t>;
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
+    std::get<arg_index>(args[j]) = loader.template load<arg_t>(self.data[arg_index + 1], offset[arg_index], arg_index);
+  }
+};
+
 }  // namespace detail
+
+struct LoadWithoutCast {
+  template<typename scalar_t>
+  __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
+    return *(reinterpret_cast<scalar_t *>(base_ptr) + offset);
+  }
+};
+
+template <int N>
+struct LoadWithCast {
+  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
+
+  array_t dtypes;
+  size_array_t element_sizes;
+
+  template<typename array_t_>
+  LoadWithCast(array_t_ dtypes) {
+    #pragma unroll
+    for (int i = 0; i < N; i++) {
+      this->dtypes[i] = dtypes[i];
+      element_sizes[i] = c10::elementSize(dtypes[i]);
+    }
+  }
+
+  template<typename scalar_t>
+  __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
+    void *ptr = base_ptr + element_sizes[arg] * offset;
+    return c10::fetch_and_cast<scalar_t>(dtypes[arg], ptr);
+  }
+};
+
+struct StoreWithoutCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+    *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+};
+
+struct StoreWithCast {
+  at::ScalarType dtype;
+  uint32_t element_size;
+  StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+    void *ptr = base_ptr + element_size * offset;
+    c10::cast_and_store<scalar_t>(dtype, ptr, value);
+  }
+};
 
 // aligned vector generates vectorized load/store on CUDA
 template<typename scalar_t, int vec_size>
@@ -69,35 +135,37 @@ namespace policies {
 
 // Assumption:
 // all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-template<typename data_t>
+template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
 struct unroll {
 
   data_t data;
   int remaining;
+  inp_calc_t input_offset_calculator;
+  out_calc_t output_offset_calculator;
+  loader_t loader;
+  storer_t storer;
 
-  __device__ unroll(data_t data, int remaining): data(data), remaining(remaining) {}
+  __device__ unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s):
+    data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
     return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
   }
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
+  template<typename args_t>
+  __device__ inline void load(args_t *args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      to(i) = from[thread_idx];
+      int linear_idx = thread_idx + block_work_size * idx;
+      auto offset = input_offset_calculator.get(linear_idx);
+      detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i);
       thread_idx += num_threads;
     }
-  }
-
-  template<typename args_t>
-  __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
@@ -109,7 +177,9 @@ struct unroll {
       if (thread_idx >= remaining) {
         return;
       }
-      to[thread_idx] = from[i];
+      int linear_idx = thread_idx + block_work_size * idx;
+      int offset = output_offset_calculator.get(linear_idx)[0];
+      storer.store(from[i], data[0], offset);
       thread_idx += num_threads;
     }
   }
@@ -153,7 +223,7 @@ struct vectorized {
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size<args_t>::value;
-    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
+    detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>

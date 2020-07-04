@@ -57,6 +57,12 @@ struct ExecutionOptions {
   bool run_root_tasks_inline_ = false;
 };
 
+struct CAFFE2_API AsyncNetCancelled : public std::exception {
+  const char* what() const noexcept override {
+    return "Cancelled";
+  }
+};
+
 class CAFFE2_API AsyncNetBase : public NetBase {
  public:
   AsyncNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);

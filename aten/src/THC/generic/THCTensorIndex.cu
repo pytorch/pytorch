@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorIndex.cu"
 #else
 
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.

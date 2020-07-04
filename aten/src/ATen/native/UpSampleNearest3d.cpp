@@ -40,7 +40,7 @@ static void upsample_nearest3d_out_cpu_template(
       output_height,
       output_width);
 
-  output.resize_({nbatch, channels, output_depth, output_height, output_width});
+  output.resize_({nbatch, channels, output_depth, output_height, output_width}, input.suggest_memory_format());
   AT_ASSERT(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
       output_depth > 0 && output_height > 0 && output_width > 0);
@@ -106,8 +106,12 @@ Tensor& upsample_nearest3d_out_cpu(
   return output;
 }
 
-Tensor upsample_nearest3d_cpu(const Tensor& input, IntArrayRef output_size,
-                              c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w) {
+Tensor upsample_nearest3d_cpu(
+    const Tensor& input,
+    IntArrayRef output_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_nearest3d_out_cpu_template(output, input, output_size, scales_d, scales_h, scales_w);
   return output;

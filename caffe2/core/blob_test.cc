@@ -13,6 +13,7 @@
 #include "caffe2/core/qtensor.h"
 #include "caffe2/core/qtensor_serialization.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/test_utils.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -588,6 +589,18 @@ TEST(TensorTest, Tensor64BitDimension) {
 TEST(TensorTest, UndefinedTensor) {
   Tensor x;
   EXPECT_FALSE(x.defined());
+}
+
+TEST(TensorTest, CopyAndAssignment) {
+  Tensor x(CPU);
+  x.Resize(16, 17);
+  testing::randomFill(x.template mutable_data<float>(), 16 * 17);
+  EXPECT_TRUE(x.defined());
+
+  Tensor y(x);
+  Tensor z = x;
+  testing::assertTensorEquals(x, y);
+  testing::assertTensorEquals(x, z);
 }
 
 TEST(TensorDeathTest, CannotCastDownLargeDims) {

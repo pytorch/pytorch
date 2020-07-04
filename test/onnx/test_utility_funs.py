@@ -5,12 +5,17 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
+import torch.utils.cpp_extension
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 import onnx
+import onnxruntime  # noqa
 
 import io
 import copy
 import unittest
+
+import numpy as np
 
 
 skip = unittest.skip
@@ -72,6 +77,42 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    def test_constant_fold_reduceL2(self):
+        class TransposeModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = torch.norm(a, p=2, dim=-2, keepdim=False)
+                return b + x
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
+                                             do_constant_folding=True,
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::ReduceL2"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_reduceL1(self):
+        class NormModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = torch.norm(a, p=1, dim=-2)
+                return b + x
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = utils._model_to_graph(NormModule(), (x, ),
+                                             do_constant_folding=True,
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::ReduceL1"
+        assert len(list(graph.nodes())) == 1
+
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
             def forward(self, x):
@@ -118,7 +159,9 @@ class TestUtilityFuns(TestCase):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = a[0:-1]        # index relative to the end
-                return b + x
+                c = torch.select(a, dim=-1, index=-2)
+                d = torch.select(a, dim=1, index=0)
+                return b + x, c + d
 
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
@@ -131,7 +174,26 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_gather(self):
+        class GatherModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = torch.select(a, dim=1, index=-2)
+                c = torch.index_select(a, dim=-2, index=torch.tensor([0, 1]))
+                return b + 1, c + x
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(1, 3)
+        model = GatherModule()
+        model(x)
+        graph, _, __ = utils._model_to_graph(GatherModule(), (x, ),
+                                             do_constant_folding=True,
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Gather"
 
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
@@ -188,7 +250,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 2
+        assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
@@ -231,8 +293,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
-    # TODO we need to figure out the root cause and fix the problem
-    @skip("causing segmentation fault")
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
@@ -290,6 +350,56 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
 
+    def test_constant_fold_add(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                add = self.weight + torch.tensor([1, 2, 3, 4, 5])
+                return add - x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, params_dict, __ = utils._model_to_graph(
+            Module(), (x, ), do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            self.assertTrue(node.kind() != "onnx::Add")
+        self.assertEqual(len(list(graph.nodes())), 1)
+        params = list(params_dict.values())
+        self.assertEqual(len(params), 1)
+        weight = params[0]
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
+
+    def test_constant_fold_sub(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                sub = self.weight - torch.tensor([1, 2, 3, 4, 5])
+                return sub + x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, params_dict, __ = utils._model_to_graph(
+            Module(), (x, ), do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Sub"
+        self.assertEqual(len(list(graph.nodes())), 1)
+        params = list(params_dict.values())
+        self.assertEqual(len(params), 1)
+        weight = params[0]
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
+
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -307,6 +417,27 @@ class TestUtilityFuns(TestCase):
                                              operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Sqrt"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_shape(self):
+        class ShapeModule(torch.nn.Module):
+            def __init__(self):
+                super(ShapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                shape = self.weight.shape[0]
+                return x + shape
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(ShapeModule(), (x, ), do_constant_folding=True,
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Shape"
         assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):
@@ -342,6 +473,208 @@ class TestUtilityFuns(TestCase):
                                     'unwrap model from torch.nn.DataParallel. Try '):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    def test_export_mode(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                return y
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+        f = io.BytesIO()
+
+        # set mode to in inference mode and export in training mode
+        model.eval()
+        old_state = model.training
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        # verify that the model state is preserved
+        assert model.training == old_state
+
+        # set mode to training mode and export in inference mode
+        model.train()
+        old_state = model.training
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
+        # verify that the model state is preserved
+        assert model.training == old_state
+
+    def test_dropout_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.4)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+        assert x != ort_outs[0]
+
+    def test_aten_fallthrough(self):
+        # Test aten export of op with no symbolic
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x)
+
+        x = torch.randn(2, 3, 4)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ),
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::triu"
+
+    def test_custom_op_fallthrough(self):
+        # Test custom op
+        op_source = """
+        #include <torch/script.h>
+
+        torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
+          return self + other;
+        }
+
+        static auto registry =
+          torch::RegisterOperators("custom_namespace::custom_op", &custom_add);
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="custom_add",
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        class FooModel(torch.nn.Module):
+            def forward(self, input, other):
+                # Calling custom op
+                return torch.ops.custom_namespace.custom_op(input, other)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        y = torch.randn(2, 3, 4, requires_grad=False)
+        model = FooModel()
+        graph, _, __ = torch.onnx.utils._model_to_graph(model, (x, y),
+                                                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "custom_namespace::custom_op"
+
+    def test_onnx_fallthrough(self):
+        # Test aten export of op with symbolic for aten
+        x = torch.randn(100, 128)
+        y = torch.randn(100, 128)
+        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+
+        graph, _, __ = utils._model_to_graph(model, (x, y),
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::cosine_similarity"
+
+    def test_quantized_fallthrough(self):
+        # Test Quantized op
+        class QModule(torch.nn.Module):
+            def __init__(self):
+                super(QModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = self.quant1(x)
+                return self.dequant(res)
+
+        model = QModule()
+        torch.backends.quantized.engine = "qnnpack"
+        pt_inputs = (torch.randn(1, 2, 3, 4))
+        model.qconfig = torch.quantization.default_qconfig
+        q_model = torch.quantization.prepare(model, inplace=False)
+        q_model = torch.quantization.convert(q_model, inplace=False)
+
+        q_model.eval()
+        output = q_model(*pt_inputs)
+
+        graph, _, __ = utils._model_to_graph(q_model, pt_inputs, example_outputs=output,
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::quantize_per_tensor"
+        assert next(iter).kind() == "aten::dequantize"
+
+    def test_prim_fallthrough(self):
+        # Test prim op
+        class PrimModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if isinstance(x, list):
+                    y = x
+                else:
+                    y = [x]
+                return y
+
+        x = torch.tensor([2])
+        model = PrimModule()
+        output = model(x)
+        graph, _, __ = utils._model_to_graph(model, (x,), example_outputs=output,
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "prim::ListConstruct"
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_dropout_training_zero(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        torch.manual_seed(0)
+        onnxruntime.set_seed(0)
+
+        model = MyModule()
+
+        # ensure there are no zeros in the input
+        x = torch.randn(10, 3, 128, 128)
+        y = x.numpy()
+        y_mask = np.where(y == 0, 1, y)
+        input = torch.from_numpy(y_mask)
+        nb_elements = torch.numel(input)
+
+        model.train()
+
+        f = io.BytesIO()
+        torch.onnx.export(model, (input,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name : input.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+        y = model(input)
+        output = y.cpu().numpy()
+
+        ort_mask = np.where(ort_outs[0] != 0, 1, 0)
+        pyt_mask = np.where(output != 0, 1, 0)
+
+        ratio_pytorch = np.sum(pyt_mask) / nb_elements
+        ratio_ort = np.sum(ort_mask) / nb_elements
+
+        np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -354,6 +687,16 @@ TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=11))
 
+# opset 12 tests
+TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=12))
+
+
+# opset 12tests
+TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 if __name__ == '__main__':
     run_tests()

@@ -18,6 +18,9 @@ DECLARE_DISPATCH(unary_fn, real_stub);
 DECLARE_DISPATCH(unary_fn, imag_stub);
 DECLARE_DISPATCH(unary_fn, conj_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
+DECLARE_DISPATCH(unary_fn, acosh_stub);
+DECLARE_DISPATCH(unary_fn, asinh_stub);
+DECLARE_DISPATCH(unary_fn, atanh_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
 DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);
@@ -40,6 +43,7 @@ DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
+
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
 DECLARE_DISPATCH(unary_fn, rsqrt_stub);
@@ -54,18 +58,20 @@ DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
-DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), cauchy_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), exponential_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), geometric_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), log_normal_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, Generator *), normal_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, Generator *), random_from_to_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Generator *), random_full_64_bits_range_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Generator *), random_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, c10::optional<Generator>), bernoulli_tensor_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, c10::optional<Generator>), cauchy_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, c10::optional<Generator>), exponential_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, c10::optional<Generator>), geometric_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, c10::optional<Generator>), log_normal_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, c10::optional<Generator>), uniform_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, c10::optional<Generator>), normal_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, c10::optional<Generator>), random_from_to_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_full_64_bits_range_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, Generator *), multinomial_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, c10::optional<Generator>), multinomial_stub);
 
 // Missing unary functions
 // digamma

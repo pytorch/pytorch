@@ -1,14 +1,11 @@
-#include "vararg_functions.h"
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
 
 void tupleUnpack(Stack& stack) {
   auto tuple = pop(stack).toTuple();
-  stack.insert(
-     stack.end(),
-     tuple->elements().begin(),
-     tuple->elements().end());
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
 void format(Stack& stack, size_t num_inputs) {
@@ -59,7 +56,10 @@ void tupleConstruct(Stack& stack, size_t num_inputs) {
   push(stack, c10::ivalue::Tuple::create(std::move(elems)));
 }
 
-void namedTupleConstruct(Stack& stack, at::TupleTypePtr type, size_t num_inputs) {
+void namedTupleConstruct(
+    Stack& stack,
+    at::TupleTypePtr type,
+    size_t num_inputs) {
   std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
                             std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
@@ -83,11 +83,15 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
   at::TypePtr value_type = type->getValueType();
   auto vals = c10::impl::GenericDict(key_type, value_type);
   vals.reserve(num_inputs / 2);
+  // loop from the bottom of the stack to ensure the dictConstruct preserve
+  // the inputs order.
+  auto inputs = last(stack, num_inputs);
   for (size_t i = 0; i < num_inputs; i += 2) {
-    auto val = pop(stack);
-    auto key = pop(stack);
+    auto key = inputs[i];
+    auto val = inputs[i + 1];
     vals.insert_or_assign(std::move(key), std::move(val));
   }
+  drop(stack, num_inputs);
   push(stack, std::move(vals));
 }
 
@@ -98,9 +102,7 @@ void createObject(Stack& stack, at::ClassTypePtr type) {
   push(stack, std::move(userObj));
 }
 
-void isinstance(
-    Stack& stack,
-    at::ArrayRef<at::TypePtr> types) {
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
     if (ty->isSubtypeOf(candidate)) {

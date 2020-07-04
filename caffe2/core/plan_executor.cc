@@ -21,6 +21,36 @@ namespace caffe2 {
 
 namespace {
 
+class ExceptionWrapper {
+ public:
+  ExceptionWrapper() : hasException_(false) {}
+  explicit ExceptionWrapper(const std::exception& ex)
+      : hasException_(true), exceptionMsg_(ex.what()) {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    exception_ = std::current_exception();
+#endif
+  }
+
+  void rethrowException() {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    std::rethrow_exception(exception_);
+#else
+    CAFFE_THROW(exceptionMsg_);
+#endif
+  }
+
+  operator bool() {
+    return hasException_;
+  }
+
+ private:
+  bool hasException_;
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::exception_ptr exception_;
+#endif
+  std::string exceptionMsg_;
+};
+
 struct NetDefInfo {
   const NetDef* netDef;
   // in order to keep the "override existing nets" on the top-level workflow,
@@ -100,7 +130,9 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initialized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
+  if (!b ||
+      b->meta().id() ==
+          TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -223,6 +255,8 @@ struct ExecutionStepWrapper {
     return guard;
   }
 
+  void Cancel();
+
  private:
   std::unique_ptr<CompiledExecutionStep> doCompile();
 
@@ -321,6 +355,24 @@ struct CompiledExecutionStep {
     };
   }
 
+  // Cancel attempts to cancel the running nets in a best effort way. If the net
+  // or op type does IO and doesn't implement cancellation it may not be
+  // possible to cancel leading to execution getting stuck on error.
+  void Cancel() {
+    for (auto& substep : reportSubsteps) {
+      substep->Cancel();
+    }
+    for (auto& substep : recurringSubsteps) {
+      substep->Cancel();
+    }
+    for (auto& net : networks) {
+      net->Cancel();
+    }
+    if (reportNet) {
+      reportNet->Cancel();
+    }
+  }
+
   const ExecutionStep* step;
   Workspace* workspace;
   vector<std::shared_ptr<ExecutionStepWrapper>> reportSubsteps;
@@ -336,6 +388,12 @@ struct CompiledExecutionStep {
  private:
   std::unique_ptr<Workspace> localWorkspace_;
 };
+
+void ExecutionStepWrapper::Cancel() {
+  if (compiledStep_) {
+    compiledStep_->Cancel();
+  }
+}
 
 std::unique_ptr<CompiledExecutionStep> ExecutionStepWrapper::doCompile() {
   return std::unique_ptr<CompiledExecutionStep>(new CompiledExecutionStep(
@@ -403,7 +461,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
         std::atomic<int> next_substep{0};
         std::mutex exception_mutex;
-        string first_exception;
+        ExceptionWrapper first_exception;
         auto worker = [&]() {
           auto num_substeps = compiledStep->recurringSubsteps.size();
           int substep_id = next_substep++ % num_substeps;
@@ -417,11 +475,13 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
             }
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
-            if (!first_exception.size()) {
-              first_exception = c10::GetExceptionString(ex);
-              LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
+            if (!first_exception) {
+              first_exception = ExceptionWrapper(ex);
+              LOG(ERROR) << "Parallel worker exception:\n"
+                         << c10::GetExceptionString(ex);
             }
             compiledStep->gotFailure = true;
+            compiledStep->Cancel();
             if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
@@ -445,10 +505,8 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         }
         if (compiledStep->gotFailure) {
           LOG(ERROR) << "One of the workers failed.";
-          if (first_exception.size()) {
-            CAFFE_THROW(
-                "One of the workers died with an unhandled exception ",
-                first_exception);
+          if (first_exception) {
+            first_exception.rethrowException();
           }
           return false;
         }
@@ -473,7 +531,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 }
 
 #undef CHECK_SHOULD_STOP
-}
+} // namespace
 
 bool RunPlanOnWorkspace(
     Workspace* ws,
@@ -519,4 +577,4 @@ bool RunPlanOnWorkspace(
   LOG(INFO) << "Plan " << plan.name() << " executed successfully.";
   return true;
 }
-}
+} // namespace caffe2

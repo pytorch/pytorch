@@ -4,6 +4,8 @@ import types
 
 
 class VFModule(types.ModuleType):
+    vf: types.ModuleType
+
     def __init__(self, name):
         super(VFModule, self).__init__(name)
         self.vf = torch._C._VariableFunctions

@@ -1,4 +1,8 @@
 #pragma once
+
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace vec256 {
@@ -13,9 +17,9 @@ inline scalar_t vec_reduce_all(
   scalar_t acc_arr[Vec::size()];
   acc_vec.store(acc_arr);
   for (int64_t i = 1; i < size; i++) {
-    scalar_t acc_arr_next[Vec::size()];
+    std::array<scalar_t, Vec::size()> acc_arr_next = {0};
     acc_arr_next[0] = acc_arr[i];
-    Vec acc_vec_next = Vec::loadu(acc_arr_next);
+    Vec acc_vec_next = Vec::loadu(acc_arr_next.data());
     acc_vec = vec_fun(acc_vec, acc_vec_next);
   }
   acc_vec.store(acc_arr);

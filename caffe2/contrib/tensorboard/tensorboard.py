@@ -115,7 +115,7 @@ def tensorboard_graphs(c2_netdef, tf_dir):
     log.setLevel(logging.INFO)
 
     def parse_net_def(path):
-        import google.protobuf.text_format
+        import google.protobuf.text_format  # type: ignore[import]
         net_def = caffe2_pb2.NetDef()
         with open(path) as f:
             google.protobuf.text_format.Merge(f.read(), net_def)

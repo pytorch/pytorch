@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -33,6 +34,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
   }
+  friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
 }
 
@@ -56,6 +58,12 @@ public:
 
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
+
+  // returns the underlying std::string by reference (only enabled if this is from a torch::List<std::string>).
+  template<class _T = T>
+  std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
+    return iterator_->toStringRef();
+  }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
@@ -139,7 +147,7 @@ public:
   ListElementReference<T, Iterator> operator*() const {
     return {iterator_};
   }
-  
+
   ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
     return {iterator_ + offset};
   }
@@ -173,7 +181,7 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
@@ -204,15 +212,15 @@ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl> impl_;
+  c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl::list_type::iterator>;
+  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::iterator>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::reverse_iterator>;
+  using size_type = typename c10::detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -426,7 +434,7 @@ public:
   void unsafeSetElementType(TypePtr t);
 
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
+  explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
   template<class T_> friend List<IValue> impl::toList(List<T_>);

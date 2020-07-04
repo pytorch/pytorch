@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -74,6 +75,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
     "div", "div_", "div_out",
     "mul", "mul_", "mul_out",
     "sub", "sub_", "sub_out",
+    "true_divide", "true_divide_", "true_divide_out",
     "floor_divide", "floor_divide_", "floor_divide_out"
   };
   return allowed.find(name) != allowed.end();
@@ -214,6 +216,10 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *  precedence.
  *
  *  'obj' is an object to check for a __torch_function__ implementation
+ *
+ * If changing this file in a way that can affect the __torch_function__
+ * overhead, please report the benchmarks in 'benchmarks/overrides_benchmark'.
+ * See the instructions in the 'README.md' in that directory.
  *
  */
 
@@ -467,7 +473,12 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
-      next_offset = offset + 1;
+      next_offset = offset+ 1;
+      // this 'if' happens for an empty parameter list, i.e. fn().
+      if (offset == last_offset) {
+        last_offset = next_offset;
+        break;
+      }
     } else {
       next_offset = offset + 2;
     }
@@ -475,7 +486,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       throw std::runtime_error("missing closing parenthesis: " + fmt);
     }
     if (offset == last_offset) {
-      break;
+      throw std::runtime_error("malformed signature: " + fmt);
     }
 
     auto param_str = fmt.substr(last_offset, offset - last_offset);
@@ -510,12 +521,18 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
 }
 
 std::string FunctionSignature::toString() const {
+  // TODO: consider printing more proper schema strings with defaults, optionals, etc.
   std::ostringstream ss;
+  bool keyword_already = false;
   ss << "(";
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
       ss << ", ";
+    }
+    if (param.keyword_only && !keyword_already) {
+      ss << "*, ";
+      keyword_already = true;
     }
     ss << param.type_name() << " " << param.name;
     i++;
@@ -826,7 +843,8 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::AutoNonVariableTypeMode guard;
+  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);

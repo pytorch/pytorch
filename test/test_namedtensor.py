@@ -6,7 +6,6 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -90,7 +89,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         message='Name inference for {} on device {} failed'.format(
+                         msg='Name inference for {} on device {} failed'.format(
                              op.__name__, device))
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
@@ -117,8 +116,15 @@ class TestNamedTensor(TestCase):
         x = factory(1, 2, 3, names=('N', None, 'D'), device=device)
         self.assertEqual(x.names, ('N', None, 'D'))
 
+        x = factory(1, 2, 3, names=('_1', 'batch9', 'BATCH_5'), device=device)
+        self.assertEqual(x.names, ('_1', 'batch9', 'BATCH_5'))
+
         with self.assertRaisesRegex(RuntimeError,
-                                    'must contain alphabetical characters and/or underscore'):
+                                    'a valid identifier contains only'):
+            x = factory(2, names=('1',), device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'a valid identifier contains only'):
             x = factory(2, names=('?',), device=device)
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
@@ -148,8 +154,8 @@ class TestNamedTensor(TestCase):
         prev_none_refcnt = sys.getrefcount(None)
         scope()
         self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         message='Using tensor.names should not change '
-                                 'the refcount of Py_None')
+                         msg='Using tensor.names should not change '
+                             'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -162,14 +168,10 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    @unittest.skipIf(PY2, "Ellipsis object not supported in python 2")
     def test_py3_ellipsis(self):
-        # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)
-        scope = {'tensor': tensor}
-        code_str = "output = tensor.refine_names('N', ..., 'C')"
-        exec(code_str, globals(), scope)
-        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+        output = tensor.refine_names('N', ..., 'C')
+        self.assertEqual(output.names, ['N', None, None, 'C'])
 
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
@@ -464,8 +466,8 @@ class TestNamedTensor(TestCase):
         # Test torch.full
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
+            result = torch.full([1, 2, 3], 2., names=names, device=device)
+            expected = torch.full([1, 2, 3], 2., device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
@@ -840,7 +842,7 @@ class TestNamedTensor(TestCase):
                 # Get a better error message by catching the error and asserting.
                 raise RuntimeError('{}: {}'.format(testcase.name, err))
             self.assertEqual(out.names, tensor.names,
-                             message=testcase.name)
+                             msg=testcase.name)
 
         def fn(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
@@ -989,6 +991,13 @@ class TestNamedTensor(TestCase):
         test_ops(torch.cummax)
         test_ops(torch.cummin)
 
+    def test_logcumsumexp(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.logcumsumexp(tensor, 'D')
+            self.assertEqual(result.names, names)
+
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'D')
@@ -1097,8 +1106,11 @@ class TestNamedTensor(TestCase):
     def test_unsupported_op_error_msg(self):
         named = torch.randn(3, 3, names=('N', 'C'))
         with self.assertRaisesRegex(
-                RuntimeError, "pdist is not yet supported with named tensors"):
+                RuntimeError, r"pdist.+is not yet supported with named tensors"):
             torch.pdist(named)
+        with self.assertRaisesRegex(
+                RuntimeError, r"as_strided_.+is not yet supported with named tensors"):
+            named.as_strided_((3, 3), (3, 1))
 
     def test_reduction_fns(self):
         def check_output(output, expected_names):
@@ -1383,7 +1395,7 @@ class TestNamedTensor(TestCase):
 
     def test_no_jit_tracer_support(self):
         def foo(x):
-            return torch.full(x.shape, 2, names=('N',))
+            return torch.full(x.shape, 2., names=('N',))
 
         with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
             x = torch.randn(3)

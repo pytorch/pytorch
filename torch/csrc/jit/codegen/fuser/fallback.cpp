@@ -2,10 +2,10 @@
 
 #include <ATen/core/functional.h> //fmap
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <stdexcept>
 
@@ -26,7 +26,7 @@ RegisterOperators reg_fused_operators({Operator(
     [](const Node* node) -> Operation {
       int64_t dim = node->i(attr::dim);
       int64_t num_inputs = node->inputs().size();
-      return [dim, num_inputs](Stack& stack) {
+      return [dim, num_inputs](Stack* stack) {
         auto result = at::cat(
             fmap(
                 last(stack, num_inputs),
@@ -34,7 +34,6 @@ RegisterOperators reg_fused_operators({Operator(
             dim);
         drop(stack, num_inputs);
         pack(stack, std::move(result));
-        return 0;
       };
     },
     aliasAnalysisIsSpecialCase())});

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+import cimodel.data.simple.util.docker_constants as pytorch_docker_constants
+
 from yaml import load
 
 try:
@@ -36,7 +37,7 @@ def check_version(job, tags, expected_version):
 
 def validate_docker_version():
     tags = load_tags_for_projects(load_config())
-    check_version("pytorch", tags, pytorch_build_definitions.DOCKER_IMAGE_VERSION)
+    check_version("pytorch", tags, pytorch_docker_constants.DOCKER_IMAGE_TAG)
     check_version("caffe2", tags, caffe2_build_definitions.DOCKER_IMAGE_VERSION)
 
 

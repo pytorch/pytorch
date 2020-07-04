@@ -2,6 +2,7 @@ import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
+TrainingMode = _C._onnx.TrainingMode
 PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
@@ -12,6 +13,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
+constant_folding_opset_versions = [9, 10, 11, 12]
 
 
 class ExportTypes:
@@ -27,7 +29,7 @@ def _export(*args, **kwargs):
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False,
+def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
@@ -58,9 +60,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             as arguments, the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if specified, we will print out a debug
             description of the trace being exported.
-        training (bool, default False): export the model in training mode.  At
-            the moment, ONNX is oriented towards exporting models for inference
-            only, so you will generally not need to set this to True.
+        training (enum, default TrainingMode.EVAL):
+            TrainingMode.EVAL: export the model in inference mode.
+            TrainingMode.PRESERVE: export the model in inference mode if model.training is
+            False and to a training friendly mode if model.training is True.
+            TrainingMode.TRAINING: export the model in a training friendly mode.
         input_names(list of strings, default empty list): names to assign to the
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
@@ -71,10 +75,46 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
-            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
-            OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
-            OperatorExportTypes.RAW: export raw ir.
+            OperatorExportTypes.ONNX: All ops are exported as regular ONNX ops
+            (with ONNX namespace).
+            OperatorExportTypes.ONNX_ATEN: All ops are exported as ATen ops
+            (with aten namespace).
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: If an ATen op is not supported
+            in ONNX or its symbolic is missing, fall back on ATen op. Registered ops
+            are exported to ONNX regularly.
+            Example graph:
+                graph(%0 : Float):
+                  %3 : int = prim::Constant[value=0]()
+                  %4 : Float = aten::triu(%0, %3) # missing op
+                  %5 : Float = aten::mul(%4, %0) # registered op
+                  return (%5)
+            is exported as:
+                graph(%0 : Float):
+                  %1 : Long() = onnx::Constant[value={0}]()
+                  %2 : Float = aten::ATen[operator="triu"](%0, %1)  # missing op
+                  %3 : Float = onnx::Mul(%2, %0) # registered op
+                  return (%3)
+            In the above example, aten::triu is not supported in ONNX, hence
+            exporter falls back on this op.
+            OperatorExportTypes.RAW: Export raw ir.
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
+            Example graph:
+                graph(%x.1 : Long(1:1)):
+                  %1 : None = prim::Constant()
+                  %2 : Tensor = aten::sum(%x.1, %1)
+                  %y.1 : Tensor[] = prim::ListConstruct(%2)
+                  return (%y.1)
+            is exported as:
+                graph(%x.1 : Long(1:1)):
+                  %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
+                  %y.1 : Long() = prim::ListConstruct(%1)
+                  return (%y.1)
+            In the above example, prim::ListConstruct is not supported, hence
+            exporter falls through.
+
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
@@ -183,15 +223,17 @@ def _optimize_trace(graph, operator_export_type):
     return utils._optimize_graph(graph, operator_export_type)
 
 
-def set_training(model, mode):
+def select_model_mode_for_export(model, mode):
     r"""
     A context manager to temporarily set the training mode of 'model'
     to 'mode', resetting it when we exit the with-block.  A no-op if
     mode is None.
+
+    In version 1.6 changed to this from set_training
     """
 
     from torch.onnx import utils
-    return utils.set_training(model, mode)
+    return utils.select_model_mode_for_export(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):

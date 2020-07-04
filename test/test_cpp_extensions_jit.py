@@ -12,12 +12,14 @@ import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
-from torch.utils.cpp_extension import CUDA_HOME
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.autograd.gradcheck import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 TEST_CUDNN = False
-if TEST_CUDA:
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
     CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
     TEST_CUDNN = (
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
@@ -25,11 +27,13 @@ if TEST_CUDA:
 IS_WINDOWS = sys.platform == "win32"
 
 
-# This effectively allows re-using the same extension (compiled once) in
-# multiple tests, just to split up the tested properties.
-def dont_wipe_extensions_build_folder(func):
-    func.dont_wipe = True
-    return func
+def remove_build_path():
+    if sys.platform == "win32":
+        print("Not wiping extensions build folder because Windows")
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root)
 
 
 class TestCppExtensionJIT(common.TestCase):
@@ -43,33 +47,17 @@ class TestCppExtensionJIT(common.TestCase):
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        test_name = self.id().split(".")[-1]
-        dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
-        if dont_wipe:
-            print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
-            )
-            return
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
-
     def tearDown(self):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
     @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+
+    @classmethod
     def tearDownClass(cls):
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
+        remove_build_path()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -109,6 +97,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_cuda_cflags=["-O2"],
             verbose=True,
+            keep_intermediates=False,
         )
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
@@ -132,9 +121,8 @@ class TestCppExtensionJIT(common.TestCase):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output, err = p.communicate()
-            if common.PY3:
-                output = output.decode("ascii")
-                err = err.decode("ascii")
+            output = output.decode("ascii")
+            err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
                 raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
@@ -144,10 +132,10 @@ class TestCppExtensionJIT(common.TestCase):
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = ['sm_' + xx for xx in expected_values]
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: {}\n"
-                                     "Stderr: {}\nOutput: {}".format(
-                                         flags, actual_arches, expected_arches,
-                                         err, output))
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -184,6 +172,7 @@ class TestCppExtensionJIT(common.TestCase):
                 os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "disabled on rocm")
     def test_jit_cuda_archflags(self):
         # Test a number of combinations:
         #   - the default for the machine we're testing on
@@ -365,19 +354,6 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
-    def test_complex_registration(self):
-        module = torch.utils.cpp_extension.load(
-            name="complex_registration_extension",
-            sources="cpp_extensions/complex_registration_extension.cpp",
-            verbose=True,
-        )
-
-        # Make sure that the empty tensor is of the desired shape and type
-        # Refer to https://github.com/pytorch/pytorch/issues/14829
-        t = torch.empty(2, 2, dtype=torch.complex64)
-        self.assertEqual(t.size(), torch.Size([2, 2]))
-        self.assertEqual(t.type(), 'torch.ComplexFloatTensor')
-
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_half_support(self):
         """
@@ -440,8 +416,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -473,8 +447,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -572,8 +544,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -595,9 +565,7 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @dont_wipe_extensions_build_folder
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -818,6 +786,32 @@ class TestCppExtensionJIT(common.TestCase):
         inp = torch.rand(20, requires_grad=True)
         loss = MyFn.apply(inp).sum()
         test_backward_deadlock.run_back_no_gil(loss)
+
+    def test_custom_compound_op_autograd(self):
+        # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
+        # correctly returns gradients of those other ops
+
+        source = """
+        #include <torch/library.h>
+        torch::Tensor my_add(torch::Tensor x, torch::Tensor y) {
+          return x + y;
+        }
+        TORCH_LIBRARY(my, m) {
+            m.def("add", &my_add);
+        }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        a = torch.randn(5, 5, requires_grad=True)
+        b = torch.randn(5, 5, requires_grad=True)
+
+        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
 
 if __name__ == "__main__":

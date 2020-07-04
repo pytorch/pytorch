@@ -10,13 +10,14 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode
+    enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
@@ -172,6 +173,18 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_remainder_cuda(self):
+        def cuda_rem(x, y):
+            return 1 + torch.remainder(x, y) - 1
+
+        a = torch.rand([512], dtype=torch.float).cuda()
+        b = torch.rand([512], dtype=torch.float).cuda()
+        inputs = [a, b]
+        ge = self.checkScript(cuda_rem, inputs)
+        graph = ge.graph_for(*inputs)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_cuda(self):
         def fn(x):
             a, b, c = x.chunk(3, 1)
@@ -299,11 +312,12 @@ class TestFuser(JitTestCase):
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            f.__disable_jit_function_caching__ = True
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
@@ -460,6 +474,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
+    @torch.jit._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
@@ -487,7 +502,7 @@ class TestFuser(JitTestCase):
                 with torch.jit.optimized_execution(False):
                     out_noopt = model_noopt(x, y)
                     rep_noopt = str(model_noopt.graph_for(x, y))
-                self.assertEqual(out, out_noopt, prec=3e-5)
+                self.assertEqual(out, out_noopt, atol=3e-5)
 
             # Check that normalization op has really been decomposed
             for node_in_graph in in_opt_graph:
@@ -606,7 +621,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
                             except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
             warmup_backward(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
             graph = backward_graph(s)
@@ -687,7 +702,7 @@ class TestFuser(JitTestCase):
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
 
-        with enable_profiling_mode(True):
+        with enable_profiling_mode_for_profiling_tests(True):
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
             backward = backward_graph(module)
@@ -765,6 +780,7 @@ class TestFuser(JitTestCase):
         warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -814,6 +830,7 @@ class TestFuser(JitTestCase):
                                                          "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
             r = torch.rand_like(y)

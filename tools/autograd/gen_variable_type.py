@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -109,7 +109,14 @@ DONT_REQUIRE_DERIVATIVE = {
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
     # Quantize functions should not record gradients
-    'quantize_per_tensor', 'quantize_per_channel'
+    'quantize_per_tensor', 'quantize_per_channel',
+    # Functions that return integers should not have output that require gradients
+    'argmax', 'argmin', 'argsort',
+}
+
+# Some operators invalidate the grad_accumulator. Let's reset it.
+RESET_GRAD_ACCUMULATOR = {
+    'set', 'resize'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -173,26 +180,24 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
 
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}),
-      &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
+m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel(DispatchKey::VariableTensorId, &VariableType::${type_wrapper_name}))
+m.impl("${unqual_operator_name_with_overload}",
+       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${class_type}::${type_wrapper_name}))
+);
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -217,23 +222,47 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-self_.${api_name}(${unpacked_method_args})""")
+${var}.${api_name}(${unpacked_method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
-DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return ${base_type_call};
 })();
+""")
+
+ASSIGN_RETURN_VALUE = CodeTemplate("""\
 ${return_values} = ${rhs_value};
+""")
+
+ARRAYREF_TO_VEC = CodeTemplate("""\
+auto ${vec} = ${arg}.vec();
+""")
+
+OPTIONAL_TO_VAL = CodeTemplate("""\
+auto ${val} = ${arg}.value_or(${default});
+""")
+
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
+c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
+  ${replay_view_func}
+}
+""")
+
+REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
+func = [=](const at::Tensor& ${input_base}) {
+  return ${replay_view_call};
+};
 """)
 
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
@@ -273,6 +302,7 @@ op_name = jit::Symbol::fromQualString("aten::${trace_name}");
 """)
 
 PRE_RECORD_TRACE = CodeTemplate("""\
+#if !defined(PYTORCH_DISABLE_TRACING)
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
@@ -286,6 +316,7 @@ if (jit::tracer::isTracing()) {
   ${inplace_guard}
   jit::tracer::setTracingState(nullptr);
 }
+#endif
 """)
 
 INPLACE_GUARD = CodeTemplate("""\
@@ -295,10 +326,12 @@ jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
+#if !defined(PYTORCH_DISABLE_TRACING)
 if (tracer_state) {
   jit::tracer::setTracingState(std::move(tracer_state));
   ${add_trace_outputs}
 }
+#endif
 """)
 
 RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
@@ -309,7 +342,42 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+""")
+
+# ProfiledType templates
+# See NOTE[UnboxedOnly] in function_wrapper.py
+UNBOXED_PROFILE_DISPATCH = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${profiled_arg_types})>();
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
+""")
+PROFILE_DISPATCH = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${profiled_arg_types})>();
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
+""")
+
+
+# TraceType templates
+# TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
+# See NOTE[UnboxedOnly] in function_wrapper.py
+UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${arg_types})>();
+${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+""")
+TRACE_DISPATCH = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${schema_order_arg_types})>();
+${assign_return_values}c10::Dispatcher::singleton()
+    .redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
 """)
 
 
@@ -467,13 +535,55 @@ def format_prerecord_trace(declaration):
     return PRE_RECORD_TRACE.substitute(local)
 
 
-def format_trace(declaration, disable_trace=False):
-    if disable_trace or not should_trace(declaration):
+def format_trace(declaration):
+    if not should_trace(declaration):
         return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
-def gen_variable_type(out, aten_declarations, template_path, disable_trace=False):
+# Methods shared by TraceType and VariableType to handle return variable declaration, tie and tuple.
+def format_return_variables(declaration):
+    name = declaration['name']
+    arguments = declaration['arguments']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+
+    def declare_returned_variables():
+        if modifies_arguments:
+            return ''
+        if len(declaration['returns']) == 1:
+            return ''
+        # TODO: this will be ugly
+        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
+        return '\n'.join(names)
+
+    def tie_return_values():
+        if len(declaration['returns']) == 1:
+            return 'auto {}'.format(declaration['returns'][0]['name'])
+        names = [ret['name'] for ret in declaration['returns']]
+        return 'std::tie({})'.format(', '.join(names))
+
+    def get_return_value():
+        if inplace:
+            return 'self'
+        if is_out_fn:
+            return_names = [arg['name'] for arg in arguments
+                            if arg.get('output', False)]
+            if len(return_names) == 1:
+                return return_names[0]
+            return 'std::forward_as_tuple({})'.format(', '.join(return_names))
+
+        returns = declaration['returns']
+        if len(returns) == 1:
+            return returns[0]['name']
+        moved = ['std::move({})'.format(r['name']) for r in returns]
+        return 'std::make_tuple({})'.format(', '.join(moved))
+
+    return (declare_returned_variables(), tie_return_values(), get_return_value())
+
+
+def gen_variable_type(out, aten_declarations, template_path):
 
     """VariableType.h and VariableType.cpp body
 
@@ -487,7 +597,7 @@ def gen_variable_type(out, aten_declarations, template_path, disable_trace=False
 
     aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
 
-    gen_variable_type_shard(out, aten_declarations, template_path, None, True, disable_trace)
+    gen_variable_type_shard(out, aten_declarations, template_path, None, True)
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
@@ -500,58 +610,210 @@ def gen_variable_type(out, aten_declarations, template_path, disable_trace=False
         shards[x].append(decl)
 
     for i, shard in enumerate(shards):
-        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False, disable_trace)
-    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False, disable_trace)
+        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
+    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
     REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
     registration_declarations = []
 
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived':
-            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
+        if declaration['use_c10_dispatcher'] == 'full':
+            declaration_formals = declaration['schema_order_formals']
         else:
-            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+            declaration_formals = declaration['formals']
+        if dispatch_strategy(declaration) == 'use_derived':
+            registration_declarations.append(
+                REGISTRATION_DECLARATION.substitute(declaration,
+                                                    declaration_formals=declaration_formals,
+                                                    compound='false'))
+        else:
+            registration_declarations.append(
+                REGISTRATION_DECLARATION.substitute(declaration,
+                                                    declaration_formals=declaration_formals,
+                                                    compound='true'))
 
     env = {
         'registration_declarations': registration_declarations,
     }
     write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
-def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header, disable_trace):
+
+def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
+    PROFILED_TYPE_CPP = CodeTemplate.from_file(template_path + '/ProfiledType.cpp')
+    TRACE_TYPE_CPP = CodeTemplate.from_file(template_path + '/TraceType.cpp')
 
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
+    profiled_method_definitions = []
+    profiled_wrapper_registrations = []
+    trace_method_definitions = []
+    trace_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if not declaration['manual_kernel_registration']:
-            body = emit_body(declaration, disable_trace)
+            body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
             if declaration['use_c10_dispatcher'] == 'full':
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
+                    declaration, class_type='VariableType'))
             else:
-                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                    declaration, formal_types=formal_types))
+                    declaration, class_type='VariableType'))
+
+        # Emit ProfiledType code
+        profiled_body = emit_profiled_body(declaration)
+        profiled_method_definitions.append(METHOD_DEFINITION.substitute(
+            declaration, type_definition_body=profiled_body))
+
+        if declaration['use_c10_dispatcher'] == 'full':
+            profiled_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='ProfiledType'))
+        else:
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+            profiled_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='ProfiledType'))
+
+        # Emit TraceType code
+        if not declaration['manual_kernel_registration']:
+            trace_body = emit_trace_body(declaration)
+            trace_method_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=trace_body))
+
+            if declaration['use_c10_dispatcher'] == 'full':
+                trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, class_type='TraceType'))
+            else:
+                trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, class_type='TraceType'))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
+        'profiled_method_definitions': profiled_method_definitions,
+        'profiled_wrapper_registrations': profiled_wrapper_registrations,
+        'trace_method_definitions': trace_method_definitions,
+        'trace_wrapper_registrations': trace_wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
+        write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
+        write(out, 'TraceType%s.cpp' % suffix, TRACE_TYPE_CPP, env)
 
 
-def emit_body(declaration, disable_trace):
+def emit_profiled_body(declaration):
+    arguments = declaration['arguments']
+    returns = declaration['returns']
+    func = declaration['derivative']
+    name = declaration['name']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 0
+
+    processed_args = []
+    for a in arguments:
+        processed_args.append('{}'.format(a['name']))
+
+    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
+    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+    schema_order_arg_types = ', '.join([a['type'] for a in declaration['schema_order_arguments']])
+    schema_order_ret_and_arg_types = ', '.join(
+        [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
+
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
+    profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
+    schema_order_profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['schema_order_args']
+
+    if declaration['use_c10_dispatcher'] == 'full':
+        profiled_arg_types = schema_order_arg_types
+        profiled_ret_and_arg_types = schema_order_ret_and_arg_types
+        profiled_dispatch_args = schema_order_profiled_dispatch_args
+    else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        profiled_arg_types = arg_types
+        profiled_ret_and_arg_types = ret_and_arg_types
+        profiled_dispatch_args = profiled_dispatch_args
+
+    call = PROFILE_DISPATCH.substitute(
+        declaration,
+        name=name,
+        input_names=record_function_input_names(),
+        return_type=declaration['return_type'],
+        profiled_arg_types=profiled_arg_types,
+        profiled_ret_and_arg_types=profiled_ret_and_arg_types,
+        profiled_dispatch_args=profiled_dispatch_args,
+    )
+
+    return [call]
+
+
+def emit_trace_body(declaration):
+    returns = declaration['returns']
+    name = declaration['name']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 0
+
+    trace_body = []
+    pre_record_trace, post_record_trace = format_trace(declaration)
+    declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
+
+    trace_body.append(pre_record_trace)
+    trace_body.append(declare_returned_variables)
+
+    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
+    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+    schema_order_arg_types = ', '.join([a['type'] for a in declaration['schema_order_arguments']])
+    schema_order_ret_and_arg_types = ', '.join(
+        [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
+
+    trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
+    schema_order_trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['schema_order_args']
+    assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
+    if declaration['use_c10_dispatcher'] == 'full':
+        call = TRACE_DISPATCH.substitute(
+            declaration,
+            schema_order_arg_types=schema_order_arg_types,
+            assign_return_values=assign_return_values,
+            schema_order_ret_and_arg_types=schema_order_ret_and_arg_types,
+            schema_order_trace_dispatch_args=schema_order_trace_dispatch_args,
+        )
+    else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        call = UNBOXED_TRACE_DISPATCH.substitute(
+            declaration,
+            arg_types=arg_types,
+            ret_and_arg_types=ret_and_arg_types,
+            trace_dispatch_args=trace_dispatch_args,
+            assign_return_values=assign_return_values,
+        )
+    trace_body.append(call)
+    trace_body.append(post_record_trace)
+    if not returns_void:
+        trace_body.append('return {};'.format(get_return_value))
+    return trace_body
+
+
+def emit_body(declaration):
     strategy = dispatch_strategy(declaration)
 
     arguments = declaration['arguments']
@@ -737,7 +999,7 @@ def emit_body(declaration, disable_trace):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    is_inplace_view = "{}.is_view()".format(var)
                     expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
                 else:
                     expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
@@ -755,19 +1017,68 @@ def emit_body(declaration, disable_trace):
                 stmts.append('}')
         return stmts
 
-    def declare_returned_variables():
-        if modifies_arguments:
-            return ''
-        if len(declaration['returns']) == 1:
-            return ''
-        # TODO: this will be ugly
-        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
-        return '\n'.join(names)
+    def emit_dispatch_call(api_name, input_base, unpacked_args):
+        """ Dispatch call via function in a namespace or method on Tensor."""
+        if 'namespace' in declaration['method_of']:
+            call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+                api_name=api_name,
+                unpacked_args=unpacked_args)
+        else:
+            call = CALL_DISPATCH_VIA_METHOD.substitute(
+                api_name=api_name,
+                var=input_base,
+                unpacked_method_args=unpacked_args[1:])
+        return call
 
-    def wrap_output(call):
-        # Returns `wrapped_call` which is a drop-in replacement for `call`
+    def emit_view_lambda():
+        """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
+        See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
+        input_base = 'input_base'
+        replay_view_func = ''
+        updated_unpacked_args = []
+        combined = nested_dict(env, declaration)
+        known_view_arg_simple_types = ['int64_t', 'int64_t?', 'bool', 'IntArrayRef']
+        for arg in combined['unpacked_args']:
+            if arg == 'self_':
+                updated_unpacked_args.append(input_base)
+                continue
+            arg_type = combined['unpacked_args_simple_type'][arg]
+            if arg_type not in known_view_arg_simple_types:
+                raise TypeError('You are adding an {} {} argument to op {} in addition to known types: {}. '
+                                'Please update the list or materialize it so that it can be closed over by value, '
+                                'also add a test in pytorch/xla/test/test_operations.py where this code is exercised.'
+                                .format(arg_type, arg, declaration['name'], ', '.join(known_view_arg_simple_types)))
+
+            if arg_type == 'IntArrayRef':
+                # It's not safe to close over IntArrayRef by value, since this is a
+                # reference type, so materialize a vector to close over by value
+                arg_vec = arg + '_vec'
+                replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
+                updated_unpacked_args.append(arg_vec)
+            elif arg_type == 'int64_t?':
+                # Materialize int64_t? to int64_t
+                arg_value = arg + '_val'
+                replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
+                updated_unpacked_args.append(arg_value)
+            else:
+                updated_unpacked_args.append(arg)
+
+        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
+        replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+            input_base=input_base,
+            replay_view_call=replay_view_call)
+
+        is_view_with_metadata_change = 'true' if name in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else 'false'
+
+        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
+            is_view_with_metadata_change=is_view_with_metadata_change,
+            replay_view_func=replay_view_func)
+
+    def wrap_output(return_values, var):
+        call = ''
+        rhs_value = None
         if 'Tensor' not in declaration['return_type']:
-            return call
+            rhs_value = var
         elif view_info is not None:
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
@@ -777,7 +1088,7 @@ def emit_body(declaration, disable_trace):
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                return 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, call)
+                rhs_value = 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, var)
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
@@ -787,18 +1098,25 @@ def emit_body(declaration, disable_trace):
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
-                creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                 if return_info['dynamic_type'] == 'TensorList':
                     creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                wrapped_call = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                "/* creation_meta */ {})").format(view_info, call, creation_meta)
-                return wrapped_call
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                else:
+                    call += emit_view_lambda()
+                    creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                 "/* view_func */ func, /* creation_meta */ {})").format(view_info, var, creation_meta)
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
                 raise RuntimeError("Function that return multiple differentiable output "
                                    "when at least one of them is view is not supported.")
         else:
-            return 'std::move({})'.format(call)
+            rhs_value = 'std::move({})'.format(var)
+        assert rhs_value is not None
+        call += ASSIGN_RETURN_VALUE.substitute(return_values=return_values,
+                                               rhs_value=rhs_value)
+        return call
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -823,7 +1141,7 @@ def emit_body(declaration, disable_trace):
                 RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
         return call
 
-    def emit_call(env):
+    def emit_call(env, tie_return_values):
         combined = nested_dict(env, declaration)
         if strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
@@ -831,50 +1149,22 @@ def emit_body(declaration, disable_trace):
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            if 'namespace' in declaration['method_of']:
-                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
-            else:
-                unpacked_method_args = combined['unpacked_args'][1:]
-                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
-                    combined, unpacked_method_args=unpacked_method_args)
+            base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
             if not modifies_arguments and not returns_void:
-                rhs_value = wrap_output('tmp')
-                call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call,
-                    return_values=tie_return_values(),
-                    rhs_value=rhs_value)
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
+
+                call += wrap_output(tie_return_values, 'tmp')
             else:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
             call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
-                call = '{} = {}'.format(tie_return_values(), call)
+                call = '{} = {}'.format(tie_return_values, call)
             call = call + ';'
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
-
-    def tie_return_values():
-        if len(declaration['returns']) == 1:
-            return 'auto {}'.format(declaration['returns'][0]['name'])
-        names = [ret['name'] for ret in declaration['returns']]
-        return 'std::tie({})'.format(', '.join(names))
-
-    def get_return_value():
-        if inplace:
-            return 'self'
-        if is_out_fn:
-            return_names = [arg['name'] for arg in arguments
-                            if arg.get('output', False)]
-            if len(return_names) == 1:
-                return return_names[0]
-            return 'std::forward_as_tuple({})'.format(', '.join(return_names))
-
-        returns = declaration['returns']
-        if len(returns) == 1:
-            return returns[0]['name']
-        moved = ['std::move({})'.format(r['name']) for r in returns]
-        return 'std::make_tuple({})'.format(', '.join(moved))
 
     def emit_history():
         fn = 'rebase' if modifies_arguments and view_info is None else 'set'
@@ -905,45 +1195,37 @@ def emit_body(declaration, disable_trace):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 
-    def check_record_function_input_type(simple_type):
-        return simple_type in ['Tensor', 'Scalar']
-
-    def record_function_input_names():
-        return ', '.join([
-            arg['name'] for arg in declaration['arguments']
-            if check_record_function_input_type(arg['simple_type'])])
-
     env = {}
     combined = nested_dict(env, declaration)
 
     body = []
-    if base_name not in DONT_PROFILE:
-        input_names = record_function_input_names()
-        body.append(
-            RECORD_FUNCTION.substitute(combined, input_names=input_names))
+
+    declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
+
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
-    body.append(declare_returned_variables())
+    body.append(declare_returned_variables)
 
-    pre_record_trace, post_record_trace = format_trace(declaration, disable_trace)
-
-    body.append(pre_record_trace)
-    body.append(emit_call(env))
+    body.append(emit_call(env, tie_return_values))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())
         body.append(emit_history())
-    # post_record_trace must appear before save_outputs so that saved outputs
-    # have their tracing state saved (that is setup by recordTrace)
-    body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
+    if base_name in RESET_GRAD_ACCUMULATOR:
+        # `inplace` implies that there is exactly one output named `self`,
+        # so we can keep the generated code easy. If you need to
+        # `reset_grad_accumulator` in an operator that's not `inplace`, you can
+        # remove this assert but the code generation will get more elaborate
+        assert inplace
+        body.append('reset_grad_accumulator(self);')
     if not returns_void:
-        body.append('return {};'.format(get_return_value()))
+        body.append('return {};'.format(get_return_value))
     return body
 
 
@@ -1006,8 +1288,7 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['requires_tensor'] or
-            declaration['derivative'] is not None):
+    if declaration['abstract'] or declaration['derivative'] is not None:
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 
@@ -1022,6 +1303,7 @@ def dispatch_strategy(declaration):
         # more performant and to ensure factory functions return tensors with _version
         # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
         # to understand.
+
         return 'use_derived'
     else:
         # If the function is concrete (we don't have to override it) and we

@@ -14,7 +14,8 @@ fi
 
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
-
+export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 
 mkdir -p $TMP_DIR/build/torch
 
@@ -43,11 +44,11 @@ run_tests() {
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-            $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
+            $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
+            $SCRIPT_HELPERS_DIR/test_libtorch.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
-            $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat && \
-            $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         fi
     fi
 }

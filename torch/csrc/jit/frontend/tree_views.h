@@ -40,6 +40,7 @@ namespace jit {
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
 //       | Raise(Expr expr)                                             TK_RAISE
 //       | Def                                                          TK_DEF
+//       | With(List<WithItem> targets, List<Stmt> body)                TK_WITH
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -73,7 +74,7 @@ namespace jit {
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
 //       | TupleLiteral(List<Expr> inputs)                              TK_TUPLE_LITERAL
 //       | Starred(Expr expr)                                           TK_STARRED
-//
+//       | WithItem(Expr target, Maybe<Var> var)                        TK_WITH_ITEM
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
 // Attribute = Attribute(Ident name, Expr value)                        TK_ATTRIBUTE
@@ -83,6 +84,7 @@ namespace jit {
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
+//            | Mod()                                                   TK_MOD_EQ
 //
 
 // Each subclass of TreeView should provide:
@@ -251,6 +253,7 @@ struct Stmt : public TreeView {
       case TK_DELETE:
       case TK_CONTINUE:
       case TK_DEF:
+      case TK_WITH:
         return;
       default:
         throw ErrorReport(tree)
@@ -307,6 +310,7 @@ struct Expr : public TreeView {
       case TK_LIST_COMP:
       case TK_DOTS:
       case TK_IN:
+      case TK_WITH_ITEM:
         return;
       default:
         throw ErrorReport(tree)
@@ -562,6 +566,7 @@ struct AugAssignKind : public TreeView {
       case '-':
       case '*':
       case '/':
+      case '%':
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";
@@ -799,7 +804,8 @@ struct Const : public Expr {
   }
   bool isFloatingPoint() const {
     bool is_inf = subtree(0)->stringValue() == "inf";
-    return is_inf || subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
+    return is_inf ||
+        subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
     return !isFloatingPoint();
@@ -816,8 +822,7 @@ struct Const : public Expr {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
     char* dummy;
-    return torch::jit::strtod_c(
-        subtree(0)->stringValue().c_str(), &dummy);
+    return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -937,8 +942,10 @@ struct Subscript : public Expr {
       const SourceRange& range,
       const Expr& value,
       const List<Expr>& subscript_exprs) {
+    auto whole_range = SourceRange(
+        range.source(), range.start(), subscript_exprs.range().end() + 1);
     return Subscript(
-        Compound::create(TK_SUBSCRIPT, range, {value, subscript_exprs}));
+        Compound::create(TK_SUBSCRIPT, whole_range, {value, subscript_exprs}));
   }
 };
 
@@ -951,6 +958,51 @@ struct Var : public Expr {
   }
   static Var create(const SourceRange& range, const Ident& name) {
     return Var(Compound::create(TK_VAR, range, {name}));
+  }
+};
+
+// WithItem represents an item using with a WithStmt.
+struct WithItem : public Expr {
+  explicit WithItem(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_WITH_ITEM);
+  }
+
+  Expr target() const {
+    return Expr(subtree(0));
+  }
+
+  Maybe<Var> var() const {
+    return Maybe<Var>(subtree(1));
+  }
+
+  static WithItem create(
+      const SourceRange& range,
+      const Expr& target,
+      const Maybe<Var>& var) {
+    return WithItem(Compound::create(TK_WITH_ITEM, range, {target, var}));
+  }
+};
+
+// With represents a with statement consisting of a list of with items and a
+// body of statements.
+struct With : public Stmt {
+  explicit With(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_WITH);
+  }
+
+  List<WithItem> targets() const {
+    return List<WithItem>(subtree(0));
+  }
+
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(1));
+  }
+
+  static With create(
+      const SourceRange& range,
+      const List<WithItem>& targets,
+      const List<Stmt>& body) {
+    return With(Compound::create(TK_WITH, range, {targets, body}));
   }
 };
 

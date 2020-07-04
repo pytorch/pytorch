@@ -5,6 +5,8 @@ In this note we'll cover ways of extending :mod:`torch.nn`,
 :mod:`torch.autograd`, :mod:`torch`, and writing custom C extensions utilizing our C
 libraries.
 
+.. _extending-autograd:
+
 Extending :mod:`torch.autograd`
 -------------------------------
 
@@ -51,6 +53,13 @@ encode the operation history. Every new function requires you to implement 2 met
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
     be used to tell the engine if an output is not differentiable.
 
+.. note::
+
+  By default, all the output Tensors that are of differentiable type will be set to
+  require gradient and have all autograd metadata set for them. If you don't want
+  them to require gradients, you can use the `mark_non_differentiable` method mentioned
+  above. For output Tensors that are not of differentiable type (integer types for example),
+  they won't be marked as requiring gradients.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
@@ -119,6 +128,11 @@ non-Tensor arguments::
     track history. So if ``backward`` is implemented with differentiable
     operations, (e.g., invocation of another custom
     :class:`~torch.autograd.function`), higher order derivatives will work.
+    In this case, the Tensors saved with ``save_for_backward`` can also be used
+    in the backward and have gradients flowing back but Tensors saved in the ``ctx``
+    won't have gradients flowing back for them.
+    If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
+    make it an output of the custom ``Function`` and save it with ``save_for_backward``.
 
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
@@ -134,6 +148,8 @@ numerical approximations using small finite differences::
     print(test)
 
 See :ref:`grad-check` for more details on finite-difference gradient comparisons.
+If your function is used in higher order derivatives (differentiating the backward pass) you
+can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
 
 Extending :mod:`torch.nn`
 -------------------------
@@ -190,7 +206,7 @@ This is how a ``Linear`` module can be implemented::
 
             # Not a very smart way to initialize weights
             self.weight.data.uniform_(-0.1, 0.1)
-            if bias is not None:
+            if self.bias is not None:
                 self.bias.data.uniform_(-0.1, 0.1)
 
         def forward(self, input):

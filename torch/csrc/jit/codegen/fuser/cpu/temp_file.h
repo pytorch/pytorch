@@ -1,19 +1,19 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 #ifdef _WIN32
-#include <Windows.h>
-#include <io.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <random>
-#include <process.h>
 #include <WinError.h>
+#include <Windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <process.h>
+#include <stdio.h>
 #include <sys/stat.h>
+#include <random>
 #else
 #include <unistd.h>
 #endif
@@ -44,7 +44,7 @@ int mkstemps(char* tmpl, int suffix_len) {
   std::random_device rd;
   do {
     for (unsigned i = 0; i < 6; ++i) {
-        name[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[rd() % 36];
+      name[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[rd() % 36];
     }
 
     fd = _open(tmpl, _O_RDWR | _O_CREAT | _O_EXCL, _S_IWRITE | _S_IREAD);
@@ -68,11 +68,11 @@ struct TempFile {
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);
     AT_ASSERT(fd != -1);
-    #ifdef _MSC_VER
+#ifdef _MSC_VER
     file_ = _fdopen(fd, "r+");
-    #else
+#else
     file_ = fdopen(fd, "r+");
-    #endif
+#endif
 
     // - 1 because tt.size() includes the null terminator,
     // but std::string does not expect one

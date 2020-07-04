@@ -20,9 +20,9 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.10)
 endif()
 
 # ---[ Project and semantic versioning.
-project(Caffe2 CXX C)
+project(Torch CXX C)
 
-if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
   set(LINUX FALSE)
@@ -31,11 +31,9 @@ endif()
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 14)
-if (NOT MSVC)
-  set(CMAKE_C_STANDARD 11)
-endif()
-if (DEFINED GLIBCXX_USE_CXX11_ABI)
-  if (${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
+set(CMAKE_C_STANDARD 11)
+if(DEFINED GLIBCXX_USE_CXX11_ABI)
+  if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
   endif()
@@ -47,10 +45,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # with the main Caffe2 library. This is useful for building modules - if
 # modules are built with the main Caffe2 library then one does not need to do
 # find caffe2 in the cmake script. One can usually guard it in some way like
-#    if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+#    if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 #      find_package(Caffe2 REQUIRED)
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
+
+# Googletest's cmake files are going to set it on once they are processed. Let's
+# set it at the very beginning so that the entire build is deterministic.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 if(NOT DEFINED BLAS_SET_BY_USER)
   if(DEFINED BLAS)
@@ -72,31 +74,31 @@ if(APPLE)
   set(CMAKE_FIND_APPBUNDLE LAST)
 
   # Get clang version on macOS
-  EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
+  execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
   string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
-  MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+  message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
   # RPATH stuff
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-if (WIN32)
+if(WIN32)
   # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
   # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
   # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
-  if ($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
+  if($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
     set(CPU_INTEL ON)
-  else ()
+  else()
     set(CPU_INTEL OFF)
-  endif ()
-else ()
-  if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+  endif()
+else()
+  if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
     set(CPU_INTEL ON)
-  else ()
+  else()
     set(CPU_INTEL OFF)
-  endif ()
-endif ()
+  endif()
+endif()
 
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
@@ -136,6 +138,7 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -146,6 +149,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -185,6 +189,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -202,8 +209,44 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
+option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
+
+# Linux distributions do not want too many embedded sources, in that sense we
+# need to be able to build pytorch with an (almost) empty third_party
+# directory.
+# USE_SYSTEM_LIBS is a shortcut variable to toggle all the # USE_SYSTEM_*
+# variables on. Individual USE_SYSTEM_* variables can be toggled with
+# USE_SYSTEM_LIBS being "OFF".
+option(USE_SYSTEM_LIBS "Use all available system-provided libraries." OFF)
+option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
+option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
+option(USE_SYSTEM_GLOO "Use system-provided gloo." OFF)
+option(USE_SYSTEM_FP16 "Use system-provided fp16." OFF)
+option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
+option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
+option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
+option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
+option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
+option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+if(USE_SYSTEM_LIBS)
+  set(USE_SYSTEM_CPUINFO ON)
+  set(USE_SYSTEM_SLEEF ON)
+  set(USE_SYSTEM_GLOO ON)
+  set(BUILD_CUSTOM_PROTOBUF OFF)
+  set(USE_SYSTEM_EIGEN_INSTALL ON)
+  set(USE_SYSTEM_FP16 ON)
+  set(USE_SYSTEM_PTHREADPOOL ON)
+  set(USE_SYSTEM_PSIMD ON)
+  set(USE_SYSTEM_FXDIV ON)
+  set(USE_SYSTEM_BENCHMARK ON)
+  set(USE_SYSTEM_ONNX ON)
+  set(USE_SYSTEM_XNNPACK ON)
+endif()
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
@@ -216,7 +259,11 @@ cmake_dependent_option(
   MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
   "MSVC" OFF)
 
-set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+if(NOT USE_SYSTEM_ONNX)
+  set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+elseif()
+  set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 set(OP_DEPENDENCY "" CACHE STRING
@@ -229,7 +276,7 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
 endif()
 
-if (MSVC)
+if(MSVC)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
       CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
@@ -252,18 +299,12 @@ if (MSVC)
     # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
     # moment only CMP0092 is enough to prevent those warnings too.
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
-    # Suppress EHs is overridden by EHa warning
-    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
-    #
-    # Turn on EHa; I'm not altogether clear why we use the asynchronous
-    # exception handling model, but someone added it at some point, so
-    # keep using it.
-    string(APPEND ${flag_var} " /w /EHa")
+    string(APPEND ${flag_var} " /w")
 
-    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+    if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
         string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/MD")
@@ -286,6 +327,14 @@ if (MSVC)
     endif()
   endforeach(flag_var)
 
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
@@ -305,20 +354,20 @@ if (MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
-IF(NOT MSVC)
+if(NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
   list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
-ENDIF(NOT MSVC)
+endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 # Setting `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can
 # force it to do mobile build with host toolchain - which is useful for testing
 # purpose.
-if (ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
+if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
 
-  if (DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
+  if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
@@ -327,7 +376,7 @@ endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
-if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
   set(INTERN_BUILD_ATEN_OPS OFF)
 else()
   set(INTERN_BUILD_ATEN_OPS ON)
@@ -337,8 +386,8 @@ endif()
 # When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
 # When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  if (NOT BUILD_SHARED_LIBS)
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_EXPORT")
   endif()
   set(BUILD_PYTHON OFF)
@@ -362,19 +411,28 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.1.0")
+file(READ version.txt TORCH_DEFAULT_VERSION)
+# Strip trailing newline
+string(REGEX REPLACE "\n$" "" TORCH_DEFAULT_VERSION "${TORCH_DEFAULT_VERSION}")
+if("${TORCH_DEFAULT_VERSION} " STREQUAL " ")
+  message(WARNING "Could not get version from base 'version.txt'")
+  # If we can't get the version from the version file we should probably
+  # set it to something non-sensical like 0.0.0
+  set(TORCH_DEFAULT_VERSION, "0.0.0")
+endif()
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
-if (DEFINED ENV{PYTORCH_BUILD_VERSION})
+if(DEFINED ENV{PYTORCH_BUILD_VERSION})
   set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
     CACHE STRING "Torch build version" FORCE)
 endif()
-if (NOT TORCH_BUILD_VERSION)
+if(NOT TORCH_BUILD_VERSION)
   # An empty string was specified so force version to the default
   set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
     CACHE STRING "Torch build version" FORCE)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
 caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
+set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
@@ -423,7 +481,19 @@ if(USE_PYTORCH_QNNPACK)
 endif()
 
 if(USE_XNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
+endif()
+
+if(USE_VULKAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN")
+endif()
+
+if(USE_VULKAN_WRAPPER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_WRAPPER")
+endif()
+
+if(USE_VULKAN_SHADERC_RUNTIME)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -455,10 +525,11 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-  if (CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
+  if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
   endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=pedantic")
@@ -466,7 +537,7 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=old-style-cast")
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-  if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-invalid-partial-specialization")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-typedef-redefinition")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
@@ -477,55 +548,55 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
-    if (${COLORIZE_OUTPUT})
+    if(${COLORIZE_OUTPUT})
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
     endif()
   endif()
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
-    if (${COLORIZE_OUTPUT})
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
+    if(${COLORIZE_OUTPUT})
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
     endif()
   endif()
-  if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR (CMAKE_COMPILER_IS_GNUCXX
-    AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
+  if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
+    OR(CMAKE_COMPILER_IS_GNUCXX
+    AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
-  if (WERROR)
+  if(WERROR)
     check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
-    if (NOT COMPILER_SUPPORT_WERROR)
+    if(NOT COMPILER_SUPPORT_WERROR)
       set(WERROR FALSE)
     else()
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
     endif()
   endif(WERROR)
-  if (NOT APPLE)
+  if(NOT APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
   endif()
-  set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
-  set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
+  set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
   check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
-  if (HAS_WERROR_FORMAT)
+  if(HAS_WERROR_FORMAT)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=format")
   endif()
 endif()
 
-if (USE_ASAN)
-    set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
-    set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+if(USE_ASAN)
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
+    set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
 endif()
 
-if (APPLE)
+if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
 endif()
 
-if (EMSCRIPTEN)
+if(EMSCRIPTEN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
@@ -567,7 +638,7 @@ add_subdirectory(caffe2)
 if(BUILD_DOCS)
   # check if Doxygen is installed
   find_package(Doxygen)
-  if (DOXYGEN_FOUND)
+  if(DOXYGEN_FOUND)
     message("Generating documentation")
 
     set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-c)
@@ -615,14 +686,14 @@ endif()
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
 
-if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
+if((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING
       "Generated cmake files are only fully tested if one builds "
       "with system glog, gflags, and protobuf. Other settings may "
       "generate files that are not well tested.")
 endif()
 
-if (USE_CUDA OR USE_ROCM)
+if(USE_CUDA OR USE_ROCM)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
 
@@ -634,7 +705,7 @@ endif()
 # script will fail. As a result, we will only provide the targets cmake
 # files for shared lib installation. For more info, read:
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
-if (BUILD_SHARED_LIBS)
+if(BUILD_SHARED_LIBS)
   configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
@@ -681,12 +752,12 @@ add_subdirectory(modules)
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-if (BUILD_BINARY)
+if(BUILD_BINARY)
   add_subdirectory(binaries)
 endif()
 
 # ---[ JNI
-if (BUILD_JNI)
+if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)

@@ -16,14 +16,14 @@ namespace nn {
 ///
 /// Example:
 /// ```
-/// Upsample model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
+/// Upsample model(UpsampleOptions().scale_factor(std::vector<double>({3})).mode(torch::kLinear).align_corners(false));
 /// ```
 struct TORCH_API UpsampleOptions {
   /// output spatial sizes.
-  TORCH_ARG(std::vector<int64_t>, size) = {};
+  TORCH_ARG(c10::optional<std::vector<int64_t>>, size) = c10::nullopt;
 
   /// multiplier for spatial size.
-  TORCH_ARG(std::vector<double>, scale_factor) = {};
+  TORCH_ARG(c10::optional<std::vector<double>>, scale_factor) = c10::nullopt;
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic" and "trilinear". Default: "nearest"
@@ -49,7 +49,7 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::interpolate(input, F::InterpolateFuncOptions().size({4}).mode(torch::kNearest));
+/// F::interpolate(input, F::InterpolateFuncOptions().size(std::vector<int64_t>({4})).mode(torch::kNearest));
 /// ```
 struct TORCH_API InterpolateFuncOptions {
   typedef c10::variant<
@@ -61,10 +61,10 @@ struct TORCH_API InterpolateFuncOptions {
       enumtype::kArea> mode_t;
 
   /// output spatial sizes.
-  TORCH_ARG(std::vector<int64_t>, size) = {};
+  TORCH_ARG(c10::optional<std::vector<int64_t>>, size) = c10::nullopt;
 
   /// multiplier for spatial size.
-  TORCH_ARG(std::vector<double>, scale_factor) = {};
+  TORCH_ARG(c10::optional<std::vector<double>>, scale_factor) = c10::nullopt;
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic", "trilinear", and "area". Default: "nearest"
@@ -80,6 +80,17 @@ struct TORCH_API InterpolateFuncOptions {
   /// kept the same. This only has an effect when :attr:`mode` is "linear",
   /// "bilinear", "bicubic" or "trilinear". Default: "False"
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
+
+  /// recompute the scale_factor for use in the
+  /// interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
+  /// to compute the `output_size`.  If `recompute_scale_factor` is `true` or not specified,
+  /// a new `scale_factor` will be computed based on the output and input sizes for use in the
+  /// interpolation computation (i.e. the computation will be identical to if the computed
+  /// `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
+  /// be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+  /// the recomputed scale_factor may differ from the one passed in due to rounding and precision
+  /// issues.
+  TORCH_ARG(c10::optional<bool>, recompute_scale_factor) = c10::nullopt;
 };
 
 } // namespace functional

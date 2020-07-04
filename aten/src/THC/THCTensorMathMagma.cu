@@ -5,6 +5,7 @@
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 #include <algorithm>
+#include <ATen/native/cuda/MiscUtils.h>
 
 #ifdef USE_MAGMA
 #include <magma.h>

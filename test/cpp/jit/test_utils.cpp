@@ -27,7 +27,7 @@ std::vector<at::Tensor> run(
   return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
-static void unpackReturnTuple(Stack &stack) {
+static void unpackReturnTuple(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }

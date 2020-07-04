@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/boxing/kernel_functor.h>
+#include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
@@ -77,11 +77,12 @@ call_torchbind_method_from_stack(
 
   using IValueArgTypes =
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
-  return (functor)(c10::detail::ivalue_to_arg<
+  // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
+  return (functor)(c10::impl::ivalue_to_arg<
                    std::remove_cv_t<std::remove_reference_t<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>(std::move(
+                   AllowDeprecatedTypes>::call(std::move(
       torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
 }
 
@@ -119,10 +120,24 @@ struct BoxedProxy<void, Func> {
   }
 };
 
+inline bool validIdent(size_t i, char n) {
+  return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
+}
+
+inline void checkValidIdent(const std::string& str, const char *type) {
+  for (size_t i = 0; i < str.size(); ++i) {
+    TORCH_CHECK(validIdent(i, str[i]),
+      type,
+      " must be a valid Python/C++ identifier."
+      " Character '", str[i], "' at index ",
+      i, " is illegal.");
+  }
+}
+
 } // namespace detail
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
-TORCH_API void registerCustomClassMethod(std::shared_ptr<jit::Function> method);
+TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
 
 // Given a qualified name (e.g. __torch__.torch.classes.Foo), return
 // the ClassType pointer to the Type that describes that custom class,
@@ -132,6 +147,10 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
 TORCH_API bool isCustomClass(const c10::IValue& v);
+
+// This API is for testing purposes ONLY. It should not be used in
+// any load-bearing code.
+TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
 
 namespace jit {
 using ::torch::registerCustomClass;

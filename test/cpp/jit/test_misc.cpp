@@ -1,27 +1,23 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/Parallel.h>
-#include <ATen/ThreadLocalDebugInfo.h>
 
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
-#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/ir/irparser.h"
+#include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/jit_log.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -32,28 +28,34 @@
 #include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/liveness.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/pass_manager.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/frontend/tracer.h"
+#include "torch/csrc/jit/serialization/import.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/runtime/profiling_record.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -67,12 +69,13 @@
 #include <utility>
 #include <vector>
 
+using namespace torch::autograd::profiler;
+
 namespace torch {
 namespace jit {
 inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
-
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
@@ -420,15 +423,16 @@ void testCustomFusionNestedBlocks() {
       Symbol::fromQualString("prim::FusionGroup"));
 
   // Could be done in more efficient ways, but this is only a test.
-  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
-      for (auto node : b->nodes()) {
-          if (node->kind() == s)
-              return true;
-          for (auto nested_b : node->blocks())
-              if (dfs(nested_b, s))
-                  return true;
-      }
-      return false;
+  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b,
+                                                      Symbol s) {
+    for (auto node : b->nodes()) {
+      if (node->kind() == s)
+        return true;
+      for (auto nested_b : node->blocks())
+        if (dfs(nested_b, s))
+          return true;
+    }
+    return false;
   };
 
   AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
@@ -466,9 +470,7 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](int64_t l) {
-    return IValue(scalar_to_tensor(at::Scalar(l)));
-  };
+  auto L = [](int64_t l) { return IValue(scalar_to_tensor(at::Scalar(l))); };
   auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string& name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
@@ -498,7 +500,7 @@ void testEvalModeForLoadedModule() {
 }
 
 void testSerializationInterop() {
-  if (isSandcastle()){
+  if (isSandcastle()) {
     // The module file to load is not generated in Sandcastle
     return;
   }
@@ -521,7 +523,7 @@ void testSerializationInterop() {
 }
 
 void testTorchSaveError() {
-  if (isSandcastle()){
+  if (isSandcastle()) {
     // The file to load is not generated in Sandcastle
     return;
   }
@@ -708,16 +710,21 @@ at::Tensor invokeTestRecordFunction(at::Tensor& t) {
 }
 
 static const auto invokeTestRecordFunction_JIT = R"JIT(
-  def forward(t):
+  def foo(self, t):
     t2 = t.pow(2)
     return t2
+
+  def forward(self, t):
+    return self.foo(t)
 )JIT";
 
 at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
   RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
 
-  auto cu = compile(invokeTestRecordFunction_JIT);
-  return cu->get_function("forward")({t}).toTensor();
+  auto module = std::make_shared<script::Module>(
+      "RecordFunctionTestModule", std::make_shared<script::CompilationUnit>());
+  module->define(invokeTestRecordFunction_JIT);
+  return module->forward({t}).toTensor();
 }
 
 using TracedTestInputs =
@@ -750,67 +757,150 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
+void checkScopeCallbacks() {
+  bool found_function_scope = false;
+  bool found_method_scope = false;
+  bool found_user_scope = false;
+  at::addGlobalCallback(at::RecordFunctionCallback(
+      [&](const at::RecordFunction& fn) {
+        if (fn.scope() == at::RecordScope::FUNCTION &&
+            std::string(fn.name().str()) == "test_function") {
+          found_function_scope = true;
+        }
+        if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
+            std::string(fn.name().str()) == "test_method") {
+          found_method_scope = true;
+        }
+        if (fn.scope() == at::RecordScope::USER_SCOPE &&
+            std::string(fn.name().str()) == "test_user_scope") {
+          found_user_scope = true;
+        }
+      },
+      [](const at::RecordFunction&) {}));
+
+  bool bad_scope = false;
+  auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
+    at::addGlobalCallback(
+        at::RecordFunctionCallback(
+            [&bad_scope, &cnt, scope](const at::RecordFunction& fn) {
+              if (fn.scope() == scope) {
+                ++cnt;
+              } else {
+                bad_scope = true;
+              }
+              return true;
+            },
+            [](const at::RecordFunction&) {})
+            .scopes({scope}));
+  };
+
+  size_t fun_cnt = 0;
+  pushScopedCallback(at::RecordScope::FUNCTION, fun_cnt);
+  size_t ts_fun_cnt = 0;
+  pushScopedCallback(at::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
+  size_t user_scope_cnt = 0;
+  pushScopedCallback(at::RecordScope::USER_SCOPE, user_scope_cnt);
+
+  TORCH_CHECK(at::hasCallbacks());
+
+  {
+    RECORD_TORCHSCRIPT_FUNCTION("test_method", {});
+    { RECORD_FUNCTION("test_function", {}); }
+    { RECORD_USER_SCOPE("test_user_scope"); }
+  }
+
+  TORCH_CHECK(!bad_scope);
+  TORCH_CHECK(fun_cnt == 1);
+  TORCH_CHECK(ts_fun_cnt == 1);
+  TORCH_CHECK(user_scope_cnt == 1);
+
+  TORCH_CHECK(found_function_scope);
+  TORCH_CHECK(found_method_scope);
+  TORCH_CHECK(found_user_scope);
+}
+
 void testRecordFunction() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
+  // disabling the inlining of method calls
+  GraphOptimizerEnabledGuard opt_guard(false);
+
   // [(fn, [[sizes], [sizes], ...]), ...]
   TracedTestInputs traced_inputs;
-  autograd::profiler::pushCallback(
-      [&traced_inputs](const autograd::profiler::RecordFunction& fn) {
-        auto inputs = fn.inputs();
-        std::vector<std::vector<int64_t>> sizes;
-        for (const auto& input : inputs) {
-          if (input.isTensor()) {
-            sizes.push_back(input.toTensor().sizes().vec());
-          } else if (input.isScalar()) {
-            sizes.push_back(std::vector<int64_t>());
-          }
-        }
-        traced_inputs.push_back(
-            std::make_tuple(fn.name().str(), sizes));
-      },
-      [](const autograd::profiler::RecordFunction&) {},
-      /* needs_inputs */ true);
+  std::unordered_set<std::string> ts_names;
+  addGlobalCallback(
+      RecordFunctionCallback(
+          [&](const RecordFunction& fn) {
+            if (fn.scope() == RecordScope::FUNCTION) {
+              auto inputs = fn.inputs();
+              std::vector<std::vector<int64_t>> sizes;
+              for (const auto& input : inputs) {
+                if (input.isTensor()) {
+                  sizes.push_back(input.toTensor().sizes().vec());
+                } else if (input.isScalar()) {
+                  sizes.push_back(std::vector<int64_t>());
+                }
+              }
+              traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+            } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+              ts_names.insert(fn.name().str());
+            }
+          },
+          [](const RecordFunction&) {})
+          .needsInputs(true));
 
-  auto t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  auto t2 = invokeTestRecordFunction(t);
-  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
-  auto eager_inputs = traced_inputs;
-  traced_inputs.clear();
+  TracedTestInputs eager_inputs, jit_inputs;
+  {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = invokeTestRecordFunction(t);
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
+    eager_inputs = traced_inputs;
+    traced_inputs.clear();
 
-  t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
-  auto jit_inputs = traced_inputs;
-  traced_inputs.clear();
+    TORCH_CHECK(ts_names.empty());
 
-  autograd::profiler::popCallback();
+    t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    t2 = invokeTestRecordFunctionJIT(t);
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
+    jit_inputs = traced_inputs;
+    traced_inputs.clear();
+  }
+
+  TORCH_CHECK(ts_names.size() == 2);
+  TORCH_CHECK(ts_names.find("forward") != ts_names.end());
+  TORCH_CHECK(ts_names.find("foo") != ts_names.end());
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
+  at::clearCallbacks();
 
   // test sampled callbacks
   int sampled_cb_ctr = 0;
-  autograd::profiler::pushCallback(
-      [&sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
-        if (std::string(fn.name().str()) == "test") {
-          ++sampled_cb_ctr;
-        }
-      },
-      [](const autograd::profiler::RecordFunction&) {},
-      /* needs_inputs */ false,
-      /* sampled */ true);
+  auto setup_sampled_callback = [&sampled_cb_ctr](double sampling_prob) {
+    return addGlobalCallback(RecordFunctionCallback(
+                                 [&sampled_cb_ctr](const RecordFunction& fn) {
+                                   if (std::string(fn.name().str()) == "test") {
+                                     ++sampled_cb_ctr;
+                                   }
+                                   return true;
+                                 },
+                                 [](const RecordFunction&) {})
+                                 .samplingProb(sampling_prob));
+  };
 
   int non_sampled_cb_ctr = 0;
-  autograd::profiler::pushCallback(
-      [&non_sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+  addGlobalCallback(RecordFunctionCallback(
+      [&non_sampled_cb_ctr](const RecordFunction& fn) {
         if (std::string(fn.name().str()) == "test") {
           ++non_sampled_cb_ctr;
         }
+        return true;
       },
-      [](const autograd::profiler::RecordFunction&) {},
-      /* needs_inputs */ false,
-      /* sampled */ false);
+      [](const RecordFunction&) {}));
+
+  auto handle = setup_sampled_callback(0.5);
 
   auto run_test_function = []() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
@@ -819,32 +909,199 @@ void testRecordFunction() {
     }
   };
 
-  autograd::profiler::setSamplingProbability(0.5);
   run_test_function();
-
   TORCH_CHECK(non_sampled_cb_ctr == 1000);
   TORCH_CHECK(sampled_cb_ctr > 0 && sampled_cb_ctr < 1000);
 
   sampled_cb_ctr = 0;
-  autograd::profiler::setSamplingProbability(0.0);
+  removeCallback(handle);
+  handle = setup_sampled_callback(0.0);
   run_test_function();
 
   TORCH_CHECK(non_sampled_cb_ctr == 2000);
   TORCH_CHECK(sampled_cb_ctr == 0);
 
   sampled_cb_ctr = 0;
-  autograd::profiler::setSamplingProbability(1.0);
+  removeCallback(handle);
+  handle = setup_sampled_callback(1.0);
   run_test_function();
 
   TORCH_CHECK(non_sampled_cb_ctr == 3000);
   TORCH_CHECK(sampled_cb_ctr == 1000);
+  clearCallbacks();
 
-  autograd::profiler::popCallback();
-  autograd::profiler::popCallback();
+  // test the scope of the callbacks
+  checkScopeCallbacks();
+  clearCallbacks();
+
+  // check record function guard
+  std::vector<std::string> fn_names;
+  std::mutex mtx;
+  addGlobalCallback(RecordFunctionCallback(
+      [&fn_names, &mtx](const RecordFunction& fn) {
+        std::lock_guard<std::mutex> lock(mtx);
+        fn_names.push_back(fn.name().str());
+        return true;
+      },
+      [](const RecordFunction&) {}));
+  {
+    RecordFunctionGuard g1(false);
+    {
+      RECORD_USER_SCOPE("A");
+      {
+        RecordFunctionGuard g2(true);
+        RECORD_USER_SCOPE("B");
+        {
+          DisableRecordFunctionGuard g3;
+          RECORD_USER_SCOPE("C");
+        }
+      }
+      { RECORD_USER_SCOPE("D"); }
+    }
+  }
+  TORCH_CHECK(fn_names.size() == 1);
+  TORCH_CHECK(fn_names[0] == "B");
+  clearCallbacks();
+
+  // test add/remove
+  std::vector<size_t> ids;
+  auto add_remove_test_add_cb = [&ids](size_t id) {
+    return addGlobalCallback(RecordFunctionCallback(
+        [&ids, id](const RecordFunction& fn) { ids.push_back(id); },
+        [](const RecordFunction&) {}));
+  };
+
+  auto h1 = add_remove_test_add_cb(1);
+  auto h2 = add_remove_test_add_cb(2);
+  auto h3 = add_remove_test_add_cb(3);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ids.size() == 3);
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 3) != ids.end());
+
+  ids.clear();
+  removeCallback(h1);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ids.size() == 2);
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 3) != ids.end());
+
+  ids.clear();
+  removeCallback(h3);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ids.size() == 1);
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
+
+  clearCallbacks();
+
+  // thread local / global callbacks
+
+  ids.clear();
+  addGlobalCallback(RecordFunctionCallback(
+      [&ids](const RecordFunction& fn) { ids.push_back(1); },
+      [](const RecordFunction&) {}));
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ids.size() == 1);
+  TORCH_CHECK(ids[0] == 1);
+  ids.clear();
+
+  auto th = std::thread([&ids]() {
+    c10::impl::IncludeDispatchKeyGuard observer_guard(
+        c10::DispatchKey::Profiler);
+    addThreadLocalCallback(RecordFunctionCallback(
+        [&ids](const RecordFunction& fn) { ids.push_back(2); },
+        [](const RecordFunction&) {}));
+
+    { RECORD_USER_SCOPE("test_thread"); }
+  });
+  th.join();
+  TORCH_CHECK(ids.size() == 2);
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
+  TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
+  ids.clear();
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ids.size() == 1);
+  TORCH_CHECK(ids[0] == 1);
+  ids.clear();
+
+  clearCallbacks();
+
+  // test should_run
+
+  bool ran = false;
+  bool should_run = false;
+  addGlobalCallback(
+      RecordFunctionCallback(
+          [&ran](const RecordFunction& fn) { ran = true; },
+          [](const RecordFunction&) {})
+          .setShouldRun([&should_run](const RecordFunctionCallback&) {
+            return should_run;
+          }));
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(!ran);
+
+  should_run = true;
+
+  { RECORD_USER_SCOPE("test"); }
+
+  TORCH_CHECK(ran);
+
+  clearCallbacks();
+
+  // test propagation of TLS callbacks
+  std::thread t([]() {
+    RecordFunctionGuard enable_rec_fn;
+    std::string recorded_op;
+    auto handle = addThreadLocalCallback(RecordFunctionCallback(
+        [&recorded_op](const RecordFunction& fn) {
+          recorded_op = fn.name().str();
+        },
+        [](const RecordFunction&) {}));
+    ThreadLocalState state;
+    std::thread t_child([state]() {
+      ThreadLocalStateGuard g_tls(state);
+      RECORD_USER_SCOPE("test_in_thread");
+    });
+    t_child.join();
+    TORCH_CHECK(recorded_op == "test_in_thread");
+    removeCallback(handle);
+  });
+  t.join();
+  clearCallbacks();
+
+  // test set ids
+  bool has_ids = false;
+  addGlobalCallback(
+      RecordFunctionCallback(
+          [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+          [](const RecordFunction&) {})
+          .needsIds(true));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(has_ids);
+  clearCallbacks();
+  has_ids = false;
+  addGlobalCallback(RecordFunctionCallback(
+      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+      [](const RecordFunction&) {}));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(!has_ids);
+  clearCallbacks();
 }
 
-class TestThreadLocalDebugInfo
-  : public at::ThreadLocalDebugInfoBase {
+class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {
     return model_id_;
@@ -860,49 +1117,89 @@ class TestThreadLocalDebugInfo
   int model_id_ = 0;
 };
 
-void testThreadLocalDebugInfo() {
-  auto checkDebugInfo = [](){
-    auto debug_info = at::getThreadLocalDebugInfo();
-    TORCH_CHECK(debug_info != nullptr);
-    auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(
-        debug_info.get());
-    TORCH_CHECK(test_debug_info != nullptr);
-    TORCH_CHECK(test_debug_info->getModelId() == 42);
-  };
+void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
+  auto debug_info = c10::ThreadLocalDebugInfo::get(kind);
+  TORCH_CHECK(debug_info != nullptr);
+  auto* test_debug_info =
+      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
+  TORCH_CHECK(test_debug_info != nullptr);
+  TORCH_CHECK(test_debug_info->getModelId() == model_id);
+}
 
-  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+void testThreadLocalDebugInfo() {
+  // enable observers
+  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
+
+  TORCH_CHECK(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
   debug_info->setModelId(42);
-  at::setThreadLocalDebugInfo(debug_info);
-
-  checkDebugInfo();
+  {
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
+    checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+  }
 
   // check that thread local debug info is propagated through fork calls
-  std::atomic<bool> done {false};
-  at::launch([checkDebugInfo, &done](){
-    checkDebugInfo();
-    done = true;
-  });
-  while (!done) {}
-  checkDebugInfo();
+  TORCH_CHECK(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
+  std::atomic<bool> done{false};
+  {
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
+    at::launch([&done]() {
+      checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+      done = true;
+    });
+  }
+  while (!done) {
+  }
 
   // check that thread local debug info is propagated through backward pass
-  autograd::profiler::pushCallback(
-      [&checkDebugInfo](const autograd::profiler::RecordFunction& fn) {
-        checkDebugInfo();
+  TORCH_CHECK(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
+  done = false;
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [&done](const RecordFunction&) {
+        checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+        done = true;
+        return true;
       },
-      [](const autograd::profiler::RecordFunction&) {});
+      [](const RecordFunction&) {}));
   {
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   }
-  autograd::profiler::popCallback();
+  removeCallback(handle);
+  TORCH_CHECK(done);
 
-  checkDebugInfo();
-  at::setThreadLocalDebugInfo(nullptr);
-  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+  // check nested debug info
+  TORCH_CHECK(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
+  {
+    c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
+    {
+      checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+      {
+        auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+        debug_info->setModelId(314);
+        c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO_2, debug_info);
+        {
+          checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+          checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
+          done = false;
+          at::launch([&done]() {
+            checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
+            checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
+            done = true;
+          });
+          while (!done) {
+          }
+        }
+      }
+    }
+  }
 }
 
 void testAutogradProfiler() {
@@ -919,7 +1216,7 @@ void testAutogradProfiler() {
 
   std::stringstream ss;
   {
-    autograd::profiler::RecordProfile guard(ss);
+    RecordProfile guard(ss);
     for (size_t i = 0; i < 100; ++i) {
       std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
     }
@@ -937,21 +1234,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -1043,6 +1336,244 @@ static void checkShape(
   auto tp = profile->output()->type();
   auto ptp = tp->expect<TensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void count_(
+    Block* block,
+    const std::function<bool(Node* n)>& pred,
+    size_t& count) {
+  for (Node* n : block->nodes()) {
+    if (pred(n)) {
+      count++;
+    }
+
+    for (Block* ib : n->blocks()) {
+      count_(ib, pred, count);
+    }
+  }
+}
+
+size_t countNodes(
+    const std::shared_ptr<Graph>& graph,
+    const std::function<bool(Node* n)>& pred) {
+  size_t count = 0;
+  count_(graph->block(), pred, count);
+  return count;
+}
+
+void testLoopPeeler() {
+  // peel all loops
+  auto true_pred = [](Node* n) { return true; };
+  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
+
+  // do not use an induction variable explicitly
+  {
+    static const auto str_func_def = R"JIT(
+    def test_peel_n_times():
+      sum = 0
+      for i in range(10):
+        sum += 2
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_peel_n_times");
+    auto stack = createStack({});
+    // peeling loop once
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 20);
+    }
+
+    // test peeling more than one iteration
+    {
+      LoopsPeeler peeler(true_pred, 3);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 20);
+    }
+  }
+
+  // uses the induction variable
+  {
+    static const auto str_func_def = R"JIT(
+    def test_peel_n_times():
+      sum = 0
+      for i in range(10):
+        sum += i
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_peel_n_times");
+    auto stack = createStack({});
+    // peeling loop once
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 45);
+    }
+
+    // test peeling more than one iteration
+    {
+      LoopsPeeler peeler(true_pred, 3);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 45);
+    }
+  }
+
+  // tests with explicit termination conditions
+  {
+    static const auto str_func_def = R"JIT(
+    def test_with_cond_times():
+      sum = 0
+      i = 0
+      while (sum < 2):
+        sum += i
+        i += 1
+      return sum
+    )JIT";
+
+    // the peel changes the termination condition to false
+    // so the original loop doesn't run
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_with_cond_times");
+    auto stack = createStack({});
+    // peeling 5 iterations should update the termination
+    // condition to false
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+
+    // the termination condition remains true
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+  }
+
+  // tests simple nested loops
+  {
+    static const auto str_func_def = R"JIT(
+    def test_nested_loops():
+      sum = 0
+      i = 0
+      for i in range(10):
+        for j in range(10):
+          sum += i + j
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_nested_loops");
+    auto stack = createStack({});
+
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 900);
+    }
+
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 900);
+    }
+  }
+
+  {
+    static const auto str_func_def = R"JIT(
+    def test_nested_loops():
+      sum = 0
+      i = 0
+      for i in range(10):
+        j = 0
+        while sum < 2:
+          sum += i + j
+          j += 1
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_nested_loops");
+    auto stack = createStack({});
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+  }
 }
 
 void testInsertAndEliminateRedundantGuards() {
@@ -1163,15 +1694,15 @@ void testProfiler() {
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
   auto mm =
-      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::add; });
   ASSERT_NE(mm, end);
-  std::vector<int64_t> mm_expected{4, 256};
+  std::vector<int64_t> mm_expected{4, 2048};
   std::vector<int64_t> eltwise{4, 512};
   checkShape(*mm, mm_expected);
-  auto sigmoid_n = std::find_if(
-      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
-  ASSERT_NE(sigmoid_n, end);
-  checkShape(*sigmoid_n, eltwise);
+  auto mul_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mul; });
+  ASSERT_NE(mul_n, end);
+  checkShape(*mul_n, eltwise);
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(*tanh_n, eltwise);
@@ -1303,16 +1834,216 @@ void testAutogradSymbols() {
   TORCH_CHECK(canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("prim::test_symbol");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("prim::FusionGroup");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("custom::test_symbol");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
+}
+
+void testDefaultArgTypeHinting() {
+  const auto text_non_hinted = R"(
+
+def a(x, y=1):
+    print("a1")
+    print("a2")
+    return x
+  )";
+
+  const auto text_hinted = R"(
+
+def a(x, y:int=1):
+    print("a1")
+    print("a2")
+    return x
+  )";
+
+  try {
+    compile(text_non_hinted);
+    ASSERT_TRUE(0);
+  } catch (const std::exception& c) {
+  }
+
+  auto cu = compile(text_hinted);
+}
+
+void testFutures() {
+  // Basic set case.
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    ASSERT_FALSE(f1->completed());
+    ASSERT_FALSE(f1->hasValue());
+    int32_t sat1 = 0;
+    int32_t sat2 = 0;
+    f1->addCallback([&]() { ++sat1; });
+    f1->markCompleted(43);
+    ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasValue());
+    ASSERT_FALSE(f1->hasError());
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(f1->constValue().toInt(), 43);
+    ASSERT_EQ(f1->value().toInt(), 43);
+    f1->addCallback([&]() { ++sat2; });
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+  }
+
+  // Basic error cases.
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    int sat1 = 0;
+    int sat2 = 0;
+    f1->addCallback([&]() { ++sat1; });
+    f1->setError("Failed");
+    ASSERT_EQ(sat1, 1);
+    ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasError());
+    ASSERT_FALSE(f1->hasValue());
+    try {
+      (void)f1->value();
+      ASSERT_TRUE(false); // Supposed to throw.
+    } catch (const std::exception& e) {
+      ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
+    }
+    f1->addCallback([&]() { ++sat2; });
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+    f1->setErrorIfNeeded("Dup");
+    ASSERT_TRUE(strcmp(f1->error()->what(), "Failed") == 0);
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+  }
+
+  // then
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    auto f2 = f1->then(
+        [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+        IntType::get());
+    auto f3 = f2->then(
+        [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+        IntType::get());
+    bool done = false;
+    f3->addCallback([f3, &done]() {
+      ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+      done = true;
+    });
+    ASSERT_FALSE(done);
+    f1->markCompleted(42);
+    ASSERT_TRUE(done);
+  }
+
+  // collectAll()
+  {
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = c10::make_intrusive<Future>(IntType::get());
+    auto s3 = c10::make_intrusive<Future>(IntType::get());
+
+    // Empty case
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
+    auto c1 = collectAll(futures);
+    ASSERT_TRUE(c1->completed());
+    ASSERT_EQ(c1->value().toList().size(), 0);
+    ASSERT_TRUE(
+        *(c1->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
+
+    // 1-element, initially not completed.
+    futures.push_back(s1);
+    auto c2 = collectAll(futures);
+    ASSERT_FALSE(c2->completed());
+    s1->markCompleted(5);
+    ASSERT_TRUE(c2->completed());
+    ASSERT_EQ(c2->value().toList().size(), 1);
+    ASSERT_TRUE(
+        *(c2->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
+    ASSERT_EQ(c2->value().toList().get(0).toFuture()->value().toInt(), 5);
+
+    // 1-element, already completed
+    auto c3 = collectAll(futures);
+    ASSERT_TRUE(c3->completed());
+    ASSERT_EQ(c3->value().toList().size(), 1);
+    ASSERT_EQ(c3->value().toList().get(0).toFuture()->value().toInt(), 5);
+
+    // 3 elements.
+    futures.push_back(s2);
+    futures.push_back(s3);
+    auto c4 = collectAll(futures);
+    ASSERT_FALSE(c4->completed());
+    s3->markCompleted(7);
+    ASSERT_FALSE(c4->completed());
+    s2->markCompleted(6);
+    ASSERT_TRUE(c4->completed());
+    ASSERT_EQ(c4->value().toList().size(), 3);
+    ASSERT_EQ(c4->value().toList().get(0).toFuture()->value().toInt(), 5);
+    ASSERT_EQ(c4->value().toList().get(1).toFuture()->value().toInt(), 6);
+    ASSERT_EQ(c4->value().toList().get(2).toFuture()->value().toInt(), 7);
+    ASSERT_TRUE(
+        *(c4->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
+
+    // Handle exception in the list.
+    auto s4 = c10::make_intrusive<Future>(IntType::get());
+    futures.push_back(s4);
+    auto c5 = collectAll(futures);
+    ASSERT_FALSE(c5->completed());
+    s4->setError("Failed");
+    ASSERT_TRUE(c5->completed());
+    ASSERT_EQ(c5->value().toList().size(), 4);
+    try {
+      (void)c5->value().toList().get(3).toFuture()->value();
+      ASSERT_TRUE(false); // supposed to throw
+    } catch (const std::exception& e) {
+      ASSERT_EQ(std::string(e.what()), "Failed");
+    }
+  }
+
+  // collectAny()
+  {
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+
+    // Empty case
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
+    auto c1 = collectAny(futures);
+    ASSERT_TRUE(c1->completed());
+
+    // 1 element, not yet satisfied
+    futures.push_back(s1);
+    auto c2 = collectAny(futures);
+    ASSERT_FALSE(c2->completed());
+    s1->markCompleted(5);
+    ASSERT_TRUE(c2->completed());
+    ASSERT_TRUE(c2->value().isInt());
+    ASSERT_EQ(c2->value().toInt(), 5);
+
+    // 1 element already satisfied.
+    auto c3 = collectAny(futures);
+    ASSERT_TRUE(c3->completed());
+    ASSERT_TRUE(c3->value().isInt());
+    ASSERT_EQ(c3->value().toInt(), 5);
+
+    // 2 elements
+    futures.clear();
+    auto s2 = c10::make_intrusive<Future>(IntType::get());
+    auto s3 = c10::make_intrusive<Future>(IntType::get());
+    futures.push_back(s2);
+    futures.push_back(s3);
+    auto c4 = collectAny(futures);
+    ASSERT_FALSE(c4->completed());
+    s3->markCompleted(7);
+    ASSERT_TRUE(c4->completed());
+    ASSERT_EQ(c4->value().toInt(), 7);
+    s2->markCompleted(1);
+    ASSERT_EQ(c4->value().toInt(), 7);
+  }
 }
 
 } // namespace jit

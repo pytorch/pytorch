@@ -3,9 +3,9 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/frontend/strtod.h>
 #include <algorithm>
 #include <clocale>
 #include <cstdlib>
@@ -79,6 +79,7 @@ namespace jit {
   _(TK_MINUS_EQ, "-=", "-=")                     \
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
+  _(TK_MOD_EQ, "%=", "%=")                       \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SUBSCRIPT, "subscript", "")               \
@@ -106,7 +107,10 @@ namespace jit {
   _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")
+  _(TK_IMPORT, "import", "import")               \
+  _(TK_WITH, "with", "with")                     \
+  _(TK_WITH_ITEM, "withitem", "")                \
+  _(TK_AS, "as", "as")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters

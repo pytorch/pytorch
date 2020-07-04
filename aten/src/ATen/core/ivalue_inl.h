@@ -27,7 +27,7 @@ struct TupleType;
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
 
-// However, kernel_functor.h automatically sets the input types of the function
+// However, make_boxed_from_unboxed_functor.h automatically sets the input types of the function
 // by introspecting the types of the functor (which is IValue in this case).
 // However, we need the type it binds to be Foo.
 
@@ -127,6 +127,14 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
   TORCH_INTERNAL_ASSERT(isCapsule());
   return toIntrusivePtr<torch::CustomClassHolder>();
 }
+inline at::Generator IValue::toGenerator() && {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(moveToIntrusivePtr<at::GeneratorImpl>());
+}
+inline at::Generator IValue::toGenerator() const & {
+  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
 
 namespace ivalue {
 
@@ -197,6 +205,8 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   }
   std::shared_ptr<TupleType> type() const;
 
+  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
+
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
     : elements_(std::move(elements)), type_(std::move(type)) {}
@@ -220,9 +230,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
-  Future(TypePtr type) : type_(type) {}
+  explicit Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
-    FutureError(std::string&& error_msg_)
+    explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
     FutureError() = default;
@@ -235,8 +245,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   };
 
   /**
-  * Wait on the future until it completes.
-  */
+   * Wait on the future until it completes.
+   */
   void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
@@ -249,7 +259,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
 
@@ -267,20 +280,26 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error) {
+  void setError(std::string err) {
+    setError(FutureError(std::move(err)));
+  }
+
+  void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    has_error_ = true;
-    error_ = std::move(error);
+    setErrorInternal(std::move(error), lock);
+  }
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG(INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
+      return;
+    } else {
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
@@ -288,9 +307,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error_) {
-      throw error_;
+    if (error_) {
+      throw *error_;
     }
+    return value_;
+  }
+
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const IValue& constValue() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!error_);
     return value_;
   }
 
@@ -307,7 +335,31 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks_.push_back(callback);
+    callbacks_.emplace_back(std::move(callback));
+  }
+
+  /**
+   * Add a callback to the future, and return another Future to hold the return
+   * value of the callback. This is necessary when the callback provider needs
+   * to know for sure when the callback has finished.
+   */
+  c10::intrusive_ptr<Future> then(
+      std::function<IValue(void)> callback,
+      TypePtr type) {
+    auto fut = c10::make_intrusive<Future>(type);
+    // Cannot move capture std::function in lambda, because it cannot deduce
+    // the template type for std::function. Hence use std::bind to explicitly
+    // specify types.
+    addCallback(std::bind(
+        [fut](std::function<IValue(void)> cb) {
+          try {
+            fut->markCompleted(cb());
+          } catch (std::exception& e) {
+            fut->setError(e.what());
+          }
+        },
+        std::move(callback)));
+    return fut;
   }
 
   // Check if the current future has completed
@@ -315,25 +367,65 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return completed_;
   }
 
+  bool hasValue() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return completed_ && !error_;
+  }
+
+  bool hasError() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_ ? true : false;
+  }
+
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
+  }
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() const {
+  TypePtr elementType() const {
     return type_;
   }
 
  private:
-  std::mutex mutex_;
+  void setErrorInternal(
+      FutureError error,
+      std::unique_lock<std::mutex>& lock) {
+    AT_ASSERT(!completed());
+    completed_ = true;
+    error_ = std::move(error);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
+  mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
-  bool has_error_ = false;
-  FutureError error_;
+  c10::optional<FutureError> error_;
 };
+
+// Input is a list of Futures with the same target type.
+// Output is a Future to the List of completed Futures.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+// Input is a List of Futures with the same target type.
+// Output is a Future that will be updated with a seen value.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
@@ -411,6 +503,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
+  c10::intrusive_ptr<Object> deepcopy() const;
+
+  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
+
  private:
   void resizeObject(size_t slot);
   StrongTypePtr type_;
@@ -425,8 +523,6 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual PyObject* getPyObject() = 0;
   virtual ~PyObjectHolder() {};
 };
-
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
 
 #undef TORCH_FORALL_TAGS
 
@@ -494,6 +590,7 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
 struct _fake_type {};
@@ -574,6 +671,28 @@ c10::List<Elem> generic_to(
     IValue ivalue,
     _fake_type<c10::List<Elem>>) {
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
+}
+
+namespace detail {
+template <typename Elem, size_t... I>
+std::array<Elem, sizeof...(I)> generic_to_array(
+    IValue ivalue,
+    _fake_type<std::array<Elem, sizeof...(I)>>,
+    std::index_sequence<I...>) {
+  // We need to do a deep copy of the array because there might be other
+  // references to this same IValue that also use the list. We can't just
+  // move the elements out.
+  auto list = std::move(ivalue).to<List<Elem>>();
+  TORCH_CHECK(list.size() == sizeof...(I), "Tried to convert a List with ", list.size()," elements to a fixed-size array of size ", sizeof...(I));
+  return {list[I]...};
+}
+}
+
+template <typename Elem, size_t N>
+std::array<Elem, N> generic_to(
+    IValue ivalue,
+    _fake_type<std::array<Elem, N>> ft) {
+  return detail::generic_to_array(ivalue, ft, std::make_index_sequence<N>());
 }
 
 template <typename Key, typename Value>
@@ -770,6 +889,14 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (const auto& e : v) {
     list.push_back(e);
+  }
+}
+template<class T, size_t N> inline IValue::IValue(std::array<T, N> v)
+: IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  for (auto& e : v) {
+    list.push_back(std::move(e));
   }
 }
 

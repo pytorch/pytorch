@@ -29,6 +29,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
@@ -222,8 +223,9 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
 at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = c10::Storage(
-      tensor.dtype(),
-      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      c10::Storage::use_byte_size_t(),
+      at::detail::computeStorageNbytes(
+          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
       allocator,
       /*resizable=*/false);
   return at::empty({0}, tensor.options().device(at::kCPU))
@@ -339,14 +341,9 @@ bool ProcessGroupGloo::SendWork::wait() {
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return sendCompleted;
 }
 
@@ -372,14 +369,9 @@ bool ProcessGroupGloo::RecvWork::wait() {
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return recvCompleted;
 }
 
@@ -730,7 +722,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncBroadcastWork> work;
@@ -1253,7 +1245,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   const auto& layout = inputs[0].layout();
@@ -1329,7 +1321,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     case c10::kCPU:
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   switch (layout) {
@@ -1491,7 +1483,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncReduceWork> work;
@@ -1698,7 +1690,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncAllgatherWork> work;
@@ -2030,7 +2022,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncGatherWork> work;
@@ -2216,7 +2208,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
 #endif
       break;
     default:
-      invalidArgument("unsupported device type");
+      invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
   std::shared_ptr<AsyncScatterWork> work;

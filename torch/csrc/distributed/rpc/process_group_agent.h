@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -17,7 +16,7 @@ constexpr auto kDefaultNumSendRecvThreads = 4;
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
-      std::chrono::milliseconds rpc_timeout,
+      float rpc_timeout,
       std::string init_method)
       : RpcBackendOptions(rpc_timeout, init_method),
         numSendRecvThreads(num_send_recv_threads) {
@@ -75,9 +74,9 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
-  void start() override;
+  void startImpl() override;
 
-  void shutdown() override;
+  void shutdownImpl() override;
 
   ~ProcessGroupAgent() override;
 
@@ -87,15 +86,17 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  std::shared_ptr<FutureMessage> send(
+      const WorkerInfo& to,
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+
+  // put SendWork into a queue and notify the worker thread
+  virtual void enqueueSend(SendWork work);
+  // Bypass handleSend() logic and send a message to self rank
+  virtual void sendToSelf(Message&& message);
 
  private:
-  using steady_clock_time_point =
-      std::chrono::time_point<std::chrono::steady_clock>;
-
-  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
@@ -144,22 +145,21 @@ class ProcessGroupAgent : public RpcAgent {
   };
 
   void collectNames();
-  // put SendWork into a queue and notify the worker thread
-  void enqueueSend(SendWork work);
   // handle a SendWork request. This serializes the payload inside the work
   // object, and sends the message to the receiver using the underlying
   // ProcessGroup.
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // handle a RecvWork request. Return 1 if we should increment recvCounts, 0 if
-  // not (i.e. if the RPC timed out and we are getting a result after the
-  // timeout)
-  int handleRecv(RecvWork& work);
-  // Loop for receiving messages. Calls listenLoopInternal and handles errors
-  // such as timeouts on the process group.
-  virtual void listenLoopInternal();
-  // Main function for receiving messages
+  // handle a RecvWork request. Return true if we should increment recvCounts,
+  // false if not (i.e. if the RPC timed out and we are getting a result after
+  // the timeout). This ensures that the messages accounted for in
+  // hasPendingMessage() are tallied properly during a graceful shutdown.
+  bool handleRecv(RecvWork& work);
+  // Loop that receives and processes messages
+  void listenLoopInternal();
+  // Calls listenLoopInternal and handles errors such as timeouts on the
+  // process group.
   void listenLoop();
   // exception_pointer correspnding to an exception raised in listenLoop (if
   // there is one), and lock to guard access.
@@ -209,7 +209,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
-  std::unordered_map<std::string, int> nameMap_;
+  std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
   // record the number of messages sent to and received from each peer. The recv
   // counter is only marked after the message is processed. Join uses allgather
@@ -219,13 +219,6 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
-  // atomic bool indicating if this agent is running. It is set in
-  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
-  // ProcessGroupAgent::join. It controls whether several background threads
-  // should be running.
-  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
-  // conditions when notifying condition variables.
-  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
@@ -256,6 +249,8 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
+  // Atomic to indicate whether the timeout thread is enabled.
+  std::atomic<bool> timeoutThreadEnabled_;
   // Mapping of request id to FutureInfo struct.
   std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time

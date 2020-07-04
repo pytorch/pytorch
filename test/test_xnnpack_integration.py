@@ -30,9 +30,9 @@ class TestXNNPACKOps(TestCase):
         else:
             bias = None
         ref_result = F.linear(input_data, weight, bias)
-        packed_weight_bias = torch.ops._xnnpack.linear_prepack(weight, bias)
-        output_linear_xnnpack = torch.ops._xnnpack.linear_packed(input_data, packed_weight_bias)
-        torch.testing.assert_allclose(ref_result, output_linear_xnnpack, rtol=1e-2, atol=1e-3)
+        packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
+        output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
+        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -47,7 +47,8 @@ class TestXNNPACKOps(TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           format=st.sampled_from([None, torch.preserve_format, torch.contiguous_format, torch.channels_last]))
     def test_conv2d(self,
                     batch_size,
                     input_channels_per_group,
@@ -62,19 +63,22 @@ class TestXNNPACKOps(TestCase):
                     pad_h,
                     pad_w,
                     dilation,
-                    use_bias):
+                    use_bias,
+                    format):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0] >=
-               dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1] >=
-               dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
@@ -82,9 +86,9 @@ class TestXNNPACKOps(TestCase):
 
         ref_result = F.conv2d(input_data, weight, bias,
                               strides, paddings, dilations, groups)
-        packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
-                                                               strides, paddings, dilations, groups)
-        xnnpack_result = torch.ops._xnnpack.conv2d_packed(input_data, packed_weight_bias)
+        packed_weight_bias = torch.ops.prepacked.conv2d_clamp_prepack(weight, bias,
+                                                                      strides, paddings, dilations, groups)
+        xnnpack_result = torch.ops.prepacked.conv2d_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
@@ -109,10 +113,10 @@ class TestXNNPACKSerDes(TestCase):
         class LinearPrePacked(torch.nn.Module):
             def __init__(self, weight, bias=None):
                 super(LinearPrePacked, self).__init__()
-                self.packed_weight_bias = torch.ops._xnnpack.linear_prepack(weight, bias)
+                self.packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
 
             def forward(self, x):
-                return torch.ops._xnnpack.linear_packed(x, self.packed_weight_bias)
+                return torch.ops.prepacked.linear_clamp_run(x, self.packed_weight_bias)
 
         data_shape = [batch_size] + list(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
@@ -121,11 +125,11 @@ class TestXNNPACKSerDes(TestCase):
         else:
             bias = None
         scripted_linear = torch.jit.script(Linear(weight, bias))
-        scripted_linear_prepacked = torch.jit.script(LinearPrePacked(weight, bias))
+        scripted_linear_clamp_prepacked = torch.jit.script(LinearPrePacked(weight, bias))
         input_data = torch.rand(data_shape)
         ref_result = scripted_linear(input_data)
-        output_linear_xnnpack = scripted_linear_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, output_linear_xnnpack, rtol=1e-2, atol=1e-3)
+        output_linearprepacked = scripted_linear_clamp_prepacked(input_data)
+        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand(data_shape)
@@ -134,12 +138,12 @@ class TestXNNPACKSerDes(TestCase):
         buffer.seek(0)
         deserialized_linear = torch.jit.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_linear_prepacked, buffer)
+        torch.jit.save(scripted_linear_clamp_prepacked, buffer)
         buffer.seek(0)
-        deserialized_linear_prepacked = torch.jit.load(buffer)
+        deserialized_linear_clamp_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_linear(input_data)
-        output_linear_xnnpack = deserialized_linear_prepacked(input_data)
-        torch.testing.assert_allclose(ref_result, output_linear_xnnpack, rtol=1e-2, atol=1e-3)
+        output_linearprepacked = deserialized_linear_clamp_prepacked(input_data)
+        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -154,7 +158,8 @@ class TestXNNPACKSerDes(TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           format=st.sampled_from([None, torch.preserve_format, torch.contiguous_format, torch.channels_last]))
     def test_conv2d(self,
                     batch_size,
                     input_channels_per_group,
@@ -169,7 +174,8 @@ class TestXNNPACKSerDes(TestCase):
                     pad_h,
                     pad_w,
                     dilation,
-                    use_bias):
+                    use_bias,
+                    format):
         class Conv2D(torch.nn.Module):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
                 super(Conv2D, self).__init__()
@@ -187,11 +193,11 @@ class TestXNNPACKSerDes(TestCase):
         class Conv2DPrePacked(torch.nn.Module):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
                 super(Conv2DPrePacked, self).__init__()
-                self.packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
-                                                                            strides, paddings, dilations, groups)
+                self.packed_weight_bias = torch.ops.prepacked.conv2d_clamp_prepack(weight, bias,
+                                                                                   strides, paddings, dilations, groups)
 
             def forward(self, x):
-                return torch.ops._xnnpack.conv2d_packed(x, self.packed_weight_bias)
+                return torch.ops.prepacked.conv2d_clamp_run(x, self.packed_weight_bias)
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -205,6 +211,8 @@ class TestXNNPACKSerDes(TestCase):
                dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
         if use_bias:
@@ -212,24 +220,26 @@ class TestXNNPACKSerDes(TestCase):
 
         scripted_conv2d = torch.jit.script(Conv2D(weight, bias,
                                                   strides, paddings, dilations, groups))
-        scripted_conv2d_prepacked = torch.jit.script(Conv2DPrePacked(
+        scripted_conv2d_clamp_prepacked = torch.jit.script(Conv2DPrePacked(
             weight, bias, strides, paddings, dilations, groups))
         ref_result = scripted_conv2d(input_data)
-        xnnpack_result = scripted_conv2d_prepacked(input_data)
+        xnnpack_result = scripted_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
         # Serialize the modules and then deserialize
         input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
         buffer = io.BytesIO()
         torch.jit.save(scripted_conv2d, buffer)
         buffer.seek(0)
         deserialized_conv2d = torch.jit.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_conv2d_prepacked, buffer)
+        torch.jit.save(scripted_conv2d_clamp_prepacked, buffer)
         buffer.seek(0)
-        deserialized_conv2d_prepacked = torch.jit.load(buffer)
+        deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
         ref_result = deserialized_conv2d(input_data)
-        xnnpack_result = deserialized_conv2d_prepacked(input_data)
+        xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
@@ -246,7 +256,8 @@ class TestXNNPACKSerDes(TestCase):
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
            linear_weight_output_dim=st.integers(2, 64),
-           use_bias=st.booleans())
+           use_bias=st.booleans(),
+           format=st.sampled_from([None, torch.preserve_format, torch.contiguous_format, torch.channels_last]))
     def test_combined_model(self,
                             batch_size,
                             input_channels_per_group,
@@ -262,7 +273,8 @@ class TestXNNPACKSerDes(TestCase):
                             pad_w,
                             dilation,
                             linear_weight_output_dim,
-                            use_bias):
+                            use_bias,
+                            format):
         class M(torch.nn.Module):
             def __init__(self, conv_weight, conv_bias, linear_weight, linear_bias,
                          strides, paddings, dilations, groups):
@@ -287,16 +299,16 @@ class TestXNNPACKSerDes(TestCase):
             def __init__(self, conv_weight, conv_bias, linear_weight, linear_bias,
                          strides, paddings, dilations, groups):
                 super(MPrePacked, self).__init__()
-                self.conv2d_packed_weight_bias = \
-                    torch.ops._xnnpack.conv2d_prepack(conv_weight, conv_bias,
-                                                      strides, paddings, dilations, groups)
-                self.linear_packed_weight_bias = \
-                    torch.ops._xnnpack.linear_prepack(linear_weight, linear_bias)
+                self.conv2d_clamp_run_weight_bias = \
+                    torch.ops.prepacked.conv2d_clamp_prepack(conv_weight, conv_bias,
+                                                             strides, paddings, dilations, groups)
+                self.linear_clamp_run_weight_bias = \
+                    torch.ops.prepacked.linear_clamp_prepack(linear_weight, linear_bias)
 
             def forward(self, x):
-                o = torch.ops._xnnpack.conv2d_packed(x, self.conv2d_packed_weight_bias)
+                o = torch.ops.prepacked.conv2d_clamp_run(x, self.conv2d_clamp_run_weight_bias)
                 o = o.permute([0, 2, 3, 1])
-                o = torch.ops._xnnpack.linear_packed(o, self.linear_packed_weight_bias)
+                o = torch.ops.prepacked.linear_clamp_run(o, self.linear_clamp_run_weight_bias)
                 return F.relu(o)
 
         input_channels = input_channels_per_group * groups
@@ -305,12 +317,14 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0] >=
-               dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1] >=
-               dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         conv_bias = None
         if use_bias:
@@ -323,7 +337,6 @@ class TestXNNPACKSerDes(TestCase):
                           strides, paddings, dilations, groups)
         linear_input_shape = result.shape[1]
 
-        input_data = input_data.contiguous(memory_format=torch.channels_last)
         linear_weight = torch.rand((linear_weight_output_dim, linear_input_shape))
         linear_bias = None
         if use_bias:
@@ -365,33 +378,42 @@ class TestXNNPACKSerDes(TestCase):
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
 class TestXNNPACKRewritePass(TestCase):
+    @staticmethod
+    def validate_transformed_module(
+            # To please flake
+            self,
+            pattern_count_map,
+            data_shape,
+            prepack_removal=False,
+            fuse_clamping_ops=False):
+        module_instance = self
+        scripted_model = torch.jit.script(module_instance)
+        scripted_model.eval()
+        input_data = torch.normal(1, 20, size=data_shape)
+        ref_result = scripted_model(input_data)
+        torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
+        if fuse_clamping_ops or prepack_removal:
+            scripted_model._c = torch._C._freeze_module(scripted_model._c)
+        if fuse_clamping_ops:
+            torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
+        if (prepack_removal):
+            torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
+
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_model, buffer)
+        buffer.seek(0)
+        deserialized_scripted_model = torch.jit.load(buffer)
+        for pattern, v in pattern_count_map.items():
+            if (v == 0):
+                FileCheck().check(pattern).run(deserialized_scripted_model.graph)
+            elif (v == -1):
+                FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+            else:
+                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+        xnnpack_result = deserialized_scripted_model(input_data)
+        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
     def test_linear(self):
-        def validate_transformed_module(module_name, pattern_count_map, data_shape, prepack_removal=False):
-            scripted_model = torch.jit.script(module_name())
-            scripted_model.eval()
-            input_data = torch.rand(data_shape)
-            ref_result = scripted_model(input_data)
-            torch._C._jit_pass_insert_xnnpack_ops(scripted_model._c)
-            if (prepack_removal):
-                scripted_model._c = torch._C._freeze_module(scripted_model._c)
-                torch._C._jit_pass_fold_xnnpack_prepack_ops(scripted_model._c)
-
-            buffer = io.BytesIO()
-            torch.jit.save(scripted_model, buffer)
-            buffer.seek(0)
-            deserialized_scripted_model = torch.jit.load(buffer)
-            file_check = FileCheck()
-            for pattern, v in pattern_count_map.items():
-                if (v == 0):
-                    file_check.check(pattern)
-                elif (v == -1):
-                    file_check.check_not(pattern)
-                else:
-                    file_check.check_count(pattern, v, exactly=True)
-            file_check.run(deserialized_scripted_model.graph)
-            xnnpack_result = deserialized_scripted_model(input_data)
-            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
-
         data_shape = [2, 3, 32]
         weight_output_dim = 24
         weight_shape = (weight_output_dim, data_shape[-1])
@@ -399,8 +421,8 @@ class TestXNNPACKRewritePass(TestCase):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super(Linear, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
 
             def forward(self, x):
                 return F.linear(x, self.weight, self.bias)
@@ -408,17 +430,17 @@ class TestXNNPACKRewritePass(TestCase):
         class LinearNoBias(torch.nn.Module):
             def __init__(self):
                 super(LinearNoBias, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
 
             def forward(self, x):
                 return F.linear(x, self.weight, None)
 
         # Linear with bias pattern.
         pattern_count_map = {"Tensor = prim::CallFunction": -1,
-                             "_xnnpack::linear_prepack": 1,
-                             "_xnnpack::linear_packed": 1}
-        validate_transformed_module(Linear, pattern_count_map, data_shape)
-        validate_transformed_module(LinearNoBias, pattern_count_map, data_shape)
+                             "prepacked::linear_clamp_prepack": 1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(Linear(), pattern_count_map, data_shape)
+        TestXNNPACKRewritePass.validate_transformed_module(LinearNoBias(), pattern_count_map, data_shape)
 
         # Conv params
         batch_size = 2
@@ -443,8 +465,8 @@ class TestXNNPACKRewritePass(TestCase):
         class Conv2D(torch.nn.Module):
             def __init__(self):
                 super(Conv2D, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)))
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -456,9 +478,9 @@ class TestXNNPACKRewritePass(TestCase):
 
         data_shape = (batch_size, input_channels, height, width)
         pattern_count_map = {"Tensor = aten::conv2d": -1,
-                             "_xnnpack::conv2d_prepack": 1,
-                             "_xnnpack::conv2d_packed": 1}
-        validate_transformed_module(Conv2D, pattern_count_map, data_shape)
+                             "prepacked::conv2d_clamp_prepack": 1,
+                             "prepacked::conv2d_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(Conv2D(), pattern_count_map, data_shape)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -469,34 +491,218 @@ class TestXNNPACKRewritePass(TestCase):
         linear_weight_shape = (weight_output_dim, linear_input_shape)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, activation_fn=F.relu):
                 super(M, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
+                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))), requires_grad=False)
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+                self.activation_fn = activation_fn
+
+            def forward(self, x):
+                o = F.conv2d(x, self.conv_weight, self.conv_bias,
+                             self.strides, self.paddings, self.dilations, self.groups)
+                o = self.activation_fn(o)
+                o = o.permute([0, 2, 3, 1])
+                o = F.linear(o, self.linear_weight, self.linear_bias)
+                return self.activation_fn(o)
+
+        pattern_count_map = {"Tensor = aten::conv2d": -1,
+                             "prepacked::conv2d_clamp_prepack": 1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": 1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(M(), pattern_count_map, data_shape)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["Tensor = prim::CallFunction"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        TestXNNPACKRewritePass.validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True)
+
+        # Not inplace relu fusion test.
+        pattern_count_map = {"aten::relu": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(M(), pattern_count_map, data_shape, prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::relu"] = -1
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+        # Inplace relu fusion test.
+        pattern_count_map = {"aten::relu": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.relu_),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::relu"] = -1
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.relu_),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+        # Not inplace hardtanh fusion test.
+        pattern_count_map = {"aten::hardtanh": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.hardtanh),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::hardtanh"] = -1
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.hardtanh),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+        # Inplace hardtanh fusion test.
+        pattern_count_map = {"aten::hardtanh_": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.hardtanh_),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::hardtanh_"] = -1
+        TestXNNPACKRewritePass.validate_transformed_module(
+            M(F.hardtanh_),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+        class MFusionAntiPattern(torch.nn.Module):
+            def __init__(self):
+                super(MFusionAntiPattern, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
                 self.groups = groups
 
             def forward(self, x):
-                o = F.conv2d(x, self.conv_weight, self.conv_bias,
-                             self.strides, self.paddings, self.dilations, self.groups)
-                o = o.permute([0, 2, 3, 1])
-                o = F.linear(o, self.linear_weight, self.linear_bias)
-                return F.relu(o)
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = F.relu(o)
+                o = F.hardtanh(o)
+                return o
 
-        pattern_count_map = {"Tensor = aten::conv2d": -1,
-                             "_xnnpack::conv2d_prepack": 1,
-                             "_xnnpack::conv2d_packed": 1,
-                             "Tensor = prim::CallFunction": -1,
-                             "_xnnpack::linear_prepack": 1,
-                             "_xnnpack::linear_packed": 1}
-        validate_transformed_module(M, pattern_count_map, data_shape)
-        pattern_count_map["_xnnpack::conv2d_prepack"] = -1
-        pattern_count_map["_xnnpack::linear_prepack"] = -1
-        validate_transformed_module(M, pattern_count_map, data_shape, True)
+        # Unfusable hardtanh.
+        pattern_count_map = {"aten::hardtanh": 1,  # hardtanh cannot be.
+                             "aten::relu": -1,  # relu is fused.
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(
+            MFusionAntiPattern(),
+            pattern_count_map,
+            (16, linear_weight_shape[1]),
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+        class MFusionAntiPatternParamMinMax(torch.nn.Module):
+            def __init__(self):
+                super(MFusionAntiPatternParamMinMax, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                min = x[0, 0]
+                max = min + 10
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = F.hardtanh(o, min, max)
+                return o
+
+        # Unfusable hardtanh.
+        pattern_count_map = {"aten::hardtanh": 1,  # hardtanh cannot be.
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(
+            MFusionAntiPatternParamMinMax(),
+            pattern_count_map,
+            (16, linear_weight_shape[1]),
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
+    def test_decomposed_linear(self):
+        data_shape = [2, 32]
+        weight_output_dim = 24
+        weight_shape = (weight_output_dim, data_shape[-1])
+
+        class DecomposedLinearAddmm(torch.nn.Module):
+            def __init__(self):
+                super(DecomposedLinearAddmm, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+
+            def forward(self, x):
+                weight_t = self.weight.t()
+                return torch.addmm(self.bias, x, weight_t)
+
+        class DecomposedLinearMatmulAdd(torch.nn.Module):
+            def __init__(self):
+                super(DecomposedLinearMatmulAdd, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+
+            def forward(self, x):
+                weight_t = self.weight.t()
+                y = torch.matmul(x, weight_t)
+                res = y.add_(self.bias)
+                return res
+
+        class DecomposedLinearMatmul(torch.nn.Module):
+            def __init__(self):
+                super(DecomposedLinearMatmul, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+
+            def forward(self, x):
+                weight_t = self.weight.t()
+                res = torch.matmul(x, weight_t)
+                return res
+
+        # Linear with bias pattern.
+        pattern_count_map = {"Tensor = prim::CallFunction": -1,
+                             "prepacked::linear_clamp_prepack": 1,
+                             "prepacked::linear_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(DecomposedLinearAddmm(), pattern_count_map, data_shape)
+        TestXNNPACKRewritePass.validate_transformed_module(DecomposedLinearMatmulAdd(), pattern_count_map, data_shape)
+        TestXNNPACKRewritePass.validate_transformed_module(DecomposedLinearMatmul(), pattern_count_map, data_shape)
 
 
 if __name__ == "__main__":

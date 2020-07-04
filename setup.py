@@ -42,7 +42,7 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   MKLDNN_THREADING
+#   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
@@ -105,9 +105,6 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
@@ -160,8 +157,17 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_SYSTEM_LIBS (work in progress)
+#      Use system-provided libraries to satisfy the build dependencies.
+#      When turned on, the following cmake variables will be toggled as well:
+#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
+    raise Exception("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
@@ -174,7 +180,6 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
@@ -184,11 +189,6 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-
-try:
-    FileNotFoundError
-except NameError:
-    FileNotFoundError = IOError  # Python 2.7 does not have FileNotFoundError
 
 ################################################################################
 # Parameters parsed from environment
@@ -219,7 +219,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -287,6 +287,8 @@ def build_deps():
     report('-- Building version ' + version)
 
     def check_file(f):
+        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+            return
         if not os.path.exists(f):
             report("Could not find {}".format(f))
             report("Did you run 'git submodule update --init --recursive'?")
@@ -353,9 +355,6 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = ['future']
-
-if sys.version_info <= (2, 7):
-    install_requires += ['typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -570,28 +569,16 @@ def configure_extension_build():
         extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
-        # /Z7 turns on symbolic debugging information in .obj files
-        # /EHa is about native C++ catch support for asynchronous
-        # structured exception handling (SEH)
+        # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/Z7',
-                              '/EHa', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
-        if sys.version_info[0] == 2:
-            if not check_env_flag('FORCE_PY27_BUILD'):
-                report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
-                report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
-                sys.exit(1)
-            # /bigobj increases number of sections in .obj file, which is needed to link
-            # against libaries in Python 2.7 under Windows
-            extra_compile_args.append('/bigobj')
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -616,9 +603,9 @@ def configure_extension_build():
     library_dirs.append(lib_path)
 
     main_compile_args = []
-    main_libraries = ['shm', 'torch_python']
+    main_libraries = ['torch_python']
     main_link_args = []
-    main_sources = ["torch/csrc/stub.cpp"]
+    main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -629,6 +616,7 @@ def configure_extension_build():
 
     if build_type.is_debug():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
@@ -636,6 +624,7 @@ def configure_extension_build():
 
     if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-g']
@@ -659,7 +648,7 @@ def configure_extension_build():
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
-                  language='c++',
+                  language='c',
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
@@ -673,7 +662,7 @@ def configure_extension_build():
         extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementaiton
+    # inside the build_ext implementation
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state'),
@@ -748,11 +737,17 @@ if __name__ == '__main__':
 
     install_requires += extra_install_requires
 
+    # Read in README.md for our long_description
+    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+        long_description = f.read()
+
     setup(
         name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
@@ -763,7 +758,7 @@ if __name__ == '__main__':
                 'py.typed',
                 'bin/*',
                 'test/*',
-                '__init__.pyi',
+                '_C/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
@@ -797,12 +792,14 @@ if __name__ == '__main__':
                 'include/ATen/native/cpu/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
+                'include/ATen/quantized/*.h',
                 'include/caffe2/utils/*.h',
                 'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -811,6 +808,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',
@@ -838,8 +836,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
                 'include/torch/csrc/jit/*.h',
+                'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/quantization/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/runtime/*.h',
                 'include/torch/csrc/jit/ir/*.h',
@@ -879,7 +879,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.6.0',
+        python_requires='>=3.6.1',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -888,12 +888,10 @@ if __name__ == '__main__':
             'Intended Audience :: Science/Research',
             'License :: OSI Approved :: BSD License',
             'Programming Language :: C++',
-            'Programming Language :: Python :: 2',
-            'Programming Language :: Python :: 2.7',
             'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.5',
             'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
             'Topic :: Scientific/Engineering',
             'Topic :: Scientific/Engineering :: Mathematics',
             'Topic :: Scientific/Engineering :: Artificial Intelligence',

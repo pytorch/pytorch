@@ -15,7 +15,7 @@ using namespace std;
 // to the real value 0, and 'scale' is the difference of real values
 // corresponding to consecutive quantized values.
 struct TensorQuantizationParams {
-  float scale;
+  double scale;
   std::int32_t zero_point;
   int precision;
 };
@@ -33,8 +33,8 @@ inline TensorQuantizationParams ChooseQuantizationParams(
       "In ChooseQuantizationParams, min should be less than or equal to max");
 
   if (reduce_range) {
-    qmin = 0;
-    qmax = 127;
+    qmin = qmin/2;
+    qmax = qmax/2;
   }
   if (min < 0 && max > 0 && preserve_sparsity) {
     int symmetric_qmin = -((qmax - qmin) / 2 + 1);
@@ -57,15 +57,14 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
   // Use double precision for intermediate computation but use single precision
   // in final number to reflect the actual number used during quantization.
-  float scale = (static_cast<double>(max) - min) / (qmax - qmin);
+  double scale = (static_cast<double>(max) - min) / (qmax - qmin);
   // If scale is 0 or too small so its reciprocal is infinity, we arbitrary
   // adjust the scale to 0.1 . We want to avoid scale's reciprocal being
   // infinity because some of fbgemm code pre-computes scale's reciprocal to do
   // multiplication instead of division in the time critical part of code.
-  if (scale == 0.0f || isinf(1.0f / scale)) {
+  if (float(scale) == 0.0f || std::isinf(1.0f / float(scale))) {
     scale = 0.1;
   }
-
   TORCH_CHECK(scale > 0, "quantization scale should be > 0");
 
   if (force_scale_power_of_two) {
@@ -119,6 +118,21 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   TensorQuantizationParams result;
   result.scale = scale;
   result.zero_point = nudged_zero_point;
+  return result;
+}
+
+// This function helps to convert the Conv1D dimensions usable by the Conv2d op.
+constexpr int64_t kConv1dSqueezeDim = 0;
+static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
+                                             int64_t base_value) {
+  TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
+  torch::List<int64_t> result({arg.get(0), base_value});
+  if (arg.size() == 1) {
+    result[1] = arg.get(0);
+  } else {
+    result[1] = arg.get(1);
+  }
+  result[kConv1dSqueezeDim] = base_value;
   return result;
 }
 

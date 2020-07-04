@@ -1,16 +1,17 @@
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
+#include <torch/library.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
@@ -34,7 +35,7 @@ detail::types<void, Types...> init() {
 /// calls needed. For example, to register a class named Foo, you might
 /// create a global variable like so:
 ///
-///     static auto register_foo = torch::class_<Foo>("Foo")
+///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
 ///       .def("myMethod", &Foo::myMethod)
 ///       .def("lambdaMethod", [](const c10::intrusive_ptr<Foo>& self) {
 ///         // Do something with `self`
@@ -51,12 +52,16 @@ class class_ {
 
  public:
   /// This constructor actually registers the class type.
-  /// String argument `className_` is the name you would like to
+  /// String argument `namespaceName` is an identifier for the
+  /// namespace you would like this class to appear in.
+  /// String argument `className` is the name you would like to
   /// see this class exposed as in Python and TorchScript. For example, if
-  /// you pass in "MyStack" here, the class will appear as
-  /// `torch.classes.MyStack` in both Python and TorchScript.
-  explicit class_(const std::string& className) : className(std::move(className)) {
-    qualClassName = topModule + "." + parentModule + "." + className;
+  /// you pass `foo` as the namespace name and `Bar` as the className, the
+  /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
+  explicit class_(const std::string& namespaceName, const std::string& className) {
+    detail::checkValidIdent(namespaceName, "Namespace name");
+    detail::checkValidIdent(className, "Class name");
+    qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
@@ -64,9 +69,9 @@ class class_ {
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::intrusive_ptr<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::intrusive_ptr<CurClass>)), classTypePtr});
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::tagged_capsule<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::tagged_capsule<CurClass>)), classTypePtr});
 
     registerCustomClass(classTypePtr);
   }
@@ -110,6 +115,17 @@ class class_ {
   class_& def(std::string name, Func f) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
     defineMethod(std::move(name), std::move(wrapped_f));
+    return *this;
+  }
+
+  /// This is an unsafe method registration API added for adding custom JIT backend support via custom
+  /// C++ classes. It is not for general purpose use.
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+    auto qualMethodName = qualClassName + "." + name;
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName, std::move(schema), std::move(func));
+    classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
     return *this;
   }
 
@@ -172,7 +188,7 @@ class class_ {
             std::move(setstate_wrapper)));
 
     // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
+    auto getstate_schema = classTypePtr->getMethod("__getstate__").getSchema();
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
@@ -186,21 +202,21 @@ class class_ {
     TORCH_CHECK(
         *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->python_str());
+        first_arg_type->repr_str());
     TORCH_CHECK(
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
+    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
         (*arg_type == *ser_type),
         "__setstate__'s argument should be the same type as the "
         "return value of __getstate__. Got ",
-        arg_type->python_str(),
+        arg_type->repr_str(),
         " but expected ",
-        ser_type->python_str());
+        ser_type->repr_str());
 
     return *this;
   }
@@ -219,23 +235,19 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_shared<jit::BuiltinOpFunction>(
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
     // those are held by the CompilationUnit), so we need a proxy for
     // that behavior here.
-    registerCustomClassMethod(method);
     classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
   }
 
-  std::string className;
   std::string qualClassName;
   at::ClassTypePtr classTypePtr;
-
-  const std::string parentModule = "classes";
-  const std::string topModule = "__torch__.torch";
 };
 
 /// make_custom_class() is a convenient way to create an instance of a registered
@@ -270,4 +282,14 @@ using ::torch::class_;
 
 } // namespace jit
 
-} // namespace torch
+template <class CurClass>
+inline class_<CurClass> Library::class_(const std::string& className) {
+  TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
+    "class_(\"", className, "\"): Cannot define a class inside of a TORCH_LIBRARY_IMPL block.  "
+    "All class_()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  "
+    "(Error occurred at ", file_, ":", line_, ")");
+  TORCH_INTERNAL_ASSERT(ns_.has_value(), file_, ":", line_);
+  return torch::class_<CurClass>(*ns_, className);
+}
+
+}

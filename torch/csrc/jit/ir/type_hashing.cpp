@@ -8,7 +8,8 @@
 namespace torch {
 namespace jit {
 
-size_t HashType::operator()(const TypePtr& type) const {
+namespace {
+size_t hashType(const c10::ConstTypePtr& type) {
   if (auto named_type = type->cast<ClassType>()) {
     return get_hash(named_type->name().value());
   }
@@ -18,11 +19,26 @@ size_t HashType::operator()(const TypePtr& type) const {
   });
   auto typekind_hash = type->kind();
   return get_hash(typekind_hash, hashes);
-};
+}
+} // namespace
+
+size_t HashType::operator()(const TypePtr& type) const {
+  return hashType(type);
+}
+
+size_t HashType::operator()(const c10::ConstTypePtr& type) const {
+  return hashType(type);
+}
 
 bool EqualType::operator()(const TypePtr& a, const TypePtr& b) const {
   return *a == *b;
-};
+}
+
+bool EqualType::operator()(
+    const c10::ConstTypePtr& a,
+    const c10::ConstTypePtr& b) const {
+  return *a == *b;
+}
 
 } // namespace jit
 } // namespace torch

@@ -15,15 +15,15 @@ list(APPEND Caffe2_GPU_SRCS ${Caffe2_DB_COMMON_GPU_SRC})
 list(APPEND Caffe2_HIP_SRCS ${Caffe2_DB_COMMON_HIP_SRC})
 
 # DB specific files
-if (USE_LMDB)
+if(USE_LMDB)
   list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lmdb.cc")
 endif()
 
-if (USE_LEVELDB)
+if(USE_LEVELDB)
   list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/leveldb.cc")
 endif()
 
-if (USE_ZMQ)
+if(USE_ZMQ)
   list(APPEND Caffe2_CPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/zmqdb.cc")
 endif()
 

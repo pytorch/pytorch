@@ -7,10 +7,9 @@ torch.set_default_dtype(torch.double)
 import itertools
 import functools
 import random
-import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -759,6 +758,17 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    def test_add_sub_nnz(self):
+        # nnz should not grow unbounded (gh-34964)
+        x = torch.randn(10, device=self.device).to_sparse()
+        x.add_(x)
+        x.add_(x)
+        self.assertLessEqual(x._nnz(), 10)
+
+        x.sub_(2 * x)
+        x.sub_(2 * x)
+        self.assertLessEqual(x._nnz(), 10)
+
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -912,6 +922,139 @@ class TestSparse(TestCase):
         test_shape(10, 0, 100, 0)
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
+
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @unittest.skipIf(
+        TEST_CUDA and (
+            not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
+    def test_bmm(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j])[0]
+                b_mat = torch.randn([dim_j, dim_k])
+                if self.is_cuda:
+                    a_mat = a_mat.cuda()
+                    b_mat = b_mat.cuda()
+                a_list.append(a_mat)
+                b_list.append(b_mat)
+
+            a = torch.stack(a_list)
+            b = torch.stack(b_list)
+            ab = a.bmm(b)
+
+            # Compare each matrix against result from mm()
+            for mat_idx in range(num_mats):
+                a_mat = a_list[mat_idx]
+                b_mat = b_list[mat_idx]
+                ab_mat_bmm = ab[mat_idx]
+                ab_mat_mm = a_mat.mm(b_mat)
+                self.assertEqual(ab_mat_bmm, ab_mat_mm)
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+        test_shape(10, 10, 100, 0, 20)
+
+        a = torch.rand([10, 23, 32])
+        a[3] = torch.zeros(23, 32)
+        a[6] = torch.zeros(23, 32)
+        a = a.to_sparse()
+        b = torch.rand([10, 32, 10])
+        b[4] = torch.zeros(32, 10)
+        b[6] = torch.zeros(32, 10)
+        if self.is_cuda:
+            a = a.cuda()
+            b = b.cuda()
+        ab = a.bmm(b)
+        for mat_idx in range(ab.size(0)):
+            ab_mat = ab[mat_idx]
+            ab_mat_check = a[mat_idx].mm(b[mat_idx])
+            self.assertEqual(ab_mat, ab_mat_check)
+
+        ab_traspose_check = b.transpose(1, 2).to_sparse().bmm(
+            a.transpose(1, 2).to_dense()
+        ).transpose(1, 2)
+        self.assertEqual(ab, ab_traspose_check)
+
+    @cuda_only
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @unittest.skipIf(
+        (not torch.version.cuda
+            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        "bmm sparse-dense requires CUDA 10.1 or greater"
+    )
+    def test_bmm_deterministic(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j])[0])
+                b_list.append(torch.randn([dim_j, dim_k]))
+
+            a = torch.stack(a_list).cuda()
+            b = torch.stack(b_list).cuda()
+            ab_nondeterministic = torch._bmm(a, b, deterministic=False)
+            ab_deterministic = torch._bmm(a, b, deterministic=True)
+            diff_abs = (ab_deterministic - ab_nondeterministic).abs()
+            diff_rel = diff_abs / ab_deterministic.abs()
+            diff_rel[torch.isnan(diff_rel)] = 0
+
+            # deterministic and non-deterministic results should either be
+            # equal or within a small relative difference
+            equal_abs_or_rel = diff_abs.eq(0).logical_or(diff_rel.lt(0.001))
+            self.assertTrue(equal_abs_or_rel.all())
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+        test_shape(10, 10, 100, 0, 20)
+
+    @cuda_only
+    @unittest.skipIf(
+        not IS_WINDOWS,
+        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
+    )
+    def test_bmm_windows_error(self):
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense CUDA is not supported on Windows"):
+            ab = a.bmm(b)
+
+    @cuda_only
+    @skipIfRocm
+    @unittest.skipIf(
+        (torch.version.cuda
+            and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
+        "this test ensures bmm gives error if CUDA version is less than 10.1"
+    )
+    def test_bmm_cuda_version_error(self):
+        a = torch.rand(2, 2, 2).to_sparse().cuda()
+        b = torch.rand(2, 2, 2).cuda()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "bmm sparse-dense requires CUDA 10.1 or greater"):
+            ab = a.bmm(b)
 
     @cpu_only
     def test_saddmm(self):
@@ -1078,6 +1221,23 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 30, 0], [2, 0])
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
+    @cuda_only
+    @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
+    def test_sparse_add_out_bfloat16(self):
+        # fp32
+        x, _, _ = self._gen_sparse(3, 5, 10)
+        y, _, _ = self._gen_sparse(3, 5, 10)
+        x = x.float().cuda()
+        y = y.float().cuda()
+        res_fp32 = torch.add(x, y)
+
+        # bfloat16
+        x = x.bfloat16()
+        y = y.bfloat16()
+        res_bf16 = torch.add(x, y)
+        res_bf16 = res_bf16.float()  # to compare with reference
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
+
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size)
@@ -1200,11 +1360,13 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        # Note: true_divide does not have a method variant
         y1 = torch.true_divide(x1, 37.5)
         y2 = x1.clone()
+        if y2.dtype.is_floating_point or y2.dtype.is_complex:
+            y2.true_divide_(37.5)
         expected = torch.true_divide(self.safeToDense(x1), 37.5)
         self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 // 37.5
         y2 = x1.clone()
@@ -1515,6 +1677,31 @@ class TestSparse(TestCase):
             torch.Size([5, 6, 0]),
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
+
+    def test_mv(self):
+        def test_shape(di, dj, dk, nnz):
+            x, _, _ = self._gen_sparse(2, nnz, [di, dj])
+            t = torch.randn(dk, device=self.device)
+
+            res = x.matmul(t)
+            expected = self.safeToDense(x).matmul(t)
+            self.assertEqual(res, expected)
+
+        test_shape(10, 100, 100, 20)
+        test_shape(100, 1000, 1000, 20)
+        test_shape(64, 10000, 10000, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(10, 0, 0, 0)
+        test_shape(10, 100, 100, 0)
+        test_shape(10, 100, 100, 20)
+
+        with self.assertRaisesRegex(RuntimeError, r"mv: expected self\.size\(-1\) == vec\.size\(-1\)"):
+            test_shape(10, 100, 10, 20)
+
+        with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
+            x, _, _ = self._gen_sparse(2, 20, [10, 100])
+            y, _, _ = self._gen_sparse(2, 20, [10, 100])
+            res = x.mv(y)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
@@ -2027,7 +2214,7 @@ class TestSparse(TestCase):
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (0., 0.), (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (-1., 1.), (1,)).is_nonzero())
         self.assertTrue(torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, []).is_nonzero())  # scalar sparse tensor
-        with self.assertRaisesRegex(RuntimeError, "bool value of Tensor with no values is ambiguous"):
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch.sparse_coo_tensor(([0, 1],), self.value_empty(2, 0), (4, 0)).is_nonzero()
 
     def test_allow_tensor_metadata_change(self):
@@ -2107,10 +2294,7 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
 
         shape_sparse_dim_nnz = [
             ((), 0, 2),
@@ -2178,6 +2362,298 @@ class TestSparse(TestCase):
     def test_sparse_to_numpy(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
+
+    @cpu_only
+    def test_softmax(self):
+        import torch.nn.functional as F
+
+        def to_dense(sparse, fill_value=None):
+            """
+            Return dense tensor from a sparse tensor using given fill value.
+            """
+            if fill_value is None or fill_value == 0:
+                return sparse.to_dense()
+            sparse = sparse.coalesce()
+            dense = torch.full(sparse.shape, fill_value, dtype=sparse.dtype, device=sparse.device)
+            for idx, value in zip(sparse._indices().t(), sparse._values()):
+                dense[tuple(idx)] = value
+            return dense
+
+        def softmax_to_dense(sparse, dim):
+            """Dense softmax of a sparse tensor. Useful only for testing softmax
+            correctness.
+
+            When computing softmax of a sparse tensor, the value of
+            unspecified items is negative infinity rather than zero so
+            that
+
+              softmax(sparse.to_dense(fill_value=-inf), dim) == softmax(sparse, dim).to_dense()
+
+            holds for non-empty lines. One empty lines, the softmax
+            values are defined as 0 in order to preserve the sparsity
+            of result.
+
+            Note that in PyTorch, ``to_dense`` method does not
+            implement the ``fill_value`` keyword argument.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+            dense = to_dense(sparse, fill_value=-float('inf'))
+            r = F.softmax(dense, dim)
+            # softmax on empty lines results nan, replace with zeros to match the definition
+            r[r != r] = 0
+            return r
+
+        def sparse_softmax(sparse, dim):
+            """Pure Python softmax of a sparse tensor. Assuming -inf for
+            unspecified sparse tensor data. This is a prototype of
+            sparse softmax algorithm in Python.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+
+            # softmax is non-linear operation, so sparse tensors must
+            # be coalesced.
+            sparse = sparse.coalesce()
+            inf = float('inf')
+            indices = sparse._indices()
+            values = sparse._values()
+
+            if dim < sparse.sparse_dim():
+                nnz = sparse._nnz()
+
+                # compute pool indices
+                size = sparse.size()
+                strides = torch.ones((sparse.sparse_dim(), 1), dtype=indices.dtype, device=indices.device)
+                for i in reversed(range(sparse.sparse_dim() - 1)):
+                    strides[i, 0] = strides[i + 1, 0] * size[i + 1]
+                strides[dim, 0] = 0
+
+                pool = (indices * strides).sum(dim=0)
+                i2p = {}
+                for i in range(nnz):
+                    c = int(pool[i])
+                    if c not in i2p:
+                        i2p[c] = len(i2p)
+                    pool[i] = i2p[c]
+
+                # compute max
+                dense_size = tuple(size[sparse.sparse_dim():])
+                mx = torch.empty((pool.max() + 1,) + dense_size, dtype=dtype, device=device)
+                mx[:] = -inf
+                for n in range(nnz):
+                    p = pool[n]
+                    mx[p] = torch.max(mx[p], values[n])
+
+                # apply exp to (v - mx) and sum the results
+                exp_values = torch.empty_like(values)
+                exp_sums = torch.zeros_like(mx)
+                for n in range(nnz):
+                    p = pool[n]
+                    v = exp_values[n] = (values[n] - mx[p]).exp()
+                    exp_sums[p] = exp_sums[p] + v
+
+                # normalize with the sum of exponents
+                for n in range(nnz):
+                    p = pool[n]
+                    exp_values[n] = exp_values[n] / exp_sums[p]
+
+                return torch.sparse_coo_tensor(indices,
+                                               exp_values,
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+
+            elif dim < sparse.sparse_dim() + sparse.dense_dim():
+                return torch.sparse_coo_tensor(indices,
+                                               F.softmax(values, dim - sparse.sparse_dim() + 1),
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+            else:
+                raise ValueError(
+                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
+                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+
+        def softmax_jacobian_analytic(x, dim):
+            """Return Jacobian of softmax using analytic formula
+
+               D_jS_i = S_i * (1[i==j] - S_j).
+
+            where S = softmax(x, dim), x is dense tensor, i,j in
+            range(x.shape[dim]).
+            """
+            y = F.softmax(x, dim)
+            y[y != y] = 0  # replace nan-s with zeros
+            J = torch.zeros((x.shape[dim],) + tuple(x.shape), dtype=x.dtype, device=x.device)
+            si = [slice(None)] * len(y.shape)
+            sj = [slice(None)] * len(y.shape)
+            s = [slice(None)] * len(J.shape)
+            for i in range(y.shape[dim]):
+                si[dim] = i
+                s[dim + 1] = i
+                yi = y[tuple(si)]
+                for j in range(y.shape[dim]):
+                    sj[dim] = j
+                    s[0] = j
+                    if i == j:
+                        J[tuple(s)] = yi * (1 - yi)
+                    else:
+                        yj = y[tuple(sj)]
+                        J[tuple(s)] = - yi * yj
+                    sj[dim] = slice(None)
+                si[dim] = slice(None)
+                s[dim + 1] = slice(None)
+            return J
+
+        def softmax_jacobian_autograd(x, dim, log=False):
+            """Return Jacobian of softmax using PyTorch autograd feature.
+
+            x can be dense or sparse tensor.
+            """
+            import itertools
+
+            if x.is_sparse:
+                x = x.coalesce()
+
+            dtype = x.dtype
+            device = x.device
+            shape = tuple(x.shape)
+            J = torch.zeros((shape[dim],) + shape, dtype=dtype, device=device)
+            for i in range(shape[dim]):
+                if x.is_sparse:
+                    sparse_dim = x.sparse_dim()
+                    dense_dim = x.dense_dim()
+                    if dim < sparse_dim:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            if dim == j:
+                                ranges.append([i])
+                            else:
+                                ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                    else:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                        sv = [slice(None)] * (dense_dim + 1)
+                        sv[dim - sparse_dim + 1] = i
+                        values[tuple(sv)] = 1
+                    v = torch.sparse_coo_tensor(indices, values, shape, dtype=dtype, device=device)
+                else:
+                    v = torch.zeros_like(x)
+                    sv = [slice(None)] * len(v.shape)
+                    sv[dim] = i
+                    v[tuple(sv)] = 1
+                x_ = x.clone()
+                x_.requires_grad_(True)
+
+                if log:
+                    if x_.is_sparse:
+                        y = torch.sparse.log_softmax(x_, dim)
+                    else:
+                        y = F.log_softmax(x_, dim)
+                else:
+                    if x_.is_sparse:
+                        y = torch.sparse.softmax(x_, dim)
+                    else:
+                        y = F.softmax(x_, dim)
+                        # replace nan-s with zeros
+                        y.data[y != y] = 0
+                y.backward(v)
+                g = x_.grad
+                if not g.is_sparse:
+                    # replace nan-s with zeros
+                    g.data[g != g] = 0
+                J[i] = g.to_dense() if g.is_sparse else g
+            return J
+
+        def test_op(sparse_dims, nnz, with_size):
+            if isinstance(with_size, Number):
+                with_size = [with_size] * sparse_dims
+
+            x, i, v = self._gen_sparse(sparse_dims, nnz, with_size)
+
+            def sparse_log(x):
+                return torch.sparse_coo_tensor(x._indices(), x._values().log(),
+                                               x.size(), dtype=x.dtype, device=x.device)
+
+            for dim in range(x.sparse_dim() + x.dense_dim()):
+                # Check sparse softmax definition
+
+                # check Python sparse softmax
+                y = sparse_softmax(x, dim)
+                r1 = softmax_to_dense(x, dim)
+                r2 = y.to_dense()
+                self.assertEqual(r1, r2)
+
+                # check C++ sparse softmax
+                y1 = torch.sparse.softmax(x, dim)
+                self.assertEqual(y, y1)
+
+                # check C++ sparse log_softmax
+                ly1 = torch.sparse.log_softmax(x, dim)
+                self.assertEqual(ly1, sparse_log(y1))
+
+                # Check autograd support on sparse softmax
+
+                # check softmax Jacobian definition for dense input
+                x1 = to_dense(x, fill_value=float('-inf'))
+                J = softmax_jacobian_analytic(x1, dim)
+                assert J.shape[0] == x.shape[dim]
+                assert J.shape[dim + 1] == x.shape[dim]
+
+                # check softmax Jacobian from autograd, dense input
+                J2 = softmax_jacobian_autograd(x1, dim)
+                self.assertEqual(J, J2)
+
+                # check softmax Jacobian from autograd, sparse input
+                J3 = softmax_jacobian_autograd(x, dim)
+                self.assertEqual(J, J3)
+
+                '''
+                y = softmax(x, dim)
+                z = log(y) = log_softmax(x, dim)
+                Dy/Dx = J
+                Dz/Dx = Dz/Dy Dy/Dx = 1/y * J
+                => J = J_log * y
+                '''
+                # log_softmax Jacobian from autograd, dense input
+                J2_log = softmax_jacobian_autograd(x1, dim, log=True)
+
+                # log_softmax Jacobian from autograd, sparse input
+                J3_log = softmax_jacobian_autograd(x, dim, log=True)
+
+                J = J.transpose(0, dim + 1)
+                J2_log = J2_log.transpose(0, dim + 1)
+                J3_log = J3_log.transpose(0, dim + 1)
+                self.assertEqual(J, J2_log * r1)
+                self.assertEqual(J, J3_log * r1)
+
+                if dim == 0:
+                    # check dtype argument
+                    other_dtype = torch.float32
+                    y2 = torch.sparse.softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(y2.dtype, other_dtype)
+                    self.assertEqual(y2, y1.type(other_dtype))
+
+                    ly2 = torch.sparse.log_softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(ly2.dtype, other_dtype)
+                    self.assertEqual(ly2, ly1.type(other_dtype))
+
+        test_op(1, 10, [3])
+        test_op(1, 10, [2, 3])
+        test_op(1, 10, [3, 2])
+        test_op(2, 10, [2, 3, 4])
+        test_op(2, 10, [3, 4])
+        test_op(2, 5, [5, 4])
+        test_op(2, 10, [3, 4, 2])
+        test_op(3, 10, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2, 3])
+        test_op(3, 100, [3, 4, 2, 3, 5, 2])
+        test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
 
 class TestUncoalescedSparse(TestSparse):

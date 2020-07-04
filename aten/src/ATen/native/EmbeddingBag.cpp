@@ -5,7 +5,11 @@
 
 #include <TH/THBlasUtils.h>
 
+#ifdef USE_FBGEMM
+#include <fbgemm/Fbgemm.h>
+#else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
+#endif
 
 #include <cstring>
 #include <iostream>
@@ -23,6 +27,9 @@ namespace {
 
 namespace at {
 namespace native {
+
+template<typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, const Tensor &indices, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -100,8 +107,30 @@ void index_select_add<float>(const Tensor &select_indices,
       offsets_data = offsets_include_last.data();
     }
 
+#ifdef USE_FBGEMM
+    auto kernel_fp32_i64 =
+      fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
+        /* block_size */ddim,
+        /* has_weight */false,
+        /* normalize_by_lengths */false,
+        /* prefetch */16,
+        /* is_weight_positional */false,
+        /* use_offsets */true
+      );
+#endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+#ifdef USE_FBGEMM
+          kernel_fp32_i64(
+            /* output_size */end_idx - start_idx,
+            /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
+            /* data_size */src.size(0),
+            /* input */src_data,
+            /* indices */select_indices_data + offsets_data[start_idx],
+            /* offsets_or_lengths */offsets_data + start_idx,
+            /* weights */nullptr,
+            /* output */output_data + start_idx * ddim);
+#else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -114,6 +143,7 @@ void index_select_add<float>(const Tensor &select_indices,
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data + start_idx * ddim);
+#endif
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
@@ -204,8 +234,30 @@ void index_select_scale_add<float>(const Tensor &select_indices,
       offsets_data = offsets_include_last.data();
     }
 
+#ifdef USE_FBGEMM
+    auto kernel_fp32_i64 =
+      fbgemm::GenerateEmbeddingSpMDM<float, int64_t, int64_t>(
+        /* block_size */ddim,
+        /* has_weight */true,
+        /* normalize_by_lengths */false,
+        /* prefetch */16,
+        /* is_weight_positional */false,
+        /* use_offsets */true
+      );
+#endif
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+#ifdef USE_FBGEMM
+          kernel_fp32_i64(
+            /* output_size */end_idx - start_idx,
+            /* index_size */offsets_data[end_idx] - offsets_data[start_idx],
+            /* data_size */src.size(0),
+            /* input */src_data,
+            /* indices */select_indices_data + offsets_data[start_idx],
+            /* offsets_or_lengths */offsets_data + start_idx,
+            /* weights */scale_data + offsets_data[start_idx],
+            /* output */output_data + start_idx * ddim);
+#else
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -218,6 +270,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data + start_idx * ddim);
+#endif
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
@@ -259,8 +312,8 @@ static at::Tensor make_bag_size(
     }
     bag_size[-1] = indices.size(0) - offsets[-1];
   } else if (requires_grad) {
-    // in MODE_SUM, only initialize bag_size if we need gradients
-    bag_size = at::zeros(offsets.sizes(), indices.options());
+    // in MODE_SUM, only allocate bag_size if we need gradients
+    bag_size = at::empty(offsets.sizes(), indices.options());
   }
   return bag_size;
 }
@@ -401,7 +454,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
         "include_last_offset: number of offset should be at least 1");
   }
 
-  auto output = at::zeros(
+  auto output = at::empty(
       {include_last_offset ? offsets.size(0) - 1 : offsets.size(0),
        weight.size(1)},
       weight.options());
@@ -431,6 +484,9 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     make_offset2bag(offsets, indices, offset2bag);
 
     offset2bag.resize_({indices.sizes()[0]});
+
+    // only initialize output in slow path
+    output.zero_();
   }
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
@@ -731,7 +787,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       auto bag_idx = offset2bag_data[sample_idx];
       auto embedding_idx = indices_data[sample_idx];
 
-      output_data[sample_idx] = THBlas_dot<scalar_t>(
+      output_data[sample_idx] = dot_impl<scalar_t>(
           embedding_features,
           grad_data + grad_stride0 * bag_idx, grad_stride1,
           weight_data + weight_stride0 * embedding_idx, weight_stride1);

@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -16,6 +17,24 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
+static bool fallback_allowed = true;
+
+bool setFallbackAllowed(bool value) {
+  bool old_value = fallback_allowed;
+  fallback_allowed = value;
+  return old_value;
+}
+
+bool fallbackAllowed() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -37,7 +56,8 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
+static std::vector<ExprHandle> texprSizes(
+    const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
     dims.push_back(IntImm::make(*shape[i]));
@@ -47,14 +67,14 @@ static std::vector<ExprHandle> texprSizes(const c10::VaryingShape& shape) {
 
 static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    throw malformed_input("type is not Tensor");
   }
 
   auto tt = v->type()->cast<TensorType>();
   std::vector<DimArg> dimArgs;
   int i = 0;
   for (auto const& s : texprSizes(tt->sizes())) {
-    dimArgs.emplace_back(DimArg(s, "i" + std::to_string(i++)));
+    dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
   }
   return dimArgs;
 }
@@ -75,6 +95,8 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
       return FloatImm::make(static_cast<float>(val.toDouble()));
     } else if (val.isInt()) {
       return IntImm::make(val.toInt());
+    } else if (val.isBool()) {
+      return BoolImm::make(val.toBool());
     } else if (val.isNone()) {
       // This is just a placeholder so we don't throw.  None-handling
       // is operator-specific and should be handled properly in
@@ -86,7 +108,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   }
 
   if (!scalars_.count(v->unique())) {
-    throw malformed_input();
+    throw malformed_input("no scalar in Constant");
   }
 
   return scalars_.at(v->unique());
@@ -134,7 +156,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input();
+    return e;
   }
 
   auto tt = *v->type()->cast<TensorType>()->scalarType();
@@ -151,7 +173,7 @@ ExprHandle TensorExprKernel::demoteOutput(
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     case at::ScalarType::Bool:
-      return e;
+      return cast<bool>(e);
     default:
       throw unsupported_dtype();
   }
@@ -394,10 +416,14 @@ Tensor* TensorExprKernel::computeFourOperand(
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
-      return computeTwoOperandWithAlpha(
-          "aten_add", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs + rhs;
-          });
+      auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs + rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_add", v, add_lambda)
+          : computeTwoOperand("aten_add", v, add_lambda);
     } break;
 
     case aten::_cast_Float: {
@@ -407,10 +433,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sub: {
-      return computeTwoOperandWithAlpha(
-          "aten_sub", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs - rhs;
-          });
+      auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return lhs - rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
+      return (v->node()->inputs().size() > 2)
+          ? computeTwoOperandWithAlpha("aten_sub", v, sub_lambda)
+          : computeTwoOperand("aten_sub", v, sub_lambda);
     } break;
 
     case aten::mul: {
@@ -569,10 +599,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
-        return ExprHandle(1.0f) /
-            (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - a));
-      });
+      return computeOneOperand(
+          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
     } break;
 
     case aten::reciprocal: {
@@ -771,11 +799,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
-        // return
-        // (ExprHandle(-.67436811832e-5f)+(ExprHandle(.2468149110712040f)+(ExprHandle(.583691066395175e-1f)+ExprHandle(.3357335044280075e-1f)*a)*a)*a)/(ExprHandle(.2464845986383725f)+(ExprHandle(.609347197060491e-1f)+(ExprHandle(.1086202599228572f)+ExprHandle(.2874707922475963e-1f)*a)*a)*a);
-        return tanh(a);
-      });
+      return computeOneOperand(
+          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
     } break;
 
     case aten::sqrt: {
@@ -912,7 +937,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
             if (dim < 0) {
               if (axes.size() == 0) {
-                throw malformed_input();
+                throw malformed_input("axes are zero handling unsqueeze");
               }
 
               dim += axes.size() - 1;
@@ -948,49 +973,55 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
-void TensorExprKernel::lowerToBackend(BackendType backendType) {
-  std::vector<Tensor*> tensorOutputs(tensorOutputs_);
-
-  if (backendType == BackendType::kCudaCodeGen) {
-    for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
-      Tensor* tensor = tensorOutputs_[tensorIdx];
-      ExprHandle totalCount = ExprHandle(tensor->dim(0));
-      for (int i = 1; i < tensor->ndim(); i++) {
-        const IntImm* totalCountImm = totalCount.AsNode<IntImm>();
-        const IntImm* tensorDimImm =
-            dynamic_cast<const IntImm*>(tensor->dim(i));
-        if (totalCountImm && tensorDimImm) {
-          // TODO: switch to real constant folding when it is available.
-          totalCount =
-              ExprHandle(totalCountImm->value() * tensorDimImm->value());
-        } else {
-          totalCount = totalCount * ExprHandle(tensor->dim(i));
-        }
-      }
-      // Flatten the index for GPU kernels.
-      // TODO: move this to fusing axis when it is ready.
-      Tensor* newOut = Compute(
-          tensor->func_var()->name_hint() + "_flat",
-          {totalCount},
-          [tensor](const VarHandle& index) -> ExprHandle {
-            std::vector<ExprHandle> dims;
-            ExprHandle value = index;
-            for (int i = tensor->ndim() - 1; i >= 0; i--) {
-              ExprHandle idx = value;
-              if (i > 0) {
-                idx = Mod::make(value, ExprHandle(tensor->dim(i)));
-              }
-              dims.push_back(idx);
-              value = value / ExprHandle(tensor->dim(i));
-            }
-            std::reverse(dims.begin(), dims.end());
-            return tensor->call(dims);
-          });
-      tensorOutputs[tensorIdx] = newOut;
-    }
+void TensorExprKernel::flattenTensors(BackendType backendType) {
+  if (backendType != BackendType::kCudaCodeGen) {
+    // We only need to flatten for GPU, for other backends just use the same
+    // tensors.
+    flatTensorOutputs_ = tensorOutputs_;
+    return;
   }
 
-  torch::jit::tensorexpr::schedule::LoopNest l(tensorOutputs);
+  flatTensorOutputs_.resize(tensorOutputs_.size());
+  for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
+    Tensor* tensor = tensorOutputs_[tensorIdx];
+    ExprHandle totalCount = ExprHandle(tensor->dim(0));
+    for (int i = 1; i < tensor->ndim(); i++) {
+      const IntImm* totalCountImm = totalCount.AsNode<IntImm>();
+      const IntImm* tensorDimImm = dynamic_cast<const IntImm*>(tensor->dim(i));
+      if (totalCountImm && tensorDimImm) {
+        // TODO: switch to real constant folding when it is available.
+        totalCount = ExprHandle(totalCountImm->value() * tensorDimImm->value());
+      } else {
+        totalCount = totalCount * ExprHandle(tensor->dim(i));
+      }
+    }
+    // Flatten the index for GPU kernels.
+    // TODO: move this to fusing axis when it is ready.
+    Tensor* newOut = Compute(
+        tensor->func_var()->name_hint() + "_flat",
+        {totalCount},
+        [tensor](const VarHandle& index) -> ExprHandle {
+          std::vector<ExprHandle> dims;
+          ExprHandle value = index;
+          for (int i = tensor->ndim() - 1; i >= 0; i--) {
+            ExprHandle idx = value;
+            if (i > 0) {
+              idx = Mod::make(value, ExprHandle(tensor->dim(i)));
+            }
+            dims.push_back(idx);
+            value = value / ExprHandle(tensor->dim(i));
+          }
+          std::reverse(dims.begin(), dims.end());
+          return tensor->call(dims);
+        });
+    flatTensorOutputs_[tensorIdx] = newOut;
+  }
+}
+
+Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
+  flattenTensors(backendType);
+
+  torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
@@ -999,17 +1030,19 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
     Stmt* loop = l.getLoopBodyFor(p.second);
     if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
-      l.ComputeInlineWithRandom(loop);
+      l.computeInlineWithRandom(loop);
     } else {
-      l.ComputeInline(loop);
+      l.computeInline(loop);
     }
   }
   if (backendType == kCudaCodeGen) {
-    for (size_t i = 0; i < tensorOutputs_.size(); i++) {
-      l.ComputeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
+      Tensor* tensor = flatTensorOutputs_[i];
 
-      Tensor* tensor = tensorOutputs[i];
-      const Var* index = tensor->arg(0);
+      // For every output tensor we've created a flattened 1D tensor - let's
+      // mark the original output tensor with computeInline
+      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loopLevels = (loopLevels > 0) ? loopLevels : kDefaultLoopLevels;
@@ -1024,9 +1057,9 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
           blockSize = kDefaultBlockSize;
         }
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockSize, &outer, &inner);
-        l.SetGPUBlockIndex(outer, 0);
-        l.SetGPUThreadIndex(inner, 0);
+        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.setGPUBlockIndex(outer, 0);
+        l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
         For* outer;
         For* inner;
@@ -1038,18 +1071,20 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
-        l.SplitWithMask(inner, blockSize, &inner1, &inner2);
-        l.SetGPUBlockIndex(inner1, 0);
-        l.SetGPUThreadIndex(inner2, 0);
+        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(inner, blockSize, &inner1, &inner2);
+        l.setGPUBlockIndex(inner1, 0);
+        l.setGPUThreadIndex(inner2, 0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + std::to_string(loopLevels));
+            "Invalid loop-level: " + c10::to_string(loopLevels));
       }
     }
-  } else if (backendType == kLLVMCodeGen) {
-    l.ApplyInlines();
+  }
 
+  l.prepareForCodegen();
+
+  if (backendType == kLLVMCodeGen) {
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
 
@@ -1062,7 +1097,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         Block* b = blocks.back();
         blocks.pop_back();
 
-        for (Stmt* s : b->stmts()) {
+        for (Stmt* s : *b) {
           if (For* f = dynamic_cast<For*>(s)) {
             worklist.push_back(f);
           } else if (Block* b2 = dynamic_cast<Block*>(s)) {
@@ -1080,7 +1115,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
 
       bool containsSubLoops = false;
       if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : body->stmts()) {
+        for (Stmt* s2 : *body) {
           if (For* f2 = dynamic_cast<For*>(s2)) {
             containsSubLoops = true;
             worklist.push_back(f2);
@@ -1093,30 +1128,49 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       }
     }
 
-    // Vectorize inner loops.
+    // vectorize inner loops.
     for (For* loop : innerLoops) {
       For* outer1;
       For* split1;
       For* tail1;
 
-      l.SplitWithTail(loop, 8, &outer1, &split1, &tail1);
-      l.Vectorize(split1);
+      static const int kBodyVectorWidth = 8;
+      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
+      l.vectorize(split1);
 
       if (tail1) {
         For* outer2;
         For* split2;
         For* tail2;
-        l.SplitWithTail(tail1, 4, &outer2, &split2, &tail2);
-        l.Vectorize(split2);
+        static const int kTailVectorWidth = 4;
+        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
+        l.vectorize(split2);
       }
     }
   }
 
-  l.ApplyInlines();
   Stmt* stmt = l.root_stmt();
+  // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
+  return stmt;
+}
 
-  // Set up formal params (inputs, then outputs) for kernel.
+std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
+  switch (backendType) {
+    case kCudaCodeGen:
+      return "cuda_codegen";
+    case kLLVMCodeGen:
+      return "llvm_codegen";
+    case kSimpleIREval:
+      return "simple_ir_eval";
+    default:
+      throw std::runtime_error(
+          "invalid backend type: " +
+          c10::to_string(static_cast<int>(backendType)));
+  }
+}
+
+std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
   std::vector<CodeGen::BufferArg> params;
   for (auto const& arg : kernelArgs_) {
     params.push_back(arg.buffer());
@@ -1127,31 +1181,10 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       params.emplace_back(stride.var);
     }
   }
-  for (auto& o : tensorOutputs) {
+  for (auto& o : flatTensorOutputs_) {
     params.emplace_back(o);
   }
-
-  // Generate code.
-  std::string codegenName;
-  switch (backendType_) {
-    case kCudaCodeGen:
-      codegenName = "cuda_codegen";
-      break;
-    case kLLVMCodeGen:
-      codegenName = "llvm_codegen";
-      break;
-    case kSimpleIREval:
-      codegenName = "simple_ir_eval";
-      break;
-    default:
-      throw std::runtime_error(
-          "invalid backend type: " +
-          std::to_string(static_cast<int>(backendType_)));
-  }
-
-  codegenCache_.emplace(
-      torch::get_hash(device_),
-      CreateCodeGen(codegenName, stmt, params, device_));
+  return params;
 }
 
 template <typename T>
@@ -1160,7 +1193,7 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
 }
 
 static bool isValidVaryingShape(
-    const c10::VaryingShape& vs,
+    const c10::VaryingShape<int64_t>& vs,
     at::IntArrayRef sz) {
   if (!vs.size().has_value()) {
     // TODO: does it make sense to have kernels with completely unspecified
@@ -1235,23 +1268,19 @@ static void checkInputs(
   }
 }
 
-void TensorExprKernel::pickAndCheckBackendType(
-    const at::ArrayRef<IValue>& inputs) {
-  checkInputs(inputs, inputTypes_);
-
-  at::Device device = [&inputs]() {
-    for (auto const& input : inputs) {
-      if (input.isTensor()) {
-        return input.toTensor().device();
-      }
+at::Device TensorExprKernel::pickDeviceType(
+    const at::ArrayRef<torch::jit::Value*>& inputs) {
+  for (auto const& input : inputs) {
+    auto tt = input->type()->cast<TensorType>();
+    if (tt && tt->device()) {
+      return *tt->device();
     }
-    throw std::runtime_error("No tensor inputs");
-  }();
-
-  if (codegenCache_.count(torch::get_hash(device))) {
-    return;
   }
+  throw std::runtime_error("No tensor inputs");
+}
 
+TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
+    at::Device device) {
   BackendType backendType = BackendType::kUninitialized;
   if (device.type() == at::kCUDA) {
     backendType = kCudaCodeGen;
@@ -1260,92 +1289,11 @@ void TensorExprKernel::pickAndCheckBackendType(
     backendType = kLLVMCodeGen;
 #else
     backendType = kSimpleIREval;
-    ;
 #endif
   } else {
     throw std::runtime_error("Invalid device type");
   }
-
-  if (backendType_ == kUninitialized) {
-    backendType_ = backendType;
-    device_ = device;
-    lowerToBackend(backendType);
-  } else if (backendType_ != backendType) {
-    // TODO: if we have to support muliptole backends with the same subgraph,
-    // we need to add kernel caching.
-    throw std::runtime_error(
-        "Inconsistent backendType: " + std::to_string(backendType_) + " vs " +
-        std::to_string(backendType));
-  }
-}
-
-void TensorExprKernel::codeGenRun(
-    const std::vector<CodeGen::CallArg>& runArgs) {
-  switch (backendType_) {
-    case kSimpleIREval:
-    case kLLVMCodeGen:
-    case kCudaCodeGen:
-      codegenCache_.at(torch::get_hash(device_))->call(runArgs);
-      break;
-    default:
-      throw std::runtime_error(
-          "Invalid backend type: " + std::to_string(backendType_));
-  }
-}
-
-ExprHandle TensorExprKernel::createInputIndexExpr(
-    const Buffer& buffer,
-    const std::vector<VarHandle>& axes,
-    const c10::VaryingShape& sizes,
-    const c10::VaryingStrides& strides,
-    const c10::VaryingStrides& contiguity,
-    const std::unordered_map<int64_t, VarHandle>& sizeVars) {
-  if (axes.size() != strides.size()) {
-    throw malformed_input();
-  }
-
-  std::vector<ShapeArg> strideArgs;
-  std::vector<ShapeArg> sizeArgs;
-  ExprHandle stride = 1;
-  ExprHandle index = 0;
-
-  if (axes.size() == 0) {
-    throw malformed_input();
-  }
-  size_t n = axes.size() - 1;
-
-  for (size_t i = 0; i < axes.size(); i++) {
-    // For discontiguous tensors, create a parameter to represent stride.
-    if (!*contiguity[i]) {
-      VarHandle v = VarHandle{
-          "stride_" + buffer.data()->name_hint() + "_" + std::to_string(i),
-          kInt};
-      strideArgs.emplace_back(n - i, v);
-      stride = v;
-    }
-
-    // If size is dynamic (indicated by negative value) create a size param.
-    ExprHandle size;
-    auto sizeVal = *sizes[n - i];
-    if (sizeVal < 0) {
-      auto it = sizeVars.find(sizeVal);
-      if (it == sizeVars.end()) {
-        throw malformed_input();
-      }
-
-      auto const& v = it->second;
-      sizeArgs.emplace_back(n - i, v);
-      size = v;
-    } else {
-      size = static_cast<int32_t>(sizeVal);
-    }
-
-    index = index + axes[n - i] * stride;
-    stride = stride * size;
-  }
-
-  kernelArgs_.emplace_back(buffer, std::move(sizeArgs), std::move(strideArgs));
-  return buffer(index);
+  return backendType;
 }
 
 void TensorExprKernel::bindInput(const torch::jit::Value* input) {
@@ -1358,42 +1306,16 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
-      std::unordered_map<int64_t, VarHandle> sizeVars;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        auto const& size = *tt->sizes()[i];
-        if (size < 0) {
-          VarHandle v(
-              "size_" + std::to_string(input->unique()) + "_" +
-                  std::to_string(i),
-              kInt);
-          sizeVars.emplace(size, v);
-          inputTensorDims.emplace_back(v);
-        } else {
-          inputTensorDims.emplace_back(
-              DimArg(IntImm::make(size), "i" + std::to_string(i)));
-        }
+        auto const size = *tt->sizes()[i];
+        inputTensorDims.emplace_back(
+            DimArg(IntImm::make(size), "i" + c10::to_string(i)));
       }
-#ifdef DYNAMIC_SHAPES
+      auto const strides = tt->strides();
       tensors_.emplace(
           input->unique(),
           Compute(
-              "input",
-              inputTensorDims,
-              [&](const std::vector<VarHandle>& axes) {
-                return createInputIndexExpr(
-                    inBuffer,
-                    axes,
-                    tt->sizes(),
-                    tt->strides(),
-                    tt->contiguity(),
-                    sizeVars);
-              }));
-#else
-      auto const& strides = tt->strides();
-      tensors_.emplace(
-          input->unique(),
-          Compute(
-              "input",
+              "input" + c10::to_string(tensors_.size() + 1),
               inputTensorDims,
               [&](const std::vector<VarHandle>& axes) {
                 ExprHandle idx = 0;
@@ -1404,11 +1326,16 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
               }));
       kernelArgs_.emplace_back(
           inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());
-#endif
       break;
     }
     case TypeKind::FloatType: {
       VarHandle v("v" + input->debugName(), kFloat);
+      kernelArgs_.emplace_back(v);
+      scalars_.emplace(input->unique(), v);
+      break;
+    }
+    case TypeKind::BoolType: {
+      VarHandle v("v" + input->debugName(), kBool);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -1456,15 +1383,30 @@ void TensorExprKernel::compile() {
   // Move output operands from `tensors_` to `tensorOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
-      throw malformed_input();
+      throw malformed_input("cannot find output Tensor");
     }
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
   }
+
+  device_ = pickDeviceType(graph_->inputs());
+  BackendType backendType = inferBackendTypeFromDevice(device_);
+  Stmt* stmt = generateStmt(backendType);
+
+  // Set up formal params (inputs, then outputs) for kernel.
+  std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
+
+  // Generate code.
+  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
+  if (!fallbackAllowed()) {
+    compile();
+    return;
+  }
+
   try {
     compile();
   } catch (...) {
@@ -1473,6 +1415,11 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (!fallbackAllowed()) {
+    runKernel(stack);
+    return;
+  }
+
   if (fallback_) {
     fallback(stack);
     return;
@@ -1485,12 +1432,9 @@ void TensorExprKernel::run(Stack& stack) {
   }
 }
 
-void TensorExprKernel::runKernel(Stack& stack) {
-  KernelScope kernelScope(&kernelArena_);
-  // Set up arguments (inputs, then outputs) for kernel call.
-  auto inputs = last(stack, nInputs_);
-  pickAndCheckBackendType(inputs);
-
+std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
+    const at::ArrayRef<IValue>& inputs,
+    std::vector<at::Tensor>& outputs) {
   std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
@@ -1515,7 +1459,6 @@ void TensorExprKernel::runKernel(Stack& stack) {
     }
   }
 
-  std::vector<at::Tensor> outputs;
   for (auto& o : tensorOutputs_) {
     std::vector<int64_t> tensorSize;
     for (const Expr* dim : o->dims()) {
@@ -1525,7 +1468,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
       } else {
         const IntImm* s = dynamic_cast<const IntImm*>(dim);
         if (!s) {
-          throw malformed_input(dim);
+          throw malformed_input("output expected Int", dim);
         }
         tensorSize.push_back(s->value());
       }
@@ -1535,9 +1478,24 @@ void TensorExprKernel::runKernel(Stack& stack) {
         tensorSize, c10::TensorOptions(tensorType(o)).device(device_)));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
+  return runArgs;
+}
+
+Stmt* TensorExprKernel::getCodeGenStmt() {
+  return codegen_->stmt();
+}
+
+void TensorExprKernel::runKernel(Stack& stack) {
+  KernelScope kernelScope(&kernelArena_);
+
+  // Set up arguments (inputs, then outputs) for kernel call.
+  auto inputs = last(stack, nInputs_);
+  std::vector<at::Tensor> outputs;
+
+  std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
 
   // Call the kernel.
-  codeGenRun(runArgs);
+  codegen_->call(runArgs);
 
   // Update the stack.
   drop(stack, nInputs_);

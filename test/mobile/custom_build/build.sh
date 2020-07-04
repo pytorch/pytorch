@@ -47,7 +47,7 @@ generate_op_dependency_graph() {
   if [ ! -f "${OP_DEPENDENCY}" ]; then
     BUILD_ROOT="${ANALYZER_BUILD_ROOT}" \
       ANALYZE_TORCH=1 \
-      "${SRC_ROOT}/tools/code_analyzer/build.sh" -closure=false
+      "${SRC_ROOT}/tools/code_analyzer/build.sh"
   fi
 }
 

@@ -1,6 +1,6 @@
 #ifdef USE_PYTORCH_QNNPACK
 
-#include "init_qnnpack.h"
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <pytorch_qnnpack.h>

@@ -18,18 +18,6 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
-namespace detail {
-inline bool defaultValueEquals_(
-    const c10::optional<IValue>& lhs,
-    const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-} // namespace detail
-
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -39,15 +27,13 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      bool is_inferred_type = false)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        is_inferred_type_(is_inferred_type) {
+        alias_info_(std::move(alias_info)) {
   }
   const std::string& name() const {
     return name_;
@@ -68,7 +54,14 @@ struct Argument {
     return alias_info_;
   }
   bool is_inferred_type() const {
-    return is_inferred_type_;
+    bool is_inferred_type = false;
+    TORCH_INTERNAL_ASSERT(type_);
+    if (auto pt = type_->cast<TensorType>()) {
+      if (pt->isInferredType()) {
+        is_inferred_type = true;
+      }
+    }
+    return is_inferred_type;
   }
 
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
@@ -82,7 +75,7 @@ struct Argument {
     }
     return c10::str(
         "Expected a value of type '",
-        type()->python_str(),
+        type()->repr_str(),
         "' for argument '",
         name(),
         "' but instead found type '",
@@ -117,14 +110,13 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
-  bool is_inferred_type_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
-          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.default_value() == rhs.default_value()
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
 }
@@ -260,6 +252,16 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
+    return FunctionSchema(
+      std::move(name),
+      std::move(overload_name),
+      arguments(),
+      returns(),
+      is_vararg(),
+      is_varret()
+      );
+  }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
@@ -320,6 +322,16 @@ public:
   }
   void setAliasAnalysis(AliasAnalysisKind v) {
     alias_kind_ = v;
+  }
+
+  c10::optional<c10::string_view> getNamespace() const {
+    return name_.getNamespace();
+  }
+
+  // Returns true if we successfully set the namespace (as there
+  // was none set, and false otherwise)
+  bool setNamespaceIfNotSet(const char* ns) {
+    return name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

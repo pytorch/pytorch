@@ -5,7 +5,6 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -123,10 +122,10 @@ Tensor q_avg_pool3d(
 
   auto output = at::_empty_affine_quantized(
       output_shape,
-      input_nhwc.options(),
+      input_nhwc.options().memory_format(input_nhwc.suggest_memory_format()),
       input_nhwc.q_scale(),
       input_nhwc.q_zero_point(),
-      input_nhwc.suggest_memory_format());
+      c10::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
   if (output_shape.size() == 4) {
     qavg_pool3d_nhwc_stub(

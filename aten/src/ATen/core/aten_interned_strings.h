@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -39,6 +42,9 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _clamp) \
+_(aten, _clamp_max) \
+_(aten, _clamp_min) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
@@ -131,21 +137,15 @@ _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
-_(aten, _th_clamp) \
-_(aten, _th_clamp_max) \
-_(aten, _th_clamp_min) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_max) \
 _(aten, _th_median) \
-_(aten, _th_min) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -162,6 +162,7 @@ _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
 _(aten, _unsafe_view) \
+_(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \
 _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \
@@ -226,6 +227,7 @@ _(aten, binary_cross_entropy_with_logits_backward) \
 _(aten, binary_cross_entropy_with_logits_target_backward) \
 _(aten, bincount) \
 _(aten, blackman_window) \
+_(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
 _(aten, cartesian_prod) \
@@ -258,6 +260,7 @@ _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
+_(aten, count_nonzero) \
 _(aten, cross) \
 _(aten, std_mean) \
 _(aten, var_mean) \
@@ -284,6 +287,7 @@ _(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
+_(aten, deg2rad) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
@@ -329,8 +333,11 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -361,6 +368,8 @@ _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
 _(aten, hardshrink_backward) \
+_(aten, hardsigmoid) \
+_(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
@@ -390,6 +399,7 @@ _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
 _(aten, isclose) \
+_(aten, istft) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -416,6 +426,7 @@ _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
+_(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -526,6 +537,7 @@ _(aten, ones_like) \
 _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
+_(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
@@ -540,6 +552,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \
@@ -711,6 +724,7 @@ _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
 _(aten, values) \
+_(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
@@ -718,6 +732,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

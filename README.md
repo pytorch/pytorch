@@ -20,13 +20,14 @@ You can reuse your favorite Python packages such as NumPy, SciPy and Cython to e
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| System | 2.7 | 3.5 | 3.6 |
+| System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
 | Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Windows CPU / GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
-| Linux (ppc64le) CPU | <center>—</center> | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
-| Linux (ppc64le) GPU | <center>—</center> | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
+| Linux (ppc64le) CPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) | <center>—</center> |
+| Linux (ppc64le) GPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/) | <center>—</center> |
+| Linux (aarch64) CPU | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38) |
 
 See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
@@ -139,13 +140,11 @@ Commands to install from binaries via Conda or pip wheels are on our website:
 Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
 
 - Stable binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
 - Rolling weekly binaries:
-  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
 
-They require JetPack 4.2 and above, and @dusty-nv maintains them
+They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) maintains them
 
 
 ### From Source
@@ -156,26 +155,27 @@ You will get a high-quality BLAS library (MKL) and you get controlled dependency
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
+- [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
 
 #### Install Dependencies
 
-Common (only install `typing` for Python <3.5)
+Common
 ```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 ```
 
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 | magma-cuda101 ] depending on your cuda version
+conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
@@ -210,12 +210,12 @@ Each CUDA version only supports one particular XCode version. The following comb
 
 On Windows
 
-At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+At least Visual Studio 2017 version 15.6 with the toolset 14.13 and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
 
-If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 2017 version 15.4 v14.11 toolset" is strongly recommended.
-<br/> If the version of Visual Studio 2017 is lesser than 15.3.3, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
-<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
-<br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+If the version of Visual Studio 2017 is higher than 15.6, installing of "VC++ 2017 version 15.6 v14.13 toolset" is strongly recommended.
+<br/> If the version of Visual Studio 2017 is lesser than 15.6, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.6 v14.13 toolset".
+<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.6 v14.13.
+<br/> "VC++ 2017 version 15.6 v14.13 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
 
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
@@ -227,16 +227,12 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 | CUDA version | Newest supported VS version                             |
 | ------------ | ------------------------------------------------------- |
-| 9.0 / 9.1    | Visual Studio 2017 Update 4 (15.4) (`_MSC_VER` <= 1911) |
 | 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |
 | 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |
 
 ```cmd
 cmd
-:: [Optional] Only add the next two lines if you need Python 2.7. If you use Python 3, ignore these two lines.
-set MSSdk=1
-set FORCE_PY27_BUILD=1
 
 :: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
@@ -246,7 +242,6 @@ set CMAKE_GENERATOR=Visual Studio 15 2017
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
 :: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
-:: It's an essential step if you use Python 3.5.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
@@ -329,6 +324,19 @@ Three pointers to get you started:
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 
+## Resources
+
+* [PyTorch.org](https://pytorch.org/)
+* [PyTorch Tutorials](https://pytorch.org/tutorials/)
+* [PyTorch Examples](https://github.com/pytorch/examples)
+* [PyTorch Models](https://pytorch.org/hub/)
+* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [PyTorch Twitter](https://twitter.com/PyTorch)
+* [PyTorch Blog](https://pytorch.org/blog/)
+* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
+
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
@@ -345,6 +353,8 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.
 
+To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
+
 ## The Team
 
 PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
@@ -356,4 +366,4 @@ Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 
 ## License
 
-PyTorch is BSD-style licensed, as found in the LICENSE file.
+PyTorch is BSD-style licensed, as found in the [LICENSE](LICENSE) file.

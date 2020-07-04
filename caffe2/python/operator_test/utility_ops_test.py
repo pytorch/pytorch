@@ -12,7 +12,6 @@ import hypothesis.strategies as st
 import numpy as np
 import random
 import six
-import unittest
 
 
 class TestUtilityOps(serial.SerializedTestCase):
@@ -58,6 +57,21 @@ class TestUtilityOps(serial.SerializedTestCase):
             outputs_to_check=0,
             outputs_with_grads=[0],
         )
+
+    @given(ndims=st.integers(min_value=1, max_value=10), **hu.gcs)
+    def test_resize_like(self, ndims, gc, dc):
+        X = np.zeros((ndims * 2, ))
+        Y = np.zeros((ndims, 2))
+
+        op = core.CreateOperator(
+            "ResizeLike", ["X", "Y"], ["Z"],
+        )
+
+        def resize_like(X, Y):
+            return [X.reshape(Y.shape)]
+
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertReferenceChecks(gc, op, [X, Y], resize_like, ensure_outputs_are_inferred=True)
 
     @serial.given(dtype=st.sampled_from([np.float32, np.int32]),
            ndims=st.integers(min_value=1, max_value=5),
@@ -254,6 +268,45 @@ class TestUtilityOps(serial.SerializedTestCase):
             reference=min_grad_op,
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
+
+    @serial.given(
+        n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
+        in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
+        seed=st.integers(min_value=0, max_value=65535),
+        dtype=st.sampled_from([np.int32, np.int64, np.float32]),
+        **hu.gcs)
+    def test_sum(
+            self, n, m, d, in_place, engine, seed, dtype, gc, dc):
+        input_names = []
+        input_vars = []
+        np.random.seed(seed)
+        for i in range(m):
+            X_name = 'X' + str(i)
+            input_names.extend([X_name])
+            var = np.random.rand(n, d).astype(dtype)
+            vars()[X_name] = var
+            input_vars.append(var)
+
+        def sum_op_ref(*args):
+            res = np.zeros((n, d))
+            for i in range(m):
+                res = res + args[i]
+            return (res, )
+
+        op = core.CreateOperator(
+            "Sum",
+            input_names,
+            [input_names[0]] if in_place else ['Y'],
+            engine=engine,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=input_vars,
+            reference=sum_op_ref,
+        )
+        self.assertDeviceChecks(dc, op, input_vars, [0])
 
     @serial.given(
         inputs=hu.lengths_tensor().flatmap(

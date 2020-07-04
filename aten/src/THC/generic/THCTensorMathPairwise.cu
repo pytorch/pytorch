@@ -24,7 +24,7 @@ static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *s
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
-  unsigned char min = THCudaByteTensor_minall(state, buf);
+  unsigned char min = THTensor_wrap(buf).min().item<unsigned char>();
 
   THCudaByteTensor_free(state, buf);
 

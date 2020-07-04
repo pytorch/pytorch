@@ -9,6 +9,8 @@
 namespace at {
 namespace native {
 
+using namespace sobol_utils;
+
 /// This is the core function to draw samples from a `SobolEngine` given
 /// its state variables (`sobolstate` and `quasi`). `dimension` can be
 /// inferred from `sobolstate`, but choosing to pass it explicitly to avoid

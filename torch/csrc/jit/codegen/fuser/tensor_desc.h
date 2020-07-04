@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <c10/util/Exception.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <algorithm>

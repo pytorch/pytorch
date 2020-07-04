@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
-#include <ATen/ATen.h>
 
 namespace torch {
 namespace jit {
@@ -33,6 +33,10 @@ class TORCH_API CodeGen {
     return stmt_;
   }
 
+  void apply_mutator(IRMutator* mutator) {
+    stmt_ = stmt_->accept_mutator(mutator);
+  }
+
   std::vector<BufferArg>& buffer_args() {
     return buffer_args_;
   }
@@ -56,12 +60,14 @@ class TORCH_API CodeGen {
 class CodeGen::BufferArg {
  public:
   BufferArg(const Buffer& buffer)
-      : var_(buffer.data()), dtype_(buffer.dtype()) {}
+      : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->function()->func_var(tensor->output_index())),
+      : var_(tensor->function()
+                 ->func_var(tensor->output_index())
+                 ->base_handle()),
         dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
   BufferArg(const Function& func)
-      : var_(func.func_var(0)), dtype_(func.body(0)->dtype()) {
+      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
     // TODO: Support multiple-output functions
     if (func.func_vars().size() != 1) {
       throw unimplemented_lowering();
@@ -163,8 +169,12 @@ class RegisterCodeGen {
   explicit RegisterCodeGen(const std::string& name) {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
-        name, [](Stmt* stmt, const std::vector<CodeGen::BufferArg>& params, at::Device device) {
-          std::unique_ptr<CodeGen> method(new CodeGenType(stmt, params, device));
+        name,
+        [](Stmt* stmt,
+           const std::vector<CodeGen::BufferArg>& params,
+           at::Device device) {
+          std::unique_ptr<CodeGen> method(
+              new CodeGenType(stmt, params, device));
           return method;
         });
   }
@@ -175,6 +185,11 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device = at::kCPU);
+
+class TORCH_API GenericIntrinsicsExpander : public IRMutator {
+ protected:
+  const Expr* mutate(const Intrinsics* v);
+};
 
 } // namespace tensorexpr
 } // namespace jit
