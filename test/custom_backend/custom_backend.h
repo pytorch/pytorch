@@ -2,7 +2,7 @@
 
 namespace torch {
 namespace custom_backend {
-// This test JIT backend is intended to do the minimal amount of work
+// This custom JIT backend is intended to do the minimal amount of work
 // necessary to test that the JIT backend registration endpoints and
 // code generation are working correctly. It is not intended to
 // produce numerically correct results.
@@ -67,6 +67,18 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
   }
 };
 
-std::string getBackendName();
+// clang-format off
+#  if defined(_WIN32)
+#    if defined(custom_ops_EXPORTS)
+#      define CUSTOM_BACKEND_API __declspec(dllexport)
+#    else
+#      define CUSTOM_BACKEND_API __declspec(dllimport)
+#    endif
+#  else
+#    define CUSTOM_BACKEND_API
+#  endif
+// clang-format on
+
+CUSTOM_BACKEND_API std::string getBackendName();
 } // namespace custom_backend
 } // namespace torch
