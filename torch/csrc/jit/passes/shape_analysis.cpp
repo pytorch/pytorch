@@ -664,6 +664,14 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::grad: {
+        auto tt = node->input()->type()->expect<TensorType>();
+        // grad may be undefined
+        // requires_grad may be required
+        auto grad_type = TensorType::get()->withPossiblyUndefined();
+        node->output()->setType(grad_type);
+        return;
+      }
       case prim::CallFunction:
       case prim::CallMethod:
       case prim::AutogradZero: {
