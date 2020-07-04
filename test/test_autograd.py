@@ -4199,25 +4199,16 @@ for shape in [(1,), ()]:
         a.requires_grad = True
 
         # No args
-        print(a)
-        print(a.nanprod())
         gradcheck(lambda x: x.nanprod(), a)
         gradgradcheck(lambda x: x.nanprod(), a)
 
         # Single dim
-        gradcheck(lambda x: x.nanprod((0)), a)
-        gradgradcheck(lambda x: x.nanprod((0)), a)
-
-        # Multi dim
-        gradcheck(lambda x: x.nanprod((0, 2)), a)
-        gradgradcheck(lambda x: x.nanprod((0, 2)), a)
-
-        gradcheck(lambda x: x.nanprod((0, -1)), a)
-        gradgradcheck(lambda x: x.nanprod((0, -1)), a)
+        gradcheck(lambda x: x.nanprod(0), a)
+        gradgradcheck(lambda x: x.nanprod(0), a)
 
         # With keep-dim
-        gradcheck(lambda x: x.nanprod((0, -1), True), a)
-        gradgradcheck(lambda x: x.nanprod((0, -1), True), a)
+        gradcheck(lambda x: x.nanprod(0, True), a)
+        gradgradcheck(lambda x: x.nanprod(0, True), a)
 
     def test_nanprod_dtype(self):
         inp = torch.randn(2, 2, 2, 2)
