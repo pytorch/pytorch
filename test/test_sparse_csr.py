@@ -47,6 +47,7 @@ class TestSparseGCS(TestCase):
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
     def test_sparse_gcs_from_dense(self):
+        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse(layout=torch.sparse_gcs)
         pass
     
     def test_sparse_gcs_constructor(self):

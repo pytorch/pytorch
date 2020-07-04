@@ -3485,13 +3485,13 @@
 - func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
 
-- func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+- func: to_sparse.sparse_dim(Tensor self, int sparse_dim, *, Layout layout) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
 
-- func: to_sparse(Tensor self) -> Tensor
+- func: to_sparse(Tensor self, *, Layout layout) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
