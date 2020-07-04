@@ -2742,14 +2742,16 @@ class TestCudaComm(TestCase):
         num_bytes = numel * 8
         tensors = [
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
-            torch.randn(numel).long().cuda(),
+            torch.randn(numel).mul().long().cuda(),
             torch.randn(numel).cuda(),
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
             make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
             make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            torch.empty(numel, dtype=torch.uint8, device='cuda').random_(),
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
+            torch.empty(numel, dtype=torch.bool, device='cuda').random_(),
             make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
@@ -2761,10 +2763,12 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            torch.randn(numel).long().cuda(),
+            torch.randn(numel).mul().long().cuda(),
             torch.randn(numel).cuda(),
+            torch.empty(numel, dtype=torch.uint8, device='cuda').random_(),
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
+            torch.empty(numel, dtype=torch.bool, device='cuda').random_(),
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -2817,14 +2821,16 @@ class TestCudaComm(TestCase):
         num_bytes = numel * 8
         tensors = [
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
-            torch.randn(numel).long().cuda(),
+            torch.randn(numel).mul(10).long().cuda(),
             torch.randn(numel).cuda(),
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
             make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
             make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
             make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            torch.empty(numel, dtype=torch.uint8, device='cuda').random_(),
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
+            torch.empty(numel, dtype=torch.bool, device='cuda').random_(),
             make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
@@ -2836,10 +2842,12 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            torch.randn(numel).long().cuda(),
+            torch.randn(numel).mul(10).long().cuda(),
             torch.randn(numel).cuda(),
+            torch.empty(numel, dtype=torch.uint8, device='cuda').random_(),
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
+            torch.empty(numel, dtype=torch.bool, device='cuda').random_(),
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
