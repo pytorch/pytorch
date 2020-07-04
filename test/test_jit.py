@@ -3996,6 +3996,25 @@ def foo(xyz):
 
         self.checkScript(f, (x,))
 
+
+    def test_block_input_grad_in_loop(self):
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        def grad_in_loop(x, y):
+            for i in range(100):
+                x = y @ x
+            return x
+
+        scripted = torch.jit.script(grad_in_loop)
+        outer = scripted.graph_for(x, y)
+        loop = outer.findNode("prim::Loop")
+        loop_block = next(loop.blocks())
+        param_node = loop_block.paramNode()
+        x_value = list(param_node.outputs())[1]
+        self.assertTrue(x_value.requires_grad())
+
     def test_tensor_grad(self):
         x = torch.randn(3, 4, requires_grad=True)
         y = torch.randn(3, 4, requires_grad=False)
