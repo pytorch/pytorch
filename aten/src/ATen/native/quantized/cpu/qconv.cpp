@@ -24,42 +24,48 @@ bool ConvDimChecks(
     int64_t padding_dims,
     int64_t output_padding_dims,
     int64_t dilation_dims,
-    std::string func_name) {
+    std::string func_name,
+    bool transpose = false) {
   TORCH_CHECK(
       act_dims == kSpatialDim + 2,
       func_name,
       kSpatialDim,
       "d(): Expected activation tensor to have ",
       kSpatialDim + 2,
-      " dimensions.");
+      " dimensions, got ",
+      act_dims);
   TORCH_CHECK(
       stride_dims == kSpatialDim,
       func_name,
       kSpatialDim,
       "d(): Expected stride tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      stride_dims);
   TORCH_CHECK(
       padding_dims == kSpatialDim,
       func_name,
       kSpatialDim,
       "d(): Expected padding tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      padding_dims);
   TORCH_CHECK(
-      output_padding_dims == kSpatialDim,
+      !transpose || (output_padding_dims == kSpatialDim),
       func_name,
       kSpatialDim,
-      "d(): Expected padding tensor to have ",
+      "d(): Expected output padding tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      output_padding_dims);
   TORCH_CHECK(
       dilation_dims == kSpatialDim,
       func_name,
       kSpatialDim,
       "d(): Expected dilation tensor to have ",
       kSpatialDim,
-      " dimensions.");
+      " dimensions, got ",
+      dilation_dims);
   return true;
 }
 
@@ -273,7 +279,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
-      output_padding().size(), dilation().size(), func_name);
+      output_padding().size(), dilation().size(), func_name, transpose());
 
   const int N = act.size(0);
   const int C = act.size(1);
@@ -545,7 +551,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       "d (qnnpack): QNNPACK only supports Conv2d now.");
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
-      output_padding().size(), dilation().size(), func_name);
+      output_padding().size(), dilation().size(), func_name, transpose());
 
   auto* pack_w = w.get();
 
