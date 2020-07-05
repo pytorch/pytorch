@@ -3,6 +3,7 @@ from .adadelta import Adadelta as Adadelta
 from .adagrad import Adagrad as Adagrad
 from .adam import Adam as Adam
 from .adamax import Adamax as Adamax
+from .adamaxw import AdamaxW as AdamaxW
 from .adamw import AdamW as AdamW
 from .asgd import ASGD as ASGD
 from .lbfgs import LBFGS as LBFGS

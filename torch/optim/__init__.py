@@ -11,6 +11,7 @@ from .adam import Adam
 from .adamw import AdamW
 from .sparse_adam import SparseAdam
 from .adamax import Adamax
+from .adamaxw import AdamaxW
 from .asgd import ASGD
 from .sgd import SGD
 from .rprop import Rprop
@@ -25,6 +26,7 @@ del adam
 del adamw
 del sparse_adam
 del adamax
+del adamaxw
 del asgd
 del sgd
 del rprop

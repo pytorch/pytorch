@@ -119,6 +119,8 @@ Algorithms
     :members:
 .. autoclass:: Adamax
     :members:
+.. autoclass:: AdamaxW
+    :members:
 .. autoclass:: ASGD
     :members:
 .. autoclass:: LBFGS

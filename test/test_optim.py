@@ -428,6 +428,18 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    def test_adamaxw(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamaxW([weight, bias], lr=1e-1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamaxW(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
+            optim.AdamaxW(None, lr=1e-2, betas=(0.0, 1.0))
+
     def test_rmsprop(self):
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
