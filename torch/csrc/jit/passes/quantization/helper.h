@@ -44,6 +44,9 @@ TORCH_API bool isScalar(Value* v);
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
+// Return the module name that corresponds to the value.
+TORCH_API c10::optional<std::string> getModuleName(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
 
@@ -73,6 +76,12 @@ TORCH_API bool isPropagateQuantOp(Node* n);
 // if the input 1 is a scalar, these ops will be quantized to
 // quantized::{op}_scalar
 TORCH_API bool isBinaryOpWithScalarInput(Node* n);
+
+// Check if the node is a aten::add with list inputs
+bool isListAdd(Node* n);
+
+// Check if the node is a empty list construct node
+bool isEmptyList(Node* n);
 
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
@@ -165,5 +174,16 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_half_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_float_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_false_value(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 } // namespace jit
 } // namespace torch
