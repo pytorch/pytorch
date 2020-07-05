@@ -54,7 +54,6 @@ TEST_F(ParameterListTest, AccessWithAt) {
   }
   ASSERT_EQ(list->size(), 4);
 
-
   // returns the correct module for a given index
   for (size_t i = 0; i < params.size(); ++i) {
     ASSERT_TRUE(torch::all(torch::eq(list->at(i), params[i])).item<bool>());
@@ -65,8 +64,9 @@ TEST_F(ParameterListTest, AccessWithAt) {
   }
 
   // throws for a bad index
-  ASSERT_THROWS_WITH(list->at(params.size() + 1), "Index 5 is out of bounds");
-  ASSERT_THROWS_WITH(list[ params.size() + 1 ], "Index 5 is out of bounds");
+  ASSERT_THROWS_WITH(list->at(params.size() + 100), "Index out of range");
+  ASSERT_THROWS_WITH(list->at(params.size() + 1), "Index out of range");
+  ASSERT_THROWS_WITH(list[params.size() + 1], "Index out of range");
 }
 
 TEST_F(ParameterListTest, ExtendPushesParametersFromOtherParameterList) {
@@ -100,7 +100,6 @@ TEST_F(ParameterListTest, ExtendPushesParametersFromOtherParameterList) {
   ASSERT_TRUE(torch::all(torch::eq(b[3], tf)).item<bool>());
 }
 
-
 TEST_F(ParameterListTest, PrettyPrintParameterList) {
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
   torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
@@ -109,11 +108,8 @@ TEST_F(ParameterListTest, PrettyPrintParameterList) {
   ASSERT_EQ(
       c10::str(list),
       "torch::nn::ParameterList(\n"
-      " 1\n"
-      "[ CPUFloatType{1} ]\n"
-      " 2\n"
-      "[ CPUFloatType{1} ]\n"
-      " 3\n"
-      "[ CPUFloatType{1} ]\n"
+      "(0): Parameter containing: [Float of size [1, 2]]\n"
+      "(1): Parameter containing: [Float of size [1, 2]]\n"
+      "(2): Parameter containing: [Float of size [1, 2]]\n"
       ")");
 }

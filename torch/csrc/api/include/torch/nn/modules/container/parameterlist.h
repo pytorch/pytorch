@@ -17,13 +17,13 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   /// Constructs the `ParameterList` from a variadic list of ParameterList.
   template <typename... Tensors>
   explicit ParameterListImpl(Tensors&&... params) {
-    parameters_.reserve(sizeof...(Tensors));
+    parameters.reserve(sizeof...(Tensors));
     push_back_var(std::forward<Tensors>(params)...);
   }
 
   template <typename... Tensors>
   explicit ParameterListImpl(const Tensors&... params) {
-    parameters_.reserve(sizeof...(Tensors));
+    parameters.reserve(sizeof...(Tensors));
     push_back_var(std::forward<Tensors>(params)...);
   }
 
@@ -33,26 +33,41 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// Pretty prints the `ParameterList` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    // TODO: Check what should be the proper way to prettyprint the parameter
-    stream << "torch::nn::ParameterList(";
-    for (const auto& param : parameters_.values()) {
+    stream << "torch::nn::ParameterList(" << std::endl;
+    for (const auto& pair : parameters_) {
+      stream << "(" << pair.key() << ")"
+             << ": Parameter containing: [" << pair.value().scalar_type()
+             << " of size " << pair.value().sizes() << "]";
+      ;
       stream << std::endl;
-      stream << param;
     }
-    stream << std::endl;
     stream << ")";
   }
 
   /// push the a given parameter at the end of the list
   void append(torch::Tensor&& param) {
     bool requires_grad = param.requires_grad();
-    register_parameter(c10::to_string(parameters_.size()), std::move(param), requires_grad);
+    parameters.push_back(std::move(param));
+    register_parameter(
+        c10::to_string(parameters.size() - 1),
+        parameters[parameters.size() - 1],
+        requires_grad);
   }
 
   /// push the a given parameter at the end of the list
   void append(const torch::Tensor& param) {
-    register_parameter(c10::to_string(parameters_.size()), param, param.requires_grad());
+    parameters.push_back(param);
+    register_parameter(
+        c10::to_string(parameters.size() - 1),
+        parameters[parameters.size() - 1],
+        param.requires_grad());
   }
+
+  /// push the a given parameter at the end of the list
+  // void append(const OrderedDict<std::string, torch::Tensor>::Item& pair) {
+  //   register_parameter(c10::to_string(parameters_.size()), pair.value(),
+  //   pair.value().requires_grad());
+  // }
 
   /// extend parameters from a container to the end of the list
   template <typename Container>
@@ -64,48 +79,49 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// Returns an iterator to the start of the ParameterList
   Iterator begin() {
-    return parameters_.values().begin();
+    return parameters.begin();
   }
 
   /// Returns a const iterator to the start of the ParameterList
   ConstIterator begin() const {
-    return parameters_.values().begin();
+    return parameters.begin();
   }
 
   /// Returns an iterator to the end of the ParameterList
   Iterator end() {
-    return parameters_.values().end();
+    return parameters.end();
   }
 
   /// Returns a const iterator to the end of the ParameterList
   ConstIterator end() const {
-    return parameters_.values().end();
+    return parameters.end();
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   at::Tensor& at(size_t idx) {
-    // TODO: check exception here
-    return parameters_[idx].value();
+    TORCH_CHECK(idx < size(), "Index out of range");
+    return parameters[idx];
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   const at::Tensor& at(size_t idx) const {
-    return parameters_[idx].value();
+    TORCH_CHECK(idx < size(), "Index out of range");
+    return parameters[idx];
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   at::Tensor& operator[](size_t idx) {
     return at(idx);
   }
 
   /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before
   /// for a non-throwing way of access
   const at::Tensor& operator[](size_t idx) const {
     return at(idx);
@@ -113,11 +129,11 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// Return the size of the ParameterList
   size_t size() const noexcept {
-    return parameters_.size();
+    return parameters.size();
   }
   /// True if the ParameterList is empty
   bool is_empty() const noexcept {
-    return parameters_.is_empty();
+    return parameters.empty();
   }
 
  private:
@@ -131,6 +147,11 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// The base case, when the list of modules is empty.
   void push_back_var() {}
+
+  // since the `parameters_` in `modules` is an `OrderedDict`
+  // And there is no better way to get the reference of the
+  // iterator of value from an `OrderedDict`, so a vector is needed here
+  std::vector<torch::Tensor> parameters;
 };
 TORCH_MODULE(ParameterList);
 } // namespace nn
