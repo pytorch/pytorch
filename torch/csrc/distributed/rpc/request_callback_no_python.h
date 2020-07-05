@@ -53,7 +53,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
       std::vector<at::IValue>& stack,
-      c10::intrusive_ptr<OwnerRRef> ownerRRef) const;
+      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
 
   virtual void processPythonRemoteCall(
       RpcCommandBase& rpc,
@@ -66,7 +66,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const;
 
-  virtual void handleRRefDelete(c10::intrusive_ptr<RRef> rref) const;
+  virtual void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const;
 
   void processRpc(
       RpcCommandBase& rpc,

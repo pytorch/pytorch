@@ -47,7 +47,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const override;
 
-  void handleRRefDelete(c10::intrusive_ptr<RRef> rref) const override;
+  void handleRRefDelete(c10::intrusive_ptr<RRef>& rref) const override;
 
   void processRpcWithErrors(
       RpcCommandBase& rpc,

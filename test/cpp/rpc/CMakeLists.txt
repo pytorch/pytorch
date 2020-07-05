@@ -11,7 +11,7 @@ target_include_directories(
   test_cpp_rpc PRIVATE
   ${ATen_CPU_INCLUDE}
   ${TORCH_ROOT}/third_party/tensorpipe)
-target_link_libraries(test_cpp_rpc PRIVATE torch c10d gtest)
+target_link_libraries(test_cpp_rpc PRIVATE torch c10d gtest process_group_agent)
 
 if(USE_CUDA)
   target_link_libraries(test_cpp_rpc PRIVATE

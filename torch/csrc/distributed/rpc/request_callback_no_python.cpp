@@ -178,14 +178,15 @@ void RequestCallbackNoPython::processScriptRemoteCall(
     c10::intrusive_ptr<OwnerRRef> ownerRRef) const {
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  processScriptRemoteCallOp(scriptRemoteCall, postProcessing, stack, ownerRRef);
+  processScriptRemoteCallOp(
+      scriptRemoteCall, postProcessing, stack, std::move(ownerRRef));
 }
 
 bool RequestCallbackNoPython::processScriptRemoteCallOp(
     ScriptRemoteCall& scriptRemoteCall,
     const std::function<void(void)>& postProcessing,
     std::vector<at::IValue>& stack,
-    c10::intrusive_ptr<OwnerRRef> ownerRRef) const {
+    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
   if (scriptRemoteCall.hasOp()) {
     try {
       scriptRemoteCall.op()->getOperation()(&stack);
@@ -217,7 +218,7 @@ void RequestCallbackNoPython::processPythonRRefFetchCall(
 }
 
 void RequestCallbackNoPython::handleRRefDelete(
-    c10::intrusive_ptr<RRef> rref) const {
+    c10::intrusive_ptr<RRef>& rref) const {
   TORCH_CHECK(!rref->isPyObj(), "RRefs with python objects not supported!");
 }
 

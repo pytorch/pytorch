@@ -417,7 +417,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(py::init([](std::string workerName,
-                       std::shared_ptr<::c10d::ProcessGroup> pg,
+                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(

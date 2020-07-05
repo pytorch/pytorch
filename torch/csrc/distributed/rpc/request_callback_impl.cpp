@@ -467,7 +467,7 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
 }
 
 void RequestCallbackImpl::handleRRefDelete(
-    c10::intrusive_ptr<RRef> rref) const {
+    c10::intrusive_ptr<RRef>& rref) const {
   if (rref && rref->isPyObj()) {
     py::gil_scoped_acquire acquire;
     rref.reset();
