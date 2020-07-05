@@ -71,13 +71,13 @@ static void fractional_max_pool3d_out_single_batch_frame(
           for (w = 0; w < outputW; ++w) {
             int64_t inputWStart = sequenceW[w];
 
+            int64_t t2 = inputTStart, h2 = inputHStart, w2 = inputWStart;
             scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-            int64_t maxIndex = 0;
+            int64_t maxIndex = t2 * inputH * inputW + h2 * inputW + w2;
 
-            int64_t t2, h2, w2;
-            for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
-              for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
-                for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
+            for (; t2 < inputTStart + poolSizeT; ++t2) {
+              for (; h2 < inputHStart + poolSizeH; ++h2) {
+                for (; w2 < inputWStart + poolSizeW; ++w2) {
                   AT_ASSERT(t2 >= 0 && t2 < inputT);
                   AT_ASSERT(h2 >= 0 && h2 < inputH);
                   AT_ASSERT(w2 >= 0 && w2 < inputW);
