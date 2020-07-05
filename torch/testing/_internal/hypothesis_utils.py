@@ -329,7 +329,7 @@ def tensor_conv(
         tr = draw(st.booleans())
         if tr:
             weight_shape = (input_channels, output_channels_per_group) + tuple(kernels)
-            bias_shape = output_channels_per_group
+            bias_shape = output_channels
 
     # Resolve the tensors
     if qparams is not None:

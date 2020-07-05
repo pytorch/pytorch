@@ -236,10 +236,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       " instead. "
       "(weight dimensions: ",
       weight.sizes(), " , transpose: ",
-      (transpose ? "True)." : "False)."),
-      "\nDEBUG INFO: ",
-      bias_fp32.ndimension(), ", ",
-      bias_fp32.size(0), ", ", out_ch
+      (transpose ? "True)." : "False).")
   );
 
   auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
