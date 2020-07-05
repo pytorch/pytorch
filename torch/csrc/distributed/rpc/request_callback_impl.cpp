@@ -262,7 +262,7 @@ void RequestCallbackImpl::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
     const std::function<void(void)>& postProcessing,
     std::vector<at::IValue>& stack,
-    c10::intrusive_ptr<OwnerRRef> ownerRRef) const {
+    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
   if (processScriptRemoteCallOp(
           scriptRemoteCall, postProcessing, stack, ownerRRef)) {
     return;

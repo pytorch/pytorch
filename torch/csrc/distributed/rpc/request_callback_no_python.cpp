@@ -175,11 +175,10 @@ void RequestCallbackNoPython::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
     const std::function<void(void)>& postProcessing,
     std::vector<at::IValue>& stack,
-    c10::intrusive_ptr<OwnerRRef> ownerRRef) const {
+    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const {
   TORCH_CHECK(
       scriptRemoteCall.hasOp(), "ScriptRemoteCall needs to have an op!");
-  processScriptRemoteCallOp(
-      scriptRemoteCall, postProcessing, stack, std::move(ownerRRef));
+  processScriptRemoteCallOp(scriptRemoteCall, postProcessing, stack, ownerRRef);
 }
 
 bool RequestCallbackNoPython::processScriptRemoteCallOp(

@@ -47,7 +47,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
       std::vector<at::IValue>& stack,
-      c10::intrusive_ptr<OwnerRRef> ownerRRef) const;
+      const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
 
   bool processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
