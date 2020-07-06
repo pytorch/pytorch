@@ -580,12 +580,17 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
+            # The zipfile reader is going to advance the current file position.
+            # If we want to actually tail call to torch.jit.load, we need to
+            # reset back to the original position.
+            orig_position = opened_file.tell()
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
-                    return torch.jit.load(f)
+                    opened_file.seek(orig_position)
+                    return torch.jit.load(opened_file)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 

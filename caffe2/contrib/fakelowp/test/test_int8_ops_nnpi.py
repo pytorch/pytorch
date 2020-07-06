@@ -106,8 +106,8 @@ class Int8OpsTest(serial.SerializedTestCase):
                     "b": b_fp32,
                     "Y_fbgemm": Y_fbgemm,
                     "Y_glow": Y_glow,
-                    "diff": diff,
-                    "maxdiff": diff.max(axis=1),
+                    "diff": diff_Y,
+                    "maxdiff": diff_Y.max(axis=1),
                 },
             )
             assert 0
@@ -211,8 +211,8 @@ class Int8OpsTest(serial.SerializedTestCase):
                     "b": b_fp32,
                     "Y_fbgemm": Y_fbgemm,
                     "Y_glow": Y_glow,
-                    "diff": diff,
-                    "maxdiff": diff.max(axis=1),
+                    "diff": diff_Y,
+                    "maxdiff": diff_Y.max(axis=1),
                 },
             )
             assert 0
