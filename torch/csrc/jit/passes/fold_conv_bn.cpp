@@ -113,8 +113,23 @@ class FoldConvBatchNormHelper {
 
   std::unordered_map<ModulePtr, std::tuple<at::Tensor, at::Tensor>>
       conv_module_and_params_;
-  std::unordered_map<Graph*, std::vector<std::tuple<std::string, std::string>>>
-      conv_bn_names_;
+
+  // A map from graph to a list of tuple of paths of matched conv and bn module
+  // e.g. if we have a graph `g` containing following code
+  // x = self.sub.conv1(..)
+  // x = self.sub.bn1(..)
+  // x = self.sub.conv2(..)
+  // x = self.sub.bn2(..)
+  // then the value for graph `g` in this map will be:
+  // [(['sub', 'conv1'], ['sub', 'bn1']), (['sub', 'conv2'], ['sub', 'bn2'])]
+  // the first entry of the list is the paths to first conv-bn match
+  // the second entry of the list is the path to second match
+  std::unordered_map<
+      Graph*,
+      std::vector<
+          std::tuple<std::vector<std::string>, std::vector<std::string>>>>
+      conv_bn_paths_;
+
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
@@ -251,29 +266,29 @@ void FoldConvBatchNormHelper::analyze(
 
       GRAPH_DEBUG("number of Conv-BatchNorm matches: ", matches.size());
       Graph* g = method.graph().get();
-      if (!conv_bn_names_.count(g)) {
+      if (!conv_bn_paths_.count(g)) {
         // This is to make sure we don't visit one graph multiple times
-        conv_bn_names_[g] = {};
+        conv_bn_paths_[g] = {};
         for (const Match& match : matches) {
+          if (!std::all_of(
+                  pattern.filters.begin(),
+                  pattern.filters.end(),
+                  [&](const MatchFilter& f) { return f(match, vmap); })) {
+            continue;
+          }
           GRAPH_DEBUG("Checking next match...");
+          // Get the conv and bn submodule
           Node* matched_conv = match.nodes_map.at(pattern_conv);
           Node* matched_bn = match.nodes_map.at(pattern_bn);
-          Node* matched_conv_submodule =
-              match.values_map.at(pattern_conv_submodule)->node();
           Node* matched_bn_submodule =
               match.values_map.at(pattern_bn_submodule)->node();
-
-          TORCH_INTERNAL_ASSERT(
-              matched_conv_submodule->kind() == prim::GetAttr);
-          TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
-
-          const auto& conv_module_name =
-              matched_conv_submodule->s(Symbol::attr("name"));
-          const auto& bn_module_name =
-              matched_bn_submodule->s(Symbol::attr("name"));
-
-          Module conv_submodule = current.attr(conv_module_name).toModule();
-          Module bn_submodule = current.attr(bn_module_name).toModule();
+          Value* conv_instance = matched_conv->input(0);
+          Value* bn_instance = matched_bn->input(0);
+          Value* self = g->inputs()[0];
+          auto conv_module_path = getModuleAccessPath(conv_instance, self);
+          auto bn_module_path = getModuleAccessPath(bn_instance, self);
+          Module conv_submodule = findChildModule(current, conv_module_path);
+          Module bn_submodule = findChildModule(current, bn_module_path);
 
           ConvBNParameters params;
           if (!tryExtractingConvBNParameters(
@@ -282,8 +297,8 @@ void FoldConvBatchNormHelper::analyze(
                 "Conv and BN modules didn't have all required parameters or attributes...");
             continue;
           }
-          conv_bn_names_[g].push_back(
-              std::make_tuple(conv_module_name, bn_module_name));
+          conv_bn_paths_[g].push_back(
+              std::make_tuple(conv_module_path, bn_module_path));
           // We are using a separate vector for saving Values we want to rewrite
           // to make sure that the order in which we perform these
           // transformations is deterministic. Iterating through keys of
@@ -309,9 +324,9 @@ void FoldConvBatchNormHelper::analyze(
         } // matches
       }
 
-      for (const auto& conv_bn : conv_bn_names_.at(g)) {
-        Module conv_submodule = current.attr(std::get<0>(conv_bn)).toModule();
-        Module bn_submodule = current.attr(std::get<1>(conv_bn)).toModule();
+      for (const auto& conv_bn : conv_bn_paths_.at(g)) {
+        Module conv_submodule = findChildModule(current, std::get<0>(conv_bn));
+        Module bn_submodule = findChildModule(current, std::get<1>(conv_bn));
 
         ConvBNParameters params;
         TORCH_INTERNAL_ASSERT(tryExtractingConvBNParameters(
