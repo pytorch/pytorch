@@ -245,7 +245,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     // If we use the work to do barrier, we should block here
     for (size_t i = 0; i < devices_.size(); ++i) {
       at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
+     // AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
 }
@@ -297,6 +297,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+    std::cout << "Destructor for rank: " << getRank();
   terminateWatchdog_.store(true);
   watchdogCV_.notify_one();
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -477,6 +478,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     std::lock_guard<std::mutex> lock(mutex_);
     if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
       // Reuse the cached communicator if there is one.
+        std::cout << "Using cached communicator\n";
       return devNCCLCommMap_[devicesKey];
     }
   }
@@ -493,7 +495,10 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // Broadcast so that each process can have a unique NCCL ID
+  std::cout << "Cannot use cached comm, need to write to store\n";
+  if (getRank() == 1) std::this_thread::sleep_for(std::chrono::seconds(2));
   broadcastUniqueNCCLID(&ncclID);
+  std::cout << "Done writing to store!\n";
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 

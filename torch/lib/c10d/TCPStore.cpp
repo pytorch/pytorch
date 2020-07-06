@@ -283,6 +283,7 @@ TCPStore::TCPStore(
       initKey_("init/"),
       regularPrefix_("/") {
   if (isServer_) {
+      std::cout << "Opening the listening sock";
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
     // Now start the daemon
@@ -301,6 +302,7 @@ TCPStore::TCPStore(
 TCPStore::~TCPStore() {
   ::close(storeSocket_);
   if (isServer_) {
+      std::cout << "Server shutting down TCP store";
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
     tcpStoreDaemon_.reset(nullptr);
