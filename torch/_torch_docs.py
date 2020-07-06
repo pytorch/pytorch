@@ -1715,6 +1715,31 @@ Example::
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
 
+add_docstr(torch.count_nonzero,
+           r"""
+count_nonzero(input, dim=None) -> Tensor
+
+Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
+
+Args:
+    {input}
+    dim  (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
+    Default is None, meaning that non-zeros will be counted along a flattened version of :attr:`input`.
+
+Example::
+
+    >>> x = torch.zeros(3,3)
+    >>> x[torch.randn(3,3) > 0.5] = 1
+    >>> x
+    tensor([[0., 1., 1.],
+            [0., 0., 0.],
+            [0., 0., 1.]])
+    >>> torch.count_nonzero(x)
+    tensor(3)
+    >>> torch.count_nonzero(x, dim=0)
+    tensor([0, 1, 2])
+""".format(**reduceops_common_args))
+
 add_docstr(torch.dequantize,
            r"""
 dequantize(tensor) -> Tensor

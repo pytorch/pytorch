@@ -1091,6 +1091,35 @@ graph(%Ra, %Rb):
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
 
+    def test_shape_analysis_unsqueeze_in_loop(self):
+        input_str = """graph(%x.1 : Tensor):
+          %4 : bool = prim::Constant[value=1]()
+          %1 : int = prim::Constant[value=2]()
+          %7 : int = prim::Constant[value=0]()
+          # CHECK: FloatTensor = prim::Loop
+          %x : Tensor = prim::Loop(%1, %4, %x.1)
+            # CHECK: : FloatTensor):
+            block0(%i : int, %x.6 : Tensor):
+              # CHECK: FloatTensor = aten::unsqueeze
+              %x.3 : Tensor = aten::unsqueeze(%x.6, %7)
+              -> (%4, %x.3)
+          return (%x)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
+        FileCheck().run(input_str, graph)
+
+    def test_shape_analysis_masked_select(self):
+        input_str = """graph(%0 : Float(),
+          %1 : Bool()):
+          # CHECK: Float(*) = aten::masked_select
+          %2 : Tensor = aten::masked_select(%0, %1) # test/test_jit.py:15261:0
+          return (%2)"""
+        graph = parse_ir(input_str)
+        x = torch.ones(1, dtype=torch.float32)[0]
+        mask = x.ge(0.5)
+        torch._C._jit_pass_complete_shape_analysis(graph, (x, mask), False)
+        FileCheck().run(input_str, graph)
+
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
     def test_verify(self):
@@ -3967,6 +3996,25 @@ def foo(xyz):
 
         self.checkScript(f, (x,))
 
+
+    def test_block_input_grad_in_loop(self):
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        def grad_in_loop(x, y):
+            for i in range(100):
+                x = y @ x
+            return x
+
+        scripted = torch.jit.script(grad_in_loop)
+        outer = scripted.graph_for(x, y)
+        loop = outer.findNode("prim::Loop")
+        loop_block = next(loop.blocks())
+        param_node = loop_block.paramNode()
+        x_value = list(param_node.outputs())[1]
+        self.assertTrue(x_value.requires_grad())
+
     def test_tensor_grad(self):
         x = torch.randn(3, 4, requires_grad=True)
         y = torch.randn(3, 4, requires_grad=False)
@@ -3983,6 +4031,20 @@ def foo(xyz):
         x.sum().backward()
         self.checkScript(f_grad, (x,))
         self.checkScript(f_grad, (y,))
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "shape analysis is only enabled in Legacy")
+    def test_prim_grad_undefined(self):
+
+        x = torch.ones(2)
+
+        def f_grad(x):
+            return x.grad
+
+        scripted = self.checkScript(f_grad, (x,))
+        g = scripted.graph_for(x)
+
+        prim_grad_node = g.findNode("prim::grad")
+        self.assertTrue(next(prim_grad_node.outputs()).type().undefined() is None)
 
     def test_tensor_data(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -8167,142 +8229,6 @@ a")
             m = M()
             self.assertEqual(m(), 10)
 
-    def test_moduledict(self):
-        class Inner(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        class Inner2(torch.nn.Module):
-            def forward(self, x):
-                return x * 2
-
-        class Inner3(torch.nn.Module):
-            def forward(self, x):
-                return (x - 4) * 3
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                modules = OrderedDict([
-                    ('one', Inner()),
-                    ('two', Inner2()),
-                    ('three', Inner3()),
-                ])
-                self.moduledict = nn.ModuleDict(modules)
-
-            def forward(self, x, skip_name):
-                # type: (Tensor, str)
-                names = torch.jit.annotate(List[str], [])
-                values = []
-                for name in self.moduledict:
-                    names.append(name)
-
-                for name, mod in self.moduledict.items():
-                    if name != skip_name:
-                        names.append(name)
-                        x = mod(x)
-                        values.append(x)
-
-                for mod in self.moduledict.values():
-                    x = mod(x)
-                    values.append(x)
-
-                for key in self.moduledict.keys():
-                    names.append(key)
-
-                return x, names
-
-        class M2(M):
-            def __init__(self):
-                super(M2, self).__init__()
-
-            def forward(self, x, skip_name):
-                # type: (Tensor, str)
-                names = torch.jit.annotate(List[str], [])
-                values = []
-                x2 = x
-                iter = 0
-                for name in self.moduledict:
-                    names.append(name)
-
-                for i, (name, mod) in enumerate(self.moduledict.items()):
-                    iter += i
-                    if name != skip_name:
-                        names.append(name)
-                        x = mod(x)
-                        values.append(x)
-
-                for i, mod in enumerate(self.moduledict.values()):
-                    iter += i
-                    x = mod(x)
-                    values.append(x)
-
-                for i, key in enumerate(self.moduledict.keys()):
-                    iter += i
-                    names.append(key)
-
-                for mod, mod in zip(self.moduledict.values(), self.moduledict.values()):
-                    iter += i
-                    x2 = mod(mod(x2))
-
-                return x, x2, names, iter
-
-
-        for name in ["", "one", "two", "three"]:
-            inp = torch.tensor(1)
-            self.checkModule(M(), (inp, name))
-            self.checkModule(M2(), (inp, name))
-
-    def test_custom_container_forward(self):
-        class Inner(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        class CustomSequential(nn.Sequential):
-            def __init__(self):
-                super(CustomSequential, self).__init__(
-                    nn.ReLU(), Inner())
-
-            def forward(self, x):
-                x = x + 3
-                for mod in self:
-                    x = mod(x)
-                return x - 5
-
-        self.checkModule(CustomSequential(), (torch.tensor(.5),))
-
-        class CustomModuleList(nn.ModuleList):
-            def __init__(self):
-                super(CustomModuleList, self).__init__(
-                    [nn.ReLU(), Inner()])
-
-            def forward(self, x):
-                x = x + 3
-                for mod in self:
-                    x = mod(x)
-                return x - 5
-
-        self.checkModule(CustomModuleList(), (torch.tensor(.5),))
-
-        class CustomModuleDict(nn.ModuleDict):
-            def __init__(self):
-                super(CustomModuleDict, self).__init__(
-                    OrderedDict([
-                        ('one', Inner()),
-                        ('two', nn.ReLU()),
-                        ('three', Inner()),
-                    ]))
-
-            def forward(self, x):
-                x = x + 3
-                names = torch.jit.annotate(List[str], [])
-                for name, mod in self.items():
-                    x = mod(x)
-                    names.append(name)
-                return names, x - 5
-
-        self.checkModule(CustomModuleDict(), (torch.tensor(.5),))
-
     def test_override_magic(self):
         class OverrideMagic(nn.Module):
             def __init__(self):
@@ -8358,63 +8284,6 @@ a")
             self.assertEqual(o, v)
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print(list(m))
-
-    def test_script_modulelist_index(self):
-        class Sub(torch.nn.Module):
-            def __init__(self, i):
-                super(Sub, self).__init__()
-                self.i = i
-
-            def forward(self, thing):
-                return thing - self.i
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
-
-            def forward(self, v):
-                v = self.mods[4].forward(v)
-                v = self.mods[-1].forward(v)
-                v = self.mods[-9].forward(v)
-                return v
-
-        x = torch.tensor(1)
-        self.checkModule(M(), (x,))
-
-        class MForward(torch.nn.Module):
-            def __init__(self):
-                super(MForward, self).__init__()
-                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
-
-            def forward(self, v):
-                v = self.mods[4](v)
-                v = self.mods[-1](v)
-                v = self.mods[-9](v)
-                return v
-
-        self.checkModule(MForward(), (torch.tensor(1),))
-
-        class M2(M):
-            def __init__(self):
-                super(M2, self).__init__()
-
-            def forward(self, v):
-                return self.mods[-11].forward(v)
-
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
-            torch.jit.script(M2())
-
-
-        class M2(M):
-            def __init__(self):
-                super(M2, self).__init__()
-
-            def forward(self, v):
-                return self.mods[-11].forward(v)
-
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
-            torch.jit.script(M2())
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -8677,22 +8546,6 @@ a")
                 return v
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
-
-    def test_script_module_list_sequential(self):
-        class M(torch.jit.ScriptModule):
-            def __init__(self, mod_list):
-                super(M, self).__init__()
-                self.mods = mod_list
-
-            @torch.jit.script_method
-            def forward(self, v):
-                for m in self.mods:
-                    v = m(v)
-                return v
-
-        with torch.jit.optimized_execution(False):
-            m = M(nn.Sequential(nn.ReLU()))
-            self.assertExportImportModule(m, (torch.randn(2, 2),))
 
     def test_attr_module_constants(self):
         class M2(torch.jit.ScriptModule):
@@ -10382,6 +10235,15 @@ a")
         res = m(data)
         FileCheck().check_not("aten::dropout").run(str(m.graph))
         torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
+
+    def test_unfold_zero_dim(self):
+        def fn(x):
+            return x.unfold(0, 1, 1)
+
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.tensor(0.39),), False)
+        out_dims = fn(torch.tensor(0.3923)).ndim
+        self.assertEqual(graph.findNode("aten::unfold").output().type().dim(), out_dims)
 
     def test_mm_batching(self):
 

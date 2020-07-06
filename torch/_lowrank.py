@@ -267,8 +267,5 @@ def pca_lowrank(A, q=None, center=True, niter=2):
         M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
         return _svd_lowrank(A, q, niter=niter, M=M)
     else:
-        c = A.sum(dim=(-2,)) / m
-        C = c.reshape(A.shape[:-2] + (1, n))
-        ones_m1 = torch.ones(A.shape[:-1] + (1, ), dtype=dtype, device=A.device)
-        M = ones_m1.matmul(C)
-        return _svd_lowrank(A - M, q, niter=niter, M=None)
+        C = A.mean(dim=(-2,), keepdim=True)
+        return _svd_lowrank(A - C, q, niter=niter, M=None)

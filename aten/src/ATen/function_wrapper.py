@@ -93,8 +93,17 @@ SCHEMA_REGISTRATION = CodeTemplate("""\
 m.def("${unqual_schema_string}");
 """)
 
+# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
+# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
+# ops that are `use_c10_dispatcher: full` need different c++ code than ops
+# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
+# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
+# can be deleted once all ops are `use_c10_dispatcher: full`.
+# If you update one of the templates, you likely also have to update the other.
+
 # NB: Specifiction of the namespace is handled by the enclosing
 # TORCH_LIBRARY macro invocation
+# See NOTE[UnboxedOnly]
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::CppFunction::makeUnboxedOnly(&TypeDefault::${type_wrapper_name}));
@@ -1124,6 +1133,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, actuals=option['method_actuals'])
 
+            # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
                 tensor_method_actuals = option['schema_order_method_actuals']
                 tensor_method_cpp_signature = option['schema_order_cpp_signature']
@@ -1176,6 +1186,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, actuals=option['actuals'])
 
+            # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
                 function_actuals = option['schema_order_actuals']
                 function_cpp_signature = option['schema_order_cpp_signature']
@@ -1240,6 +1251,7 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
+                # See NOTE[UnboxedOnly]
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
@@ -1559,6 +1571,7 @@ def create_derived(backend_type_env, declarations):
                 type_object_definitions.append(def_backend.substitute(env))
 
                 if native_dispatch:
+                    # See NOTE[UnboxedOnly]
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),

@@ -116,8 +116,15 @@ class TestNamedTensor(TestCase):
         x = factory(1, 2, 3, names=('N', None, 'D'), device=device)
         self.assertEqual(x.names, ('N', None, 'D'))
 
+        x = factory(1, 2, 3, names=('_1', 'batch9', 'BATCH_5'), device=device)
+        self.assertEqual(x.names, ('_1', 'batch9', 'BATCH_5'))
+
         with self.assertRaisesRegex(RuntimeError,
-                                    'must contain alphabetical characters and/or underscore'):
+                                    'a valid identifier contains only'):
+            x = factory(2, names=('1',), device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'a valid identifier contains only'):
             x = factory(2, names=('?',), device=device)
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
