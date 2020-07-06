@@ -7777,7 +7777,7 @@ vander(x, N=None, increasing=False) -> Tensor
 Generates a Vandermonde matrix.
 
 The columns of the output matrix are elementwise powers of the input vector :math:`x^{{(N-1)}}, x^{{(N-2)}}, ..., x^0`.
-If increasing is true, the order of the columns is reversed :math:`x^0, x^1, ..., x^{{(N-1)}}`. Such a
+If increasing is True, the order of the columns is reversed :math:`x^0, x^1, ..., x^{{(N-1)}}`. Such a
 matrix with a geometric progression in each row is named for Alexandre-Theophile Vandermonde.
 
 Arguments:
