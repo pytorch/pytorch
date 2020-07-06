@@ -462,19 +462,17 @@ class TestTorchFunctionOverride(TestCase):
             quux(t1)
 
 def generate_tensor_like_override_tests(cls):
-    from tools.autograd.gen_autograd import load_aten_declarations
+    from torch.csrc.autograd.generated._annotated_fn_args import annotated_args
 
-    def test_generator(func, override, decls, aten_names):
+    def test_generator(func, override):
         func_args = []
-        if inspect.isbuiltin(func) and func.__name__ in aten_names:
-            i = names.index(func.__name__)
-            decl = decls[i]
-            for arg in decl['arguments']:
+        if inspect.isbuiltin(func) and func in annotated_args:
+            for arg in annotated_args[func]["arguments"]:
                 # Guess valid input to aten function based on type of argument
                 t = arg['simple_type']
                 if t.endswith('?'):
                     t = t[:-1]
-                if 'default' in arg or arg.get('kwarg_only', False):
+                if 'default' in arg or arg.get('kwarg_only', False) or arg.get('output', False):
                     continue
                 if t == 'Tensor':
                     func_args.append(TensorLike())
@@ -490,11 +488,11 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(3.5)
                 elif t == 'bool':
                     func_args.append(False)
-                elif t.startswith('int') or t == 'Dimname':
+                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
                     func_args.append(0)
                 elif t.startswith('float') or t == 'double':
                     func_args.append(1.0)
-                elif t in ('Generator', 'MemoryFormat', 'TensorOptions'):
+                elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
                     func_args.append(None)
                 elif t == 'ScalarType':
                     func_args.append(torch.float32)
@@ -521,10 +519,8 @@ def generate_tensor_like_override_tests(cls):
 
         return test
 
-    decls = load_aten_declarations("build/aten/src/ATen/Declarations.yaml")
-    names = [d['name'] for d in decls]
     for func, override in get_testing_overrides().items():
-        test_method = test_generator(func, override, decls, names)
+        test_method = test_generator(func, override)
         module = func.__module__
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
