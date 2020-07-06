@@ -3068,3 +3068,45 @@ Tensor binary_cross_entropy_with_logits_forward(const at::Tensor& self_fw_grad, 
 
   return out_fw_grad;
 }
+
+Tensor index_put_forward(const at::Tensor& self_fw_grad_, const at::Tensor& values_fw_grad_, const at::Tensor& self,
+        TensorList indices, const at::Tensor& values, bool accumulate) {
+  Tensor self_fw_grad = self_fw_grad_;
+  Tensor values_fw_grad = values_fw_grad_;
+
+  if (!self_fw_grad.defined()) {
+    self_fw_grad = at::zeros_like(self);
+  }
+
+  if (!values_fw_grad.defined()) {
+    values_fw_grad = at::zeros_like(values);
+  }
+
+  return at::index_put_(self_fw_grad, indices, values_fw_grad, accumulate);
+}
+
+Tensor min_max_other_forward(const at::Tensor& self_fw_grad, const at::Tensor& other_fw_grad, const at::Tensor& self,
+        const at::Tensor& other, bool is_min) {
+  // Note: at least one of the two forward grad is defined when we get here
+  Tensor out_fw_grad;
+
+  Tensor use_self_grad;
+  // Follow the same boundary condition as the backward formula
+  if (is_min) {
+    use_self_grad = (self < other).type_as(self);
+  } else {
+    use_self_grad = (self > other).type_as(self);
+  }
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = self_fw_grad * use_self_grad;
+  } else {
+    out_fw_grad = at::zeros_like(self);
+  }
+
+  if (other_fw_grad.defined()) {
+    out_fw_grad = out_fw_grad + (1 - use_self_grad) * other_fw_grad;
+  }
+
+  return out_fw_grad;
+}
