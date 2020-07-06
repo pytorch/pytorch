@@ -90,8 +90,6 @@ white_list = [
     ('aten::quantized_instance_norm', datetime.date(2020, 6, 30)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
-    ('aten::eq', datetime.date(2020, 6, 30)),
-    ('aten::nq', datetime.date(2020, 6, 30)),
     ('aten::lt', datetime.date(2020, 6, 30)),
     ('aten::gt', datetime.date(2020, 6, 30)),
     ('aten::le', datetime.date(2020, 6, 30)),
@@ -115,6 +113,9 @@ white_list = [
     ('aten::__or__', datetime.date(2020, 6, 30)),
     ('aten::__xor__', datetime.date(2020, 6, 30)),
     ('aten::split', datetime.date(2020, 6, 30)),
+    ('aten::eq', datetime.date(2020, 7, 30)),
+    ('aten::nq', datetime.date(2020, 7, 30)),
+    ('aten::add', datetime.date(2020, 7, 30)),
 ]
 
 
