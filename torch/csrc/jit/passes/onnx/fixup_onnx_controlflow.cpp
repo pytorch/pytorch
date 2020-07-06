@@ -10,10 +10,13 @@ using namespace ::c10::onnx;
 }
 
 namespace {
+const int ONNX_OPSET_13 = 13;
+const int ONNX_TYPE_BOOL = 9;
+
 Node* CreateCastToBoolNode(Value* val, Graph* graph) {
   Node* cast_node = graph->create(onnx::Cast);
   cast_node->addInput(val);
-  cast_node->i_(attr::to, /*Bool*/ 9);
+  cast_node->i_(attr::to, ONNX_TYPE_BOOL);
   return cast_node;
 }
 
@@ -131,7 +134,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
     return node->outputs().vec();
   }
 
-  if (opset_version >= 13) {
+  if (opset_version >= ONNX_OPSET_13) {
     // Sequence type as loop-carried dependencies should be supported by ONNX
     // ospet 13.
     return node->outputs().vec();
