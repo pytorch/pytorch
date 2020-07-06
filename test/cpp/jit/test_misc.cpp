@@ -2072,12 +2072,12 @@ void testTLSFutureCallbacks() {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    auto s2 = s1->then(wrapPropagateTLSState<c10::IValue>(
-        [&profilerEnabledCb]() {
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
           profilerEnabledCb();
           return at::IValue(1);
-        }
-       ), IntType::get());
+        }),
+        IntType::get());
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     t.join();
     s2->wait();
