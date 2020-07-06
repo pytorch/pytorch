@@ -474,7 +474,7 @@ class BCELoss(_WeightedLoss):
     However, an infinite term in the loss equation is not desirable for several reasons.
 
     For one, if either :math:`y_n = 0` or :math:`(1 - y_n) = 0`, then we would be
-    multipying 0 with infinity. Secondly, if we have an infinite loss value, then
+    multiplying 0 with infinity. Secondly, if we have an infinite loss value, then
     we would also have an infinite term in our gradient, since
     :math:`\lim_{x\to 0} \frac{d}{dx} \log (x) = \infty`.
     This would make BCELoss's backward method nonlinear with respect to :math:`x_n`,
@@ -1316,7 +1316,7 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
         >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
         >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
-        >>> 
+        >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)
