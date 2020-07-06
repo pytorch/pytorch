@@ -14,7 +14,6 @@ namespace {
 
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
-#if !defined(PYTORCH_DISABLE_TRACING)
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
     auto& graph = state.graph;
@@ -34,18 +33,15 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     }
     jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
-#endif
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.copy_(src, non_blocking);
   }
 
-#if !defined(PYTORCH_DISABLE_TRACING)
   if(torch::jit::tracer::isTracing()) {
     jit::tracer::setOutput(output, self);
   }
-#endif
   return self;
 }
 
@@ -53,13 +49,11 @@ Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-#if !defined(PYTORCH_DISABLE_TRACING)
   if (torch::jit::tracer::isTracing()) {
     jit::tracer::ArgumentStash::popIntArrayRef("size");
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-#endif
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
@@ -72,12 +66,10 @@ Tensor& resize_as_(
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
-#if !defined(PYTORCH_DISABLE_TRACING)
   if (torch::jit::tracer::isTracing()) {
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-#endif
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
@@ -87,7 +79,6 @@ Tensor& resize_as_(
 }
 
 Tensor detach(const Tensor & self) {
-#if !defined(PYTORCH_DISABLE_TRACING)
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -96,23 +87,19 @@ Tensor detach(const Tensor & self) {
     jit::tracer::addInputs(node, "self", self);
     graph->insertNode(node);
   }
-#endif
 
   auto result = [&]() {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return self.detach();
   }();
 
-#if !defined(PYTORCH_DISABLE_TRACING)
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-#endif
   return result;
 }
 
 Tensor & detach_(Tensor & self) {
-#if !defined(PYTORCH_DISABLE_TRACING)
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -122,18 +109,15 @@ Tensor & detach_(Tensor & self) {
     graph->insertNode(node);
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
-#endif
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     self.detach_();
   }
 
-#if !defined(PYTORCH_DISABLE_TRACING)
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, self);
   }
-#endif
   return self;
 }
 
