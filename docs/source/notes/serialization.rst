@@ -2,6 +2,57 @@
 Serialization semantics
 =======================
 
+Storage sharing is preserved in serialization
+---------------------------------------------
+
+.. _preserve-storage-sharing:
+
+PyTorch saves the underlying storages so that tensors sharing the same storage before :func:`torch.save`
+will still share storage after :func:`torch.load`.
+
+::
+
+    >>> tensor = torch.zeros(1000000)
+    >>> slice1 = tensor[:1000]
+    >>> slice2 = tensor[:10] # slice1 and slice2 share the same storage
+    >>> torch.save([slice1, slice2], 'share.pt')
+    >>> loaded_1, loaded_2 = torch.load('share.pt')
+    >>> loaded_1[0]
+    tensor(0.)
+    >>> loaded_2[0]
+    tensor(0.)
+    >>> loaded_2[0] = 1
+    >>> loaded_1[0] # loaded tensors still share storage
+    tensor(1.)
+
+Note that saving storage instead of tensor itself means the serialized file size might not match tensor size.
+In the example above the whole `tensor`'s storage (of size 1000000) is serialized instead of only slices.
+When tensor is expanded from a smaller storage, serialized file size might be smaller than tensor size as well.
+
+::
+
+    >>> a = torch.zeros(4).expand(4, 4)
+    >>> a.size()
+    torch.Size([4, 4])
+    >>> a.storage() # All columns of `a` share the same storage
+     0.0
+     0.0
+     0.0
+     0.0
+    [torch.FloatStorage of size 4]
+    >>> torch.save(a, 'a.pt')  # Only 4 float numbers are serialized
+    >>> loaded = torch.load('a.pt')
+    >>> loaded.storage()  # All colums of `loaded` share the same storage
+     0.0
+     0.0
+     0.0
+     0.0
+    [torch.FloatStorage of size 4]
+
+If saving storages causes issues like saved file contains a lot of unwanted data,
+you can break the storage sharing before saving using :meth:`~torch.Tensor.clone`. But it might
+produce different results compared to the original storage sharing version.
+
 Best practices
 --------------
 
