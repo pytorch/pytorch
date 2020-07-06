@@ -154,7 +154,7 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   return THPVariable_NewWithVar((PyTypeObject*)cls, self->cdata.alias());
   END_HANDLE_TH_ERRORS
@@ -169,7 +169,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
@@ -542,6 +542,26 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto self_real = at::real(self_);
+  self_real.copy_(real->cdata);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto self_imag = at::imag(self_);
+  self_imag.copy_(imag->cdata);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
 static struct PyGetSetDef THPVariable_properties[] = {
@@ -572,8 +592,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
-  {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
-  {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
+  {"real", (getter)THPVariable_get_real, (setter)THPVariable_set_real, nullptr, nullptr},
+  {"imag", (getter)THPVariable_get_imag, (setter)THPVariable_set_imag, nullptr, nullptr},
   {nullptr}
 };
 

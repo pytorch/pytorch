@@ -793,31 +793,42 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
+    @given(
+        dtype=st.sampled_from([torch.qint8, torch.float16]),
+        bidirectional=st.booleans(),
+    )
     @override_qengines
-    def test_lstm_api(self):
+    def test_lstm_api(self, dtype, bidirectional):
         r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
         """
         # Check that module matches the numerics of the op and ensure that module can be
         # instantiated for all engines and dtypes
+        seq_len = 4
+        batch = 2
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        weight_keys = []
+        bias_keys = []
+        num_directions = 2 if bidirectional else 1
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                weight_keys.append(key_name1)
+                weight_keys.append(key_name2)
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                bias_keys.append(key_name1)
+                bias_keys.append(key_name2)
 
-        for dtype in [torch.qint8, torch.float16]:
-            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
-                # fp16 dynamic quant is not supported for qnnpack
-                continue
-                # Test default instantiation
-            seq_len = 4
-            batch = 2
-            input_size = 3
-            hidden_size = 7
-            num_layers = 2
-            bias = True
-            bidirectional = False
-
+        if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
+            # fp16 dynamic quant is not supported for qnnpack
             x = torch.randn(seq_len, batch, input_size)
             h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
             c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
-
-
             cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
                                                       hidden_size=hidden_size,
                                                       num_layers=num_layers,
@@ -826,6 +837,15 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                                                       dropout=0.0,
                                                       bidirectional=bidirectional,
                                                       dtype=dtype)
+            ref_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                     hidden_size=hidden_size,
+                                                     num_layers=num_layers,
+                                                     bias=bias,
+                                                     batch_first=False,
+                                                     dropout=0.0,
+                                                     bidirectional=bidirectional,
+                                                     dtype=dtype)
+
             _all_params = ([m.param for m in cell_dq._all_weight_values])
             result = torch.quantized_lstm(x, (h, c),
                                           _all_params,
@@ -843,14 +863,19 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             self.assertEqual(result[0], y)
             self.assertEqual(result[1], h)
             self.assertEqual(result[2], c)
+            x = torch.randn(10, 20, 3)
+            self.check_eager_serialization(cell_dq, ref_dq, x)
+            self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
+    @given(
+        dtype=st.sampled_from([torch.qint8, torch.float16]),
+    )
     @override_qengines
-    def test_cell_api(self):
+    def test_cell_api(self, dtype):
         r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
         """
         # Check that module matches the numerics of the op and ensure that module can be
         # instantiated for all engines and dtypes
-
         batch = 7
         input_size = 3
         hidden_size = 7
@@ -874,12 +899,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
 
         for rnn_type in cell_dict.keys():
-            for dtype in [torch.qint8, torch.float16]:
-                if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
-                    # fp16 dynamic quant is not supported for qnnpack
-                    continue
-                    # Test default instantiation
-
+            if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
+                # fp16 dynamic quant is not supported for qnnpack
                 kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
                 if rnn_type == 'RNNReLU':
                     kwargs['nonlinearity'] = "relu"
@@ -893,3 +914,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 result_module = cell_dq(x, state[rnn_type])
                 self.assertEqual(result[0], result_module[0], msg="RNNCell module API failed")
                 self.assertEqual(result[1], result_module[1], msg="RNNCell module API failed")
+                weight_keys = ['weight_ih', 'weight_hh']
+                bias_keys = ['bias_ih', 'bias_hh']
+                self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), x)
+                self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)

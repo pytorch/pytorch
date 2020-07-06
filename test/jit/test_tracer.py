@@ -2,6 +2,7 @@ import unittest
 import io
 import os
 import sys
+import copy
 
 import torch
 import torch.nn as nn
@@ -389,7 +390,7 @@ class TestTracer(JitTestCase):
     # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
     def test_trace_full_dynamic_shape(self):
         def full_with_shape_like(x):
-            return torch.full(x.shape, 2)
+            return torch.full(x.shape, 2.)
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
@@ -569,30 +570,70 @@ class TestTracer(JitTestCase):
         with self.assertRaises(RuntimeError):
             self.checkTrace(test, {})
 
-    def test_input_dict_flattens(self):
-        class Test(torch.nn.Module):
-            def forward(self, d):
-                return d['x'] + d['y']
+    def test_input_dict_remembers_keys(self):
+        """Check that the trace remembers which keys were in a dict input"""
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
 
-        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
-        module = torch.jit.trace(Test(), inputs)
+            def forward(self, dict_input):
+                return dict_input['x']
 
-        FileCheck().check('aten::values').check('prim::ListUnpack').run(str(module.graph))
+        input_1 = {'x': torch.tensor(1)}
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_1, ))
+        self.assertEqual(m_traced(input_1), torch.tensor(1))
 
-    def test_input_dict_flattens_recursive(self):
-        class Test(torch.nn.Module):
-            def forward(self, d):
-                # Use both to avoid getting optimized away
-                a = d['x'][0]
-                b, c = d['y']
-                return a + b
+        # should work to change the values and not the keys
+        input_same_key_different_value = {'x': torch.tensor(2)}
+        self.assertEqual(m_traced(input_same_key_different_value), torch.tensor(2))
 
-        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2)), 'y': (torch.ones(1, 1), torch.ones(2, 1))}
-        module = torch.jit.trace(Test(), inputs)
-        FileCheck().check('aten::values') \
-                   .check('prim::ListUnpack') \
-                   .check_count('prim::TupleUnpack', 2) \
-                   .run(str(module.graph))
+        # error to use something that doesn't have `x`
+        input_different_key = {'y': torch.tensor(3)}
+        with self.assertRaises(RuntimeError):
+            m_traced(input_different_key)
+
+        # it's okay to have additional elements in the dictionary, so long as 'x' is there
+        input_additional_key = {'x': torch.tensor(4), 'y': torch.tensor(3)}
+        self.assertEqual(m_traced(input_additional_key), torch.tensor(4))
+
+    def test_input_dict_insertion_order(self):
+        """Check that dictionary access doesn't care about insertion order"""
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, dict_input):
+                return dict_input['x'], dict_input['y']
+        input_x_then_y = {}
+        input_x_then_y['x'] = torch.tensor(1)
+        input_x_then_y['y'] = torch.tensor(2)
+
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_x_then_y, ))
+
+        self.assertEqual(m_traced(input_x_then_y), (torch.tensor(1), torch.tensor(2)))
+
+        input_y_then_x = {}
+        input_y_then_x['y'] = torch.tensor(4)
+        input_y_then_x['x'] = torch.tensor(3)
+
+        self.assertEqual(m_traced(input_y_then_x), (torch.tensor(3), torch.tensor(4)))
+
+    def test_input_dict_recursive(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, dict_input):
+                return dict_input['x'][1]
+
+        input_1 = {'x': {1: torch.tensor(1)}}
+        m = TestModule()
+        m_traced = torch.jit.trace(m, (input_1, ))
+
+        input_2 = {'x': {1: torch.tensor(2)}}
+        self.assertEqual(m_traced(input_2), torch.tensor(2))
 
     def test_input_dict_checkTrace_mut(self):
         def test(d):
@@ -1143,7 +1184,8 @@ class TestTracer(JitTestCase):
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
         # should work
-        loaded.copy()
+        copy.copy(loaded)
+        copy.deepcopy(loaded)
 
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):
@@ -1740,17 +1782,17 @@ class TestMixTracingScripting(JitTestCase):
 
     def test_trace_mixed_by_script_with_dict_output(self):
         @torch.jit.script
-        def return_dict(input: torch.Tensor) -> Dict[torch.Tensor, torch.Tensor]:
-            return {input : input + 1}
+        def return_dict(input: torch.Tensor) -> Dict[str, torch.Tensor]:
+            return {"foo" : input + 1}
 
         class TraceModule(torch.nn.Module):
             def forward(self, input):
                 dict = return_dict(input)
-                return dict[input] + list(dict.keys())[0]
+                return dict["foo"] + dict["foo"]
 
-        x = torch.rand(10, 3)
+        x = torch.ones(1)
         tm = torch.jit.trace(TraceModule(), x)
-        self.assertEqual(tm(x), x + 1 + x)
+        self.assertEqual(tm(x), x + 1 + x + 1)
 
     def test_trace_of_script(self):
         @torch.jit.script
@@ -2043,3 +2085,95 @@ class TestMixTracingScripting(JitTestCase):
         with torch.jit.optimized_execution(False):
             m2 = M2()
             m2(torch.zeros(4, 3))
+
+    def test_trace_dict_mix_script(self):
+        class testB(torch.nn.Module):
+            def __init__(self):
+                super(testB, self).__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
+                output = []
+                for i, j in feature_map.items():
+                    output.append(self.linear(j[0]))
+
+                return torch.stack(output)
+
+        class testA(torch.nn.Module):
+            def __init__(self):
+                super(testA, self).__init__()
+                self.b = torch.jit.script(testB())
+
+            def forward(self, input_map: Dict[str, List[Tensor]]) -> Tensor:
+                feature_map = {}
+                for i, j in input_map.items():
+                    feature_map[i] = [j[0]]
+
+                return self.b(feature_map)
+
+        input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        model = testA()
+        traced_model = torch.jit.trace(model, input_map)
+        new_input_map = {"1" : [torch.rand(2, 2), torch.randn(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        self.assertEqual(model(new_input_map), traced_model(new_input_map))
+
+    def test_trace_script_returning_complex_dict(self):
+        """Tracing over a script function returning a dictionary should work.
+        The dictionary can should be able to contain other containers (like a tuple) recursively.
+        """
+        class ReturnsDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self, id_score_list: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+            ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+                # do some random operations and then return a dict of the same structure
+                v = id_score_list["1000"]
+                idx_keys = v[1] - 1500000
+                weights = v[2]
+                result = {
+                    "1000": (v[0], idx_keys, weights)
+                }
+                return result
+
+        class ChecksDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+                v = input["1000"]
+                return v[1] + 1
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, checks_dict, returns_dict):
+                super().__init__()
+                self.checks_dict = checks_dict
+                self.returns_dict = returns_dict
+
+            def forward(self, input: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+                foo = self.returns_dict(input)
+                return self.checks_dict(foo)
+
+        input1 = {
+            "1000": (
+                torch.tensor([0]),
+                torch.tensor([], dtype=torch.int64),
+                torch.tensor([])
+            )
+        }
+
+        input2 = {
+            "1000": (
+                torch.tensor([0]),
+                torch.tensor([1500000, 1500004], dtype=torch.int64),
+                torch.tensor([2.0, 3.0])
+            )
+        }
+
+        checks_dict = torch.jit.script(ChecksDict())
+        returns_dict = torch.jit.script(ReturnsDict())
+        eager_module = TestModule(checks_dict, returns_dict)
+        traced_module = torch.jit.trace(eager_module, input1)
+        self.assertEqual(traced_module(input1), eager_module(input1))
+        self.assertEqual(traced_module(input2), eager_module(input2))

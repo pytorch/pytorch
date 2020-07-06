@@ -5,12 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
-from torch._C import parse_ir
 
 # torch.quantization
 from torch.quantization import (
     QConfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_observer,
     per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
@@ -79,12 +79,15 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
     """
     def test_foldbn_trivial(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test trivial case
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1)
+                self.bn = bn_module[dim](num_features=20)
                 self.bn.eps = 0.0023
 
             def forward(self, x):
@@ -92,24 +95,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 6, 6), 3 : torch.rand(1, 1, 6, 6, 6)}
         # Check that the transformation doesn't change numerics
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 6, 6)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             # Check that in the original script module's forward we have two
             # CallMethod nodes. One of them should be for conv.forward and the other
             # for bn.forward.
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward(scripted_or_traced._c).graph))
 
-            # Run FoldConvBatchnorm2d pass.
+            # Run FoldConvBatchnorm pass.
             scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
 
             # Check that after the pass one of the CallMethods is gone (supposedly,
@@ -118,16 +117,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
             # Check that the transformation doesn't change numerics
-            x = torch.rand(1, 1, 6, 6)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_trivial_nobias(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test trivial case
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1, bias=False)
+                self.bn = bn_module[dim](num_features=20)
                 # to make sure new bias is not zero
                 self.bn.eps = 0.0027
                 self.bn.bias = torch.nn.Parameter(torch.rand([20]))
@@ -137,23 +138,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 6, 6)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 6, 6), 3 : torch.rand(1, 1, 6, 6, 6)}
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             # Check that in the original script module's forward we have two
             # CallMethod nodes. One of them should be for conv.forward and the other
             # for bn.forward.
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
-            # Run FoldConvBatchnorm2d pass.
+            # Run FoldConvBatchnorm pass.
             scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
 
             # Check that after the pass one of the CallMethods is gone (supposedly,
@@ -162,16 +159,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
             # Check that the transformation doesn't change numerics
-            x = torch.rand(1, 1, 6, 6)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_in_submodule(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(SubModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1)
+                self.bn = bn_module[dim](num_features=20)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -179,24 +178,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return x
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.sub = SubModule()
+                self.sub = SubModule(dim)
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 10, 10), 3 : torch.rand(1, 1, 10, 10, 10)}
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
@@ -205,72 +200,23 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
-            x = torch.rand(1, 1, 10, 10)
-            self.assertEqual(eager(x), scripted_or_traced(x))
-
-    def test_foldbn_in_customConv2D(self):
-        # Make sure a custom Conv2D class is not folded
-        # as we do not know it does.
-        class CustomConv2D(torch.nn.Module):
-            def __init__(self, a, b, c, d):
-                super(CustomConv2D, self).__init__()
-
-            def forward(self, x):
-                return F.relu(x)
-
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-                self.conv = CustomConv2D(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-                self.sub = SubModule()
-
-            def forward(self, x):
-                x = self.sub(x)
-                return x
-
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 20, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
-            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
-
-            scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
-
-            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
-
-            x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_shared_classtype(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         class TestModule(torch.nn.Module):
-            def __init__(self, bias=False):
+            def __init__(self, dim, bias=False):
                 super(TestModule, self).__init__()
-                self.conv1 = torch.nn.Conv2d(5, 5, 3, bias=bias)
-                self.bn1 = torch.nn.BatchNorm2d(num_features=5)
+                self.conv1 = conv_module[dim](5, 5, 3, bias=bias)
+                self.bn1 = bn_module[dim](num_features=5)
                 self.bn1.running_mean.fill_(-0.2)
                 self.bn1.bias = torch.nn.Parameter(torch.rand([5]))
                 # to make sure new bias is not zero
                 self.bn1.eps = 0.0023
-                self.conv2 = torch.nn.Conv2d(5, 5, 3, bias=bias)
-                self.bn2 = torch.nn.BatchNorm2d(num_features=5)
+                self.conv2 = conv_module[dim](5, 5, 3, bias=bias)
+                self.bn2 = bn_module[dim](num_features=5)
                 self.bn2.eps = 0.0029
                 self.relu = torch.nn.ReLU()
 
@@ -283,33 +229,62 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.relu(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            for bias in [True, False]:
-                eager = TestModule(bias).eval()
-                if tracing_mode:
-                    x = torch.rand(1, 5, 6, 6)
-                    scripted_or_traced = torch.jit.trace(eager, x).copy()
-                else:
-                    scripted_or_traced = torch.jit.script(eager).copy()
-                torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
-                folded = fuse_conv_bn_jit(scripted_or_traced)
-                x = torch.rand(1, 5, 6, 6)
-                self.assertEqual(eager(x), scripted_or_traced(x))
+        options = itertools.product([True, False], [2, 2], [True, False])
+        data = {2 : torch.rand(1, 5, 6, 6), 3 : torch.rand(1, 5, 6, 6, 6)}
+        for tracing, dim, bias in options:
+            eager = TestModule(dim, bias).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x)
+            folded = fuse_conv_bn_jit(scripted_or_traced)
+            self.assertEqual(eager(x), scripted_or_traced(x))
+
+    def test_foldbn_no_fusion(self):
+        ''' Test that we don't fuse the cases when module type does not match
+        '''
+        class CustomConv(torch.nn.Module):
+            def __init__(self):
+                super(CustomConv, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class CustomBn(torch.nn.Module):
+            def __init__(self):
+                super(CustomBn, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = CustomConv()
+                self.bn = CustomBn()
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        m = torch.jit.script(M())
+        m = fuse_conv_bn_jit(m)
+        FileCheck().check_count("prim::CallMethod", 2, exactly=True) \
+                   .run(m.graph)
 
     def test_foldbn_complex_cases(self):
-        # This test case attempt to try combinations of conv2d with bias/nobias
+        # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
         # this only works when default dtype is double
         torch.set_default_dtype(torch.double)
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
 
         class SubModule(torch.nn.Module):
-            def __init__(self, num_blocks, enable_bias, enable_affine):
+            def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super(SubModule, self).__init__()
                 layers = []
                 for i in range(num_blocks):
-                    layers.append(torch.nn.Conv2d(20, 20, 5, 1, bias=enable_bias))
-                    bn_obj = torch.nn.BatchNorm2d(num_features=20, affine=enable_affine)
+                    layers.append(conv_module[dim](20, 20, 5, 1, bias=enable_bias))
+                    bn_obj = bn_module[dim](num_features=20, affine=enable_affine)
                     if enable_affine:
                         bn_obj.weight = torch.nn.Parameter(torch.rand_like(bn_obj.weight))
                         bn_obj.bias = torch.nn.Parameter(torch.rand_like(bn_obj.bias))
@@ -322,25 +297,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return self.layers(x)
 
         class TestModule(torch.nn.Module):
-            def __init__(self, num_blocks, enable_bias, enable_affine):
+            def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super(TestModule, self).__init__()
-                self.sub = SubModule(num_blocks, enable_bias, enable_affine)
+                self.sub = SubModule(dim, num_blocks, enable_bias, enable_affine)
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        bias_affine_options = itertools.product([True, False], [True, False], [True, False], [1, 2])
-        for (tracing_mode, enable_bias, enable_bn_affine, num_layers) in bias_affine_options:
-            eager = TestModule(num_layers, enable_bias, enable_bn_affine)
-            eager.eval()
-
-            if tracing_mode:
-                x = torch.rand(1, 20, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
+        options = itertools.product([True, False], [2, 3], [True, False], [True, False], [1, 2])
+        data = {2 : torch.rand(1, 20, 10, 10), 3 : torch.rand(1, 20, 10, 10, 10)}
+        for tracing, dim, enable_bias, enable_bn_affine, num_layers in options:
+            eager = TestModule(dim, num_layers, enable_bias, enable_bn_affine).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
 
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers * 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
@@ -350,39 +320,64 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
 
-            x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
+
         torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
-        input_strs = ["""
-graph(%input, %weight, %bias, %4):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::addmm
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %res = aten::addmm(%bias, %input, %weight_t, %4, %4)
-    return (%res)""", """
-graph(%input, %weight, %bias, %4):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::matmul
-    # CHECK-NOT: aten::add_
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %output = aten::matmul(%input, %weight_t)
-    %res = aten::add_(%output, %bias, %4)
-    return (%res)""", """
-graph(%input, %weight):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::matmul
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %output = aten::matmul(%input, %weight_t)
-    return (%output)"""]
-        for input_str in input_strs:
-            graph = parse_ir(input_str)
-            torch._C._jit_pass_fuse_linear(graph)
-            FileCheck().run(input_str, graph)
+        class FunctionalLinear(torch.nn.Module):
+            def __init__(self, weight, bias):
+                super(FunctionalLinear, self).__init__()
+                self.weight = weight
+                self.bias = bias
+
+            def forward(self, x):
+                return F.linear(x, self.weight, self.bias)
+
+        x1 = torch.rand(3)
+        w1 = torch.rand(5, 3)
+        b1 = torch.rand(5)
+
+        x2 = torch.rand(5, 5)
+        w2 = torch.rand(5, 5)
+        b2 = torch.rand(5)
+
+        x3 = torch.rand(5, 5, 5)
+        w3 = torch.rand(5, 5)
+        b3 = torch.rand(5)
+        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2), (x3, w3, b3)]):
+            bias = b if has_bias else None
+            model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
+            torch._C._jit_pass_fuse_linear(model.graph)
+            FileCheck().check("aten::linear") \
+                       .run(model.graph)
+            check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
+            for cn in check_not:
+                FileCheck().check_not(cn) \
+                           .run(model.graph)
+            # make sure it runs
+            model(x)
+
+        # check matmuls are not fused
+        class Matmul(torch.nn.Module):
+            def __init__(self, weight):
+                super(Matmul, self).__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return torch.matmul(x, self.weight)
+
+        x = torch.rand(5, 6, 5)
+        w = torch.rand(5, 5, 100)
+        model = torch.jit.trace(Matmul(w), [x])
+        torch._C._jit_pass_fuse_linear(model.graph)
+        # check 3d matmul is not fused
+        FileCheck().check("aten::matmul") \
+                   .run(model.graph)
+        FileCheck().check_not("aten::linear") \
+                   .run(model.graph)
+        # make sure it runs
+        model(x)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
@@ -1101,6 +1096,19 @@ graph(%input, %weight):
                    .check("quantized::linear") \
                    .run(model.graph)
 
+    def test_inplace_option(self):
+        for tracing in [True, False]:
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3).float(), tracing, self.img_data[0][0])
+            qconfig_dict = {'': default_qconfig}
+            quantize_jit(
+                model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
+            FileCheck().check("quantized::conv2d") \
+                       .run(model.graph)
+
+            FileCheck().check_not("aten::conv2d") \
+                       .run(model.graph)
+
+
     def test_finalize_debug(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1125,21 +1133,6 @@ graph(%input, %weight):
                    .check_next("prim::dtype") \
                    .check_next("aten::quantize_per_tensor") \
                    .check("aten::dequantize") \
-                   .run(model.graph)
-
-    def test_finalize_no_extra_dequantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                x = self.conv(x)
-                return x.size(0) * x
-
-        model = torch.jit.script(M()).eval()
-        model = quantize_jit(model, {'': default_qconfig}, test_only_eval_fn, [self.img_data])
-        FileCheck().check_not("aten::dequantize(") \
                    .run(model.graph)
 
     def test_module_list(self):
@@ -1268,22 +1261,23 @@ class TestQuantizeJitOps(QuantizationTestCase):
         data = [(torch.rand((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
 
-        for model in [ModuleLinear(has_relu=False),
-                      FuncLinear(has_relu=False)]:
+        for model, tracing in itertools.product([ModuleLinear(has_relu=False),
+                                                 FuncLinear(has_relu=False)],
+                                                [True, False]):
             model = self.checkGraphModeOp(model, data, "quantized::linear",
-                                          tracing=False)
+                                          tracing)
             FileCheck() \
                 .check_count("aten::quantize_per_tensor", 1, exactly=True) \
                 .run(model.graph)
             FileCheck().check_not("quantized::linear_prepack") \
                        .run(model.graph)
 
-        for f_relu in [True, False]:
+        for f_relu, tracing in itertools.product([True, False], [True, False]):
             for model in [ModuleLinear(has_relu=True, f_relu=f_relu),
                           FuncLinear(has_relu=True, f_relu=f_relu)]:
                 model = self.checkGraphModeOp(model, data,
                                               "quantized::linear_relu",
-                                              tracing=False)
+                                              tracing)
                 checker = FileCheck().check_not("aten::linear") \
                                      .check_not("aten::relu") \
                                      .check_not("quantized::linear(") \
@@ -1603,7 +1597,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceAddScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add_scalar" if quantized else "aten::add"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
@@ -1779,7 +1774,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
             for tracing in [True, False]:
                 # quantized::add_scalar_relu or quantized::add_scalar_relu_out
                 # TODO: split this after refactor of checkGraphModeOp
-                # TODO: fix debug=True numerics
                 m = self.checkGraphModeOp(m, data, "quantized::add_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
@@ -1816,7 +1810,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                  torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for tracing in [True, False]:
-            m = self.checkGraphModeOp(QuantizedCat(), data, "quantized::cat", tracing)
+            m = self.checkGraphModeOp(QuantizedCat(), data, "quantized::cat", tracing, debug=True)
             FileCheck().check_not("aten::cat") \
                        .run(m.graph)
 
@@ -1985,7 +1979,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceMulScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::mul_scalar" if quantized else "aten::mul"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
@@ -2160,7 +2155,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
                   InplaceMulScalarInplaceFunctionalRelu()]:
             for tracing in [True, False]:
                 # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
-                # TODO: fix debug=True numerics
                 m = self.checkGraphModeOp(m, data, "quantized::mul_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
@@ -2288,11 +2282,32 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
                 self.dropout = torch.nn.Dropout()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
-                x = self.conv(x)
+                x = self.conv1(x)
+                # add_scalar
+                x = x + 3
+                # mul_scalar
+                x = x * 3
+                # add_scalar_out
+                x += 3
+                # mul_scalar_out
+                x *= 3
+                # add_scalar_relu
+                x = x + 3
+                x = F.relu(x)
+                # add_scalar_relu_out
+                x += 3
+                x = F.relu(x)
+                # mul_scalar_relu
+                x = x * 3
+                x = F.relu(x)
+                # mul_scalar_relu_out
+                x *= 3
+                x = F.relu(x)
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
@@ -2333,7 +2348,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 y = []
                 y.append(x)
                 x, _ = y
-                x = self.conv(x)
+                x = self.conv2(x)
                 return x
 
         data = torch.rand(1, 3, 10, 10)
@@ -2354,8 +2369,17 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # patterns
         # one quantize_per_tensor for input
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_count("quantized::conv2d", 2, exactly=True) \
-                   .check("aten::dequantize") \
+                   .run(m.graph)
+
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
+                   .run(m.graph)
+
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
+                   .run(m.graph)
+
+        FileCheck().check("quantized::add_scalar") \
+                   .check("quantized::mul_scalar") \
+                   .check("aten::append(") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
@@ -2473,17 +2497,24 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        m = torch.jit.script(M())
-        m = prepare_dynamic_jit(m, {'': default_dynamic_qconfig})
-        # for input of FC for dynamic quant
-        assert len(attrs_with_prefix(m, '_observer_')) == 1
-        # for weight
-        assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
-        FileCheck().check('DynamicQuantObserver = prim::GetAttr[name="_observer_') \
-                   .check('prim::GetAttr[name="fc"]') \
-                   .check('prim::CallMethod') \
-                   .check_not('Observer = prim::GetAttr[name="_observer_') \
-                   .run(m.graph)
+        model = torch.jit.script(M())
+        for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            m = prepare_dynamic_jit(model, {'': qconfig})
+
+            # for input of FC for dynamic quant
+            assert len(attrs_with_prefix(m, '_observer_')) == 1
+            # for weight
+            assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
+            if qconfig == float16_dynamic_qconfig:
+                observer_name = 'NoopObserver = prim::GetAttr[name="_observer_'
+            else:
+                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+
+            FileCheck().check(observer_name) \
+                       .check('prim::GetAttr[name="fc"]') \
+                       .check('prim::CallMethod') \
+                       .check_not('Observer = prim::GetAttr[name="_observer_') \
+                       .run(m.graph)
 
 
     def test_prepare_dynamic_child_qconfig(self):
@@ -2712,29 +2743,73 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             graph_params = []
             for x, obs in model._modules._c.items():
-                if tracing:
-                    graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
-                else:
-                    graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+                graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
             self.assertEqual(ref_qparams, graph_params)
+
+    def test_convert_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
+        FileCheck().check("aten::to") \
+                   .check_next("aten::to") \
+                   .check("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
+
+    def test_quantize_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig})
+
+        FileCheck().check("quantized::linear_prepack_fp16") \
+                   .check_next("quantized::linear_dynamic_fp16") \
+                   .check_not("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
 
 class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
     for individual ops end to end.
     """
     @override_qengines
-    def test_quantized_linear_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).float()
+    def test_linear(self):
+        class FunctionalLinear(torch.nn.Module):
+            def __init__(self, weight, bias):
+                super(FunctionalLinear, self).__init__()
+                self.weight = weight
+                self.bias = bias
 
             def forward(self, x):
-                return self.fc(x)
+                return F.linear(x, self.weight, self.bias)
 
         x = torch.rand(5, 5)
         for tracing in [True, False]:
-            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            model = self.checkGraphModeOp(
+                torch.nn.Linear(5, 5), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+
+        weight = torch.rand(5, 5)
+        b = torch.rand(5)
+        for tracing, has_bias in itertools.product([True, False], [True, False]):
+            bias = b if has_bias else None
+            model = self.checkGraphModeOp(
+                FunctionalLinear(weight, bias), x,
+                "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
@@ -2959,3 +3034,17 @@ class TestQuantizeJit(QuantizationTestCase):
                     qconfig_dict,
                     debug=True)
                 self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+
+    @skipIfNoFBGEMM
+    def test_linear_dynamic_fp16(self):
+        linear_model = SingleLayerLinearModel().eval()
+        model_eager = quantize_dynamic(linear_model, dtype=torch.float16)
+        result_eager = model_eager(self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        qconfig_dict = {'' : float16_dynamic_qconfig}
+
+        for model in [model_traced, model_script]:
+            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
+            # TODO check model with debug=True matches quantized model result
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)

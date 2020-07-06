@@ -474,7 +474,7 @@ class BCELoss(_WeightedLoss):
     However, an infinite term in the loss equation is not desirable for several reasons.
 
     For one, if either :math:`y_n = 0` or :math:`(1 - y_n) = 0`, then we would be
-    multipying 0 with infinity. Secondly, if we have an infinite loss value, then
+    multiplying 0 with infinity. Secondly, if we have an infinite loss value, then
     we would also have an infinite term in our gradient, since
     :math:`\lim_{x\to 0} \frac{d}{dx} \log (x) = \infty`.
     This would make BCELoss's backward method nonlinear with respect to :math:`x_n`,
@@ -1050,10 +1050,10 @@ class MarginRankingLoss(_Loss):
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
 
-    The loss function for each sample in the mini-batch is:
+    The loss function for each pair of samples in the mini-batch is:
 
     .. math::
-        \text{loss}(x, y) = \max(0, -y * (x1 - x2) + \text{margin})
+        \text{loss}(x1, x2, y) = \max(0, -y * (x1 - x2) + \text{margin})
 
     Args:
         margin (float, optional): Has a default value of :math:`0`.
@@ -1316,7 +1316,7 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
         >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
         >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
-        >>> 
+        >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)

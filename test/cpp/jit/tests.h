@@ -66,6 +66,7 @@ namespace jit {
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ScriptObject)                      \
+  _(ExtraFilesHookPreference)          \
   _(SaveExtraFilesHook)                \
   _(TypeTags)                          \
   _(DCE)                               \

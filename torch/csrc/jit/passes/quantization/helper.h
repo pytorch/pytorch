@@ -44,7 +44,12 @@ TORCH_API bool isScalar(Value* v);
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
+// Return the module name that corresponds to the value.
+TORCH_API c10::optional<std::string> getModuleName(Value* value);
+
 // =========== helper functions for Node =========
+TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
+
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
@@ -65,7 +70,18 @@ TORCH_API bool isPropagateQuantBinaryOp(Node* n);
 
 // Check if this is the node that we'll quantize or not quantize depending on
 // whether the input of the node is quantized, example: aten::cat
-TORCH_API bool isPropagateQuantNode(Node* n);
+TORCH_API bool isPropagateQuantOp(Node* n);
+
+// Check if the node is a binary op like aten::add and aten::mul and
+// if the input 1 is a scalar, these ops will be quantized to
+// quantized::{op}_scalar
+TORCH_API bool isBinaryOpWithScalarInput(Node* n);
+
+// Check if the node is a aten::add with list inputs
+bool isListAdd(Node* n);
+
+// Check if the node is a empty list construct node
+bool isEmptyList(Node* n);
 
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
@@ -107,6 +123,13 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
+// filter to check Value `vname` is a constant of int value `value`
+bool is_int_constant(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    int value);
+
 // filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
@@ -151,5 +174,16 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_half_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_float_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_false_value(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 } // namespace jit
 } // namespace torch

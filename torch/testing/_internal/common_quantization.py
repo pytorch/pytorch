@@ -209,6 +209,39 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnqd.Linear)
         self.assertEqual(mod._packed_params.dtype, dtype)
 
+    def check_eager_serialization(self, ref_model, loaded_model, x):
+        # Check state dict serialization and torch.save APIs
+        model_dict = ref_model.state_dict()
+        b = io.BytesIO()
+        torch.save(model_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        loaded_model.load_state_dict(loaded_dict)
+        ref_out = ref_model(x)
+        load_out = loaded_model(x)
+
+        def check_outputs(ref_out, load_out):
+            self.assertEqual(ref_out[0], load_out[0])
+            if isinstance(ref_out[1], tuple):
+                self.assertEqual(ref_out[1][0], load_out[1][0])
+                self.assertEqual(ref_out[1][1], load_out[1][1])
+            else:
+                self.assertEqual(ref_out[1], load_out[1])
+
+        check_outputs(ref_out, load_out)
+        b = io.BytesIO()
+        torch.save(ref_model, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        load_out = loaded(x)
+        check_outputs(ref_out, load_out)
+
+    def check_weight_bias_api(self, ref_model, weight_keys, bias_keys):
+        weight = ref_model.get_weight()
+        bias = ref_model.get_bias()
+        self.assertEqual(weight_keys ^ weight.keys(), set())
+        self.assertEqual(bias_keys ^ bias.keys(), set())
+
     def checkDynamicQuantizedLSTM(self, mod, reference_module_type, dtype):
         r"""Checks that mod has been swapped for an nnqd.LSTM type
             module, the bias is float.
@@ -274,6 +307,8 @@ class QuantizationTestCase(TestCase):
         else:
             *inputs, target = data[0]
         model = get_script_module(module, tracing, inputs).eval()
+        if debug:
+            print('input graph:', model.graph)
         models = {}
         outputs = {}
         for d in [True, False]:
@@ -488,24 +523,6 @@ class ActivationsTestModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
-class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
-        self.elu = torch.nn.ELU().to(dtype=torch.float)
-        self.dequant = torch.quantization.DeQuantStub()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.hardswish(x)
-        x = self.elu(x)
-        x = self.dequant(x)
-        return x
-
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -535,30 +552,6 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))
-        return x
-
-class NormalizationQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm((8))
-        self.group_norm = torch.nn.GroupNorm(2, 8)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(4)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(4)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(4)
-        self.fc2 = torch.nn.Linear(8, 2)
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.layer_norm(x)
-        x = self.group_norm(x.unsqueeze(-1))
-        x = self.instance_norm1d(x.reshape((2, 4, 2)))
-        x = self.instance_norm2d(x.unsqueeze(-1))
-        x = self.instance_norm3d(x.unsqueeze(-1))
-        x = self.fc2(x.reshape((2, 8)))
         return x
 
 class NestedModel(torch.nn.Module):

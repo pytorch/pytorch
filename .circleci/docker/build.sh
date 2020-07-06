@@ -125,6 +125,17 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
+    UBUNTU_VERSION=16.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
@@ -181,6 +192,28 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-rocm3.3-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
@@ -259,6 +292,14 @@ docker build \
        -t "$tmp_tag" \
        "$@" \
        .
+
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to replace the
+#   "$UBUNTU_VERSION" == "18.04-rc"
+# with
+#   "$UBUNTU_VERSION" == "18.04"
+UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
   docker run --rm "$tmp_tag" $*

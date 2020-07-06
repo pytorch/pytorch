@@ -302,6 +302,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
+
+  {
+    // Abort all NCCL Communicators on Process Group Destruction
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end(); it++) {
+      auto& ncclComms = it->second;
+
+      for (const auto& ncclComm : ncclComms) {
+        ncclComm->ncclCommAbort();
+      }
+    }
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -568,8 +580,11 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     if (t.sizes() != first.sizes()) {
       throw std::runtime_error("Tensors must have identical size");
     }
-    if (!t.is_contiguous()) {
-      throw std::runtime_error("Tensors must be contiguous");
+    if (t.strides() != first.strides()) {
+      throw std::runtime_error("Tensors must have identical strides");
+    }
+    if (!t.is_non_overlapping_and_dense()) {
+      throw std::runtime_error("Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -611,7 +626,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     for (const auto& t : tensor_lists[i]) {
       if (t.numel() != other[i].numel()) {
         throw std::runtime_error(
-            "All tensor operands to scatter/gather must have the same size");
+            "All tensor operands to scatter/gather must have the same number of elements");
       }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.

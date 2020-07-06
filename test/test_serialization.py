@@ -10,6 +10,7 @@ import gzip
 import copy
 import pickle
 import shutil
+import pathlib
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -273,6 +274,45 @@ class SerializationMixin(object):
             b = torch.load(f)
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_sparse(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"tensor": x}, f.name)
+            y = torch.load(f.name)
+            self.assertEqual(x, y["tensor"])
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_sparse_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_indices = self.tensor._indices().clone()
+                invalid_indices[0][0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_indices,
+                            self.tensor._values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f.name)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "size is inconsistent with indices"):
+                y = torch.load(f.name)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -672,6 +712,31 @@ class TestSerialization(TestCase, SerializationMixin):
             test(f.name)
 
         test(io.BytesIO())
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile_actually_jit(self):
+        with tempfile.NamedTemporaryFile() as f:
+            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
+            f.seek(0)
+            torch.load(f)
+
+    # Ensure large zip64 serialization works properly
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_pathlike_serialization(self):
+        model = torch.nn.Conv2d(20, 3200, kernel_size=3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            path = pathlib.Path(f.name)
+            torch.save(model, path)
+            torch.load(path)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

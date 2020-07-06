@@ -3,6 +3,9 @@
 Quantization
 ============
 
+.. warning ::
+     Quantization is in beta and subject to change.
+
 Introduction to Quantization
 ----------------------------
 
@@ -189,11 +192,14 @@ Basic activations are supported.
 
 * :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
 * :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
+* :meth:`~torch.nn.functional.elu` - ELU
 * :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
-* :meth:`~torch.nn.functional.hardswish` - Hard Swish
+* :meth:`~torch.nn.functional.hardsigmoid` - Hardsigmoid
+* :meth:`~torch.nn.functional.hardswish` - Hardswish
+* :meth:`~torch.nn.functional.hardtanh` - Hardtanh
 * :meth:`~torch.nn.functional.upsample` - Upsampling
 * :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
@@ -351,6 +357,15 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
+* :class:`~torch.nn.quantized.ELU` — ELU
+* :class:`~torch.nn.quantized.Hardswish` — Hardswish
+* :class:`~torch.nn.quantized.BatchNorm2d` — BatchNorm2d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.BatchNorm3d` — BatchNorm3d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm1d` — InstanceNorm1d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm2d` — InstanceNorm2d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm3d` — InstanceNorm3d. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -376,7 +391,10 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
-* :func:`~torch.nn.quantized.functional.hardswish` — Hard Swish
+* :func:`~torch.nn.quantized.functional.elu` — ELU
+* :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
+* :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
+* :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
@@ -737,6 +755,16 @@ ReLU6
 .. autoclass:: ReLU6
     :members:
 
+ELU
+~~~~~~~~~~~~~~~
+.. autoclass:: ELU
+    :members:
+
+Hardswish
+~~~~~~~~~~~~~~~
+.. autoclass:: Hardswish
+    :members:
+
 Conv1d
 ~~~~~~~~~~~~~~~
 .. autoclass:: Conv1d
@@ -775,6 +803,41 @@ DeQuantize
 Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
+    :members:
+
+BatchNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm2d
+    :members:
+
+BatchNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm3d
+    :members:
+
+LayerNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: LayerNorm
+    :members:
+
+GroupNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: GroupNorm
+    :members:
+
+InstanceNorm1d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm1d
+    :members:
+
+InstanceNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm2d
+    :members:
+
+InstanceNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm3d
     :members:
 
 torch.nn.quantized.dynamic

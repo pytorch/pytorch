@@ -14,6 +14,7 @@ import torch
 import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
+from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
@@ -650,26 +651,25 @@ def is_optional(ann):
 
     return optional or union_optional
 
-# fake Python container type for Future/RRef
-T = TypeVar('T')
-
-class Future(Generic[T]):
-    __slots__ = ['__args__']
-
-    def __init__(self, types):
-        self.__args__ = types
-
 def is_future(ann):
     if ann is Future:
-        raise RuntimeError('Attempted to use torch.jit.Future without a '
-                           'contained type. Please add a contained type, e.g. '
-                           'torch.jit.Future[int]')
+        raise RuntimeError(
+            "Attempted to use Future without a "
+            "contained type. Please add a contained type, e.g. "
+            "Future[int]"
+        )
     return getattr(ann, "__origin__", None) is Future
 
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
 
     def is_rref(ann):
+        if ann is RRef:
+            raise RuntimeError(
+                "Attempted to use RRef without a "
+                "contained type. Please add a contained type, e.g. "
+                "RRef[int]"
+            )
         return getattr(ann, "__origin__", None) is RRef
 
 try:

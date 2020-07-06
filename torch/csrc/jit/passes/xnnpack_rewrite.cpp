@@ -276,18 +276,19 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::set<MobileOptimizerType>& optimization_blacklist) {
+    const std::set<MobileOptimizerType>& optimization_blacklist,
+    const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
   if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
-    cloned_module = FoldConvBatchNorm2d(cloned_module);
+    cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
   if (!optimization_blacklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
-    cloned_module = freeze_module(cloned_module);
+    cloned_module = freeze_module(cloned_module, preserved_methods);
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
@@ -328,7 +329,8 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::set<MobileOptimizerType>& blacklist) {
+    const std::set<MobileOptimizerType>& blacklist,
+    const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
