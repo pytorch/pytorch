@@ -1350,7 +1350,6 @@ filegroup(
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
-        "caffe2/utils/threadpool/ThreadPoolMobile.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
     ],
