@@ -460,9 +460,11 @@ def gen_pyi(declarations_path, out):
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
-        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+        'randint': ['def randint(low: _int, high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
-                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    'def randint(high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
                  ' out: Optional[Tensor]=None, {}) -> Tensor: ...'

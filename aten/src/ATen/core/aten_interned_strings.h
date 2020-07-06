@@ -162,6 +162,7 @@ _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
 _(aten, _unsafe_view) \
+_(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \
 _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \

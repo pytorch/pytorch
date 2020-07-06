@@ -41,6 +41,12 @@ CONFIG_TREE_DATA = [
                     ("libtorch", [XImportant(True)])
                 ]),
             ]),
+            ("11.0", [
+                X("3.8"),
+                ("3.8", [
+                    ("libtorch", [X(True)])
+                ]),
+            ]),
         ]),
     ]),
     ("bionic", [

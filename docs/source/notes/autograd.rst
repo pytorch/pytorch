@@ -211,16 +211,16 @@ Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
 
-VJP and JVP for complex numbers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Vector-Jacobian Product and Jacobian-Vector Product for complex numbers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Consider a function F: V → W, where are V and W are vector spaces. As described in
-Chapter 4 of Dougal's thesis, the output of Jacobian-Vector product function
+Chapter 4 of Dougal's thesis, the output of Jacobian-Vector Product (JVP) function
 :math:`J_f : V → (V → W)` is a linear map.
 
 The Vector-Jacobian function can be written as the transpose of this linear map
-:math:`{J_f}^T : V → (W^* → V^*)`. The output of the VJP is a linear map from
-dual space :math:`W^* to V^*`.
+:math:`{J_f}^T : V → (W^* → V^*)`. The output of the Vector-Jacobian Product (VJP)
+is a linear map from :math:`W^* to V^*`.
 
 Now consider a function :math:`F: \C → \C` and a corresponding function :math:`F_R: \R^2 → \R^2`
 
@@ -278,7 +278,7 @@ equal to:
     JVP = J * [c    d]
     VJP = [c    d]^T * J * [1   -i]
 
-For a function :math:`f1: \R^2 → \C`, :math:`JVP: \R^2 → (\R^2 → \C)` and :math:`VJP: R^2 --> (C* → R^2)`
+For a function :math:`f1: \R^2 → \C`, :math:`JVP: \R^2 → (\R^2 → \C)` and :math:`VJP: \R^2 --> (\C^* → \R^2)`
 
 ..math::
     JVP = [1    i]^T * J * [c   d]
