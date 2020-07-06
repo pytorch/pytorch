@@ -338,6 +338,8 @@ def processKernelLaunches(string, stats):
         # Extract cuda kernel
         cuda_kernel = string[params[0]["start"]:parenthesis + 1]
         kernel_string = string[kernel['start']:kernel['end']]
+        end_param_index = 0 if params[1]['end']==-1 else 1
+        kernel_name_with_template = string[params[0]['start']:params[end_param_index]['end'] + 1]
         cuda_kernel_dim3 = add_dim3(kernel_string, cuda_kernel)
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
@@ -347,6 +349,7 @@ def processKernelLaunches(string, stats):
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
+        output_string = output_string.replace(kernel_name_with_template, "(" + kernel_name_with_template + ")")
 
         # Update the statistics
         stats["kernel_launches"].append(hip_kernel)
