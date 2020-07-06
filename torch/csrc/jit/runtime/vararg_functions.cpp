@@ -83,11 +83,15 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
   at::TypePtr value_type = type->getValueType();
   auto vals = c10::impl::GenericDict(key_type, value_type);
   vals.reserve(num_inputs / 2);
+  // loop from the bottom of the stack to ensure the dictConstruct preserve
+  // the inputs order.
+  auto inputs = last(stack, num_inputs);
   for (size_t i = 0; i < num_inputs; i += 2) {
-    auto val = pop(stack);
-    auto key = pop(stack);
+    auto key = inputs[i];
+    auto val = inputs[i + 1];
     vals.insert_or_assign(std::move(key), std::move(val));
   }
+  drop(stack, num_inputs);
   push(stack, std::move(vals));
 }
 

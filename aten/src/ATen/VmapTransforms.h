@@ -32,6 +32,12 @@ struct VmapPhysicalView;
 constexpr int64_t kVmapTransformStaticInputSize = 4;
 using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticInputSize>;
 
+// Pytorch generally advertises good performance for <= 5 dims.
+// (see ATen/core/DimVector.h). We add a few extra dims (~3) for vmap
+// dimensions to get 8. Adjust this number as necessary
+constexpr int64_t kVmapStaticDimVecSize = 8;
+using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
+
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
 //
@@ -105,8 +111,12 @@ struct TORCH_API VmapPhysicalView {
   // This is because the size of levels tell us that the first two dimensions
   // of `tensor_` are batch dimensions, so a logical dim of `n` is actually
   // a physical dim of `n + 2`.
-  std::vector<int64_t> getPhysicalDims(IntArrayRef logical_dims);
+  VmapDimVector getPhysicalDims(IntArrayRef logical_dims);
   int64_t getPhysicalDim(int64_t logical_dim);
+
+  // Maps a logical shape to a physical shape by pre-pending the batch
+  // sizes to the logical shape.
+  VmapDimVector getPhysicalShape(IntArrayRef logical_shape);
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor),
   // using the mapping info stored in this VmapPhysicalView.
@@ -114,9 +124,10 @@ struct TORCH_API VmapPhysicalView {
   // of the physical tensor.
   Tensor newLogicalFromPhysical(const Tensor& physical);
 
+  int64_t numBatchDims();
+
  private:
   int64_t numLogicalDims();
-  int64_t numBatchDims();
 
   std::bitset<kVmapNumLevels> levels_;
   Tensor tensor_;

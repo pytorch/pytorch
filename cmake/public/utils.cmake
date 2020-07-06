@@ -249,8 +249,7 @@ function(torch_compile_options libname)
         /bigobj
         )
     else()
-      target_compile_options(${libname} PUBLIC
-        #    -std=c++14
+      target_compile_options(${libname} PRIVATE
         -Wall
         -Wextra
         -Wno-unused-parameter

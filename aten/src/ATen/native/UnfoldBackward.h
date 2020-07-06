@@ -91,13 +91,13 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
   auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
   /* } */
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.add_output(grad_out_restrided);
-  iter.add_input(grad_in_restrided);
-  iter.add_input(idx_dim_restrided);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(grad_out_restrided)
+    .add_input(grad_in_restrided)
+    .add_input(idx_dim_restrided)
+    .build();
 
   return iter;
 }
@@ -162,14 +162,14 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
   auto idx_last_dim_restrided = idx_last_dim.as_strided(idx_last_dim_sizes, idx_last_dim_strides);
   /* } */
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.add_output(grad_out_restrided);
-  iter.add_input(grad_in);
-  iter.add_input(idx_dim_restrided);
-  iter.add_input(idx_last_dim_restrided);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(grad_out_restrided)
+    .add_input(grad_in)
+    .add_input(idx_dim_restrided)
+    .add_input(idx_last_dim_restrided)
+    .build();
 
   return iter;
 }

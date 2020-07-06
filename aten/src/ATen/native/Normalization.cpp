@@ -235,9 +235,9 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
       Tensor in = input.select(1, f);
 
       // compute mean per input
-      auto iter = TensorIterator();
-      iter.add_input(in);
-      iter.build();
+      auto iter = TensorIteratorConfig()
+        .add_input(in)
+        .build();
       accscalar_t sum = 0;
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         sum += i;
@@ -246,10 +246,10 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
       save_mean_a[f] = mean;
 
       // compute variance per input
-      iter = TensorIterator();
-      iter.add_input(in);
-      iter.build();
       accscalar_t var_sum = 0;
+      iter = TensorIteratorConfig()
+        .add_input(in)
+        .build();
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         var_sum += (i - mean) * (i - mean);
       });
@@ -321,19 +321,19 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
         // sum over all gradOutput in feature plane
         accscalar_t sum = 0;
-        auto iter = TensorIterator();
-        iter.add_input(grad_out);
-        iter.build();
+        auto iter = TensorIteratorConfig()
+          .add_input(grad_out)
+          .build();
         cpu_serial_kernel(iter, [&](const scalar_t g) -> void {
           sum += g;
         });
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        iter = TensorIterator();
-        iter.add_input(in);
-        iter.add_input(grad_out);
-        iter.build();
+        iter = TensorIteratorConfig()
+          .add_input(in)
+          .add_input(grad_out)
+          .build();
         cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
           dotp += (i - mean) * go;
         });
@@ -348,25 +348,31 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
-            iter = TensorIterator::unary_op(grad_in, in);
-            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-              return (i - mean) * k;
-            });
+            {
+              auto iter = TensorIterator::unary_op(grad_in, in);
+              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+                return (i - mean) * k;
+              });
+            }
 
             accscalar_t grad_mean = sum / n;
-            iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
-            cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
-              return (go - grad_mean - gi) * invstd * w;
-            });
+            {
+              auto iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+              cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
+                return (go - grad_mean - gi) * invstd * w;
+              });
+            }
           } else {
             // when in evaluation mode
             // Q(X) = X - running_mean  ; i.e. input centered to zero mean
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
-            iter = TensorIterator::unary_op(grad_in, grad_out);
-            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-              return i * invstd * w;
-            });
+            {
+              auto iter = TensorIterator::unary_op(grad_in, grad_out);
+              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+                return i * invstd * w;
+              });
+            }
           }
         }
         if (grad_input_mask[1]) {

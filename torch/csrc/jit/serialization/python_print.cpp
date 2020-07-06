@@ -4,10 +4,13 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -33,6 +36,7 @@ static bool isValidIdentifier(const std::string& name) {
 const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
     "_", // avoid the confusing unnamed _
+    "as",
     "aten",
     "attribute",
     "CONSTANTS",
@@ -75,6 +79,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "return",
     "True",
     "try",
+    "with",
     "while",
     "with",
     "yield",
@@ -692,9 +697,15 @@ struct PythonPrintImpl {
     }
   }
 
+  void checkVersion(const Node* const node) {
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
+  }
+
   void printNode(Node* node, bool print_const) {
     WithSourceRange guard(&source_range_stack_, node);
     scanTypeDependencies(node);
+    checkVersion(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     switch (node->kind()) {
@@ -752,6 +763,27 @@ struct PythonPrintImpl {
         std::stringstream ss;
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
+      } break;
+      case prim::Enter: {
+        const auto in = node->inputs().at(0);
+        const auto out = node->outputs().at(0);
+        indent();
+        body_ << "with " << useOf(in);
+        if (out->uses().size() > 0) {
+          assignValue(out, genUniqueNameFor(out));
+          body_ << " as " << useOf(out);
+        }
+        body_ << ":\n";
+        level++;
+      } break;
+      case prim::Exit: {
+        // If the previous node is a prim::Enter, the with block the generated
+        // this Enter/Exit pair must have been empty.
+        if (node->prev()->kind() == prim::Enter) {
+          indent();
+          body_ << "pass\n";
+        }
+        level--;
       } break;
       case prim::Function: {
         if (enforce_importable_) {
@@ -1392,6 +1424,9 @@ struct PythonPrintImpl {
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
+
+  // The least version that supports all printed ops
+  uint64_t min_version_ = 0;
 };
 
 PythonPrint::PythonPrint(
@@ -1423,6 +1458,10 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
+}
+
+uint64_t PythonPrint::minVersion() const {
+  return pImpl->min_version_;
 }
 
 PythonPrint::~PythonPrint() = default;

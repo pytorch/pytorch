@@ -1,41 +1,60 @@
+import warnings
+
 import torch
+
 from . import nccl
 from torch._utils import _take_tensors, _flatten_dense_tensors, \
     _unflatten_dense_tensors, _reorder_tensors_as
 
 
-def broadcast(tensor, devices):
-    """Broadcasts a tensor to a number of GPUs.
+def broadcast(tensor, devices=None, *, out=None):
+    r"""Broadcasts a tensor to specified CUDA devices.
 
     Arguments:
-        tensor (Tensor): tensor to broadcast.
-        devices (Iterable): an iterable of devices among which to broadcast.
-          Note that it should be like (src, dst1, dst2, ...), the first element
-          of which is the source device to broadcast from.
+        tensor (Tensor): tensor to broadcast. Can be on CPU or CUDA.
+        devices (Iterable[torch.device, str or int], optional): an iterable of
+          CUDA devices, among which to broadcast.
+        out (Sequence[Tensor], optional, keyword-only): the CUDA tensors to
+          store output results.
+
+    .. note::
+        Exactly one of :attr:`devices` and :attr:`out` must be specified.
 
     Returns:
-        A tuple containing copies of the ``tensor``, placed on devices
-        corresponding to indices from ``devices``.
+        - If :attr:`devices` is specified,
+            a tuple containing copies of :attr:`tensor`, placed on
+            :attr:`devices`.
+        - If :attr:`out` is specified,
+            a tuple containing :attr:`out` tensors, each containing a copy of
+            :attr:`tensor`.
     """
-    return torch._C._broadcast(tensor, devices)
+    if not ((devices is None) ^ (out is None)):
+        raise RuntimeError(
+            "Exactly one of 'devices' and 'out' must be specified, but got "
+            "devices={} and out={}".format(devices, out))
+    if devices is not None:
+        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
+        return torch._C._broadcast(tensor, devices)
+    else:
+        return torch._C._broadcast_out(tensor, out)
 
 
 def broadcast_coalesced(tensors, devices, buffer_size=10485760):
-    """Broadcasts a sequence tensors to the specified GPUs.
+    r"""Broadcasts a sequence tensors to the specified CUDA devices.
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
 
     Arguments:
-        tensors (sequence): tensors to broadcast.
-        devices (Iterable): an iterable of devices among which to broadcast.
-          Note that it should be like (src, dst1, dst2, ...), the first element
-          of which is the source device to broadcast from.
+        tensors (sequence): tensors to broadcast. Must be on the same device,
+          either CPU or CUDA.
+        devices (Iterable[torch.device, str or int]): an iterable of CUDA
+          devices, among which to broadcast.
         buffer_size (int): maximum size of the buffer used for coalescing
 
     Returns:
-        A tuple containing copies of the ``tensor``, placed on devices
-        corresponding to indices from ``devices``.
+        A tuple containing copies of :attr:`tensor`, placed on :attr:`devices`.
     """
+    devices = [torch.cuda._utils._get_device_index(d) for d in devices]
     return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
@@ -128,39 +147,87 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     return tuple(_reorder_tensors_as(output, ref_order))
 
 
-def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
-    """Scatters tensor across multiple GPUs.
+def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=None):
+    r"""Scatters a tensor across multiple CUDA devices.
 
     Arguments:
-        tensor (Tensor): tensor to scatter.
-        devices (Iterable[int]): iterable of ints, specifying among which
-            devices the tensor should be scattered.
+        tensor (Tensor): tensor to scatter. Can be on CPU or CUDA.
+        devices (Iterable[torch.device, str or int], optional): an iterable of
+          CUDA devices, among which to scatter.
         chunk_sizes (Iterable[int], optional): sizes of chunks to be placed on
-            each device. It should match ``devices`` in length and sum to
-            ``tensor.size(dim)``. If not specified, the tensor will be divided
-            into equal chunks.
-        dim (int, optional): A dimension along which to chunk the tensor.
+          each device. It should match :attr:`devices` in length and sums to
+          ``tensor.size(dim)``. If not specified, :attr:`tensor` will be divided
+          into equal chunks.
+        dim (int, optional): A dimension along which to chunk :attr:`tensor`.
+          Default: ``0``.
+        out (Sequence[Tensor], optional, keyword-only): the CUDA tensors to
+          store output results. Sizes of these tensors must match that of
+          :attr:`tensor`, except for :attr:`dim`, where the total size must
+          sum to ``tensor.size(dim)``.
+
+    .. note::
+        Exactly one of :attr:`devices` and :attr:`out` must be specified. When
+        :attr:`out` is specified, :attr:`chunk_sizes` must not be specified and
+        will be inferred from sizes of :attr:`out`.
 
     Returns:
-        A tuple containing chunks of the ``tensor``, spread across given
-        ``devices``.
+        - If :attr:`devices` is specified,
+            a tuple containing chunks of :attr:`tensor`, placed on
+            :attr:`devices`.
+        - If :attr:`out` is specified,
+            a tuple containing :attr:`out` tensors, each containing a chunk of
+            :attr:`tensor`.
     """
-    return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
+    if out is None:
+        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
+        return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
+    else:
+        if devices is not None:
+            raise RuntimeError(
+                "'devices' must not be specified when 'out' is specified, but "
+                "got devices={}".format(devices))
+        if chunk_sizes is not None:
+            raise RuntimeError(
+                "'chunk_sizes' must not be specified when 'out' is specified, "
+                "but got chunk_sizes={}".format(chunk_sizes))
+        return tuple(torch._C._scatter_out(tensor, out, dim, streams))
 
-
-def gather(tensors, dim=0, destination=None):
-    """Gathers tensors from multiple GPUs.
-
-    Tensor sizes in all dimension different than ``dim`` have to match.
+def gather(tensors, dim=0, destination=None, *, out=None):
+    r"""Gathers tensors from multiple CUDA devices.
 
     Arguments:
-        tensors (Iterable[Tensor]): iterable of tensors to gather.
-        dim (int): a dimension along which the tensors will be concatenated.
-        destination (int, optional): output device (-1 means CPU, default:
-            current device)
+        tensors (Iterable[Tensor]): an iterable of tensors to gather.
+          Tensor sizes in all dimensions other than :attr:`dim` have to match.
+        dim (int, optional): a dimension along which the tensors will be
+          concatenated. Default: ``0``.
+        destination (torch.device, str, or int, optional): the output device.
+          Can be CPU or CUDA. Default: the current CUDA device.
+        out (Tensor, optional, keyword-only): the tensor to store gather result.
+          Its sizes must match those of :attr:`tensors`, except for :attr:`dim`,
+          where the size must equal ``sum(tensor.size(dim) for tensor in tensors)``.
+          Can be on CPU or CUDA.
+
+    .. note::
+        :attr:`destination` must not be specified when :attr:`out` is specified.
 
     Returns:
-        A tensor located on ``destination`` device, that is a result of
-        concatenating ``tensors`` along ``dim``.
+        - If :attr:`destination` is specified,
+            a tensor located on :attr:`destination` device, that is a result of
+            concatenating :attr:`tensors` along :attr:`dim`.
+        - If :attr:`out` is specified,
+            the :attr:`out` tensor, now containing results of concatenating
+            :attr:`tensors` along :attr:`dim`.
     """
-    return torch._C._gather(tensors, dim, destination)
+    if out is None:
+        if destination == -1:
+            warnings.warn(
+                'Using -1 to represent CPU tensor is deprecated. Please use a '
+                'device object or string instead, e.g., "cpu".')
+        destination = torch.cuda._utils._get_device_index(destination, allow_cpu=True, optional=True)
+        return torch._C._gather(tensors, dim, destination)
+    else:
+        if destination is not None:
+            raise RuntimeError(
+                "'destination' must not be specified when 'out' is specified, but "
+                "got destination={}".format(destination))
+        return torch._C._gather_out(tensors, out, dim)

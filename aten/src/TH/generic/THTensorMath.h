@@ -32,8 +32,6 @@ TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index,
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
-
 TH_API void THTensor_(addbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(baddbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
 
@@ -56,7 +54,6 @@ TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
 #endif
 #endif
 #else
-TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 #endif /* !defined(TH_REAL_IS_HALF) */
 #endif /* TH_GENERIC_FILE*/

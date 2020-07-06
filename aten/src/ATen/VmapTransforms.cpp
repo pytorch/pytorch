@@ -31,7 +31,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
     return physical_tensor;
   }
   const auto sizes = physical_tensor.sizes();
-  std::vector<int64_t> permutation(sizes.size(), 0);
+  VmapDimVector permutation(sizes.size(), 0);
   permutation.reserve(sizes.size());
   const auto is_bdim = createBatchDimBitset(bdims);
   int64_t idx = 0;
@@ -68,18 +68,29 @@ int64_t VmapPhysicalView::numLogicalDims() {
   return /*physical*/tensor_.dim() - numBatchDims();
 }
 
-std::vector<int64_t> VmapPhysicalView::getPhysicalDims(IntArrayRef logical_dims) {
+VmapDimVector VmapPhysicalView::getPhysicalDims(IntArrayRef logical_dims) {
   auto logical_ndim = numLogicalDims();
-  return fmap(
-      logical_dims,
-      [&](int64_t dim) -> int64_t {
-          return maybe_wrap_dim(dim, logical_ndim) + numBatchDims();
-      });
+  // NB: fmap doesn't have a SmallVector variant, so we don't use it here.
+  VmapDimVector result;
+  result.reserve(logical_ndim);
+  for (auto dim : logical_dims) {
+    result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
+  }
+  return result;
 }
 
 int64_t VmapPhysicalView::getPhysicalDim(int64_t logical_dim) {
   auto logical_ndim = numLogicalDims();
   return maybe_wrap_dim(logical_dim, logical_ndim) + numBatchDims();
+}
+
+VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) {
+  VmapDimVector result;
+  result.reserve(logical_shape.size() + numBatchDims());
+  auto tensor_sizes = tensor_.sizes();
+  result.insert(result.end(), tensor_sizes.begin(), tensor_sizes.begin() + numBatchDims());
+  result.insert(result.end(), logical_shape.begin(), logical_shape.end());
+  return result;
 }
 
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {

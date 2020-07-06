@@ -184,17 +184,19 @@ static void sign_kernel(TensorIterator& iter){
 
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
-    cpu_kernel(
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::sinh(a); });
+        [=](scalar_t a) -> scalar_t { return std::sinh(a); },
+        [=](Vec256<scalar_t> self_vec){return self_vec.sinh();});
   });
 }
 
 static void cosh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
-    cpu_kernel(
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::cosh(a); });
+        [=](scalar_t a) -> scalar_t { return std::cosh(a); },
+        [=](Vec256<scalar_t> self_vec){return self_vec.cosh();});
   });
 }
 

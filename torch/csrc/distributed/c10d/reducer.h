@@ -28,7 +28,8 @@ class Reducer {
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
-      int64_t bucket_bytes_cap);
+      int64_t bucket_bytes_cap,
+      bool find_unused_parameters);
 
   ~Reducer() noexcept(false);
 
@@ -78,6 +79,7 @@ class Reducer {
   size_t next_bucket_;
 
   bool has_marked_unused_parameters_;
+  const bool find_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -97,6 +99,10 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
+  void verify_replicas_within_process();
+
+  void verify_replica0_across_processes();
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -108,8 +114,6 @@ class Reducer {
   void mark_bucket_ready(size_t bucket_index);
 
   void finalize_bucket_dense(Bucket& replica);
-
-  void finalize_bucket_sparse(Bucket& replica);
 
   void finalize_backward();
 
@@ -147,6 +151,14 @@ class Reducer {
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
+
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the

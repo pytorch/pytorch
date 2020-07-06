@@ -149,6 +149,10 @@ bool Tensor::is_quantized() const {
   return impl_->is_quantized();
 }
 
+bool Tensor::is_meta() const {
+  return impl_->is_meta();
+}
+
 bool is_quantized(Tensor self) {
   return self.is_quantized();
 }

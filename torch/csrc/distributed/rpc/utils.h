@@ -2,6 +2,8 @@
 
 #include <tensorpipe/core/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
 namespace distributed {
@@ -103,6 +105,19 @@ TORCH_API Message tensorpipeDeserialize(
 // we'd save at least half the data, and over a minimum hurdle.
 TORCH_API c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors);
+
+// Combines an original payload and wrapped payload into the original payload.
+// Used to generate the overall payload for the wrapped RPC.
+TORCH_API void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload);
+
+// Reads the additional, wrapped payload from a wrapped RPC off of the input
+// payload. After this, payload will contain the payload of the original,
+// un-wrapped RPC.
+TORCH_API std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message);
 
 } // namespace rpc
 } // namespace distributed
