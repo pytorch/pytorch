@@ -448,12 +448,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
@@ -463,13 +465,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_meta.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp

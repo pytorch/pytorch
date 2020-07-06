@@ -116,40 +116,39 @@ namespace fuser {
  *
  */
 
-struct TensorDomain;
-struct TensorView;
+class TensorDomain;
+class TensorView;
 
-struct TORCH_CUDA_API TransformReplay {
- private:
+class TORCH_CUDA_API TransformReplay {
  public:
-  // Replay producer as consumer.
-  static TensorDomain* replayPasC(
-      TensorDomain* producer,
-      TensorDomain* consumer,
+  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
       int consumer_compute_at_axis);
 
-  // Replay producer as consumer.
-  static TensorView* replayPasC(
+  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
+  static std::pair<TensorView*, unsigned int> replayPasC(
       TensorView* producer,
       TensorView* consumer,
       int consumer_compute_at_axis);
 
-  // Replay producer as consumer.
-  static TensorDomain* replayCasP(
-      TensorDomain* consumer,
-      TensorDomain* producer,
+  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorDomain* consumer,
+      const TensorDomain* producer,
       int producer_compute_at_axis);
 
-  // Replay producer as consumer.
-  static TensorView* replayCasP(
+  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  static std::pair<TensorView*, unsigned int> replayCasP(
       TensorView* consumer,
       TensorView* producer,
       int producer_compute_at_axis);
 
   // Self replay.
   static TensorDomain* fullSelfReplay(
-      TensorDomain* new_self_root,
-      TensorDomain* self);
+      const TensorDomain* new_self_root,
+      const TensorDomain* self);
 };
 
 } // namespace fuser
