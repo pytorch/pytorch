@@ -104,3 +104,6 @@ def contiguous(self, x):
 
 def contiguousChannelsLast(self, x):
     return x.contiguous(memory_format=torch.channels_last)
+
+def contiguousChannelsLast3d(self, x):
+    return x.contiguous(memory_format=torch.channels_last_3d)

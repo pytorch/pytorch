@@ -147,4 +147,9 @@ class Test(torch.jit.ScriptModule):
         # type: (Tensor) -> Tensor
         return x.contiguous(memory_format=torch.channels_last)
 
+    @torch.jit.script_method
+    def contiguousChannelsLast3d(self, x):
+        # type: (Tensor) -> Tensor
+        return x.contiguous(memory_format=torch.channels_last_3d)
+
 scriptAndSave(Test(), "test.pt")

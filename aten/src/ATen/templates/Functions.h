@@ -46,9 +46,11 @@ namespace {
   inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
     if (options.has_memory_format()) {
       auto memory_format = *options.memory_format_opt();
-      if (at::MemoryFormat::ChannelsLast == memory_format
-          || at::MemoryFormat::ChannelsLast3d == memory_format) {
+      if (at::MemoryFormat::ChannelsLast == memory_format) {
         return {0, 0, 0, 0};
+      }
+      if (at::MemoryFormat::ChannelsLast3d == memory_format) {
+        return {0, 0, 0, 0, 0};
       }
     }
     return {0};

@@ -16,9 +16,16 @@ def async_execution(fn):
     (``fn``) execution needs to pause and resume due to, e.g., containing
     :meth:`~torch.distributed.rpc.rpc_async` or waiting for other signals.
 
-    .. note:: This decorator must be the outmost one when combined with other
-        decorators. Otherwise, RPC will not be able to detect the attributes
-        installed by this decorator.
+    .. note:: To enable asynchronous execution, applications must pass the
+        function object returned by this decorator to RPC APIs. Otherwise, RPC
+        will not be able to detect the attributes installed by this decorator.
+        However, this does not mean this decorator has to be outmost one when
+        defining a function. For example, when combined with ``@staticmethod``
+        or ``@classmethod``, ``@rpc.functions.async_execution`` needs to be the
+        inner decorator to allow the target function be recognized as a static
+        or class function. This target function can still execute asynchronously
+        because, when accessed, the static or class method preserves attributes
+        installed by ``@rpc.functions.async_execution``.
 
     .. warning:: `autograd profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`_
         does not work with ``async_execution`` functions.
@@ -33,7 +40,7 @@ def async_execution(fn):
         >>>
         >>> # omitting setup and shutdown RPC
         >>>
-        >>> # On worker0
+        >>> # On all workers
         >>> @rpc.functions.async_execution
         >>> def async_add_chained(to, x, y, z):
         >>>     # This function runs on "worker1" and returns immediately when
@@ -47,6 +54,7 @@ def async_execution(fn):
         >>>         lambda fut: fut.wait() + z
         >>>     )
         >>>
+        >>> # On worker0
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
         >>>     async_add_chained,
@@ -54,8 +62,8 @@ def async_execution(fn):
         >>> )
         >>> print(ret)  # prints tensor([3., 3.])
 
-        When combined with TorchScript decorators (or any other decorators),
-        this decorator must be the outmost one.
+        When combined with TorchScript decorators, this decorator must be the
+        outmost one.
 
         >>> from torch import Tensor
         >>> from torch.futures import Future
@@ -63,7 +71,7 @@ def async_execution(fn):
         >>>
         >>> # omitting setup and shutdown RPC
         >>>
-        >>> # On worker0
+        >>> # On all workers
         >>> @torch.jit.script
         >>> def script_add(x: Tensor, y: Tensor) -> Tensor:
         >>>     return x + y
@@ -73,12 +81,54 @@ def async_execution(fn):
         >>> def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
         >>>     return rpc.rpc_async(to, script_add, (x, y))
         >>>
+        >>> # On worker0
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
         >>>     async_add,
         >>>     args=("worker2", torch.ones(2), 1)
         >>> )
         >>> print(ret)  # prints tensor([2., 2.])
+
+        When combined with static or class method, this decorator must be the
+        inner one.
+
+        >>> from torch.distributed import rpc
+        >>>
+        >>> # omitting setup and shutdown RPC
+        >>>
+        >>> # On all workers
+        >>> class AsyncExecutionClass:
+        >>>
+        >>>     @staticmethod
+        >>>     @rpc.functions.async_execution
+        >>>     def static_async_add(to, x, y, z):
+        >>>         return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        >>>             lambda fut: fut.wait() + z
+        >>>         )
+        >>>
+        >>>     @classmethod
+        >>>     @rpc.functions.async_execution
+        >>>     def class_async_add(cls, to, x, y, z):
+        >>>         ret_fut = torch.futures.Future()
+        >>>         rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        >>>             lambda fut: ret_fut.set_result(fut.wait() + z)
+        >>>         )
+        >>>         return ret_fut
+        >>>
+        >>> # On worker0
+        >>> ret = rpc.rpc_sync(
+        >>>     "worker1",
+        >>>     AsyncExecutionClass.static_async_add,
+        >>>     args=("worker2", torch.ones(2), 1, 2)
+        >>> )
+        >>> print(ret)  # prints tensor([4., 4.])
+        >>>
+        >>> ret = rpc.rpc_sync(
+        >>>     "worker1",
+        >>>     AsyncExecutionClass.class_async_add,
+        >>>     args=("worker2", torch.ones(2), 1, 2)
+        >>> )
+        >>> print(ret)  # prints tensor([4., 4.])
     """
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
