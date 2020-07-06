@@ -268,7 +268,9 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict, metric_dict, run_name=None):
+    def add_hparams(
+        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None
+    ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
@@ -281,6 +283,8 @@ class SummaryWriter(object):
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
+            hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
+              contains names of the hyperparameters and all discrete values they can hold
             run_name (str): Name of the run, to be included as part of the logdir.
               If unspecified, will use current timestamp.
 
@@ -301,7 +305,7 @@ class SummaryWriter(object):
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
-        exp, ssi, sei = hparams(hparam_dict, metric_dict)
+        exp, ssi, sei = hparams(hparam_dict, metric_dict, hparam_domain_discrete)
 
         if not run_name:
             run_name = str(time.time())
