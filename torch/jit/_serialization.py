@@ -13,6 +13,7 @@ import pathlib
 import torch
 from torch._six import string_classes
 from torch.jit._recursive import wrap_cpp_module
+from torch.serialization import validate_cuda_device
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
