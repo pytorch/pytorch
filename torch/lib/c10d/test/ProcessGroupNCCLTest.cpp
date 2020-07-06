@@ -406,6 +406,7 @@ void testAllgather(const std::string& path, int rank, int size) {
 void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
   // First we must set NCCL_BLOCKING_WAIT to 1 for timeouts to work in
   // ProcessGroupNCCL.
+  auto originalBlockingWait = getenv(c10d::NCCL_BLOCKING_WAIT);
   setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1);
   auto test = AllgatherNCCLTestWithTimeout(path, size);
   test.initialize(rank, size);
@@ -415,6 +416,10 @@ void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
   try {
     test.wait(work, kWorkTimeout);
   } catch (const std::runtime_error& e) {
+    // First we reset the NCCL_BLOCKING_WAIT environment variable to prevent
+    // any unwanted side-effects. We must do this at all exit-points for this
+    // function.
+    setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
     // We are expecting the operation to timeout and throw a runtime_error
     std::string errorMsg = e.what();
     if (errorMsg.find(kTimeoutErrorString) != std::string::npos) {
@@ -427,9 +432,11 @@ void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
       throw std::runtime_error("BOOM!");
     }
   } catch (...) {
+    setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
     // Any other exception indicates a test failure
     throw std::runtime_error("BOOM!");
   }
+  setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
   // If no exception, that is also an error since we expect the test.wait call
   // to timeout and throw.
   throw std::runtime_error("BOOM!");
