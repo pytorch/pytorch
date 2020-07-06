@@ -314,7 +314,6 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -351,6 +350,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             else:
                 # use the default recursive rule to compile the module
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
@@ -376,6 +376,19 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         create_methods_from_stubs(concrete_type, stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
+
+    # Special handling so methods like __len__ work in script methods on classes derived from containers
+    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
+            '__len__' not in cpp_module._method_names():
+        script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
+    if isinstance(nn_module, torch.nn.ModuleDict) and \
+            '__contains__' not in cpp_module._method_names():
+        if len(nn_module.keys()):
+            keys = repr(list(nn_module.keys()))
+            script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+        else:
+            script_module.define("def __contains__(self, key: str):\n   return False\n")
+
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
