@@ -210,3 +210,76 @@ No thread safety on C++ hooks
 Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
+
+VJP and JVP for complex numbers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Consider a function F: V → W, where are V and W are vector spaces. As described in
+Chapter 4 of Dougal's thesis, the output of Jacobian-Vector product function
+:math:`J_f : V → (V → W)` is a linear map.
+
+The Vector-Jacobian function can be written as the transpose of this linear map
+:math:`{J_f}^T : V → (W^* → V^*)`. The output of the VJP is a linear map from
+dual space :math:`W^* to V^*`.
+
+Now consider a function :math:`F: \C → \C` and a corresponding function :math:`F_R: \R^2 → \R^2`
+
+.. math::
+    def F(z):
+        x, y = real(z), imag(z)
+        return u(x, y) + v(x, y) * 1j
+
+    def F_R(x, y):
+        return (u(x, y), v(x, y))
+
+Note that :math:`F_R` is a function written by decomposing complex values as :math:`R^2`.
+
+Given a tangent vector :math:`(c, d)` belongs to :math:`R^2`, :math:`JVP: \R^2 → (\R^2 → \R^2)`
+for :math:`f_R` can be written as:
+
+..math::
+    J * [c, d]
+
+where J is
+
+.. math::
+    \begin{bmatrix}
+    \partial_0u(x, y) & \partial_1u(x, y)\\
+    \partial_0v(x, y) & \partial_1v(x, y)
+    \end{bmatrix}
+
+
+Now given a tangent vector :math:`(c+di) \in \C`, :math:`JVP: \C → (\C → \C)` for f can be defined
+in a similar way but just additionally identifying the result as a complex number:
+
+..math::
+    [1  i]^T * J * [c   d]
+
+VJP for :math:`f` can be defined as transpose of JVP, i.e. :math:`VJP: \C → (\C^* → \C^*),
+where :math:`\C^*` is the dual space for vector space :math:`\C`
+
+Thus VJP for a cotangent vector :math:`(c+di)` equals:
+
+..math::
+    [c  -d]^T * J * [1  -i]
+
+where the negative signs are due to conjugation. The first vector in the output is a
+covector (belongs to :math:`\C^*`), and the last vector in the output is used
+to get the result in :math:`\C` since the final result of reverse-mode differentiation of a
+function is a covector belonging to :math:`\C^*` (explained in Chapter 4 of Dougal’s thesis).
+
+Based on formulas above and the behavior we expect to see (going from :math:`\C → \R^2 → \C`
+should be an identity), we use the following formula for cross-domain functions.
+
+For a function :math:`f1: \C → \R^2`, :math:`JVP: \C → (\C → \R^2)` and :math:`VJP: \C --> (\R^2 → \C^*)`
+equal to:
+
+..math::
+    JVP = J * [c    d]
+    VJP = [c    d]^T * J * [1   -i]
+
+For a function :math:`f1: \R^2 → \C`, :math:`JVP: \R^2 → (\R^2 → \C)` and :math:`VJP: R^2 --> (C* → R^2)`
+
+..math::
+    JVP = [1    i]^T * J * [c   d]
+    VJP = [c    -d]^T * J
