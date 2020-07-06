@@ -68,8 +68,8 @@ static void fractional_max_pool2d_out_single_batch_frame(
           scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
           int64_t maxIndex = h2 * inputW + w2;
 
-          for (; h2 < inputHStart + poolSizeH; ++h2) {
-            for (; w2 < inputWStart + poolSizeW; ++w2) {
+          for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
+            for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
               AT_ASSERT(h2 >= 0 && h2 < inputH);
               AT_ASSERT(w2 >= 0 && w2 < inputW);
 

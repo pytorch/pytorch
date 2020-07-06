@@ -62,9 +62,9 @@ static void adaptive_max_pool2d_single_out_frame(
           int ih=0, iw=0;
           int64_t maxindex = (ih+istartH)*isizeW + (iw+istartW);
           scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
-          for(; ih < kH; ih++)
+          for(ih=0; ih < kH; ih++)
           {
-            for(; iw < kW; iw++)
+            for(iw=0; iw < kW; iw++)
             {
               scalar_t val = *(ip + ih*istrideH + iw*istrideW);
               if ((val > maxval) || std::isnan(val))

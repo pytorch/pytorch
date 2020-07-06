@@ -72,11 +72,11 @@ static void adaptive_max_pool3d_single_out_frame(
             int64_t it = 0, ih = 0, iw = 0;
             int64_t maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);
             scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
-            for(; it < kT; it++)
+            for(it = 0; it < kT; it++)
             {
-              for(; ih < kH; ih++)
+              for(ih = 0; ih < kH; ih++)
               {
-                for(; iw < kW; iw++)
+                for(iw = 0; iw < kW; iw++)
                 {
                   scalar_t val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
                   if ((val > maxval) || std::isnan(val))
