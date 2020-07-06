@@ -49,7 +49,7 @@ struct MAGMAQueue {
     // We've manually set the math mode to CUBLAS_DEFAULT_MATH, now we
     // should restore the original math mode back
     cublasHandle_t handle = magma_queue_get_cublas_handle(magma_queue_);
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, original_math_mode));
+    cublasSetMathMode(handle, original_math_mode);
 #endif
     magma_queue_destroy(magma_queue_);
   }
