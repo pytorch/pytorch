@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -19,7 +20,11 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-std::string stringSlice(std::string string, int64_t start, int64_t end, int64_t step) {
+std::string stringSlice(
+    std::string string,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
   TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   const int64_t size = string.size();
@@ -79,7 +84,7 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_IS_OP(op_name, char_op)                          \
   Operator(                                                            \
       #op_name "(str self) -> bool",                                   \
-      [](Stack& stack) {                                               \
+      [](Stack* stack) {                                               \
         auto string = pop(stack).toStringRef();                        \
         push(                                                          \
             stack,                                                     \
@@ -87,7 +92,6 @@ RegisterOperators reg_str_ops({
                 std::all_of(string.begin(), string.end(), [](char c) { \
                   return char_op(c);                                   \
                 }));                                                   \
-        return 0;                                                      \
       },                                                               \
       aliasAnalysisFromSchema())
 
@@ -101,14 +105,13 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op) \
   Operator(                                         \
       #op_name "(str self) -> str",                 \
-      [](Stack& stack) {                            \
+      [](Stack* stack) {                            \
         auto string = pop(stack).toStringRef();     \
         std::stringstream ss;                       \
         for (char c : string) {                     \
           ss << static_cast<char>(char_op(c));      \
         }                                           \
         push(stack, ss.str());                      \
-        return 0;                                   \
       },                                            \
       aliasAnalysisFromSchema())
 
@@ -124,601 +127,524 @@ RegisterOperators reg_str_ops({
 
 });
 
-auto reg_str_ops_2 =
-    torch::RegisterOperators()
-        .op("aten::splitlines(str self, bool keepends=False) -> str[]",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, bool keepends) {
-                  std::string delimiters =
-                      "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
-                  c10::List<std::string> splits;
+// consecutive whitespace are regarded as a single separator,
+// the result will contain no empty strings at the start or end
+// if the string has leading or trailing whitespace.
+c10::List<std::string> splitNoneSeparator(const std::string& string) {
+  c10::List<std::string> splits;
+  // whitespaces includes tab, space and
+  // the delimiters defined in the implementation of splitlines
+  std::string whitespaces =
+      " \t\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
+  std::string::size_type prev_pos = 0;
+  std::string::size_type pos = 0;
 
-                  std::string::size_type prev_pos = 0;
-                  std::string::size_type pos = 0;
-                  while ((pos = string.find_first_of(delimiters, pos)) !=
-                         std::string::npos) {
-                    splits.emplace_back(
-                        string.substr(prev_pos, pos - prev_pos));
-                    if (keepends) {
-                      splits.emplace_back(string.substr(pos, 1));
-                    }
-                    pos++;
-                    prev_pos = pos;
-                  }
-                  if (prev_pos != string.size()) {
-                    splits.emplace_back(
-                        string.substr(prev_pos, string.size() - prev_pos));
-                  }
+  while ((pos = string.find_first_of(whitespaces, pos)) != std::string::npos) {
+    auto substr = string.substr(prev_pos, pos - prev_pos);
+    // skip the whitespaces as the Python split() method
+    if (!substr.empty()) {
+      splits.emplace_back(substr);
+    }
+    pos++;
+    prev_pos = pos;
+  }
+  if (prev_pos != string.size()) {
+    splits.emplace_back(string.substr(prev_pos));
+  }
+  return splits;
+}
 
-                  return splits;
-                }))
-        .op("aten::slice.str(str string, int start, int end=9223372036854775807, int step=1) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel<decltype(stringSlice), &stringSlice>())
+// String Ops
+// Implementations located in torch/csrc/jit/runtime/register_string_ops.cpp
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl("splitlines", [](std::string string, bool keepends) {
+    std::string delimiters = "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
+    c10::List<std::string> splits;
 
-        // upper and lower require there to be at least one alpha character,
-        // and ignore all other characters
-        .op("aten::isupper(str self) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  bool found_alpha = false;
-                  bool is_upper = true;
-                  for (size_t i = 0; i < string.size() && is_upper; ++i) {
-                    char c = string[i];
-                    found_alpha |= static_cast<bool>(::isalpha(c));
-                    is_upper &= (!::isalpha(c) || ::isupper(c));
-                  }
-                  return found_alpha && is_upper;
-                }))
-        .op("aten::islower(str self) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  bool found_alpha = false;
-                  bool is_lower = true;
-                  for (size_t i = 0; i < string.size() && is_lower; ++i) {
-                    char c = string[i];
-                    found_alpha |= static_cast<bool>(::isalpha(c));
-                    is_lower &= (!::isalpha(c) || ::islower(c));
-                  }
-                  return found_alpha && is_lower;
-                }))
+    std::string::size_type prev_pos = 0;
+    std::string::size_type pos = 0;
+    while ((pos = string.find_first_of(delimiters, pos)) != std::string::npos) {
+      splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+      if (keepends) {
+        splits.emplace_back(string.substr(pos, 1));
+      }
+      pos++;
+      prev_pos = pos;
+    }
+    if (prev_pos != string.size()) {
+      splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
+    }
 
-        .op("aten::capitalize(str self) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  std::stringstream ss;
-                  auto first_char = true;
-                  for (char c : string) {
-                    if (first_char) {
-                      ss << static_cast<char>(::toupper(c));
-                      first_char = false;
-                    } else {
-                      ss << static_cast<char>(::tolower(c));
-                    }
-                  }
-                  return ss.str();
-                }))
+    return splits;
+  });
 
-        .op("aten::title(str self) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  std::stringstream ss;
-                  bool prev_is_nonalpha = true;
-                  for (char c : string) {
-                    if (prev_is_nonalpha) {
-                      ss << static_cast<char>(::toupper(c));
-                    } else {
-                      ss << static_cast<char>(::tolower(c));
-                    }
-                    if (::isalpha(c)) {
-                      prev_is_nonalpha = false;
-                    } else {
-                      prev_is_nonalpha = true;
-                    }
-                  }
-                  return ss.str();
-                }))
+  m.impl("slice.str", TORCH_FN(stringSlice));
 
-        .op("aten::center(str self, int width, str fillchar=' ') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   int64_t width,
-                                   std::string fillchar) {
-                  if (fillchar.size() != 1) {
-                    // TODO: this should be a TypeError
-                    throw std::runtime_error(
-                        "TypeError: The fill character must be exactly one character long");
-                  }
-                  if (string.size() >
-                      static_cast<std::string::size_type>(width)) {
-                    return string;
-                  }
-                  std::stringstream ss;
-                  std::string::size_type full_padding = width - string.size();
-                  std::string::size_type l_pad = full_padding / 2;
-                  std::string::size_type r_pad = (full_padding + 1) / 2;
-                  if (width % 2) {
-                    auto tmp = r_pad;
-                    r_pad = l_pad;
-                    l_pad = tmp;
-                  }
-                  for (std::string::size_type i = 0; i < l_pad; ++i) {
-                    ss << fillchar;
-                  }
-                  ss << string;
-                  for (std::string::size_type i = 0; i < r_pad; ++i) {
-                    ss << fillchar;
-                  }
-                  return ss.str();
-                }))
+  // upper and lower require there to be at least one alpha character,
+  // and ignore all other characters
+  m.impl("isupper", [](std::string string) {
+    bool found_alpha = false;
+    bool is_upper = true;
+    for (size_t i = 0; i < string.size() && is_upper; ++i) {
+      char c = string[i];
+      found_alpha |= static_cast<bool>(::isalpha(c));
+      is_upper &= (!::isalpha(c) || ::isupper(c));
+    }
+    return found_alpha && is_upper;
+  });
+  m.impl("islower", [](std::string string) {
+    bool found_alpha = false;
+    bool is_lower = true;
+    for (size_t i = 0; i < string.size() && is_lower; ++i) {
+      char c = string[i];
+      found_alpha |= static_cast<bool>(::isalpha(c));
+      is_lower &= (!::isalpha(c) || ::islower(c));
+    }
+    return found_alpha && is_lower;
+  });
 
-        // Adapted from
-        // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
-        .op("aten::count(str self, str substr, int start=0, int end=-1) -> int",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  int64_t size = string.size();
-                  if (start > size) {
-                    return int64_t(0);
-                  }
-                  if (start < 0) {
-                    start = std::max(int64_t(0), int64_t(size + start));
-                  }
-                  if (end < 0) {
-                    end = std::max(int64_t(0), int64_t(size + end + 1));
-                  }
+  m.impl("capitalize", [](std::string string) {
+    std::stringstream ss;
+    auto first_char = true;
+    for (char c : string) {
+      if (first_char) {
+        ss << static_cast<char>(::toupper(c));
+        first_char = false;
+      } else {
+        ss << static_cast<char>(::tolower(c));
+      }
+    }
+    return ss.str();
+  });
 
-                  int64_t occurrences = 0;
-                  std::string::size_type pos = start;
-                  while ((pos = string.find(substr, pos)) !=
-                         std::string::npos) {
-                    if (pos < static_cast<std::string::size_type>(end)) {
-                      ++occurrences;
-                    } else {
-                      break;
-                    }
-                    pos += substr.length();
-                  }
-                  return occurrences;
-                }))
+  m.impl("title", [](std::string string) {
+    std::stringstream ss;
+    bool prev_is_nonalpha = true;
+    for (char c : string) {
+      if (prev_is_nonalpha) {
+        ss << static_cast<char>(::toupper(c));
+      } else {
+        ss << static_cast<char>(::tolower(c));
+      }
+      if (::isalpha(c)) {
+        prev_is_nonalpha = false;
+      } else {
+        prev_is_nonalpha = true;
+      }
+    }
+    return ss.str();
+  });
 
-        .op("aten::endswith(str self, str substr, int start=0, int end=-1) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  int64_t size = string.size();
-                  if (start < 0) {
-                    start = std::max(int64_t(0), int64_t(size + start));
-                  }
-                  if (end < 0) {
-                    end = std::max(int64_t(0), int64_t(size + end + 1));
-                  }
+  m.impl("center", [](std::string string, int64_t width, std::string fillchar) {
+    if (fillchar.size() != 1) {
+      // TODO: this should be a TypeError
+      throw std::runtime_error(
+          "TypeError: The fill character must be exactly one character long");
+    }
+    if (string.size() > static_cast<std::string::size_type>(width)) {
+      return string;
+    }
+    std::stringstream ss;
+    std::string::size_type full_padding = width - string.size();
+    std::string::size_type l_pad = full_padding / 2;
+    std::string::size_type r_pad = (full_padding + 1) / 2;
+    if (width % 2) {
+      auto tmp = r_pad;
+      r_pad = l_pad;
+      l_pad = tmp;
+    }
+    for (std::string::size_type i = 0; i < l_pad; ++i) {
+      ss << fillchar;
+    }
+    ss << string;
+    for (std::string::size_type i = 0; i < r_pad; ++i) {
+      ss << fillchar;
+    }
+    return ss.str();
+  });
 
-                  string = string.substr(start, end - start);
+  // Adapted from
+  // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
+  m.impl(
+      "count",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        int64_t size = string.size();
+        if (start > size) {
+          return int64_t(0);
+        }
+        if (start < 0) {
+          start = std::max(int64_t(0), int64_t(size + start));
+        }
+        if (end < 0) {
+          end = std::max(int64_t(0), int64_t(size + end + 1));
+        }
 
-                  auto result = false;
-                  if (string.length() >= substr.length()) {
-                    result = !string.compare(
-                        string.length() - substr.length(),
-                        substr.length(),
-                        substr);
-                  }
-                  return result;
-                }))
+        int64_t occurrences = 0;
+        std::string::size_type pos = start;
+        while ((pos = string.find(substr, pos)) != std::string::npos) {
+          if (pos < static_cast<std::string::size_type>(end)) {
+            ++occurrences;
+          } else {
+            break;
+          }
+          pos += substr.length();
+        }
+        return occurrences;
+      });
 
-        .op("aten::startswith(str self, str substr, int start=0, int end=-1) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  int64_t size = string.size();
-                  if (start < 0) {
-                    start = std::max(int64_t(0), int64_t(size + start));
-                  }
-                  if (end < 0) {
-                    end = std::max(int64_t(0), int64_t(size + end + 1));
-                  }
+  m.impl(
+      "endswith",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        int64_t size = string.size();
+        if (start < 0) {
+          start = std::max(int64_t(0), int64_t(size + start));
+        }
+        if (end < 0) {
+          end = std::max(int64_t(0), int64_t(size + end + 1));
+        }
 
-                  string = string.substr(start, end - start);
+        string = string.substr(start, end - start);
 
-                  auto result = false;
-                  if (string.length() >= substr.length()) {
-                    result = !string.compare(0, substr.length(), substr);
-                  }
-                  return result;
-                }))
+        auto result = false;
+        if (string.length() >= substr.length()) {
+          result = !string.compare(
+              string.length() - substr.length(), substr.length(), substr);
+        }
+        return result;
+      });
 
-        .op("aten::expandtabs(str self, int tabsize=8) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, int64_t tabsize) {
-                  std::stringstream ss;
-                  size_t index = 0;
-                  for (const auto& c : string) {
-                    if (c != '\t') {
-                      ss << c;
-                      index++;
-                    } else {
-                      if (tabsize <= 0) {
-                        continue;
-                      }
-                      do {
-                        ss << ' ';
-                        index++;
-                      } while (index % tabsize);
-                    }
-                  }
-                  return ss.str();
-                }))
+  m.impl(
+      "startswith",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        int64_t size = string.size();
+        if (start < 0) {
+          start = std::max(int64_t(0), int64_t(size + start));
+        }
+        if (end < 0) {
+          end = std::max(int64_t(0), int64_t(size + end + 1));
+        }
 
-        .op("aten::find(str self, str substr, int start=0, int end=-1) -> int",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  return stringFindImpl(string, substr, start, end);
-                }))
+        string = string.substr(start, end - start);
 
-        .op("aten::rfind(str self, str substr, int start=0, int end=-1) -> int",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  return stringFindImpl(string, substr, start, end, true);
-                }))
+        auto result = false;
+        if (string.length() >= substr.length()) {
+          result = !string.compare(0, substr.length(), substr);
+        }
+        return result;
+      });
 
-        .op("aten::index.str(str self, str substr, int start=0, int end=-1) -> int",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  auto result = stringFindImpl(string, substr, start, end);
-                  if (result < 0) {
-                    throw std::runtime_error("ValueError: substring not found");
-                  }
-                  return result;
-                }))
+  m.impl("expandtabs", [](std::string string, int64_t tabsize) {
+    std::stringstream ss;
+    size_t index = 0;
+    for (const auto& c : string) {
+      if (c != '\t') {
+        ss << c;
+        index++;
+      } else {
+        if (tabsize <= 0) {
+          continue;
+        }
+        do {
+          ss << ' ';
+          index++;
+        } while (index % tabsize);
+      }
+    }
+    return ss.str();
+  });
 
-        .op("aten::rindex(str self, str substr, int start=0, int end=-1) -> int",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string substr,
-                                   int64_t start,
-                                   int64_t end) {
-                  auto result =
-                      stringFindImpl(string, substr, start, end, true);
-                  if (result < 0) {
-                    throw std::runtime_error("ValueError: substring not found");
-                  }
-                  return result;
-                }))
+  m.impl(
+      "find",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        return stringFindImpl(string, substr, start, end);
+      });
 
-        .op("aten::isidentifier(str self) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  LOG(WARNING)
-                      << "The isidentifier() implementation being used is from Python 2\n";
-                  if (string.size() < 1) {
-                    return false;
-                  }
-                  if (::isdigit(string[0])) {
-                    return false;
-                  }
-                  auto result =
-                      std::all_of(string.begin(), string.end(), [](char c) {
-                        return ::isalnum(c);
-                      });
-                  return result;
-                }))
+  m.impl(
+      "rfind",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        return stringFindImpl(string, substr, start, end, true);
+      });
 
-        .op("aten::istitle(str self) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  auto result = false;
+  m.impl(
+      "index.str",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        auto result = stringFindImpl(string, substr, start, end);
+        if (result < 0) {
+          throw std::runtime_error("ValueError: substring not found");
+        }
+        return result;
+      });
 
-                  bool prev_is_alpha = false;
-                  for (char c : string) {
-                    if (prev_is_alpha) {
-                      if (c != static_cast<char>(::tolower(c))) {
-                        result = false;
-                        break;
-                      }
-                    } else {
-                      if (c != static_cast<char>(::toupper(c))) {
-                        result = false;
-                        break;
-                      }
-                      // Only true if there exists at least one alpha
-                      if (::isalpha(c)) {
-                        result = true;
-                      }
-                    }
-                    if (::isalpha(c)) {
-                      prev_is_alpha = true;
-                    } else {
-                      prev_is_alpha = false;
-                    }
-                  }
-                  return result;
-                }))
+  m.impl(
+      "rindex",
+      [](std::string string, std::string substr, int64_t start, int64_t end) {
+        auto result = stringFindImpl(string, substr, start, end, true);
+        if (result < 0) {
+          throw std::runtime_error("ValueError: substring not found");
+        }
+        return result;
+      });
 
-        // Can't reuse DEFINE_STRING_IS_OP because "" is printable
-        .op("aten::isprintable(str self) -> bool",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
-                  auto result =
-                      std::all_of(string.begin(), string.end(), [](char c) {
-                        return ::isalnum(c) || ::ispunct(c) || c == ' ';
-                      });
-                  return result;
-                }))
+  m.impl("isidentifier", [](std::string string) {
+    LOG(WARNING)
+        << "The isidentifier() implementation being used is from Python 2\n";
+    if (string.size() < 1) {
+      return false;
+    }
+    if (::isdigit(string[0])) {
+      return false;
+    }
+    auto result = std::all_of(
+        string.begin(), string.end(), [](char c) { return ::isalnum(c); });
+    return result;
+  });
 
-        .op("aten::ljust(str self, int width, str fillchar=' ') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   int64_t width,
-                                   std::string fillchar) {
-                  if (fillchar.size() != 1) {
-                    // TODO: this should be a TypeError
-                    throw std::runtime_error(
-                        "TypeError: The fill character must be exactly one character long");
-                  }
-                  auto to_append = std::max(
-                      int64_t(0), width - static_cast<int64_t>(string.size()));
+  m.impl("istitle", [](std::string string) {
+    auto result = false;
 
-                  std::stringstream ss;
-                  ss << string;
-                  for (auto i = 0; i < to_append; ++i) {
-                    ss << fillchar;
-                  }
+    bool prev_is_alpha = false;
+    for (char c : string) {
+      if (prev_is_alpha) {
+        if (c != static_cast<char>(::tolower(c))) {
+          result = false;
+          break;
+        }
+      } else {
+        if (c != static_cast<char>(::toupper(c))) {
+          result = false;
+          break;
+        }
+        // Only true if there exists at least one alpha
+        if (::isalpha(c)) {
+          result = true;
+        }
+      }
+      if (::isalpha(c)) {
+        prev_is_alpha = true;
+      } else {
+        prev_is_alpha = false;
+      }
+    }
+    return result;
+  });
 
-                  return ss.str();
-                }))
+  // Can't reuse DEFINE_STRING_IS_OP because "" is printable
+  m.impl("isprintable", [](std::string string) {
+    auto result = std::all_of(string.begin(), string.end(), [](char c) {
+      return ::isalnum(c) || ::ispunct(c) || c == ' ';
+    });
+    return result;
+  });
 
-        .op("aten::rjust(str self, int width, str fillchar=' ') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   int64_t width,
-                                   std::string fillchar) {
-                  if (fillchar.size() != 1) {
-                    // TODO: this should be a TypeError
-                    throw std::runtime_error(
-                        "TypeError: The fill character must be exactly one character long");
-                  }
-                  auto to_append = std::max(
-                      int64_t(0), width - static_cast<int64_t>(string.size()));
+  m.impl("ljust", [](std::string string, int64_t width, std::string fillchar) {
+    if (fillchar.size() != 1) {
+      // TODO: this should be a TypeError
+      throw std::runtime_error(
+          "TypeError: The fill character must be exactly one character long");
+    }
+    auto to_append =
+        std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-                  std::stringstream ss;
-                  for (auto i = 0; i < to_append; ++i) {
-                    ss << fillchar;
-                  }
-                  ss << string;
-                  return ss.str();
-                }))
+    std::stringstream ss;
+    ss << string;
+    for (auto i = 0; i < to_append; ++i) {
+      ss << fillchar;
+    }
 
-        .op("aten::zfill(str self, int width) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, int64_t width) {
-                  auto to_append = std::max(
-                      int64_t(0), width - static_cast<int64_t>(string.size()));
+    return ss.str();
+  });
 
-                  std::stringstream ss;
-                  for (auto i = 0; i < to_append; ++i) {
-                    ss << '0';
-                  }
-                  ss << string;
+  m.impl("rjust", [](std::string string, int64_t width, std::string fillchar) {
+    if (fillchar.size() != 1) {
+      // TODO: this should be a TypeError
+      throw std::runtime_error(
+          "TypeError: The fill character must be exactly one character long");
+    }
+    auto to_append =
+        std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-                  return ss.str();
-                }))
+    std::stringstream ss;
+    for (auto i = 0; i < to_append; ++i) {
+      ss << fillchar;
+    }
+    ss << string;
+    return ss.str();
+  });
 
-        .op("aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
-                  auto index = string.find_first_not_of(chars);
-                  if (index != std::string::npos) {
-                    string = string.substr(index, string.size());
-                  } else {
-                    string = "";
-                  }
-                  return string;
-                }))
+  m.impl("zfill", [](std::string string, int64_t width) {
+    auto to_append =
+        std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
-        .op("aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
-                  auto index = string.find_last_not_of(chars);
-                  if (index != std::string::npos) {
-                    string = string.substr(0, index + 1);
-                  } else {
-                    string = "";
-                  }
-                  return string;
-                }))
+    std::stringstream ss;
+    for (auto i = 0; i < to_append; ++i) {
+      ss << '0';
+    }
+    ss << string;
 
-        .op("aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
-                  auto rindex = string.find_last_not_of(chars);
-                  if (rindex != std::string::npos) {
-                    string = string.substr(0, rindex + 1);
-                  } else {
-                    string = "";
-                  }
-                  auto lindex = string.find_first_not_of(chars);
-                  if (lindex != std::string::npos) {
-                    string = string.substr(lindex, string.size());
-                  } else {
-                    string = "";
-                  }
-                  return string;
-                }))
+    return ss.str();
+  });
 
-        .op("aten::replace(str self, str old, str new, int max=-1) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
-                                   std::string old_str,
-                                   std::string new_str,
-                                   int64_t max) {
-                  int64_t occurrences = 0;
-                  std::string::size_type pos = 0;
-                  while ((pos = string.find(old_str, pos)) !=
-                         std::string::npos) {
-                    if (max >= 0 && ++occurrences > max) {
-                      break;
-                    }
-                    string = string.replace(pos, old_str.length(), new_str);
-                    pos += new_str.length();
-                  }
+  m.impl("lstrip", [](std::string string, std::string chars) {
+    auto index = string.find_first_not_of(chars);
+    if (index != std::string::npos) {
+      string = string.substr(index, string.size());
+    } else {
+      string = "";
+    }
+    return string;
+  });
 
-                  return string;
-                }))
+  m.impl("rstrip", [](std::string string, std::string chars) {
+    auto index = string.find_last_not_of(chars);
+    if (index != std::string::npos) {
+      string = string.substr(0, index + 1);
+    } else {
+      string = "";
+    }
+    return string;
+  });
 
-        .op("aten::partition(str self, str separator) -> (str, str, str)",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string separator) {
-                  auto pos = string.find(separator, 0);
-                  if (pos == std::string::npos) {
-                    pos = string.size();
-                    separator = "";
-                  }
-                  auto pre_partition = string.substr(0, pos);
-                  auto post_partition =
-                      string.substr(pos + separator.size(), string.size());
+  m.impl("strip", [](std::string string, std::string chars) {
+    auto rindex = string.find_last_not_of(chars);
+    if (rindex != std::string::npos) {
+      string = string.substr(0, rindex + 1);
+    } else {
+      string = "";
+    }
+    auto lindex = string.find_first_not_of(chars);
+    if (lindex != std::string::npos) {
+      string = string.substr(lindex, string.size());
+    } else {
+      string = "";
+    }
+    return string;
+  });
 
-                  return std::make_tuple(
-                      pre_partition, separator, post_partition);
-                }))
+  m.impl(
+      "replace",
+      [](std::string string,
+         std::string old_str,
+         std::string new_str,
+         int64_t max) {
+        int64_t occurrences = 0;
+        std::string::size_type pos = 0;
+        while ((pos = string.find(old_str, pos)) != std::string::npos) {
+          if (max >= 0 && ++occurrences > max) {
+            break;
+          }
+          string = string.replace(pos, old_str.length(), new_str);
+          pos += new_str.length();
+        }
 
-        .op("aten::rpartition(str self, str separator) -> (str, str, str)",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string separator) {
-                  auto pos = string.find(separator, 0);
-                  auto rpos = pos;
-                  do {
-                    pos = rpos;
-                    rpos = string.find(separator, pos + 1);
-                  } while (rpos != std::string::npos);
+        return string;
+      });
 
-                  if (pos == std::string::npos) {
-                    pos = 0;
-                    separator = "";
-                  }
+  m.impl("partition", [](std::string string, std::string separator) {
+    auto pos = string.find(separator, 0);
+    if (pos == std::string::npos) {
+      pos = string.size();
+      separator = "";
+    }
+    auto pre_partition = string.substr(0, pos);
+    auto post_partition = string.substr(pos + separator.size(), string.size());
 
-                  auto pre_partition = string.substr(0, pos);
-                  auto post_partition =
-                      string.substr(pos + separator.size(), string.size());
+    return std::make_tuple(pre_partition, separator, post_partition);
+  });
 
-                  return std::make_tuple(
-                      pre_partition, separator, post_partition);
-                }))
+  m.impl("rpartition", [](std::string string, std::string separator) {
+    auto pos = string.find(separator, 0);
+    auto rpos = pos;
+    do {
+      pos = rpos;
+      rpos = string.find(separator, pos + 1);
+    } while (rpos != std::string::npos);
 
-        .op("aten::split.str(str self, str separator=' ', int max=-1) -> str[]",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
-                      std::string::size_type prev_pos = 0;
-                      std::string::size_type pos = 0;
-                      c10::List<std::string> splits;
-                      auto count = 0;
-                      while ((pos = string.find(separator, pos)) !=
-                             std::string::npos) {
-                        count++;
-                        if (max >= 0 && count > max) {
-                          break;
-                        } else {
-                          splits.emplace_back(
-                              string.substr(prev_pos, pos - prev_pos));
-                        }
-                        pos += separator.size();
-                        prev_pos = pos;
-                      }
-                      splits.emplace_back(
-                          string.substr(prev_pos, string.size() - prev_pos));
-                      return splits;
-                    }))
+    if (pos == std::string::npos) {
+      pos = 0;
+      separator = "";
+    }
 
-        .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
-                      std::reverse(separator.begin(), separator.end());
-                      std::reverse(string.begin(), string.end());
+    auto pre_partition = string.substr(0, pos);
+    auto post_partition = string.substr(pos + separator.size(), string.size());
 
-                      std::string::size_type prev_pos = 0;
-                      std::string::size_type pos = 0;
-                      c10::List<std::string> splits;
-                      auto count = 0;
-                      while ((pos = string.find(separator, pos)) !=
-                             std::string::npos) {
-                        count++;
-                        if (max >= 0 && count > max) {
-                          break;
-                        } else {
-                          auto substr = string.substr(prev_pos, pos - prev_pos);
-                          std::reverse(substr.begin(), substr.end());
-                          splits.emplace(splits.begin(), substr);
-                        }
-                        pos += separator.size();
-                        prev_pos = pos;
-                      }
-                      auto substr =
-                          string.substr(prev_pos, string.size() - prev_pos);
-                      std::reverse(substr.begin(), substr.end());
-                      splits.emplace(splits.begin(), substr);
-                      return splits;
-                    }))
+    return std::make_tuple(pre_partition, separator, post_partition);
+  });
 
-        .op("aten::join(str self, str[] values) -> str",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](const std::string& string,
-                                   const c10::List<std::string>& values) {
-                  std::stringstream ss;
-                  for (auto it = values.begin(); it != values.end(); ++it) {
-                    ss << static_cast<std::string>(*it);
-                    if (it != values.end() - 1) {
-                      ss << string;
-                    }
-                  }
-                  return ss.str();
-                }));
+  m.impl(
+      "split.str",
+      [](const std::string& string,
+         c10::optional<std::string> separator,
+         int64_t max) {
+        if (!separator.has_value()) {
+          // if separator is not specified,
+          // a different splitting algorithm is applied as Python
+          return splitNoneSeparator(string);
+          ;
+        }
+        if (separator.value().empty()) {
+          throw std::runtime_error("ValueError: empty separator");
+        }
+
+        std::string::size_type prev_pos = 0;
+        std::string::size_type pos = 0;
+        c10::List<std::string> splits;
+        auto count = 0;
+
+        while ((pos = string.find(separator.value(), pos)) !=
+               std::string::npos) {
+          count++;
+          if (max >= 0 && count > max) {
+            break;
+          } else {
+            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+          }
+          pos += separator.value().size();
+          prev_pos = pos;
+        }
+        splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
+        return splits;
+      });
+
+  m.impl("rsplit", [](std::string string, std::string separator, int64_t max) {
+    std::reverse(separator.begin(), separator.end());
+    std::reverse(string.begin(), string.end());
+
+    std::string::size_type prev_pos = 0;
+    std::string::size_type pos = 0;
+    c10::List<std::string> splits;
+    auto count = 0;
+    while ((pos = string.find(separator, pos)) != std::string::npos) {
+      count++;
+      if (max >= 0 && count > max) {
+        break;
+      } else {
+        auto substr = string.substr(prev_pos, pos - prev_pos);
+        std::reverse(substr.begin(), substr.end());
+        splits.emplace(splits.begin(), substr);
+      }
+      pos += separator.size();
+      prev_pos = pos;
+    }
+    auto substr = string.substr(prev_pos, string.size() - prev_pos);
+    std::reverse(substr.begin(), substr.end());
+    splits.emplace(splits.begin(), substr);
+    return splits;
+  });
+
+  m.impl(
+      "join",
+      [](const std::string& string, const c10::List<std::string>& values) {
+        std::stringstream ss;
+        for (auto it = values.begin(); it != values.end(); ++it) {
+          ss << static_cast<std::string>(*it);
+          if (it != values.end() - 1) {
+            ss << string;
+          }
+        }
+        return ss.str();
+      });
+}
+
 } // namespace
 } // namespace jit
 } // namespace torch

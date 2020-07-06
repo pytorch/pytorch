@@ -144,19 +144,6 @@ template class MaxPoolImpl<3, MaxPool3dImpl>;
 
 // ============================================================================
 
-template <size_t D, typename Derived>
-AdaptiveMaxPoolImpl<D, Derived>::AdaptiveMaxPoolImpl(
-  const AdaptiveMaxPoolOptions<D>& options_) : options(options_) {}
-
-template <size_t D, typename Derived>
-void AdaptiveMaxPoolImpl<D, Derived>::reset() {}
-
-template <size_t D, typename Derived>
-void AdaptiveMaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveMaxPool" << D << "d"
-         << "(output_size=" << options.output_size() << ")";
-}
-
 Tensor AdaptiveMaxPool1dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_max_pool1d(input, options.output_size());
 }
@@ -181,24 +168,11 @@ std::tuple<Tensor, Tensor> AdaptiveMaxPool3dImpl::forward_with_indices(const Ten
   return F::detail::adaptive_max_pool3d_with_indices(input, options.output_size());
 }
 
-template class AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>;
-template class AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>;
-template class AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>;
+template class AdaptiveMaxPoolImpl<1, ExpandingArray<1>, AdaptiveMaxPool1dImpl>;
+template class AdaptiveMaxPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveMaxPool2dImpl>;
+template class AdaptiveMaxPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveMaxPool3dImpl>;
 
 // ============================================================================
-
-template <size_t D, typename Derived>
-AdaptiveAvgPoolImpl<D, Derived>::AdaptiveAvgPoolImpl(
-  const AdaptiveAvgPoolOptions<D>& options_) : options(options_) {}
-
-template <size_t D, typename Derived>
-void AdaptiveAvgPoolImpl<D, Derived>::reset() {}
-
-template <size_t D, typename Derived>
-void AdaptiveAvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveAvgPool" << D << "d"
-         << "(output_size=" << options.output_size() << ")";
-}
 
 Tensor AdaptiveAvgPool1dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_avg_pool1d(input, options.output_size());
@@ -212,9 +186,9 @@ Tensor AdaptiveAvgPool3dImpl::forward(const Tensor& input) {
   return F::detail::adaptive_avg_pool3d(input, options.output_size());
 }
 
-template class AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>;
-template class AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>;
-template class AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>;
+template class AdaptiveAvgPoolImpl<1, ExpandingArray<1>, AdaptiveAvgPool1dImpl>;
+template class AdaptiveAvgPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveAvgPool2dImpl>;
+template class AdaptiveAvgPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveAvgPool3dImpl>;
 
 // ============================================================================
 

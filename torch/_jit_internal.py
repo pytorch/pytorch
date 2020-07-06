@@ -8,8 +8,14 @@ import inspect
 import weakref
 import warnings
 import torch
+# This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
+# Explicitly ask to import `torch.distributed.__init__` first.
+# Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
+import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
+from torch.futures import Future
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -25,21 +31,54 @@ def createResolutionCallbackFromEnv(lookup_base):
     You should not use this directly, it should only be used from the other
     createResolutionCallbackFrom* functions.
     """
-    def env(qualified_name, module):
-        # We may need to resolve a qualified name, something like `torch.device`
-        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
-        # over scope, then proceed to use the looked-up value to go down the
-        # chain.
+    def lookupInModule(qualified_name, module):
         if '.' in qualified_name:
             parts = qualified_name.split('.')
             base = parts[0]
-            remainding_pieces = '.'.join(parts[1:])
+            remaining_pieces = '.'.join(parts[1:])
             module_value = getattr(module, base)
-            return env(remainding_pieces, module_value)
+            return lookupInModule(remaining_pieces, module_value)
         else:
             return getattr(module, qualified_name)
 
-    return lambda key: env(key, lookup_base)
+    def parseNestedExpr(expr, module) -> Tuple[Any, int]:
+        i = 0
+        while i < len(expr) and expr[i] not in (',', '[', ']'):
+            i += 1
+
+        base = lookupInModule(expr[:i].strip(), module)
+        assert base is not None, "Unresolvable type {}".format(expr[:i])
+        if i == len(expr) or expr[i] != '[':
+            return base, i
+
+        assert expr[i] == '['
+        parts = []
+        while expr[i] != ']':
+            part_len = 0
+            i += 1
+            part, part_len = parseNestedExpr(expr[i:], module)
+            parts.append(part)
+            i += part_len
+        if len(parts) > 1:
+            return base[tuple(parts)], i + 1
+        else:
+            return base[parts[0]], i + 1
+
+    def parseExpr(expr, module):
+        try:
+            value, len_parsed = parseNestedExpr(expr, module)
+            assert len_parsed == len(expr), "whole expression was not parsed, falling back to c++ parser"
+            return value
+        except Exception as e:
+            """
+            The python resolver fails in several cases in known unit tests, and is intended
+            to fall back gracefully to the c++ resolver in general.  For example, python 2 style
+            annotations which are frequent in our unit tests often fail with types e.g. int not
+            resolvable from the calling frame.
+            """
+            return None
+
+    return lambda expr: parseExpr(expr, lookup_base)
 
 
 def createResolutionCallbackFromFrame(frames_up=0):
@@ -452,6 +491,14 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
+
+def is_static_fn(cls, fn):
+    return isinstance(inspect.getattr_static(cls, fn), staticmethod)
+
+def get_static_fn(cls, fn):
+    return inspect.getattr_static(cls, fn).__func__
+
+
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -556,124 +603,74 @@ def _get_overloaded_methods(method, mod_class):
         raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
-try:
-    import typing
-    from typing import Tuple, List, Dict, Optional, Any
 
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        if not hasattr(ann, '__module__'):
+def is_tuple(ann):
+    # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Tuple or
+            getattr(ann, '__origin__', None) is tuple)
+
+def is_list(ann):
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is List or
+            getattr(ann, '__origin__', None) is list)
+
+def is_dict(ann):
+    if not hasattr(ann, '__module__'):
+        return False
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Dict or
+            getattr(ann, '__origin__', None) is dict)
+
+def is_optional(ann):
+    # Optional[T] is just shorthand for Union[T, None], so check for both
+    def safe_is_subclass(the_type, super_type):
+        # Don't throw if `the_type` isn't a class type (e.g. if it is
+        # another type annotation instance)
+        if not inspect.isclass(the_type):
             return False
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
+        return issubclass(the_type, super_type)
 
-    def is_list(ann):
-        if not hasattr(ann, '__module__'):
-            return False
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.List or
-             getattr(ann, '__origin__', None) is list)
+    if not hasattr(ann, '__module__'):
+        return False
 
-    def is_dict(ann):
-        if not hasattr(ann, '__module__'):
-            return False
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Dict or
-             getattr(ann, '__origin__', None) is dict)
+    union_optional = False
+    if ann.__module__ == 'typing' and \
+       (getattr(ann, '__origin__', None) is Union):
+        args = getattr(ann, '__args__', ())
+        if len(args) == 2:
+            union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
-    def is_optional(ann):
-        # Optional[T] is just shorthand for Union[T, None], so check for both
-        def safe_is_subclass(the_type, super_type):
-            # Don't throw if `the_type` isn't a class type (e.g. if it is
-            # another type annotation instance)
-            if not inspect.isclass(the_type):
-                return False
-            return issubclass(the_type, super_type)
+    optional = ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is Optional)
 
-        if not hasattr(ann, '__module__'):
-            return False
+    return optional or union_optional
 
-        union_optional = False
-        if ann.__module__ == 'typing' and \
-           (getattr(ann, '__origin__', None) is typing.Union):
-            args = getattr(ann, '__args__', ())
-            if len(args) == 2:
-                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
-                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
+def is_future(ann):
+    if ann is Future:
+        raise RuntimeError(
+            "Attempted to use Future without a "
+            "contained type. Please add a contained type, e.g. "
+            "Future[int]"
+        )
+    return getattr(ann, "__origin__", None) is Future
 
-        optional = ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Optional)
+if torch.distributed.rpc.is_available():
+    from torch.distributed.rpc import RRef
 
-        return optional or union_optional
-
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
-
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class TupleInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class ListInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class ListCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class DictInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class DictCls(object):
-        def __getitem__(self, types):
-            return DictInstance(types)
-
-    class OptionalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class OptionalCls(object):
-        def __getitem__(self, types):
-            return OptionalInstance(types)
-
-    class AnyCls(object):
-        pass
-
-    Tuple = TupleCls()  # noqa: T484
-    List = ListCls()  # noqa: T484
-    Dict = DictCls()  # noqa: T484
-    Optional = DictCls()  # noqa: T484
-    Any = AnyCls()  # noqa: T484
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
-
-    def is_list(ann):
-        return isinstance(ann, ListInstance)
-
-    def is_dict(ann):
-        return isinstance(ann, DictInstance)
-
-    def is_optional(ann):
-        return isinstance(ann, OptionalInstance)
-
+    def is_rref(ann):
+        if ann is RRef:
+            raise RuntimeError(
+                "Attempted to use RRef without a "
+                "contained type. Please add a contained type, e.g. "
+                "RRef[int]"
+            )
+        return getattr(ann, "__origin__", None) is RRef
 
 try:
     import typing_extensions
@@ -698,38 +695,6 @@ except ImportError:
 
     def is_final(ann):
         return isinstance(ann, FinalInstance)
-
-
-try:
-    from typing import TypeVar, Generic
-
-    T = TypeVar('T')
-
-    class RRef(Generic[T]):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    def is_rref(ann):
-        return getattr(ann, "__origin__", None) is RRef
-
-except ImportError:
-    class RRefInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class RRefCls(object):
-        def __getitem__(self, types):
-            return RRefInstance(types)
-
-    RRef = RRefCls()  # noqa: T484
-
-    def is_rref(ann):
-        return isinstance(ann, RRefInstance)
-
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
@@ -801,4 +766,4 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def fake_range():
-    return SourceContext('', None, 0, 0)
+    return SourceContext('', None, 0, 0).make_raw_range(0, 1)

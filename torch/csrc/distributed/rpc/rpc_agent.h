@@ -10,8 +10,12 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-constexpr auto kDefaultRpcTimeout = std::chrono::seconds(60);
+// Default RPC timeout
+constexpr float kDefaultRpcTimeoutSeconds = 60;
+// Unset RPC timeout. This is the value agent::send() will have if user does not
+// pass in a specific timeout, and indicates that we must use the default
+// timeout for RPCs.
+constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
 
 using steady_clock_time_point =
@@ -24,20 +28,21 @@ using TypeResolver =
 
 struct RpcBackendOptions {
   RpcBackendOptions()
-      : RpcBackendOptions(kDefaultRpcTimeout, kDefaultInitMethod) {}
+      : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 
-  RpcBackendOptions(
-      std::chrono::milliseconds rpcTimeout,
-      std::string initMethod)
-      : rpcTimeout(rpcTimeout), initMethod(initMethod) {}
+  RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
+      : rpcTimeoutSeconds(rpcTimeoutSeconds),
+        initMethod(std::move(initMethod)) {
+    TORCH_CHECK(rpcTimeoutSeconds >= 0, "RPC Timeout must be non-negative");
+  }
 
-  std::chrono::milliseconds rpcTimeout;
+  float rpcTimeoutSeconds;
   std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
-struct TORCH_API WorkerInfo {
-  WorkerInfo(std::string name, int id)
+struct TORCH_API WorkerInfo : torch::CustomClassHolder {
+  WorkerInfo(std::string name, int64_t id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
         id <= std::numeric_limits<worker_id_t>::max(),
@@ -73,6 +78,10 @@ struct TORCH_API WorkerInfo {
   const worker_id_t id_;
 };
 
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const WorkerInfo& workerInfo);
+
 // Struct for options to configure the RPC Retry protocol.
 struct TORCH_API RpcRetryOptions {
   // Using a default constructor like all other Options structs in the RPC
@@ -80,7 +89,7 @@ struct TORCH_API RpcRetryOptions {
   // sendWithRetries function.
   RpcRetryOptions() = default;
   // Maximum number of times we will retry the RPC
-  int maxRetries{3};
+  int maxRetries{5};
   // Initial duration between consecutive RPC send attempts
   std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
   // Constant for exponential backoff used while calculating future wait
@@ -147,7 +156,8 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
-      Message&& message) = 0;
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -155,7 +165,7 @@ class TORCH_API RpcAgent {
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
   // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
-  // number of retries for this RPC (default is 3), initial duration between
+  // number of retries for this RPC (default is 5), initial duration between
   // sends (default is 1000ms), and backoff constant (default is 1.5) by
   // passing in the RpcRetryOptions struct. This API might end up
   // executing a method twice on the remote end (it does not guarantee
@@ -198,12 +208,24 @@ class TORCH_API RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
-  // start accepting requests
-  virtual void start() = 0;
+  // Sets up backend-agnostic state for accepting requests. Currently, this
+  // entails setting rpcAgentRunning_ to true, creating the retry thread, and
+  // calling the backend's startImpl.
+  void start();
+
+  // Derived classes must override this function to start accepting requests.
+  // This is used to initialize any backend-specific state. Users must call
+  // start, not startImpl, to initialize the RPC Agent.
+  virtual void startImpl() = 0;
 
   // Stop accepting requests and shutdown the RPC framework as soon as possible
   // by terminating all RPC threads.
-  virtual void shutdown() = 0;
+  void shutdown();
+
+  // Derived classes must override this function to start accepting requests.
+  // THis is used to clean up any backend-specific state. Users must call
+  // shutdown, not shutdownImpl, to shutdown the RPC Agent.
+  virtual void shutdownImpl() = 0;
 
   // Check if current RPC agent is set.
   static bool isCurrentRpcAgentSet();
@@ -240,18 +262,16 @@ class TORCH_API RpcAgent {
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
   std::atomic<bool> profilingEnabled_;
   std::shared_ptr<TypeResolver> typeResolver_;
+  // Atomic boolean indicating whether this agent is running. It controls
+  // whether several background threads should be running. It is set in
+  // RpcAgent::start() and unset in the derived class shutdown().
+  std::atomic<bool> rpcAgentRunning_;
 
  private:
   static std::shared_ptr<RpcAgent> currentRpcAgent_;
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
-
-  // Function that cleans up the local state for RpcAgent. This is called from
-  // the destructor, and ensures that we can gracefully destruct even if the
-  // child class was not successfully constructed without calling a virtual
-  // function.
-  void cleanup();
 
   // Map that stores metadata for RPC's that may need to be re-tried as well as
   // the timepoint at which we should re-try them.
@@ -276,8 +296,7 @@ class TORCH_API RpcAgent {
   // error and do not retry again. In case 3, we move the RpcRetryInfo struct
   // to another time point in the map to schedule the RPC for a future send.
   void rpcRetryCallback(
-      const rpc::Message& message,
-      const c10::optional<utils::FutureError>& futErr,
+      const std::shared_ptr<FutureMessage>& message,
       steady_clock_time_point newTime,
       std::shared_ptr<RpcRetryInfo> earliestRpc);
 
@@ -294,14 +313,6 @@ class TORCH_API RpcAgent {
     return std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() + timedelta);
   }
-
-  // Boolean that indicates whether RpcAgent is running.
-  std::atomic<bool> rpcAgentRunning_;
-
-  // storing futures before adding callback
-  std::vector<
-      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
-      futures;
 
   // Condition Variable to signal when the rpcRetryMap_ has been populated.
   std::condition_variable rpcRetryMapCV_;

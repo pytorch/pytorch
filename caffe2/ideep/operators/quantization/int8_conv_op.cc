@@ -33,7 +33,6 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     const auto &X = Input(INPUT_X);
     const auto &filter = Input(FILTER);
     auto *Y = Output(OUTPUT);
-    auto Y_dims = CalcOutputDims(X, filter.get_dim(0));
 
     CAFFE_ENFORCE(X.has_scale());
     CAFFE_ENFORCE(4 == X.ndims() && 4 == filter.ndims());
@@ -49,38 +48,38 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
 
     bool input_changed = (cached_X_descriptor_ != X.get_descriptor());
     if (input_changed) {
-      op_key_.clear();
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
     bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed) {
-      op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());
 
-      itensor filter_in;
       auto X_dt = X.get_data_type();
       lowp_kind_ = ilowp_kind::LOWP_U8S8;
-      auto filter_scale = filter.get_scale();
       if (X_dt == idtype::s8) {
         lowp_kind_ = ilowp_kind::LOWP_S8S8;
-        filter_in = filter.as_weights().to_public();
-      } else {
-        filter_in = filter.as_weights();
       }
-      filter_in.make_group(group_);
 
       auto expected_descriptor =
-          ideep::convolution_forward::expected_weights_descriptor(
-              filter_in.get_dims(), idtype::s8, stride_, pad_tl(), pad_br(),
-              dilation_, group_, algo_, iprop::forward_inference, X_dt, X.get_dims());
-      if (filter_in.get_descriptor() != expected_descriptor) {
+          ideep::convolution_forward::expected_weights_desc(
+              filter.get_dims(),
+              idtype::s8,
+              {stride_.begin(), stride_.end()},
+              pad_tl(),
+              pad_br(),
+              {dilation_.begin(), dilation_.end()},
+              group_,
+              algo_,
+              iprop::forward_inference,
+              X_dt, X.get_dims());
+      if (filter.get_desc() != expected_descriptor) {
         filter_.init(expected_descriptor);
-        filter_.set_scale(filter_scale);
-        filter_.feed_from(filter_in);
+        filter_.set_scale(filter.get_scale());
+        filter_.feed_from(filter);
       } else {
-        filter_ = filter_in;
+        filter_ = filter;
       }
 
       if (InputSize() > last_input_) {
@@ -96,18 +95,55 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
       }
     }
 
-    if (InputSize() > last_input_) {
-      ideep::convolution_forward::compute(
-          op_key_, X, filter_, bias_, Y_dims, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_,
-          iscale(), iscale(), Y_scales_, attr_, algo_,
-          iprop::forward_inference, ipadding::zero, lowp_kind_);
+    bool with_bias = InputSize() > last_input_;
+    if (input_changed || weights_changed) {
+      auto Y_dims = CalcOutputDims(X, filter.get_dim(0));
+      if (with_bias) {
+        ideep::convolution_forward::prepare(
+            conv_param,
+            X,
+            filter_,
+            bias_,
+            Y_dims,
+            *Y,
+            {stride_.begin(), stride_.end()},
+            {dilation_.begin(), dilation_.end()},
+            pad_tl(),
+            pad_br(),
+            group_,
+            iscale(),
+            iscale(),
+            Y_scales_,
+            attr_,
+            algo_,
+            iprop::forward_inference,
+            lowp_kind_);
+      } else {
+        ideep::convolution_forward::prepare(
+            conv_param,
+            X,
+            filter_,
+            Y_dims,
+            *Y,
+            {stride_.begin(), stride_.end()},
+            {dilation_.begin(), dilation_.end()},
+            pad_tl(),
+            pad_br(),
+            group_,
+            iscale(),
+            iscale(),
+            Y_scales_,
+            attr_,
+            algo_,
+            iprop::forward_inference,
+            lowp_kind_);
+      }
+    }
+
+    if (with_bias) {
+      ideep::convolution_forward::compute(conv_param, X, filter_, bias_, *Y);
     } else {
-      ideep::convolution_forward::compute(
-          op_key_, X, filter_, Y_dims, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_,
-          iscale(), iscale(), Y_scales_, attr_, algo_,
-          iprop::forward_inference, ipadding::zero, lowp_kind_);
+      ideep::convolution_forward::compute(conv_param, X, filter_, *Y);
     }
 
     if (fusion_type_ != FUSION_CONV_RELU && fusion_type_ != FUSION_UNKNOWN) {
@@ -122,7 +158,6 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
  protected:
   iattr attr_;
   ialgo algo_;
-  ikey op_key_;
   float scale_;
   int last_input_;
   int32_t zero_point_;
@@ -132,6 +167,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   itensor filter_, bias_;
   iscale  Y_scales_;
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
+  ideep::convolution_forward_params conv_param;
 
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
   OUTPUT_TAGS(OUTPUT);

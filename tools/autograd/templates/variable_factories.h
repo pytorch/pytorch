@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
 #include <ATen/core/grad_mode.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/core/MemoryFormat.h>
@@ -60,7 +61,8 @@ inline at::Tensor from_blob(
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
@@ -77,7 +79,8 @@ inline at::Tensor from_blob(
     at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
@@ -95,7 +98,8 @@ inline at::Tensor from_blob(
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
@@ -110,7 +114,8 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());

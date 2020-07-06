@@ -1,10 +1,10 @@
-if (USE_NNPACK AND BUILD_CAFFE2_OPS)
+if(USE_NNPACK AND BUILD_CAFFE2_OPS)
   add_subdirectory(nnpack)
 endif()
-if (USE_ZSTD)
+if(USE_ZSTD)
   add_subdirectory(zstd)
 endif()
-if (NOT MSVC)
+if(NOT MSVC)
   add_subdirectory(depthwise)
 endif()
 

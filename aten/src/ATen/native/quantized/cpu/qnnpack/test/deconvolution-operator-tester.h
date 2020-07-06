@@ -14,10 +14,15 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack_func.h>
+
+#include "test_utils.h"
+using namespace qnnpack::testing;
 
 class DeconvolutionOperatorTester {
  public:
@@ -164,6 +169,15 @@ class DeconvolutionOperatorTester {
 
   inline size_t groupInputChannels() const {
     return this->groupInputChannels_;
+  }
+
+  inline DeconvolutionOperatorTester& per_channel(bool per_channel) {
+    this->per_channel_ = per_channel;
+    return *this;
+  }
+
+  inline bool per_channel() const {
+    return this->per_channel_;
   }
 
   inline DeconvolutionOperatorTester& groupOutputChannels(
@@ -374,7 +388,7 @@ class DeconvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8() const {
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -400,12 +414,20 @@ class DeconvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    // Make num zero points multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded =
+      groups() * groupOutputChannels() + 8;
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
+
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      if (per_channel()) {
+        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
@@ -461,7 +483,7 @@ class DeconvolutionOperatorTester {
                                              kx) *
                                                 groupOutputChannels() +
                                             oc]) -
-                               int32_t(kernelZeroPoint));
+                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -494,60 +516,115 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      pytorch_qnnp_operator_t deconvolution = nullptr;
+      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto f32rng =
+          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      if (per_channel()) {
+        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        std::generate(
+            requantization_scales.begin(),
+            requantization_scales.end(),
+            std::ref(scale_generator));
+      }
+      switch(mode) {
+        case Mode::Static:
+        {
+          pytorch_qnnp_operator_t deconvolution = nullptr;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
-              adjustmentHeight(),
-              adjustmentWidth(),
-              kernelHeight(),
-              kernelWidth(),
-              strideHeight(),
-              strideWidth(),
-              dilationHeight(),
-              dilationWidth(),
-              groups(),
-              groupInputChannels(),
-              groupOutputChannels(),
-              inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
-              kernel.data(),
-              bias.data(),
-              outputZeroPoint,
-              outputScale,
-              qmin(),
-              qmax(),
-              0,
-              &deconvolution));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_deconvolution2d_nhwc_q8(
+                  paddingTop(),
+                  paddingRight(),
+                  paddingBottom(),
+                  paddingLeft(),
+                  adjustmentHeight(),
+                  adjustmentWidth(),
+                  kernelHeight(),
+                  kernelWidth(),
+                  strideHeight(),
+                  strideWidth(),
+                  dilationHeight(),
+                  dilationWidth(),
+                  groups(),
+                  groupInputChannels(),
+                  groupOutputChannels(),
+                  inputZeroPoint,
+                  kernelZeroPoints.data(),
+                  kernel.data(),
+                  bias.data(),
+                  outputZeroPoint,
+                  qmin(),
+                  qmax(),
+                  0,
+                  requantization_scales.data(),
+                  &deconvolution));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
-              deconvolution,
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
+                  deconvolution,
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputPtr,
+                  inputPixelStride(),
+                  output.data(),
+                  outputPixelStride(),
+                  nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(deconvolution));
+          deconvolution = nullptr;
+        }
+        break;
+
+        case Mode::Runtime:
+        {
+          qnnpack::conv_param_t deconv_p(
+            {kernelWidth(), kernelHeight()},
+            {strideWidth(), strideHeight()},
+            {dilationWidth(), dilationHeight()},
+            {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+            {adjustmentWidth(), adjustmentHeight()},
+            groups(),
+            groupInputChannels() * groups(),
+            groupOutputChannels() * groups(),
+            /*transpose=*/true,
+            per_channel());
+          auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
+              new qnnpack::PrePackConvWeights(
+                  deconv_p,
+                  kernelZeroPoints.data(),
+                  kernel.data(),
+                  bias.data()));
+          const pytorch_qnnp_status runStatus = qnnpack::qnnpackDeConv(
+              deconv_p,
+              packW->getPackedWeights(),
               batchSize(),
               inputHeight(),
               inputWidth(),
+              inputZeroPoint,
               inputPtr,
-              inputPixelStride(),
+              kernelZeroPoints.data(),
+              requantization_scales.data(),
+              outputZeroPoint,
+              qmin(),
+              qmax(),
               output.data(),
-              outputPixelStride(),
-              nullptr /* thread pool */));
+              nullptr);
+          ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+        }
+        break;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_run_operator(deconvolution, nullptr /* thread pool */));
-
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_delete_operator(deconvolution));
-      deconvolution = nullptr;
+        default:
+          ASSERT_TRUE(false);
+      }
 
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t y = 0; y < outputHeight(); y++) {
@@ -560,8 +637,8 @@ class DeconvolutionOperatorTester {
                               groups() +
                           g) *
                              groupOutputChannels() +
-                         c] /
-                    outputScale;
+                         c] *
+                         requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,
@@ -632,4 +709,5 @@ class DeconvolutionOperatorTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
+  bool per_channel_{false};
 };

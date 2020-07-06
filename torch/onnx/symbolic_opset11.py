@@ -8,7 +8,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import expand
+from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
@@ -21,7 +21,7 @@ from torch.nn.modules.utils import _single, _pair, _triple
 @parse_args('v', 'f', 'f')
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
-    if dtype is not None:
+    if dtype is None:
         dtype = 6  # float
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -43,6 +43,22 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+def clamp_min(g, self, min):
+    max = unused(g)
+    return clamp(g, self, min, max)
+
+
+def clamp_max(g, self, max):
+    min = unused(g)
+    return clamp(g, self, min, max)
+
+
+# Opset 11 gather accepts negative indices
+@parse_args('v', 'i', 'v')
+def select(g, self, dim, index):
+    return g.op("Gather", self, index, axis_i=dim)
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
@@ -216,10 +232,12 @@ def scatter(g, self, dim, index, src):
 @parse_args('v', 'i', 'none')
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
-    csum = g.op("CumSum", self, dim_tensor)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+        cast = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    else:
+        cast = self
+    csum = g.op("CumSum", cast, dim_tensor)
     return csum
 
 
@@ -449,7 +467,9 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim):
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
     return sym_help._size_helper(g, self, dim)
 
 

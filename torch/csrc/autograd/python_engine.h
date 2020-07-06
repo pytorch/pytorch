@@ -11,7 +11,9 @@ namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
-  void thread_init(int device) override;
+  void thread_init(int device,
+      const std::shared_ptr<ReadyQueue>& ready_queue,
+      bool should_increment) override;
   void thread_on_exception(
       std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
@@ -26,6 +28,7 @@ struct PythonEngine : public Engine {
   std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root) override;
+
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
   private:
     PythonEngine();

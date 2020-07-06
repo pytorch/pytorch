@@ -21,11 +21,13 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, int64_t new_size)
     if (!THTensor_getStoragePtr(self)) {
       AT_ERROR("Tensor: invalid null storage");
     }
-    if (new_size + self->storage_offset() > self->storage().numel()) {
-      THCStorage_resize(
+    uint64_t new_size_bytes = (new_size + self->storage_offset()) * self->dtype().itemsize();
+    if (new_size_bytes > self->storage().nbytes()) {
+      THCStorage_resizeBytes(
           globalContext().getTHCState(),
           THTensor_getStoragePtr(self),
-          new_size + self->storage_offset());
+          new_size_bytes
+      );
     }
   }
 }

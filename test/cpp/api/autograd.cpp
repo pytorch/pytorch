@@ -193,7 +193,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
 
   Variable x(torch::ones(1, torch::requires_grad()));
   MyFunction::apply(x).backward(torch::ones(1) , true, true);
-  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1,2));
+  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {
@@ -508,6 +508,9 @@ TEST(CustomAutogradTest, Reentrant) {
   ASSERT_VARIABLE_EQ(x.grad(), y_data);
 }
 
+
+// NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
+// the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {

@@ -1,8 +1,8 @@
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -97,7 +97,7 @@ static void RemoveTupleConstants(Node* n) {
 
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
-  for (Value * elem: elements) {
+  for (Value* elem : elements) {
     RemoveTupleConstants(elem->node());
   }
 
@@ -130,7 +130,8 @@ static void VisitNode(Node* n, Node* insert_point) {
       TORCH_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
-          "unsupported kind: ", n->kind().toQualString());
+          "unsupported kind: ",
+          n->kind().toQualString());
       TORCH_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
@@ -164,7 +165,8 @@ static void VisitNode(Node* n, Node* insert_point) {
       TORCH_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
-          "unsupported kind: ", n->kind().toQualString());
+          "unsupported kind: ",
+          n->kind().toQualString());
       for (size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
       }

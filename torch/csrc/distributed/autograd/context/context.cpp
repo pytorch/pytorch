@@ -1,8 +1,9 @@
+#include <torch/csrc/distributed/autograd/context/context.h>
+
 #include <functional>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
@@ -81,15 +82,19 @@ void DistAutogradContext::accumulateGrad(
 
   // No higher order gradients supported in distributed autograd.
   AutoGradMode grad_mode(false);
+
+  at::Tensor new_grad = AccumulateGrad::callHooks(variable, grad);
+
   // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
   // distributed autograd as part of
   // https://github.com/pytorch/pytorch/issues/33482
-  AccumulateGrad::accumulateGradAndCallHooks(
+  AccumulateGrad::accumulateGrad(
       variable,
       old_grad,
-      grad,
-      // Add +1 here since we can't std::move(grad) since it is a const ref,
-      // which incurs a refcount bump for the Tensor.
+      new_grad,
+      // Add +1 here since we can't std::move(grad) when call
+      // AccumulateGrad::callHooks, since it is a const ref, and that incurs a
+      // refcount bump for the new_grad.
       num_expected_refs + 1,
       [this, &variable](at::Tensor&& grad_update) {
         accumulatedGrads_.insert(variable, std::move(grad_update));
@@ -119,25 +124,23 @@ void DistAutogradContext::resetGraphTask() {
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback(
-      [this](
-          const rpc::Message& /* unused */,
-          const c10::optional<utils::FutureError>& futErr) {
-        if (futErr) {
-          // If we have an error, let the local autograd engine know about it.
-          std::runtime_error err((*futErr).what());
-          std::unique_lock<std::mutex> lock(lock_);
-          if (graphTask_) {
-            graphTask_->set_exception_without_signal(nullptr);
-            lock.unlock();
-            graphTask_->future_result_->setErrorIfNeeded(err.what());
-          } else {
-            LOG(WARNING)
-                << "Ignoring error since GraphTask is no longer valid: "
-                << err.what();
-          }
+  futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
+    if (futureMessage.hasError()) {
+      // If we have an error, let the local autograd engine know about it.
+      std::runtime_error err((*futureMessage.error()).what());
+      std::unique_lock<std::mutex> lock(lock_);
+      if (graphTask_) {
+        graphTask_->set_exception_without_signal(nullptr);
+        lock.unlock();
+        if (!graphTask_->future_completed_.exchange(true)) {
+          graphTask_->future_result_->setErrorIfNeeded(err.what());
         }
-      });
+      } else {
+        LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
+                     << err.what();
+      }
+    }
+  });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
@@ -165,21 +168,20 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     state->future->markCompleted(rpc::Message());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback([state](
-                           const rpc::Message& /* unused */,
-                           const c10::optional<utils::FutureError>& err) {
-        if (err) {
-          // If there's an error, we want to setError() on the future, unless
-          // another error has already been sent - use a CAS to guard.
+      rpc->addCallback([state](const rpc::FutureMessage& rpc) {
+        if (rpc.hasError()) {
+          // If there's an error, we want to setError() on the future,
+          // unless another error has already been sent - use a CAS to
+          // guard.
           //
-          // Don't decrement num remaining here! (We don't need to, since memory
-          // handling is separate). If we simply don't decrement on errors,
-          // reaching 0 means that there were no errors - and hence, we can just
-          // markCompleted() without any other checking there.
+          // Don't decrement num remaining here! (We don't need to, since
+          // memory handling is separate). If we simply don't decrement on
+          // errors, reaching 0 means that there were no errors - and hence,
+          // we can just markCompleted() without any other checking there.
           bool expectedAlreadySent = false;
           if (state->alreadySentError.compare_exchange_strong(
                   expectedAlreadySent, true)) {
-            state->future->setError(err->what());
+            state->future->setError(rpc.error()->what());
           }
           return;
         }
@@ -208,6 +210,44 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
   std::lock_guard<std::mutex> guard(lock_);
   return accumulatedGrads_;
+}
+
+void DistAutogradContext::runGradCallbackForVariable(
+    const torch::autograd::Variable& variable,
+    GradCallback&& cb) {
+  torch::Tensor grad;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    auto it = accumulatedGrads_.find(variable);
+    TORCH_INTERNAL_ASSERT(
+        it != accumulatedGrads_.end(),
+        "The grad for the variable should exist in dist_autograd context.");
+    grad = it->value();
+  }
+  if (cb(grad)) {
+    std::lock_guard<std::mutex> guard(lock_);
+    // Needs to update the grad in the map.
+    accumulatedGrads_.insert_or_assign(variable, std::move(grad));
+  }
+}
+
+namespace {
+thread_local ContextPtr tl_context_ptr;
+} // namespace
+
+ThreadLocalDistAutogradContext::ThreadLocalDistAutogradContext(
+    ContextPtr&& new_context)
+    : prev_context_ptr_(std::move(tl_context_ptr)) {
+  tl_context_ptr = std::move(new_context);
+}
+
+ThreadLocalDistAutogradContext::~ThreadLocalDistAutogradContext() {
+  tl_context_ptr = std::move(prev_context_ptr_);
+}
+
+// static
+ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
+  return tl_context_ptr;
 }
 
 } // namespace autograd

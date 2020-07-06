@@ -127,7 +127,7 @@ class DiagonalTensor(object):
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
         if func not in self.handled_functions:
@@ -202,7 +202,7 @@ class SubTensor(torch.Tensor):
     This is useful for testing that the semantics for overriding torch
     functions are working correctly.
     """
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -312,7 +312,7 @@ class TensorLike(object):
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    def __torch_function__(self, func, args=(), kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -530,6 +530,40 @@ def generate_tensor_like_override_tests(cls):
         setattr(cls, name, test_method)
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
+
+class TestEinsumOverride(TestCase):
+    "Regression test for gh-38479"
+    def test_wrapper(self):
+        class Wrapper():
+            "Basic data container that knows how to unwrap itself"
+            def __init__(self, data):
+                self.data = data
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                # unwrap inputs if necessary
+                def unwrap(v):
+                    return v.data if isinstance(v, Wrapper) else v
+
+                args = map(unwrap, args)
+                kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+
+                return func(*args, **kwargs)
+
+        x = Wrapper(torch.randn(5))
+        y = Wrapper(torch.randn(4))
+        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
+                                       torch.ger(x, y)))
+
+        # in the old einsum interface, `operands` is a list
+        a = Wrapper(torch.randn(2, 3))
+        b = Wrapper(torch.randn(5, 3, 7))
+        c = Wrapper(torch.randn(2, 7))
+        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
+                                       torch.nn.functional.bilinear(a, c, b)))
+
 
 if __name__ == '__main__':
     unittest.main()

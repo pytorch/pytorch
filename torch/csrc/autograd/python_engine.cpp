@@ -38,6 +38,7 @@ Engine& PythonEngine::get_python_engine() {
   // backwards threads hold a lock, we'll probably deadlock in the engine
   // destructor.
   if (_reinitialize_engine) {
+    engine.release_workers();
     engine.~PythonEngine();
     new (&engine) torch::autograd::python::PythonEngine();
     _reinitialize_engine = false;
@@ -45,13 +46,22 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
-void PythonEngine::thread_init(int device) {
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  // Increment thread usage count before acquiring the GIL
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
-  Engine::thread_init(device);
+  Engine::thread_init(device, ready_queue, false);
+
+  if (should_increment) {
+    // Decrement the count during shutdown if we incremented earlier.
+    decrement_non_reentrant_thread_count();
+  }
 }
 
 void PythonEngine::thread_on_exception(
@@ -142,6 +152,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
+    if(variable.is_complex()) {
+      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
+                      "gradients for functions we have not fixed yet");
+    }
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);

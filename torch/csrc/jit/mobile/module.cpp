@@ -1,9 +1,10 @@
-#include "module.h"
-#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#if defined(PYTORCH_MOBILE_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>
-#endif
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <exception>
+
+#include <ATen/record_function.h>
 
 namespace torch {
 namespace jit {
@@ -32,24 +33,46 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
 }
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
-#if defined(PYTORCH_MOBILE_OBSERVER)
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
-    observer->onEnter(name(), method_name);
+    observer->onEnterRunMethod(name(), method_name);
   }
-#endif
+
+  auto debug_info = std::make_shared<MobileDebugInfo>();
+  debug_info->setModelName(name());
+  debug_info->setMethodName(method_name);
+  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   auto m = find_method(method_name);
-  stack.insert(stack.begin(), object_);
-  m->run(stack);
-  c10::IValue result = stack.front();
-
-#if defined(PYTORCH_MOBILE_OBSERVER)
-  if (observer) {
-    observer->onExit();
+  if (m == nullptr) {
+    if (observer) {
+      std::string cancellation_reason =
+          "Method '" + method_name + "' is not defined";
+      observer->onCancelRunMethod(cancellation_reason);
+    }
+    AT_ERROR("Method '", method_name, "' is not defined.");
   }
-#endif
-  return result;
+  try {
+    stack.insert(stack.begin(), object_);
+    m->run(stack);
+    c10::IValue result = stack.front();
+    if (observer) {
+      observer->onExitRunMethod();
+    }
+    return result;
+  } catch (const std::exception& ex) {
+    if (observer) {
+      observer->onFailRunMethod(
+          "Error occured during model running entry point: " +
+          (std::string)ex.what());
+    }
+    TORCH_CHECK(false, ex.what());
+  } catch (...) {
+    if (observer) {
+      observer->onFailRunMethod("unknown exception");
+    }
+    TORCH_CHECK(false, "unknown exception");
+  }
 }
 
 Function* Module::find_method(const std::string& basename) const {
@@ -58,7 +81,7 @@ Function* Module::find_method(const std::string& basename) const {
       return fn.get();
     }
   }
-  AT_ERROR("Method '", basename, "' is not defined.");
+  return nullptr;
 }
 
 namespace {

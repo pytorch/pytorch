@@ -49,6 +49,8 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+static PyObject* THPVariableFunctionsModule = NULL;
+
 static void check_out_type_matches(Tensor result,
                                    ScalarType scalarType, bool scalarType_is_none,
                                    c10::optional<at::Layout> layout,
@@ -112,6 +114,10 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
 
   if (r.idx == 0) {
     if (r.isNone(1)) {
@@ -178,6 +184,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   if (r.idx == 0) {
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
         "and will be removed in 0.5. Note that arange generates values in [start; end), "
@@ -199,11 +206,93 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
+inline Tensor dispatch_full(
+    IntArrayRef size,
+    Scalar fill_val,
+    const TensorOptions& options) {
+  torch::utils::maybe_initialize_cuda(options);
+  pybind11::gil_scoped_release no_gil;
+  return at::full(size, fill_val, options);
+}
+
+inline Tensor dispatch_full(
+    IntArrayRef size,
+    Scalar fill_val,
+    c10::optional<DimnameList> names,
+    const TensorOptions& options) {
+  torch::utils::maybe_initialize_cuda(options);
+  pybind11::gil_scoped_release no_gil;
+  return at::full(size, fill_val, names, options);
+}
+
+inline Tensor dispatch_full(
+    IntArrayRef size,
+    Scalar fill_val,
+    Tensor result) {
+  pybind11::gil_scoped_release no_gil;
+  return at::full_out(result, size, fill_val);
+}
+
+static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+
+  static PythonArgParser parser({
+    "full(IntArrayRef size, Scalar fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "full(IntArrayRef size, Scalar fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+  }, /*traceable=*/true);
+
+  // Acquires (common) arguments
+  ParsedArgs<8> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
+  auto size = r.intlist(0);
+  auto fill_val = r.scalar(1);
+  const auto options = TensorOptions{}
+      .dtype(r.scalartypeOptional(3))
+      .layout(r.layout(4))
+      .device(r.device(5))
+      .pinned_memory(r.toBool(6))
+      .requires_grad(r.toBool(7));
+
+  if (r.idx == 0) {
+    // full
+    if (r.isNone(2)) {
+      return wrap(dispatch_full(size, fill_val, options).set_requires_grad(r.toBool(7)));
+    }
+
+    // full.out
+    // Validates out tensor and other kwargs
+    auto result = r.tensor(2);
+    TORCH_CHECK(!r.toBool(6), " `pin_memory` and `out` parameters are incompatible");
+    check_out_type_matches(result, r.scalartype(3), r.isNone(3), r.layout(4),
+                          r.device(5), r.isNone(5));
+
+    return wrap(dispatch_full(size, fill_val, result).set_requires_grad(r.toBool(7)));
+  } else if (r.idx == 1) {
+    // full.names
+    if (r.isNone(2)) {
+      return wrap(dispatch_full(size, fill_val, c10::nullopt, options).set_requires_grad(r.toBool(7)));
+    }
+
+    // Converts from c10::optional<std:vector...> to c10::optional<ArrayRef...>
+    auto raw_names = r.toDimnameListOptional(2);
+    c10::optional<DimnameList> names(*raw_names);
+    return wrap(dispatch_full(size, fill_val, names, options).set_requires_grad(r.toBool(7)));
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, c10::optional<Generator> generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, c10::optional<Generator> generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, generator, options);
@@ -217,11 +306,11 @@ inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptio
   pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<Generator> generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<Generator> generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, generator, options);
@@ -246,6 +335,11 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
   if (r.idx == 0) {
     if (r.isNone(3)) {
       auto high = r.toInt64(0);
@@ -338,6 +432,14 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on python object to allow torch.tensor to be constructed with arbitrarily nested
 // python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -392,12 +494,15 @@ static PyMethodDef torch_functions[] = {
   {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"full", (PyCFunction)(void(*)(void))THPVariable_full, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"hsmm", (PyCFunction)(void(*)(void))THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", (PyCFunction)(void(*)(void))THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_sparse_coo_tensor_unsafe", (PyCFunction)(void(*)(void))THPVariable__sparse_coo_tensor_unsafe, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_validate_sparse_coo_tensor_args", (PyCFunction)(void(*)(void))THPVariable__validate_sparse_coo_tensor_args, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
@@ -408,7 +513,7 @@ static PyMethodDef torch_functions[] = {
 
 static PyTypeObject THPVariableFunctions = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._VariableFunctions",         /* tp_name */
+  "torch._C._VariableFunctionsClass",    /* tp_name */
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
@@ -447,13 +552,17 @@ static PyTypeObject THPVariableFunctions = {
   0                                      /* tp_new */
 };
 
-static PyObject* THPVariableFunctionsModule = NULL;
-
 void initTorchFunctions(PyObject* module) {
   if (PyType_Ready(&THPVariableFunctions) < 0) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
+
+  // Steals
+  Py_INCREF(&THPVariableFunctions);
+  if (PyModule_AddObject(module, "_VariableFunctionsClass", reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference

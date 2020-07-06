@@ -17,6 +17,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -79,12 +80,16 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  at::AutoNonVariableTypeMode guard;
+  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
   }
   if (PyFloat_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackDouble(value)), options, device);
+  }
+  if (PyComplex_Check(value)) {
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackComplexDouble(value)), options, device);
   }
   throw TypeError(
     "can't assign a %s to a %s",

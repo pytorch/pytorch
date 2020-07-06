@@ -1,12 +1,12 @@
 from collections import OrderedDict
 
+import cimodel.data.simple.util.branch_filters as branch_filters
 import cimodel.data.binary_build_data as binary_build_data
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 
-
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -15,11 +15,14 @@ class Conf(object):
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
         self.gcc_config_variant = gcc_config_variant
+        self.libtorch_config_variant = libtorch_config_variant
 
     def gen_build_env_parms(self):
         elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
         if self.gcc_config_variant is not None:
             elems.append(str(self.gcc_config_variant))
+        if self.libtorch_config_variant is not None:
+            elems.append(str(self.libtorch_config_variant))
         return elems
 
     def gen_docker_image(self):
@@ -33,8 +36,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
-        alt_docker_suffix = self.cuda_version or "100"
+        # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
+        alt_docker_suffix = self.cuda_version or "102"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
@@ -61,32 +64,32 @@ class Conf(object):
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase, nightly)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
-        job_def["requires"] = ["setup"]
         if self.smoke:
-            job_def["requires"].append("update_s3_htmls_for_nightlies")
-            job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
-            job_def["filters"] = {"branches": {"only": "postnightly"}}
+            job_def["requires"] = [
+                "update_s3_htmls",
+            ]
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=["nightly"],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         else:
-            job_def["filters"] = {
-                "branches": {
-                    "only": "nightly"
-                },
-                # Will run on tags like v1.5.0-rc1, etc.
-                "tags": {
-                    # Using a raw string here to avoid having to escape
-                    # anything
-                    "only": r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
-                }
-            }
+            if phase in ["upload"]:
+                filter_branch = "nightly"
+            else:
+                filter_branch = r"/.*/"
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=[filter_branch],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
             if not self.smoke:
-                job_def["requires"].append(self.gen_build_name("build", nightly))
-            if not (self.smoke and self.os == "macos"):
+                job_def["requires"] = [self.gen_build_name("build", nightly)]
+            if not (self.smoke and self.os == "macos") and self.os != "windows":
                 job_def["docker_image"] = self.gen_docker_image()
 
-            if self.cuda_version:
+            if self.os != "windows" and self.cuda_version:
                 job_def["use_cuda_docker_runtime"] = miniutils.quote("1")
         else:
             if self.os == "linux" and phase != "upload":
@@ -94,10 +97,15 @@ class Conf(object):
 
         if phase == "test":
             if self.cuda_version:
-                job_def["resource_class"] = "gpu.medium"
+                if self.os == "windows":
+                    job_def["executor"] = "windows-with-nvidia-gpu"
+                else:
+                    job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
             job_def["context"] = "org-member"
-            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency, nightly)]
+            job_def["requires"] = [
+                self.gen_build_name(upload_phase_dependency, nightly)
+            ]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
@@ -127,29 +135,54 @@ def gen_build_env_list(smoke):
             c.find_prop("smoke"),
             c.find_prop("libtorch_variant"),
             c.find_prop("gcc_config_variant"),
+            c.find_prop("libtorch_config_variant"),
         )
         newlist.append(conf)
 
     return newlist
 
-
-def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux"
-
+def predicate_exclude_macos(config):
+    return config.os == "linux" or config.os == "windows"
 
 def get_nightly_uploads():
     configs = gen_build_env_list(False)
     mylist = []
     for conf in configs:
-        phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
+        phase_dependency = "test" if predicate_exclude_macos(conf) else "build"
         mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
 
     return mylist
 
+def get_post_upload_jobs():
+    """Generate jobs to update HTML indices and report binary sizes"""
+    configs = gen_build_env_list(False)
+    common_job_def = {
+        "context": "org-member",
+        "filters": branch_filters.gen_filter_dict(
+            branches_list=["nightly"],
+            tags_list=[branch_filters.RC_PATTERN],
+        ),
+        "requires": [],
+    }
+    for conf in configs:
+        upload_job_name = conf.gen_build_name(
+            build_or_test="upload",
+            nightly=True
+        )
+        common_job_def["requires"].append(upload_job_name)
+    return [
+        {
+            "update_s3_htmls": {
+                "name": "update_s3_htmls",
+                **common_job_def,
+            },
+        },
+    ]
+
 def get_nightly_tests():
 
     configs = gen_build_env_list(False)
-    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
+    filtered_configs = filter(predicate_exclude_macos, configs)
 
     tests = []
     for conf_options in filtered_configs:

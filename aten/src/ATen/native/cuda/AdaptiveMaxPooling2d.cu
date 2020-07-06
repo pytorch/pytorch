@@ -76,8 +76,8 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output + oh*osizeW + ow;
       int64_t *ptr_ind = indices + oh*osizeW + ow;
-      int argmax = -1;
-      T max = THCNumerics<T>::min();
+      int argmax = istartH * isizeW + istartW;
+      T max = at::numeric_limits<T>::lower_bound(); // -Infinity
       int ih, iw;
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
@@ -255,7 +255,7 @@ void adaptive_max_pool2d_out_cuda_template(
         });
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
 
   } else {
     Tensor input_ = input.contiguous();
@@ -294,7 +294,7 @@ void adaptive_max_pool2d_out_cuda_template(
         });
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
 
   }
 }
@@ -363,7 +363,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         });
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   } else {
     int64_t sizeB  = input.size(0);
     int64_t sizeD  = input.size(1);
@@ -411,7 +411,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         });
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 

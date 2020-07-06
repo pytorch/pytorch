@@ -100,10 +100,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
     if (max_idx >= dim_size) {
-      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
     if (min_idx < -dim_size) {
-      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
   }
   return index.remainder(dim_size);
@@ -181,7 +181,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 namespace {
 void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
-    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+    TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
   auto value_ = value.contiguous();
   Tensor linearIndex, expandedValue, src;
@@ -192,13 +192,13 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
-      linearIndex = linearIndex.view(-1);
+      linearIndex = linearIndex.reshape(-1);
       auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-      linearIndex.div_(sliceSize);
+      linearIndex.floor_divide_(sliceSize);
       {
       sorted_indices.copy_(linearIndex);
       auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -239,7 +239,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
         nElemBefore);
       });
       });
-      THCudaCheck(cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
       if (permuted)
           self.copy_(src_.permute(inversePerm));
   }

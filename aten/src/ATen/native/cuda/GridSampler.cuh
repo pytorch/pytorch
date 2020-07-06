@@ -142,6 +142,17 @@ scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high
   }
 }
 
+template<typename scalar_t> 
+static __forceinline__ __device__ 
+scalar_t safe_downgrade_to_int_range(scalar_t x){
+  // -100.0 does not have special meaning. This is just to make sure 
+  // it's not within_bounds_2d or within_bounds_3d, and does not cause 
+  // undefined behavior. See #35506.  
+  if (x > INT_MAX-1 || x < INT_MIN || !::isfinite(static_cast<double>(x))) 
+    return static_cast<scalar_t>(-100.0); 
+  return x;
+}
+
 // Computes the pixel source index value for a grid coordinate
 template <typename scalar_t>
 static __forceinline__ __device__
@@ -164,6 +175,8 @@ scalar_t grid_sampler_compute_source_index(
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
   }
+
+  coord = safe_downgrade_to_int_range(coord); 
   return coord;
 }
 
@@ -196,6 +209,8 @@ scalar_t grid_sampler_compute_source_index_set_grad(
     coord = clip_coordinates_set_grad(coord, size, &grad_clip);
     *grad_in = (*grad_in) * grad_refl * grad_clip;
   }
+
+  coord = safe_downgrade_to_int_range(coord); 
   return coord;
 }
 

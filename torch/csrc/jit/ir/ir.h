@@ -3,8 +3,8 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/named_value.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/ir/scope.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
@@ -32,6 +32,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
+class AliasDb;
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -161,6 +162,8 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   TORCH_API void inferTypeFrom(const at::Tensor& output);
+  TORCH_API void inferTypeFrom(
+      const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -329,6 +332,16 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+
+  Node* copyMetadata(Node* from) {
+    this->setSourceRange(from->sourceRange());
+    this->setScope(from->scope());
+    if (auto cs = from->callstack()) {
+      this->setCallStack(*cs);
+    }
+    return this;
+  }
+
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
@@ -654,11 +667,14 @@ struct TORCH_API Node {
 
   void dump() const;
 
-  std::ostream &print(std::ostream &out, size_t level,
-                      std::vector<const Node *> *groups,
-                      bool print_source_locations = true,
-                      bool print_attributes = true, bool print_scopes = true,
-                      bool print_body = true) const;
+  std::ostream& print(
+      std::ostream& out,
+      size_t level,
+      std::vector<const Node*>* groups,
+      bool print_source_locations = true,
+      bool print_attributes = true,
+      bool print_scopes = true,
+      bool print_body = true) const;
 
   virtual ~Node() = default;
 
@@ -766,7 +782,7 @@ struct TORCH_API Node {
 
  private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
-  void printAttributes(std::ostream &out, bool ignore_subgraph) const;
+  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
@@ -1120,9 +1136,7 @@ struct Graph {
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
-  TORCH_API Node* createIsInstance(
-      Value* v,
-      at::ArrayRef<TypePtr> types);
+  TORCH_API Node* createIsInstance(Value* v, at::ArrayRef<TypePtr> types);
 
   TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
@@ -1230,6 +1244,7 @@ struct Graph {
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
+  friend void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
@@ -1366,21 +1381,23 @@ TORCH_API std::vector<Value*> insertGraph(
  * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Function* callee,
+    bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
-
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
+
  private:
   friend struct Node;
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
 };
-
 
 } // namespace jit
 } // namespace torch

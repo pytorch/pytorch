@@ -356,7 +356,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
 
   // Now that we have done error check and data_ptr checks, we delegate all
   // further cuFFT parameter computation and plan creation to the helper class
-  // CuFFTConfig in CuFFTUtils.h.
+  // CuFFTConfig in CuFFTPlanCache.h.
 
   // If plan caching is enabled, we check the cache. Note that this accesses
   // plan_cache.max_size() and thus makes this function less functional.

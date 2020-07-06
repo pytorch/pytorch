@@ -1,3 +1,4 @@
+#include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
@@ -5,9 +6,9 @@
 #include <atomic>
 #include <mutex>
 
-#include "tbb/tbb.h"
+#include <tbb/tbb.h>
 #define TBB_PREVIEW_GLOBAL_CONTROL 1
-#include "tbb/global_control.h"
+#include <tbb/global_control.h>
 
 #ifdef _OPENMP
 #include <omp.h>

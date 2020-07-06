@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorIterator.h>

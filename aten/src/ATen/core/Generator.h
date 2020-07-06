@@ -1,17 +1,19 @@
 #pragma once
 
 #include <stdint.h>
-#include <memory>
 #include <mutex>
 #include <deque>
 #include <atomic>
 #include <typeinfo>
 #include <utility>
+#include <cstddef>
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/GeneratorImpl.h>
 
 /**
  * Note [Generator]
@@ -29,7 +31,7 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGenerator.
+ * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
@@ -49,45 +51,79 @@
 
 namespace at {
 
-// The default seed is selected to be a large number
-// with good distribution of 0s and 1s in bit representation
-constexpr uint64_t default_rng_seed_val = 67280421310721;
-
 struct CAFFE2_API Generator {
-  // Constructors
-  Generator(Device device_in, DispatchKeySet key_set);
+  Generator() {}
 
-  // Delete all copy and move assignment in favor of clone()
-  // method
-  Generator(const Generator& other) = delete;
-  Generator(Generator&& other) = delete;
-  Generator& operator=(const Generator& other) = delete;
+  explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
+   : impl_(std::move(gen_impl)) {
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("GeneratorImpl with nullptr is not supported");
+    }
+  }
 
-  virtual ~Generator() = default;
-  std::shared_ptr<Generator> clone() const;
+  bool operator==(const Generator& rhs) const {
+    return this->impl_ == rhs.impl_;
+  }
 
-  // Common methods for all generators
-  virtual void set_current_seed(uint64_t seed) = 0;
-  virtual uint64_t current_seed() const = 0;
-  virtual uint64_t seed() = 0;
-  Device device() const;
+  bool operator!=(const Generator& rhs) const {
+    return !((*this) == rhs);
+  }
 
-  // See Note [Acquire lock when using random generators]
-  std::mutex mutex_;
+  bool defined() const {
+    return static_cast<bool>(impl_);
+  }
 
-  DispatchKeySet key_set() const { return key_set_; }
+  c10::GeneratorImpl* unsafeGetGeneratorImpl() const {
+    return impl_.get();
+  }
 
-  private:
-    Device device_;
-    DispatchKeySet key_set_;
-    virtual Generator* clone_impl() const = 0;
+  c10::GeneratorImpl* unsafeReleaseGeneratorImpl() {
+    return impl_.release();
+  }
+
+  const c10::intrusive_ptr<c10::GeneratorImpl>& getIntrusivePtr() const {
+    return impl_;
+  }
+
+  void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
+
+  uint64_t current_seed() const { return impl_->current_seed(); }
+
+  uint64_t seed() { return impl_->seed(); }
+
+  std::mutex& mutex() {
+    return impl_->mutex_;
+  }
+
+  DispatchKeySet key_set() const {
+    return impl_->key_set();
+  }
+
+  Device device() const { return impl_->device(); }
+
+  inline void set_pyobj(PyObject* pyobj) const noexcept {
+    impl_->set_pyobj(pyobj);
+  }
+
+  inline PyObject* pyobj() const noexcept {
+    return impl_->pyobj();
+  }
+
+  template<typename T>
+  T* get() const { return static_cast<T*>(impl_.get()); }
+
+  Generator clone() const {
+    return Generator(impl_->clone());
+  }
+
+ private:
+  c10::intrusive_ptr<c10::GeneratorImpl> impl_;
 };
 
-namespace detail {
-
-CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
-
-} // namespace detail
+template<class Impl, class... Args>
+Generator make_generator(Args&&... args) {
+  return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
+}
 
 } // namespace at
 

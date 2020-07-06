@@ -17,14 +17,17 @@ namespace rpc {
 // torch/distributed/internal_rpc_utils.py are imported only once.
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
+  struct RRefProxyFunctions {
+    py::object rrefProxyCtor_;
+    py::object rpcSync_;
+    py::object rpcAsync_;
+    py::object remote_;
+  };
+
   static PythonRpcHandler& getInstance();
 
-  // Deserialize Python function, run it, and serialize its return value.
-  SerializedPyObj generatePythonUDFResult(
-      const SerializedPyObj& serializedPyObj);
-
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const SerializedPyObj& serializedObj);
+  py::object runPythonUdf(const py::object& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -36,9 +39,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   void handleException(const py::object& obj);
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
-
-  // Get QualifiedName string of a py::object.
-  c10::QualifiedName getQualifiedName(const py::object& obj);
+  // Check if obj is an RemoteException instance.
+  bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
@@ -68,6 +70,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
 
+  const RRefProxyFunctions& getRRefProxyFunctions() const;
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
@@ -89,8 +93,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
 
-  // Ref to 'torch.jit._qualified_name'
-  py::object pyGetQualifiedName_;
+  RRefProxyFunctions rrefProxyFunctions_;
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)

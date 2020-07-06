@@ -1,11 +1,20 @@
+import copy
+import gc
 import inspect
+import runpy
 import threading
 from functools import wraps
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf
+    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 # Note: Generic Device-Type Testing
 #
@@ -19,11 +28,11 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 #           (1b) @deviceCountAtLeast(<minimum number of devices to run test with>)
 #                testX(self, devices)
 #
-#           (1c) @dtypes(<list of dtypes>)
+#           (1c) @dtypes(<list of dtypes> or <list of tuples of dtypes>)
 #                testX(self, device, dtype)
 #
 #           (1d) @deviceCountAtLeast(<minimum number of devices to run test with>)
-#                @dtypes(<list of dtypes>)
+#                @dtypes(<list of dtypes> or <list of tuples of dtypes>)
 #                testX(self, devices, dtype)
 #
 #
@@ -38,8 +47,9 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 #       primary device. These tests will be skipped if the device type
 #       has fewer available devices than the argument to @deviceCountAtLeast.
 #
-#       Tests like (1c) are called with a device string and a torch.dtype from
-#       the list of dtypes specified in the @dtypes decorator. Device-specific
+#       Tests like (1c) are called with a device string and a torch.dtype (or
+#       a tuple of torch.dtypes) from the list of dtypes (or list of tuples
+#       of torch.dtypes) specified in the @dtypes decorator. Device-specific
 #       dtype overrides can be specified using @dtypesIfCPU and @dtypesIfCUDA.
 #
 #       Tests like (1d) take a devices argument like (1b) and a dtype
@@ -154,7 +164,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
-    _tls.precision = TestCase.precision
+    _tls.precision = TestCase._precision
 
     @property
     def precision(self):
@@ -209,8 +219,15 @@ class DeviceTypeTestBase(TestCase):
             setattr(cls, test_name, instantiated_test)
         else:  # Test has dtype variants
             for dtype in dtypes:
-                dtype_str = str(dtype).split('.')[1]
-                dtype_test_name = test_name + "_" + dtype_str
+                # Constructs dtype suffix
+                if isinstance(dtype, (list, tuple)):
+                    dtype_str = ""
+                    for d in dtype:
+                        dtype_str += "_" + str(d).split('.')[1]
+                else:
+                    dtype_str = "_" + str(dtype).split('.')[1]
+
+                dtype_test_name = test_name + dtype_str
                 assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
 
                 @wraps(test)
@@ -263,7 +280,7 @@ class CUDATestBase(DeviceTypeTestBase):
         cls.no_magma = not torch.cuda.has_magma
 
         # Determines if cuDNN is available and its version
-        cls.no_cudnn = not (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(t))
+        cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
 
         # Acquires the current device as the primary (test) device
@@ -275,6 +292,30 @@ device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
 
+
+# Note [How to extend DeviceTypeTestBase to add new test device]
+# The following logic optionally allows downstream projects like pytorch/xla to
+# add more test devices.
+# Instructions:
+#  - Add a python file (e.g. pytorch/xla/test/pytorch_test_base.py) in downstream project.
+#    - Inside the file, one should inherit from `DeviceTypeTestBase` class and define
+#      a new DeviceTypeTest class (e.g. `XLATestBase`) with proper implementation of
+#      `instantiate_test` method.
+#    - DO NOT import common_device_type inside the file.
+#      `runpy.run_path` with `globals()` already properly setup the context so that
+#      `DeviceTypeTestBase` is already available.
+#    - Set a top-level variable `TEST_CLASS` equal to your new class.
+#      E.g. TEST_CLASS = XLATensorBase
+#  - To run tests with new device type, set `TORCH_TEST_DEVICE` env variable to path
+#    to this file. Multiple paths can be separated by `:`.
+# See pytorch/xla/test/pytorch_test_base.py for a more detailed example.
+_TORCH_TEST_DEVICES = os.environ.get('TORCH_TEST_DEVICES', None)
+if _TORCH_TEST_DEVICES:
+    for path in _TORCH_TEST_DEVICES.split(':'):
+        mod = runpy.run_path(path, init_globals=globals())
+        device_type_test_bases.append(mod['TEST_CLASS'])
+
+
 PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 
@@ -282,7 +323,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -304,7 +345,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
+        if except_for is not None and only_for is not None:
+            assert base.device_type not in except_for or base.device_type not in only_for,\
+                "same device cannot appear in except_for and only_for"
         if except_for is not None and base.device_type in except_for:
+            continue
+        if only_for is not None and base.device_type not in only_for:
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
@@ -320,7 +366,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
                 # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, test)
+                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
@@ -370,14 +416,14 @@ class skipIf(object):
 class skipCPUIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCPUIf, self).__init__(dep, reason, device_type='cpu')
+        super().__init__(dep, reason, device_type='cpu')
 
 
 # Skips a test on CUDA if the condition is true.
 class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
-        super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
+        super().__init__(dep, reason, device_type='cuda')
 
 
 # Only runs on cuda, and only run when there is enough GPU RAM
@@ -387,6 +433,40 @@ def largeCUDATensorTest(size):
         size = 1024 ** 3 * int(size[:-2])
     valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
     return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
+
+
+def largeTensorTest(size):
+    """Skip test if the device has insufficient memory to run the test"""
+    if isinstance(size, str):
+        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        size = 1024 ** 3 * int(size[:-2])
+
+    def inner(fn):
+        @wraps(fn)
+        def dep_fn(self, *args, **kwargs):
+            if self.device_type == 'cuda':
+                valid = (torch.cuda.is_available() and
+                         torch.cuda.get_device_properties(0).total_memory >= size)
+            else:
+                if not HAS_PSUTIL:
+                    raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
+
+                # The sanitizers have significant memory overheads
+                if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+                    effective_size = size * 10
+                else:
+                    effective_size = size
+
+                if psutil.virtual_memory().available < effective_size:
+                    gc.collect()
+                valid = psutil.virtual_memory().available >= effective_size
+
+            if not valid:
+                raise unittest.SkipTest('Insufficient {} memory'.format(self.device_type))
+
+            return fn(self, *args, **kwargs)
+        return dep_fn
+    return inner
 
 
 class expectedFailure(object):
@@ -499,14 +579,26 @@ class precisionOverride(object):
 #   (1) Tests that accept the dtype argument MUST use this decorator.
 #   (2) Can be overridden for the CPU or CUDA, respectively, using dtypesIfCPU
 #       or dtypesIfCUDA.
-#   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
+#   (3) Can accept an iterable of dtypes or an iterable of tuples
+#       of dtypes.
+# Examples:
+# @dtypes(torch.float32, torch.float64)
+# @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
 class dtypes(object):
 
     # Note: *args, **kwargs for Python2 compat.
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
-        assert args is not None and len(args) != 0, "No dtypes given"
-        assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
+        if len(args) > 0 and isinstance(args[0], (list, tuple)):
+            for arg in args:
+                assert isinstance(arg, (list, tuple)), \
+                    "When one dtype variant is a tuple or list, " \
+                    "all dtype variants must be. " \
+                    "Received non-list non-tuple dtype {0}".format(str(arg))
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), "Unknown dtype in {0}".format(str(arg))
+        else:
+            assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
+
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
 
@@ -522,14 +614,14 @@ class dtypes(object):
 class dtypesIfCPU(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
+        super().__init__(*args, device_type='cpu')
 
 
 # Overrides specified dtypes on CUDA.
 class dtypesIfCUDA(dtypes):
 
     def __init__(self, *args):
-        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
+        super().__init__(*args, device_type='cuda')
 
 
 def onlyCPU(fn):

@@ -290,8 +290,8 @@ const float minf = -1.0f * std::numeric_limits<float>::infinity();
 // implementations at compile time and have a better chance of inlining
 template <typename Functor>
 void MaskWithFunctor(
-    size_t N,
-    size_t M,
+    int N,
+    int M,
     int B,
     const float* in,
     Functor fn,
@@ -332,8 +332,8 @@ void MaskWithFunctor(
 // Repeat masking along continuous segments (right axes) of size D
 template <typename Functor>
 void RepeatedMaskWithFunctor(
-    size_t N,
-    size_t M,
+    int N,
+    int M,
     int D,
     const float* in,
     Functor fn,

@@ -2,9 +2,9 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/CUDAGenerator.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -140,17 +140,17 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#ifdef __HIP_PLATFORM_HCC__
-  // XXX HIP function signature is not compatible yet
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+  // HIP function signature is not compatible yet
   uint32_t max_blocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &max_blocks, function_, 128, 0));
   maxBlocks_ = max_blocks;
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
 #endif
-maxBlocks_ *= prop_->multiProcessorCount;
+  maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
   at::cuda::set_device(prior_device);
@@ -171,7 +171,8 @@ void FusedKernelCUDA::launch_raw(
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
-  // Note: philox_engine_inputs defined here so its lifetime extends to the launch
+  // Note: philox_engine_inputs defined here so its lifetime extends to the
+  // launch
   std::pair<uint64_t, uint64_t> philox_engine_inputs;
   if (has_random_) {
     const auto rand_offset =
@@ -179,8 +180,10 @@ void FusedKernelCUDA::launch_raw(
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     {
       // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
     }
     arguments.push_back(&philox_engine_inputs.first);
     arguments.push_back(&philox_engine_inputs.second);
@@ -229,7 +232,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(at::DeviceType::CUDA, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda
 } // namespace fuser

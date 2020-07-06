@@ -33,23 +33,18 @@ class MkldnnLinear(torch.jit.ScriptModule):
         return y
 
 
-class MkldnnConv2d(torch.jit.ScriptModule):
+class _MkldnnConvNd(torch.jit.ScriptModule):
+    """Common base of MkldnnConv1d and MkldnnConv2d"""
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
-        super(MkldnnConv2d, self).__init__()
+        super(_MkldnnConvNd, self).__init__()
 
         self.stride = dense_module.stride
         self.padding = dense_module.padding
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
 
-        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
-            dense_module.weight.to_mkldnn(),
-            self.padding,
-            self.stride,
-            self.dilation,
-            self.groups))
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
@@ -63,6 +58,42 @@ class MkldnnConv2d(torch.jit.ScriptModule):
         return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
+    def forward(self, x):
+        return torch.mkldnn_convolution(
+            x,
+            self.weight,
+            self.bias,
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups)
+
+
+class MkldnnConv1d(_MkldnnConvNd):
+    def __init__(self, dense_module):
+        super(MkldnnConv1d, self).__init__(dense_module)
+
+        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        self.weight = state[0].to_mkldnn()
+        self.bias = state[1].to_mkldnn()
+        self.training = state[2]
+
+
+class MkldnnConv2d(_MkldnnConvNd):
+    def __init__(self, dense_module):
+        super(MkldnnConv2d, self).__init__(dense_module)
+
+        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
+            dense_module.weight.to_mkldnn(),
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups))
+
+    @torch.jit.script_method
     def __setstate__(self, state):
         self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
@@ -72,17 +103,6 @@ class MkldnnConv2d(torch.jit.ScriptModule):
             self.groups)
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
-
-    @torch.jit.script_method
-    def forward(self, x):
-        return torch.conv2d(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups)
 
 
 class MkldnnBatchNorm2d(torch.jit.ScriptModule):
@@ -141,6 +161,8 @@ def to_mkldnn(module):
     def m_fn(m):
         if isinstance(m, torch.nn.Linear):
             return MkldnnLinear(m)
+        elif isinstance(m, torch.nn.Conv1d):
+            return MkldnnConv1d(m)
         elif isinstance(m, torch.nn.Conv2d):
             return MkldnnConv2d(m)
         elif isinstance(m, torch.nn.BatchNorm2d):

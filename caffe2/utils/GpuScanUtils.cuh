@@ -68,12 +68,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   T index = __popcll(getLaneMaskLe() & vote);
   T carry = __popcll(vote);
 #else
-#if CUDA_VERSION >= 9000
   T vote = __ballot_sync(__activemask(), in);
-#else
-  T vote = __ballot(in);
-#endif  // CUDA_VERSION
-
   T index = __popc(getLaneMaskLe() & vote);
   T carry = __popc(vote);
 #endif  // __HIP_PLATFORM_HCC__

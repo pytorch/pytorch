@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/codegen.h"
+#include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
 
@@ -39,11 +39,22 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    const Stmt& stmt,
-    const std::vector<CodeGen::BufferArg>& params) {
+    Stmt* stmt,
+    const std::vector<CodeGen::BufferArg>& params,
+    at::Device device) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params);
+  return method(stmt, params, device);
+}
+
+const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
+  if (v->op_type() == kSigmoid) {
+    ExprHandle x{v->param(0)};
+    ExprHandle y =
+        ExprHandle(1.0f) / (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - x));
+    return y.node();
+  }
+  return v;
 }
 
 } // namespace tensorexpr

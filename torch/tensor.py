@@ -1,4 +1,3 @@
-import sys
 import torch
 import torch._C as _C
 from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
@@ -7,20 +6,15 @@ from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
 import weakref
-from torch._six import imap
 from torch._C import _add_docstr
 from numbers import Number
 import functools
 
 
 def _wrap_type_error_to_not_implemented(f):
-    from torch import _six
-    import inspect
-
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
-    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
-                else functools.WRAPPER_ASSIGNMENTS)
+    assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
@@ -155,17 +149,8 @@ class Tensor(torch._C._TensorBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        # All strings are unicode in Python 3, while we have to encode unicode
-        # strings in Python2. If we can't, let python decide the best
-        # characters to replace unicode characters with.
-        if sys.version_info > (3,):
-            return torch._tensor_str._str(self)
-        else:
-            if hasattr(sys.stdout, 'encoding'):
-                return torch._tensor_str._str(self).encode(
-                    sys.stdout.encoding or 'UTF-8', 'replace')
-            else:
-                return torch._tensor_str._str(self).encode('UTF-8', 'replace')
+        # All strings are unicode in Python 3.
+        return torch._tensor_str._str(self)
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
@@ -176,8 +161,10 @@ class Tensor(torch._C._TensorBase):
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
-        This function accumulates gradients in the leaves - you might need to
-        zero them before calling it.
+        This function accumulates gradients in the leaves - you might need to zero
+        ``.grad`` attributes or set them to ``None`` before calling it.
+        See :ref:`Default gradient layouts<default-grad-layouts>`
+        for details on the memory layout of accumulated gradients.
 
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
@@ -361,6 +348,12 @@ class Tensor(torch._C._TensorBase):
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
                           pad_mode, normalized, onesided)
 
+    def istft(self, n_fft, hop_length=None, win_length=None, window=None,
+              center=True, normalized=False, onesided=True, length=None):
+        r"""See :func:`torch.istft`"""
+        return torch.istft(self, n_fft, hop_length, win_length, window, center,
+                           normalized, onesided, length)
+
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
         from torch.autograd._functions import Resize
@@ -403,7 +396,7 @@ class Tensor(torch._C._TensorBase):
         return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
-        if self.dtype.is_floating_point:
+        if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)
@@ -423,7 +416,8 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        return self.new_tensor(other) ** self
+        dtype = torch.result_type(other, self)
+        return torch.tensor(other, dtype=dtype, device=self.device) ** self
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
@@ -452,12 +446,6 @@ class Tensor(torch._C._TensorBase):
         return self.shape[0]
 
     def __iter__(self):
-        # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
-        # generator and don't eagerly perform all the indexes.  This could
-        # save us work, and also helps keep trace ordering deterministic
-        # (e.g., if you zip(*hiddens), the eager map will force all the
-        # indexes of hiddens[0] before hiddens[1], while the generator
-        # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -465,7 +453,7 @@ class Tensor(torch._C._TensorBase):
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '
                           'incorrect results).', category=RuntimeWarning)
-        return iter(imap(lambda i: self[i], range(self.size(0))))
+        return iter(map(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
         return id(self)
@@ -670,7 +658,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
             >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
-            >>> imgs.names, images.shape
+            >>> imgs.names, imgs.shape
             (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
 
         .. warning::
@@ -747,7 +735,7 @@ class Tensor(torch._C._TensorBase):
                           "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
                           "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
                           "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more informations.")
+                          "github.com/pytorch/pytorch/pull/30531 for more informations.", stacklevel=2)
         return self._grad
 
     @grad.setter

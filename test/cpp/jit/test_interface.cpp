@@ -3,9 +3,9 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
-#include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -41,7 +41,7 @@ static void import_libs(
       &tensor_table,
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
-  si.loadNamedType(QualifiedName(class_name));
+  si.loadType(QualifiedName(class_name));
 }
 
 void testModuleInterfaceSerialization() {

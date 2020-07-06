@@ -17,10 +17,6 @@ Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
   try {
     predictor = Caffe2IOSPredictor::NewCaffe2IOSPredictor(
         init_net, predict_net, disableMultithreadProcessing, allowMetalOperators);
-  } catch (const caffe2::EnforceNotMet& e) {
-    std::string error = e.msg();
-    errorMessage.swap(error);
-    return NULL;
   } catch (const std::exception& e) {
     std::string error = e.what();
     errorMessage.swap(error);

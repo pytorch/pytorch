@@ -37,7 +37,7 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   // PyDict_GetItemString returns a borrowed reference
   PyObject* stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
-    AT_WARN("Error detected in ", current_node_name, ". ",
+    TORCH_WARN("Error detected in ", current_node_name, ". ",
             "No forward pass information available. Enable detect anomaly "
             "during forward pass for more information.");
     return;
@@ -55,7 +55,7 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
     throw python_error();
   }
 
-  AT_WARN("Error detected in ", current_node_name, ". ",
+  TORCH_WARN("Error detected in ", current_node_name, ". ",
           "Traceback of forward call that caused the error:\n",
           THPUtils_unpackString(msg.get()));
 }

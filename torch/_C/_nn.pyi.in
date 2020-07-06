@@ -1,0 +1,5 @@
+from typing import Callable
+
+# Defined in tools/autograd/templates/python_nn_functions.cpp
+
+${dispatched_hints}

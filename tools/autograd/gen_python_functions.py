@@ -33,7 +33,7 @@
 from collections import defaultdict
 import re
 from .gen_variable_type import should_trace
-from .utils import write
+from .utils import write, is_tensor_method
 
 try:
     from src.ATen.code_template import CodeTemplate
@@ -61,6 +61,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    'full(_out)?',
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
@@ -70,7 +71,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -215,7 +216,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
-    'Generator *': 'generator',
+    'c10::optional<Generator>': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',
@@ -348,6 +349,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
+    'std::tuple<double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
@@ -1442,10 +1444,6 @@ def get_tensor_options(declaration):
 
 def has_tensor_options(declaration):
     return get_tensor_options(declaration) is not None
-
-
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
 
 
 def is_torch_function(declaration):

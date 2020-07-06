@@ -41,7 +41,7 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
 #ifdef _WIN32
@@ -111,6 +111,13 @@
 #define TORCH_HIP_API C10_EXPORT
 #else
 #define TORCH_HIP_API C10_IMPORT
+#endif
+
+// Enums only need to be exported on windows
+#ifdef _WIN32
+#define C10_API_ENUM C10_API
+#else
+#define C10_API_ENUM
 #endif
 
 #endif // C10_MACROS_MACROS_H_
