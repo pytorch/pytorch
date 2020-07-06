@@ -1453,7 +1453,7 @@ class AbstractTestCases:
             self.assertEqual(res, res2, atol=0, rtol=0)
 
             # Vectorization on non-contiguous tensors
-            res = torch.rand(3, 3, 300000)
+            res = torch.rand(3, 3, 300000).to(torch.int64)
             res = res.permute(2, 0, 1)
             torch.arange(0, 300000*3*3, out=res)
             self.assertEqual(res.flatten(), torch.arange(0, 300000*3*3))
