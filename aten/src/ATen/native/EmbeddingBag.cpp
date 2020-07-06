@@ -28,6 +28,9 @@ namespace {
 namespace at {
 namespace native {
 
+template<typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+
 static void make_offset2bag(const Tensor &offsets, const Tensor &indices, Tensor& offset2bag) {
   offset2bag.index_add_(
       0, offsets, at::ones_like(offsets, LEGACY_CONTIGUOUS_MEMORY_FORMAT)); // offset2bag = [1 0 1 0 1]
@@ -784,7 +787,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       auto bag_idx = offset2bag_data[sample_idx];
       auto embedding_idx = indices_data[sample_idx];
 
-      output_data[sample_idx] = THBlas_dot<scalar_t>(
+      output_data[sample_idx] = dot_impl<scalar_t>(
           embedding_features,
           grad_data + grad_stride0 * bag_idx, grad_stride1,
           weight_data + weight_stride0 * embedding_idx, weight_stride1);
