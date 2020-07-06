@@ -997,7 +997,7 @@ std::string pretty_print_onnx(
       false,
       std::string());
   if (google_printer) {
-    return graph_encoder.get_model_proto().DebugString();
+    return onnx::ProtoDebugString(graph_encoder.get_model_proto());
   }
   return prettyPrint(graph_encoder.get_model_proto());
 }
