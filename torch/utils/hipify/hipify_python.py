@@ -345,8 +345,8 @@ def processKernelLaunches(string, stats):
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
         hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel_dim3[0:-1].replace(
-            ">>>", ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", "
-            ).replace(kernel_name_with_template, "(" + kernel_name_with_template + ")")
+            ">>>", ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(
+            ">>>", ", ").replace(kernel_name_with_template, "(" + kernel_name_with_template + ")")
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
