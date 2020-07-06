@@ -6,7 +6,7 @@ from torch._ops import ops
 
 
 class FloatFunctional(torch.nn.Module):
-    r"""State collector class for float operatitons.
+    r"""State collector class for float operations.
 
     The instance of this class can be used instead of the ``torch.`` prefix for
     some operations. See example usage below.
@@ -84,7 +84,7 @@ class FloatFunctional(torch.nn.Module):
 
 
 class QFunctional(torch.nn.Module):
-    r"""Wrapper class for quantized operatitons.
+    r"""Wrapper class for quantized operations.
 
     The instance of this class can be used instead of the
     ``torch.ops.quantized`` prefix. See example usage below.

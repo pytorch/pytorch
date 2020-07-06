@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <ATen/ThreadLocalState.h>
 #include <fmt/format.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
@@ -20,13 +21,21 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     std::vector<c10::IValue>& stack,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
-  if (torch::autograd::profiler::profilerEnabled() &&
+  // This dummy tensor holds an at::RecordFunction when profiling is enabled.
+  // This is because at::RecordFunction is not yet registered as a TorchScript
+  // custom class (https://github.com/pytorch/pytorch/issues/35026)
+  at::Tensor handle = at::zeros(1);
+  auto shouldProfile = torch::autograd::profiler::profilerEnabled() &&
       !torch::distributed::rpc::RemoteProfilerManager::getInstance()
-           .isCurrentKeySet()) {
+           .isCurrentKeySet();
+  if (shouldProfile) {
     auto rpcAsyncJitKey = fmt::format(
-        "rpc_async_jit#({})->({})",
+        "rpc_async_jit#({})#({})->({})",
+        qualifiedName
+            .qualifiedName(), /* name of torchscript function being run */
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
         dstWorkerName);
+    handle = torch::autograd::profiler::record_function_enter(rpcAsyncJitKey);
     auto& remoteProfilerManager =
         torch::distributed::rpc::RemoteProfilerManager::getInstance();
     remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
@@ -66,6 +75,11 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       futPtr->markCompleted(deserializeRespToIValue(futMessage.constValue()));
     }
   });
+  if (shouldProfile) {
+    auto profiledFutPtr =
+        torch::autograd::profiler::_call_end_callbacks_on_fut(handle, futPtr);
+    return profiledFutPtr;
+  }
   return futPtr;
 }
 
