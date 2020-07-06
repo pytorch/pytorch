@@ -539,8 +539,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
-             std::set<MobileOptimizerType>& optimization_blacklist) {
-            return optimizeForMobile(module, optimization_blacklist);
+             std::set<MobileOptimizerType>& optimization_blacklist,
+             std::vector<std::string>& preserved_methods) {
+            return optimizeForMobile(
+                module, optimization_blacklist, preserved_methods);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -746,7 +748,7 @@ void initJITBindings(PyObject* module) {
         auto res =
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
-          int i = PyInt_AsLong(res);
+          int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
           if (i > 0) {
             return i;
           }

@@ -11,7 +11,7 @@ programs, and can aid you in debugging.
 .. _excluding-subgraphs:
 
 Excluding subgraphs from backward
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------
 
 Every Tensor has a flag: :attr:`requires_grad` that allows for fine grained
 exclusion of subgraphs from gradient computation and can increase efficiency.
@@ -19,7 +19,7 @@ exclusion of subgraphs from gradient computation and can increase efficiency.
 .. _excluding-requires_grad:
 
 ``requires_grad``
-~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^
 
 If there's a single input to an operation that requires gradient, its output
 will also require gradient. Conversely, only if all inputs don't require
@@ -61,7 +61,7 @@ will also require them.
 .. _how-autograd-encodes-history:
 
 How autograd encodes the history
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------
 
 Autograd is reverse automatic differentiation system.  Conceptually,
 autograd records a graph recording all of the operations that created
@@ -87,7 +87,7 @@ every iteration. You don't have to encode all possible paths before you
 launch the training - what you run is what you differentiate.
 
 In-place operations with autograd
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------
 
 Supporting in-place operations in autograd is a hard matter, and we discourage
 their use in most cases. Autograd's aggressive buffer freeing and reuse makes
@@ -121,7 +121,8 @@ functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
 Multithreaded Autograd
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------
+
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
 that can help you make the best use of it in a multithreaded environment.(this is
@@ -156,7 +157,7 @@ does not block on the concurrent backward computations, example code could be:
 Note that some behaviors that user should be aware of:
 
 Concurrency on CPU
-------------------
+^^^^^^^^^^^^^^^^^^
 
 When you run ``backward()`` or ``grad()`` via python or C++ API in multiple
 threads on CPU, you are expecting to see extra concurrency instead of
@@ -164,7 +165,7 @@ serializing all the backward calls in a specific order during execution
 (behavior before PyTorch 1.6).
 
 Non-determinism
-------------------
+^^^^^^^^^^^^^^^
 
 If you are calling ``backward()`` on multiple thread concurrently but with
 shared inputs (i.e. Hogwild CPU training). Since parameters are automatically
@@ -180,7 +181,7 @@ to happen. User could use the functional API :func:`torch.autograd.grad` to
 calculate the gradients instead of ``backward()`` to avoid non-determinism.
 
 Graph retaining
-------------------
+^^^^^^^^^^^^^^^
 
 If part of the autograd graph is shared between threads, i.e. run first
 part of forward single thread, then run second part in multiple threads,
@@ -192,7 +193,7 @@ crash in this case. Autograd will error out to the user similar to what call
 they should use ``retain_graph=True``.
 
 Thread Safety on Autograd Node
-------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
@@ -204,7 +205,7 @@ for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks
-------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
