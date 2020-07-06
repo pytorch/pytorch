@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 
 namespace torch {
 namespace jit {
