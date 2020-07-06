@@ -56,6 +56,6 @@ class Int8GenQuantParamsOp final : public Operator<Context> {
     return true;
   }
 
-}; // class Int8QunatParamsOp
+}; // class Int8GenQuantParamsOp
 
 } // namespace caffe2
