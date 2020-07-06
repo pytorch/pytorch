@@ -4,8 +4,10 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include "jit/runtime/graph_executor.h"
 
 namespace torch {
 namespace jit {
@@ -118,7 +120,9 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
-    return isDifferentiable(node);
+
+    return (!getProfilingMode() || tensorexpr::isSupported(node)) &&
+        isDifferentiable(node);
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(
