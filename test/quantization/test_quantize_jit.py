@@ -10,6 +10,7 @@ import torch.jit.quantized
 from torch.quantization import (
     QConfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_observer,
     per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
@@ -236,6 +237,37 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
+
+    def test_foldbn_no_fusion(self):
+        ''' Test that we don't fuse the cases when module type does not match
+        '''
+        class CustomConv(torch.nn.Module):
+            def __init__(self):
+                super(CustomConv, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class CustomBn(torch.nn.Module):
+            def __init__(self):
+                super(CustomBn, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = CustomConv()
+                self.bn = CustomBn()
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        m = torch.jit.script(M())
+        m = fuse_conv_bn_jit(m)
+        FileCheck().check_count("prim::CallMethod", 2, exactly=True) \
+                   .run(m.graph)
 
     def test_foldbn_complex_cases(self):
         # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
@@ -1066,7 +1098,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
     def test_inplace_option(self):
         for tracing in [True, False]:
-            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3).float(), tracing, self.img_data[0][0])
             qconfig_dict = {'': default_qconfig}
             quantize_jit(
                 model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
@@ -2250,11 +2282,12 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
                 self.dropout = torch.nn.Dropout()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
-                x = self.conv(x)
+                x = self.conv1(x)
                 # add_scalar
                 x = x + 3
                 # mul_scalar
@@ -2315,7 +2348,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 y = []
                 y.append(x)
                 x, _ = y
-                x = self.conv(x)
+                x = self.conv2(x)
                 return x
 
         data = torch.rand(1, 3, 10, 10)
@@ -2335,14 +2368,18 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # TODO: the checks are problematic, we need to split all checks
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_count("quantized::conv2d", 2, exactly=True) \
-                   .check("aten::dequantize") \
+                   .run(m.graph)
+
+        FileCheck().check_count("quantized::conv2d(", 2, exactly=True) \
+                   .run(m.graph)
+
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
 
         FileCheck().check("quantized::add_scalar") \
                    .check("quantized::mul_scalar") \
+                   .check("aten::append(") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
@@ -2460,17 +2497,24 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        m = torch.jit.script(M())
-        m = prepare_dynamic_jit(m, {'': default_dynamic_qconfig})
-        # for input of FC for dynamic quant
-        assert len(attrs_with_prefix(m, '_observer_')) == 1
-        # for weight
-        assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
-        FileCheck().check('DynamicQuantObserver = prim::GetAttr[name="_observer_') \
-                   .check('prim::GetAttr[name="fc"]') \
-                   .check('prim::CallMethod') \
-                   .check_not('Observer = prim::GetAttr[name="_observer_') \
-                   .run(m.graph)
+        model = torch.jit.script(M())
+        for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            m = prepare_dynamic_jit(model, {'': qconfig})
+
+            # for input of FC for dynamic quant
+            assert len(attrs_with_prefix(m, '_observer_')) == 1
+            # for weight
+            assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
+            if qconfig == float16_dynamic_qconfig:
+                observer_name = 'NoopObserver = prim::GetAttr[name="_observer_'
+            else:
+                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+
+            FileCheck().check(observer_name) \
+                       .check('prim::GetAttr[name="fc"]') \
+                       .check('prim::CallMethod') \
+                       .check_not('Observer = prim::GetAttr[name="_observer_') \
+                       .run(m.graph)
 
 
     def test_prepare_dynamic_child_qconfig(self):
@@ -2701,6 +2745,43 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             for x, obs in model._modules._c.items():
                 graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
             self.assertEqual(ref_qparams, graph_params)
+
+    def test_convert_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
+        FileCheck().check("aten::to") \
+                   .check_next("aten::to") \
+                   .check("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
+
+    def test_quantize_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig})
+
+        FileCheck().check("quantized::linear_prepack_fp16") \
+                   .check_next("quantized::linear_dynamic_fp16") \
+                   .check_not("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
 
 class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
@@ -2953,3 +3034,17 @@ class TestQuantizeJit(QuantizationTestCase):
                     qconfig_dict,
                     debug=True)
                 self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+
+    @skipIfNoFBGEMM
+    def test_linear_dynamic_fp16(self):
+        linear_model = SingleLayerLinearModel().eval()
+        model_eager = quantize_dynamic(linear_model, dtype=torch.float16)
+        result_eager = model_eager(self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        qconfig_dict = {'' : float16_dynamic_qconfig}
+
+        for model in [model_traced, model_script]:
+            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
+            # TODO check model with debug=True matches quantized model result
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)

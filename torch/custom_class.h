@@ -69,9 +69,9 @@ class class_ {
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::intrusive_ptr<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::intrusive_ptr<CurClass>)), classTypePtr});
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::tagged_capsule<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::tagged_capsule<CurClass>)), classTypePtr});
 
     registerCustomClass(classTypePtr);
   }
