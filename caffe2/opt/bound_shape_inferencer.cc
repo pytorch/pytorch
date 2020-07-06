@@ -653,7 +653,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     } else {
       w_data_type = w_shape.data_type();
     }
-    // Note: for FbFCPacked, weight is fp16 but actications are in fp32
+    // Note: for FbFCPacked, weight is fp16 but activations are in fp32
     CheckAndSetTensorBoundShape(
         op.input(0), dimTypes, dims, w_data_type, int8_fc ? true : false);
   } else {
