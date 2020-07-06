@@ -3887,9 +3887,16 @@ class AbstractTestCases:
                 str(obj)
 
             # test complex tensor
+            # complex tensor print uses two formatters, one for real values
+            # and the other for imag values. this is consistent with numpy
             x = torch.tensor([2.3 + 4j, 7 + 6j])
             self.assertEqual(x.__repr__(), str(x))
-            self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
+            self.assertExpectedInline(str(x), '''tensor([2.3000+4.j, 7.0000+6.j])''')
+
+            # test scientific notation for complex tensors
+            x = torch.tensor([1e28 + 2j , -1e-28j])
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertExpectedInline(str(x), '''tensor([1.0000e+28+2.0000e+00j, -0.0000e+00-1.0000e-28j])''')
 
             # test big integer
             x = torch.tensor(2341234123412341)
@@ -3925,6 +3932,13 @@ class AbstractTestCases:
             x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([4.0000,    inf, 1.5000,   -inf, 0.0000,    nan, 1.0000])''')
+
+            y = torch.tensor([4, inf, complex(1.5, inf), complex(-inf, 4), 0, complex(nan, inf), complex(3, nan)])
+            self.assertEqual(y.__repr__(), str(y))
+            expected_str = '''\
+tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj,
+        3.0000+nanj])'''
+            self.assertExpectedInline(str(y), expected_str)
 
             # test dtype
             torch.set_default_dtype(torch.float)
@@ -4013,6 +4027,32 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             self.assertExpectedInline(str(y), expected_str)
 
+            x = torch.ones(100, 2, 2, 10) * (1 + 1j)
+            y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
+            self.assertEqual(str(y), y.__repr__())
+            expected_str = '''\
+tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        ...,
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]]])\
+'''
+            self.assertExpectedInline(str(y), expected_str)
+
             # test print 0-dim tensor: there's no 0-dim in Numpy, we match arrayprint style
             x = torch.tensor(0.00002)
             self.assertEqual(x.__repr__(), str(x))
@@ -4031,6 +4071,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x = torch.tensor([0.00002])
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([2.0000e-05])''')
+
+            # [Numpy] test print complex in sci_mode when real_min < 0.0001 and (or) imag_min < 0.0001.
+            x = torch.tensor([0.00002]) * (1 + 1j)
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertExpectedInline(str(x), '''tensor([2.0000e-05+2.0000e-05j])''')
 
             # [Numpy] test print float in sci_mode when max > 1e8.
             # TODO: Pytorch uses fixed precision to print, while Numpy uses dragon4_scientific
@@ -6714,6 +6759,7 @@ class TestTorchDeviceType(TestCase):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
@@ -6721,8 +6767,10 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
         expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
         self.assertEqual(a << 2, expected_l)
-        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype)  # [1111...111011, 101]
+        self.compare_with_numpy(lambda x: x << 2, lambda x: np.left_shift(x, 2), a)
+        expected_r = torch.tensor([-5, 5], device=device, dtype=dtype)  # [1111...111011, 101]
         self.assertEqual(a >> 1, expected_r)
+        self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
     def test_bitwise_not(self, device):
         res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
@@ -11062,6 +11110,98 @@ class TestTorchDeviceType(TestCase):
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
+              torch.testing.get_all_complex_dtypes()))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_half=True) +
+                    torch.testing.get_all_complex_dtypes()))
+    def test_exp(self, device, dtype):
+        for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
+            if dtype == torch.bfloat16:
+                # Currently multiply a bfloat16 type with floating-point causes error:
+                #   RuntimeError: dtype != ScalarType::Undefined INTERNAL ASSERT FAILED at
+                #   "/pytorch/aten/src/ATen/native/TensorIterator.cpp":125, please report a bug to PyTorch.
+                # We skip bfloat16 for now, but we should fix it. https://github.com/pytorch/pytorch/issues/40580
+                if self.device_type == 'cpu' or self.device_type == 'cuda':
+                    with self.assertRaises(RuntimeError):
+                        torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
+                    return
+                elif self.device_type == 'xla':
+                    # Error:
+                    # Traceback (most recent call last):
+                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py",
+                    # line 241, in instantiated_test
+                    #   result = test(self, device_arg, dtype)
+                    # File "/var/lib/jenkins/workspace/xla/test/../../test/test_torch.py", line 11062, in test_exp
+                    #   self.compare_with_numpy(torch.exp, np.exp, a)
+                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 878,
+                    # in compare_with_numpy
+                    #   a = tensor_like.detach().cpu().numpy()
+                    # TypeError: Got unsupported ScalarType BFloat16
+                    return
+
+            a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
+            a = a.to(dtype)
+            self.compare_with_numpy(torch.exp, np.exp, a)
+
+            if dtype.is_complex:
+                inf_real_zero_imag_in = torch.tensor(complex(float('inf'), 0), device=device, dtype=dtype)
+                inf_real_zero_imag_out = torch.exp(inf_real_zero_imag_in).item()
+                self.assertTrue(math.isinf(inf_real_zero_imag_out.real))
+                if self.device_type == 'cpu':
+                    pass
+                    # These are commented out because it cannot be consistently reproduced.
+                    # This is incorrect. It should be zero. Need fix!
+                    # https://github.com/pytorch/pytorch/issues/40590
+                    # self.assertNotEqual(inf_real_zero_imag_out.imag, 0)
+                    # This is incorrect. They should equal. Need fix!
+                    # https://github.com/pytorch/pytorch/issues/40590
+                    # with self.assertRaises(AssertionError):
+                    #     self.compare_with_numpy(torch.exp, np.exp, inf_real_zero_imag_in)
+                else:
+                    self.assertEqual(inf_real_zero_imag_out.imag, 0, atol=0, rtol=0)
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_zero_imag_in)
+
+                zero_real_inf_imag_in = torch.tensor(complex(0, float('inf')), device=device, dtype=dtype)
+                zero_real_inf_imag_out = torch.exp(zero_real_inf_imag_in).item()
+                self.assertTrue(math.isnan(zero_real_inf_imag_out.real))
+                self.assertTrue(math.isnan(zero_real_inf_imag_out.imag))
+                # Ensure we are notified when NumPy changes its behavior
+                self.compare_with_numpy(torch.exp, np.exp, zero_real_inf_imag_in)
+
+                inf_real_imag_in = torch.tensor(complex(float('inf'), float('inf')), device=device, dtype=dtype)
+                inf_real_imag_out = torch.exp(inf_real_imag_in).item()
+                if self.device_type == 'cpu':
+                    pass
+                    # This is incorrect. Need fix! https://github.com/pytorch/pytorch/issues/40590
+                    # This is commented out because it cannot be consistently reproduced.
+                    # with self.assertRaises(AssertionError):
+                    #     self.compare_with_numpy(torch.exp, np.exp, inf_real_imag_in)
+                else:
+                    self.assertTrue(math.isinf(inf_real_imag_out.real))
+                    self.assertTrue(math.isnan(inf_real_imag_out.imag))
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_imag_in)
+
+                inf_real_nan_imag_in = torch.tensor(complex(float('inf'), float('nan')), device=device, dtype=dtype)
+                inf_real_nan_imag_out = torch.exp(inf_real_nan_imag_in).item()
+                if self.device_type == 'cpu':
+                    pass
+                    # This is incorrect. It should be inf. Need fix! https://github.com/pytorch/pytorch/issues/40590
+                    # This is commented out because it cannot be consistently reproduced.
+                    # with self.assertRaises(AssertionError):
+                    #     self.compare_with_numpy(torch.exp, np.exp, inf_real_nan_imag_in)
+                else:
+                    self.assertTrue(math.isinf(inf_real_nan_imag_out.real))
+                    self.assertTrue(math.isnan(inf_real_nan_imag_out.imag))
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_nan_imag_in)
+
+                nan_real_inf_imag_in = torch.tensor(complex(float('nan'), float('inf')), device=device, dtype=dtype)
+                nan_real_inf_imag_out = torch.exp(nan_real_inf_imag_in).item()
+                self.assertTrue(math.isnan(nan_real_inf_imag_out.real))
+                self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
+                # Ensure we are notified when NumPy changes its behavior
+                self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
@@ -17869,6 +18009,53 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for replacement in (True, False):
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
             self.assertEqual(out, expected)
+
+    def _generate_input(self, shape, dtype, device, with_extremal):
+        if shape == ():
+            x = torch.tensor((), dtype=dtype, device=device)
+        else:
+            if dtype.is_floating_point or dtype.is_complex:
+                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+                x[torch.randn(*shape) > 0.5] = 0
+                if with_extremal and dtype.is_floating_point:
+                    # Use extremal values
+                    x[torch.randn(*shape) > 0.5] = float('nan')
+                    x[torch.randn(*shape) > 0.5] = float('inf')
+                    x[torch.randn(*shape) > 0.5] = float('-inf')
+                elif with_extremal and dtype.is_complex:
+                    x[torch.randn(*shape) > 0.5] = complex('nan')
+                    x[torch.randn(*shape) > 0.5] = complex('inf')
+                    x[torch.randn(*shape) > 0.5] = complex('-inf')
+            else:
+                x = torch.randint(15, 100, shape, dtype=dtype, device=device)
+
+        return x
+
+    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype, with_extremal=False):
+        # Test 0-d to 3-d tensors.
+        for ndims in range(0, 4):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for n in range(ndims + 1):
+                for c in combinations(list(range(ndims)), n):
+                    for count_dim in permutations(c):
+                        # Generate Input.
+                        x = self._generate_input(shape, dtype, device, with_extremal)
+
+                        if count_dim == ():
+                            # Default `dims=None` case
+                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None)
+                        else:
+                            # With `dims: tuple of ints` case
+                            torch_func_partial = partial(torch_func, dim=count_dim)
+                            np_func_partial = partial(np_func, axis=count_dim)
+                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_count_nonzero(self, device, dtype):
+        self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
+        self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):

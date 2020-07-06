@@ -3017,11 +3017,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             [self.assertIsNotNone(p.grad) for p in model.parameters()]
             print([p.grad for p in model.parameters()])
 
-        def dummy_hook(state, bucket):
-            print(bucket)
+        def simple_hook(state, bucket):
             fut = torch.futures.Future()
-            fut.set_result([torch.ones(2, 2)])
-            return fut
+            fut.set_result([torch.ones(4)])
+
+            def fut_then(fut):
+                fut.wait()
+            return fut.then(fut_then)
 
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -3031,8 +3033,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             tedt_ddep_comm_hook().cpu(),
             process_group=process_group
         )
-        # dist.GradBucket([torch.ones(2, 2)])
-        cpu_model.reducer.register_comm_hook(None, dummy_hook)
+        cpu_model.reducer.register_comm_hook(None, simple_hook)
         run_and_verify_grad(cpu_model)
 
 
@@ -3170,6 +3171,42 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
+
+    def test_ddp_comm_hook_register_just_once(self):
+        """
+        DDP communication hook can only be registered once. This test validates whether
+        the error is thrown properly when register_comm_hook is called more than once.
+        """
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut.then()
+        reducer.register_comm_hook(None, dummy_hook)
+        try:
+            reducer.register_comm_hook(None, dummy_hook)
+        except Exception as e:
+            if "register_comm_hook can only be called once" in str(e):
+                return
+            else:
+                raise e
+
+    def test_ddp_comm_hook_callable(self):
+        """
+        The Python hook must be callable. This unit test checks whether this condition
+        is properly checked inside reducer.
+        """
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
+        try:
+            reducer.register_comm_hook(state=None, hook=1)
+        except Exception as e:
+            if "comm_hook must be callable" in str(e):
+                return
+            else:
+                raise e
 
 
 class ComputeBucketAssignmentTest(TestCase):

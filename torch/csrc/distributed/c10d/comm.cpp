@@ -82,18 +82,18 @@ void broadcast_coalesced(
 
 GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
 
+std::vector<at::Tensor> GradBucket::get_tensors() {
+  return tensors_;
+};
+
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::operate(
     const GradBucket& bucket) {
-  // return hook_(state_, bucket.tensors_)
-  //     .cast<std::shared_ptr<torch::jit::Future>>();
-
-  // Below return doesn't work. need to think about it.
+  py::gil_scoped_acquire acquire;
 
   c10::intrusive_ptr<torch::jit::Future> fut;
-
-  return hook_(state_, bucket.tensors_)
+  return hook_(state_, bucket)
       .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()
       ->fut;
 };

@@ -116,7 +116,10 @@ PyObject* c10d_init(PyObject* _unused) {
   auto module = py::handle(c10d_module).cast<py::module>();
 
   shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"));
+      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def("get_tensors",
+          &::c10d::GradBucket::get_tensors,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
