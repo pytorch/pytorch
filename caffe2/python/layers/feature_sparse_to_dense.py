@@ -27,10 +27,12 @@ class FeatureSparseToDense(ModelLayer):
         super(FeatureSparseToDense, self).__init__(model, name, input_record, **kwargs)
 
         self.input_specs = input_specs
-        model.maybe_add_global_constant(
-            "DEFAULT_FLOAT_FEATURE_VALUE", float(default_dense_value or 0.0)
+        self.default_float_param = self.create_param(
+            param_name="default_float_value",
+            shape=(),
+            initializer=("ConstantFill", {"value": float(default_dense_value or 0.0)}),
+            optimizer=model.NoOptim,
         )
-        self.default_float_value = model.global_constants["DEFAULT_FLOAT_FEATURE_VALUE"]
         self.zero_range = model.global_constants["ZERO_RANGE"]
 
         outputs = []
@@ -180,7 +182,7 @@ class FeatureSparseToDense(ModelLayer):
                     [
                         record[field].keys(),
                         record[field].values(),
-                        self.default_float_value,
+                        self.default_float_param,
                         record[field].lengths(),
                     ],
                     [self.output_schema[field]()],
