@@ -219,12 +219,40 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    auto dict = getSugaredDict(loc, m);
+    auto mods = dict->getModules();
+    return mods;
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleList or Sequential modules can be used as tuple";
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
     Value* idx) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
     return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+  } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+    if (auto ivalue = toIValue(idx)) {
+      auto sd = getSugaredDict(loc, m);
+      auto idx_str = ivalue->toStringRef();
+      auto keys_iter = sd->keys_;
+      auto module_values_iter = sd->modules_;
+      for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+        auto key = keys_iter->tup_.at(i);
+        auto key_str = toIValue(key->asValue(loc, m))->toStringRef();
+        if (key_str == idx_str) {
+          return module_values_iter->tup_.at(i);
+        }
+      }
+      throw ErrorReport(loc) << "Key Error, " << idx_str;
+    }
+    throw ErrorReport(loc)
+        << "Unable to extract string literal index. ModuleDict indexing is only supported with string literals.";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
@@ -740,7 +768,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
+      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {

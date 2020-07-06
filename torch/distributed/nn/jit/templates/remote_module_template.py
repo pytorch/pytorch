@@ -5,7 +5,8 @@ REMOTE_MODULE_TEMPLATE = """from typing import *
 import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor
-from torch._jit_internal import Future, RRef
+from torch._jit_internal import Future
+from torch.distributed.rpc import RRef
 
 
 {assign_module_interface_cls}

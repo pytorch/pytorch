@@ -81,6 +81,11 @@ c10::IValue getFunctionTuple(const Function& func) {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
+    } else {
+      TORCH_CHECK(
+          isOpSupportedInMobile(ins.op),
+          toString(ins.op),
+          " is not supported in mobile module.");
     }
   }
 
@@ -189,6 +194,11 @@ class ScriptModuleSerializer {
     if (bytecode_format) {
       writeByteCode(module);
     }
+
+    // Acquires and sets minimum (dynamic) version
+    for (auto& item : file_streams_) {
+      writer_.setMinVersion(item.value().minVersion());
+    }
   }
 
  private:
@@ -234,6 +244,17 @@ class ScriptModuleSerializer {
     if (hook) {
       ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
+        // Checks if the hooked file is already written in extra files,
+        //   if so, skips it and warns
+        if (extra_files.find(kv.first) != extra_files.end()) {
+          TORCH_WARN_ONCE(
+              "An extra files hook attempted to write ",
+              kv.first,
+              " but ",
+              "this is already written in extra files and so will be skipped. ",
+              "This warning will only appear once per process.");
+          continue;
+        }
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
       }

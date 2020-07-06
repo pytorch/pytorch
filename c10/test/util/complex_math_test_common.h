@@ -1,6 +1,6 @@
 // Warning: this file is included twice in aten/src/ATen/test/cuda_complex_math_test.cu
 
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <gtest/gtest.h>
 
 #ifndef PI
@@ -132,6 +132,34 @@ C10_DEFINE_TEST(TestLog10, Rev) {
   {
   c10::complex<double> x(0.1, 1.2);
   c10::complex<double> l = ::log10(::pow(double(10), x));
+  C10_ASSERT_NEAR(l.real(), double(0.1), tol);
+  C10_ASSERT_NEAR(l.imag(), double(1.2), tol);
+  }
+}
+
+C10_DEFINE_TEST(TestLog2, Rev) {
+  // log2(2^x) = x
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> l = std::log2(std::pow(float(2), x));
+  C10_ASSERT_NEAR(l.real(), float(0.1), tol);
+  C10_ASSERT_NEAR(l.imag(), float(1.2), tol);
+  }
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> l = ::log2(std::pow(float(2), x));
+  C10_ASSERT_NEAR(l.real(), float(0.1), tol);
+  C10_ASSERT_NEAR(l.imag(), float(1.2), tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> l = std::log2(std::pow(double(2), x));
+  C10_ASSERT_NEAR(l.real(), double(0.1), tol);
+  C10_ASSERT_NEAR(l.imag(), double(1.2), tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> l = ::log2(std::pow(double(2), x));
   C10_ASSERT_NEAR(l.real(), double(0.1), tol);
   C10_ASSERT_NEAR(l.imag(), double(1.2), tol);
   }

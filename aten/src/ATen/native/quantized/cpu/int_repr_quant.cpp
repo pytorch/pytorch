@@ -15,11 +15,11 @@ Tensor int_repr_quant_cpu(const Tensor& self) {
         self.sizes(),
         self.options().dtype(UNDERLYING_TYPE),
         self.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.check_all_same_dtype(false);
-    iter.add_output(dst);
-    iter.add_input(self);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(dst)
+      .add_input(self)
+      .build();
     cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
   });
   return dst;

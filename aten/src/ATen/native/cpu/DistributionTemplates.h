@@ -315,11 +315,11 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
-    auto iter = TensorIterator();
-    iter.add_output(self);
-    iter.add_input(p);
-    iter.check_all_same_dtype(false);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+        .add_output(self)
+        .add_input(p)
+        .check_all_same_dtype(false)
+        .build();
     if (p_.scalar_type() == kDouble) {
       cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
         at::bernoulli_distribution<double> bernoulli(p_val);

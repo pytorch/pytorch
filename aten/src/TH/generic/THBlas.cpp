@@ -130,37 +130,6 @@ void THBlas_(axpy)(int64_t n, scalar_t a, scalar_t *x, int64_t incx, scalar_t *y
   }
 }
 
-scalar_t THBlas_(dot)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
-{
-  if(n == 1)
-  {
-    incx = 1;
-    incy = 1;
-  }
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
-  {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    return (scalar_t) ddot_(&i_n, x, &i_incx, y, &i_incy);
-#else
-    return (scalar_t) sdot_(&i_n, x, &i_incx, y, &i_incy);
-#endif
-  }
-#endif
-  {
-    int64_t i;
-    scalar_t sum = 0;
-    for(i = 0; i < n; i++)
-    sum += x[i*incx]*y[i*incy];
-    return sum;
-  }
-}
-
 void THBlas_(ger)(
   int64_t m,
   int64_t n,

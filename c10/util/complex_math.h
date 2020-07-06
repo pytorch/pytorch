@@ -1,5 +1,5 @@
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
-#error "c10/util/complex_math.h is not meant to be individually included. Include c10/util/complex_type.h instead."
+#error "c10/util/complex_math.h is not meant to be individually included. Include c10/util/complex.h instead."
 #endif
 
 
@@ -32,6 +32,12 @@ C10_HOST_DEVICE inline c10::complex<T> log10(const c10::complex<T> &x) {
 #else
   return static_cast<c10::complex<T>>(std::log10(static_cast<std::complex<T>>(x)));
 #endif
+}
+
+template<typename T>
+C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T> &x) {
+  const c10::complex<T> log2 = c10::complex<T>(::log(2.0), 0.0);
+  return c10_complex_math::log(x) / log2;
 }
 
 // Power functions
@@ -218,6 +224,7 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log2;
 using c10_complex_math::sqrt;
 using c10_complex_math::pow;
 using c10_complex_math::sin;
@@ -238,6 +245,7 @@ namespace std {
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log2;
 using c10_complex_math::sqrt;
 using c10_complex_math::pow;
 using c10_complex_math::sin;

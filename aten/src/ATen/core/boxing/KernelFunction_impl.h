@@ -104,28 +104,27 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
     );
 }
 
-template<class FuncType, FuncType* func, bool AllowLegacyTypes>
-inline KernelFunction KernelFunction::makeFromUnboxedFunction() {
-    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with invalid template parameters. They must be <FuncType, *func_ptr>.");
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
-    static_assert(func != nullptr, "Kernel function cannot be nullptr");
+template<class FuncPtr, bool AllowLegacyTypes>
+inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr) {
+    static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
+    static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
-    return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncType, func>::type>(
-        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncType, func>::type>()
+    return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
+        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
 }
 
-template<class FuncType, FuncType* func>
-inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction() {
+template<class FuncPtr>
+inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
+    static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
+    static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
-    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with invalid template parameters. They must be <FuncType, *func_ptr>.");
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
-    static_assert(func != nullptr, "Kernel function cannot be nullptr");
-
-    return makeFromUnboxedOnlyFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, func>::type> (
-        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncType, func>::type>()
+    return makeFromUnboxedOnlyFunctor<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type> (
+        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
 }
 

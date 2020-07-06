@@ -62,10 +62,7 @@ C10_DEFINE_bool(
   "Whether to print performance stats for AI-PEP.");
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
-C10_DEFINE_bool(
-    vulkan,
-    false,
-    "Whether to use Vulkan backend (GPU).");
+C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
 
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {

@@ -57,6 +57,11 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
   Engine::thread_init(device, ready_queue, false);
+
+  if (should_increment) {
+    // Decrement the count during shutdown if we incremented earlier.
+    decrement_non_reentrant_thread_count();
+  }
 }
 
 void PythonEngine::thread_on_exception(

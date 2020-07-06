@@ -51,11 +51,28 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()
+
+list(APPEND ATen_HIP_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_integer_divider_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_half_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_optional_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_packedtensoraccessor_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_vectorized_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip)
+# TODO: fix and enable these
+#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
+#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
 
 list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp)
@@ -63,4 +80,5 @@ list(APPEND ATen_VULKAN_TEST_SRCS
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
