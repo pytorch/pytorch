@@ -18,6 +18,7 @@ import torch.onnx
 import torch.onnx.utils
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
+from torch import quantization
 
 import unittest
 
@@ -157,6 +158,27 @@ class TestModels(TestCase):
     def test_fake_quant(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(FakeQuantNet()), toC(x))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quant_resnet(self):
+        # Quantize ResNet50 model
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        qat_resnet50 = resnet50()
+
+        # Use per tensor for weight. Per channel support will come with opset 13
+        qat_resnet50.qconfig = quantization.QConfig(
+            activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
+        quantization.prepare_qat(qat_resnet50, inplace=True)
+        qat_resnet50.apply(torch.quantization.enable_observer)
+        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+
+        _ = qat_resnet50(x)
+        for module in qat_resnet50.modules():
+            if isinstance(module, quantization.FakeQuantize):
+                module.calculate_qparams()
+        qat_resnet50.apply(torch.quantization.disable_observer)
+
+        self.exportTest(toC(qat_resnet50), toC(x))
 
 if __name__ == '__main__':
     run_tests()
