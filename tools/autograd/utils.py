@@ -64,7 +64,7 @@ def write(dirname, name, template, env):
     except IOError:
         old_val = None
     new_val = template.substitute(env)
-    if True:  # old_val != new_val:
+    if old_val != new_val:
         with open(path, 'w') as f:
             print("Writing {}".format(path))
             f.write(new_val)
