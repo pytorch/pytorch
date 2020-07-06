@@ -18,6 +18,7 @@ class GradBucket {
  public:
   explicit GradBucket(std::vector<at::Tensor>& tensors);
   std::vector<at::Tensor> get_tensors();
+  void set_tensors(std::vector<at::Tensor>& tensors);
 
  private:
   std::vector<at::Tensor> tensors_;

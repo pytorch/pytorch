@@ -2995,9 +2995,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         This unit test verifies whether the Future object is passed properly.
         The callback function creates a Future object and sets a value to it.
         """
-        class tedt_ddep_comm_hook(nn.Module):
+        class test_ddp_comm_hook(nn.Module):
             def __init__(self):
-                super(tedt_ddep_comm_hook, self).__init__()
+                super(test_ddp_comm_hook, self).__init__()
                 self.t0 = Task()
 
             def forward(self, x, rank):
@@ -3014,15 +3014,16 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             output.mean().backward()
 
             # # # Now locally unused parameter should have grad updated on all ranks.
-            [self.assertIsNotNone(p.grad) for p in model.parameters()]
-            print([p.grad for p in model.parameters()])
+            [self.assertEqual(p.grad, torch.ones(2, 2)) for p in model.parameters()]
 
         def simple_hook(state, bucket):
             fut = torch.futures.Future()
             fut.set_result([torch.ones(4)])
 
             def fut_then(fut):
-                fut.wait()
+                # bucket.set_tensors(fut.wait())
+                for bt, ft in zip(bucket.get_tensors(), fut.wait()):
+                    bt.copy_(ft)
             return fut.then(fut_then)
 
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3030,7 +3031,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
-            tedt_ddep_comm_hook().cpu(),
+            test_ddp_comm_hook().cpu(),
             process_group=process_group
         )
         cpu_model.reducer.register_comm_hook(None, simple_hook)

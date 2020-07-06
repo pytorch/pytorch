@@ -86,6 +86,10 @@ std::vector<at::Tensor> GradBucket::get_tensors() {
   return tensors_;
 };
 
+void GradBucket::set_tensors(std::vector<at::Tensor>& tensors) {
+  tensors_ = tensors;
+}
+
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::operate(
