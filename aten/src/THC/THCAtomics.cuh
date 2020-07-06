@@ -215,18 +215,16 @@ static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::comple
 
 /* Note [gpuAtomicAdd vs atomicAdd]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * We are trying to standardize inside the PyTorch backend on using gpuAtomicAdd()
- * without a return. These may either be resolved through library functions or
- * implemented internally. Some extensions such as torchvision call atomicAdd()
+ * Some extensions such as torchvision call atomicAdd()
  * directly and require non-library provided data type support. Only for these, we
  * continue to provide atomicAdd overloads.
  */
 static inline __device__ at::Half atomicAdd(at::Half *address, at::Half val) {
-  gpuAtomicAdd(address, val);
+  return gpuAtomicAdd(address, val);
 }
 
 static inline __device__ at::BFloat16 atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
-  gpuAtomicAdd(address, val);
+  return gpuAtomicAdd(address, val);
 }
 
 static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
