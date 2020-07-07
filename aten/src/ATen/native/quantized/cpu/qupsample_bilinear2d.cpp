@@ -90,7 +90,7 @@ static void upsample_bilinear2d_out_frame(
 
 } // namespace
 
-Tensor quantized_upsample_bilinear2d_cpu(
+Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,

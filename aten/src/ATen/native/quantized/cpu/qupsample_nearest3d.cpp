@@ -112,7 +112,7 @@ static void upsample_nearest3d_out_frame_nhwc(
   }
 }
 
-Tensor quantized_upsample_nearest3d_cpu(
+Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
