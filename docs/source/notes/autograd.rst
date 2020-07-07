@@ -229,19 +229,19 @@ which compute the real and imaginary parts of the function:
             x, y = real(z), imag(z)
             return u(x, y) + v(x, y) * 1j
 
-The Jacobian, JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
+The JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
 
     .. code::
 
         def JVP(tangent):
             c, d = real(tangent), imag(tangent)
-            return [1, i]^T * J * [c, d]
+            return [1, j]^T * J * [c, d]
 
     .. code::
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
-            return [c, -d]^T * J * [1, -i]
+            return [c, -d]^T * J * [1, -j]
 
     where
 
@@ -259,18 +259,18 @@ mode automatic differentiation. Notice that d and *i* (imaginary number) are neg
 
 For a function F: V → W, where are V and W are vector spaces. The output of
 the Vector-Jacobian Product :math:`VJP : V → (W^* → V^*)` is a linear map
-from :math:`W^* → V^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+from :math:`W^* → V^*` (explained in `Chapter 4 of Dougal Maclaurin’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
 The negative signs in the above VJP computation are due to conjugation. The first
 vector in the output returned by VJP for a given cotangent is a covector (:math:`\in ℂ^*`),
 and the last vector in the output is used to get the result in :math:`ℂ`
 since the final result of reverse-mode differentiation of a function is a covector belonging
-to :math:`ℂ^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+to :math:`ℂ^*` (explained in `Chapter 4 of Dougal Maclaurin’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
 **What happens if I call backward() on a complex scalar?**
 **********************************************************
 
-For geneneral :math:`ℂ → ℂ` functions, the Jacobian has 4 real-valued degrees of freedom (as in the 2x2 Jacobian matrices above),
+For general :math:`ℂ → ℂ` functions, the Jacobian has 4 real-valued degrees of freedom (as in the 2x2 Jacobian matrix above),
 so we can’t hope to represent all of them with in a complex number.
 
     1. For holomorphic functions, the gradient can be fully represented with complex numbers due to the Cauchy-Riemann equations. And so,
@@ -278,7 +278,7 @@ so we can’t hope to represent all of them with in a complex number.
     2. For non-holomorphic functions, the gradient can't be fully represented with complex numbers.
        The partial derivatives of the imaginary part of the function (:math:`v(x, y)` above) are discarded
        (e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
-       For any other desired behavior, you can specify the covector :math:`v` in `torch.autograd.functional.vjp` call.
+       For any other desired behavior, you can specify the covector :math:`grad_output` in `torch.autograd.backward()` call.
 
 **How are the JVP and VJP defined for cross-domain functions?**
 ***************************************************************
@@ -296,7 +296,7 @@ The JVP and VJP for a :math:`f1: ℂ → ℝ^2` are defined as:
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
-            return [c, d]^T * J * [1, -i]
+            return [c, d]^T * J * [1, -j]
 
 The JVP and VJP for a :math:`f1: ℝ^2 → ℂ` are defined as:
 
@@ -304,7 +304,7 @@ The JVP and VJP for a :math:`f1: ℝ^2 → ℂ` are defined as:
 
         def JVP(tangent):
             c, d = real(tangent), imag(tangent)
-            return [1, i]^T * J * [c, d]
+            return [1, j]^T * J * [c, d]
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
