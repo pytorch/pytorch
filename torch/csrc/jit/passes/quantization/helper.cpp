@@ -41,6 +41,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "instance_norm",
     "add",
     "add_",
+    "cat",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -197,7 +198,7 @@ std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim", "numel"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
-std::vector<std::string> _propagate_quant_single_input_ops = {"cat"};
+std::vector<std::string> _propagate_quant_single_input_ops = {};
 
 // Rules are slightly different for binary ops like `aten::add`, for these ops,
 // if both of the inputs are Tensor, we'll quantize the output only if both of
