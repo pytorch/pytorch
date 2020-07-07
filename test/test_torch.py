@@ -10456,8 +10456,7 @@ class TestTorchDeviceType(TestCase):
 
             # Check4: Q^{T}Q = I, triu(R) = R
             self.assertEqual(torch.matmul(Q.transpose(-2, -1), Q),
-                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)),
-                             rtol=rtol, atol=atol)
+                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)))
             self.assertEqual(R.triu(), R)
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
@@ -16906,9 +16905,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
-    @dtypesIfCUDA(torch.float32, torch.float64, tfloat32)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    @tf32_on_and_off()
     def test_mm(self, device, dtype):
-        def _test_mm(n, m, p, dtype, genf, rtol, atol):
+        def _test_mm(n, m, p, dtype, genf):
             # helper function
             def matrixmultiply(mat1, mat2):
                 n = mat1.size(0)
@@ -16925,7 +16925,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res = torch.mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # non contiguous case 1
             mat1 = genf(n, m)
@@ -16933,7 +16933,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res = torch.mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # non contiguous case 2
             mat1 = genf(m, n).t()
@@ -16941,7 +16941,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res = torch.mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # non contiguous case 3
             mat1 = genf(m, n).t()
@@ -16949,7 +16949,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res = torch.mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # test with zero stride
             mat1 = genf(n, m)
@@ -16957,7 +16957,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res = torch.mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # explicitly exercise the _out variant in torch.mm().
             # contiguous case
@@ -16967,7 +16967,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.mm(mat1, mat2, out=res)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
             # explicitly exercise the _out variant in torch.mm().
             # non contiguous case 3
@@ -16977,7 +16977,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.mm(mat1, mat2, out=res)
 
             res2 = matrixmultiply(mat1, mat2)
-            self.assertEqual(res, res2, rtol=rtol, atol=atol)
+            self.assertEqual(res, res2)
 
         def genf_int(x, y):
             return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
@@ -16988,16 +16988,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def genf_float(x, y):
             return torch.randn(x, y, dtype=dtype, device=device)
 
-        with setup_tf32(dtype, 0.005, 0.005) as (dtype, rtol, atol):
-            for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
-                if (dtype == torch.int32) or (dtype == torch.int64):
-                    genf = genf_int
-                elif (dtype == torch.bfloat16):
-                    genf = genf_bfloat
-                else:
-                    genf = genf_float
+        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+            if (dtype == torch.int32) or (dtype == torch.int64):
+                genf = genf_int
+            elif (dtype == torch.bfloat16):
+                genf = genf_bfloat
+            else:
+                genf = genf_float
 
-                _test_mm(n, m, p, dtype, genf, rtol, atol)
+            _test_mm(n, m, p, dtype, genf)
 
     @onlyCPU
     @dtypes(torch.float)
