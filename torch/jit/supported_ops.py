@@ -269,7 +269,7 @@ The following functions will use the corresponding magic method on :any:`TorchSc
 
 {}
 
-These built-in functions do have a schema
+These built-in functions use the schema
 
 .. rst-class:: codeblock-height-limiter
 
