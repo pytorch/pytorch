@@ -5014,7 +5014,7 @@
   variants: method, function
   dispatch:
     CPU: cpu_equal
-    CUDA: legacy::cuda::_th_equal
+    CUDA: cuda_equal
     QuantizedCPU: quantized_equal_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
