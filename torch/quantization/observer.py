@@ -1,11 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
 from typing import List, Tuple, Optional
-import numpy as np
 
 import torch
 import torch.nn as nn
@@ -687,7 +685,7 @@ class HistogramObserver(_ObserverBase):
             if dst_bin_width == 0.0:
                 return 0.0
 
-            src_bin = np.arange(self.bins)
+            src_bin = torch.arange(self.bins).numpy()
             # distances from the beginning of first dst_bin to the beginning and
             # end of src_bin
             src_bin_begin = (src_bin - next_start_bin) * bin_width
@@ -702,7 +700,7 @@ class HistogramObserver(_ObserverBase):
 
             density = self.histogram.numpy() / bin_width
 
-            norm = np.zeros(self.bins)
+            norm = torch.zeros(self.bins).numpy()
 
             delta_begin = src_bin_begin - dst_bin_of_begin_center
             delta_end = dst_bin_width / 2
