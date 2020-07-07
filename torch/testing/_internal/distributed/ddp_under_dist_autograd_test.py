@@ -11,19 +11,14 @@ import torch
 from torch.distributed import rpc
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
 )
 from torch.testing._internal.dist_utils import dist_init
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.nn as nn
-import unittest
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -287,11 +282,7 @@ def set_shutdown_signal():
     with shutdown_signal:
         shutdown_signal.notify()
 
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "Skip ASAN as torch + multiprocessing spawn have known issues",
-)
-class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
+class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -304,14 +295,6 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
     def trainer_name(self, rank):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
-
-    def setUp(self):
-        super(TestDdpUnderDistAutograd, self).setUp()
-
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDdpUnderDistAutograd, self).tearDown()
 
     def _remote_worker_process(self):
         gLogger.info("The remote worker is running.")
@@ -448,11 +431,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
         self._do_test(DdpMode.INSIDE)
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "Skip ASAN as torch + multiprocessing spawn have known issues",
-)
-class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
+class DdpComparisonTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -461,14 +440,6 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
     def trainer_name(self, rank):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
-
-    def setUp(self):
-        super(TestDdpComparison, self).setUp()
-
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDdpComparison, self).tearDown()
 
     @requires_gloo()
     @dist_init
@@ -589,7 +560,7 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id)
                 )
             )
@@ -652,7 +623,7 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id)
                 )
             )
@@ -661,7 +632,7 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
                 layer3.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer3.module_rref, context_id)
                 )
             )
