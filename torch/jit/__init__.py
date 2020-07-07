@@ -156,6 +156,7 @@ def freeze(mod, preserved_attrs : Optional[List[str]] = None):
         Frozen :class:`ScriptModule`.
 
     Example (Freezing a simple module with a Parameter):
+
     .. testcode::
         import torch
         class MyModule(torch.nn.Module):
@@ -177,6 +178,7 @@ def freeze(mod, preserved_attrs : Optional[List[str]] = None):
         print(frozen_module.code)
 
     Example (Freezing a module with preserved attributes)
+
     .. testcode::
         import torch
         class MyModule2(torch.nn.Module):

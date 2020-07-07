@@ -29,11 +29,13 @@ def fork(func, *args, **kwargs):
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be invoked. If executed in TorchScript, it will execute asynchronously,
             otherwise it will not. Traced invocations of fork will be captured in the IR.
-        *args, **kwargs: arguments to invoke `func` with.
+        ``*args``, ``**kwargs``: arguments to invoke `func` with.
     Returns:
         `torch.jit.Future[T]`: a reference to the execution of `func`. The value `T`
         can only be accessed by forcing completion of `func` through `torch.jit.wait`.
+
     Example (fork a free function):
+
     .. testcode::
         import torch
         from torch import Tensor
@@ -49,7 +51,9 @@ def fork(func, *args, **kwargs):
         # trace is not run asynchronously, but fork is captured in IR
         graph = torch.jit.trace(bar, (input,)).graph
         assert "fork" in str(graph)
+
     Example (fork a module method):
+
     .. testcode::
         import torch
         from torch import Tensor
