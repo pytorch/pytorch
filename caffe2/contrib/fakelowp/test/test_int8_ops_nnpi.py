@@ -94,8 +94,8 @@ class Int8OpsTest(serial.SerializedTestCase):
         workspace.RunNet(net_onnxified.name)
         Y_glow = workspace.FetchBlob("Y")
 
-        diff = Y_fbgemm - Y_glow
-        if np.count_nonzero(diff) * 10 > diff.size:
+        if not np.allclose(Y_glow, Y_fbgemm):
+            diff_Y = np.abs(Y_glow - Y_fbgemm)
             print_test_debug_info(
                 "int8_fc",
                 {
@@ -106,8 +106,8 @@ class Int8OpsTest(serial.SerializedTestCase):
                     "b": b_fp32,
                     "Y_fbgemm": Y_fbgemm,
                     "Y_glow": Y_glow,
-                    "diff": diff,
-                    "maxdiff": diff.max(axis=1),
+                    "diff": diff_Y,
+                    "maxdiff": diff_Y.max(axis=1),
                 },
             )
             assert 0
@@ -197,8 +197,8 @@ class Int8OpsTest(serial.SerializedTestCase):
         workspace.RunNet(net_onnxified.name)
         Y_glow = workspace.FetchBlob("Y")
 
-        diff = Y_fbgemm - Y_glow
-        if np.count_nonzero(diff) * 10 > diff.size:
+        if not np.allclose(Y_glow, Y_fbgemm):
+            diff_Y = np.abs(Y_glow - Y_fbgemm)
             print_test_debug_info(
                 "int8_fc",
                 {
@@ -211,8 +211,8 @@ class Int8OpsTest(serial.SerializedTestCase):
                     "b": b_fp32,
                     "Y_fbgemm": Y_fbgemm,
                     "Y_glow": Y_glow,
-                    "diff": diff,
-                    "maxdiff": diff.max(axis=1),
+                    "diff": diff_Y,
+                    "maxdiff": diff_Y.max(axis=1),
                 },
             )
             assert 0

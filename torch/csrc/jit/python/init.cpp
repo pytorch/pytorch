@@ -748,7 +748,7 @@ void initJITBindings(PyObject* module) {
         auto res =
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
-          int64_t i = PyInt_AsLong(res);
+          int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
           if (i > 0) {
             return i;
           }
