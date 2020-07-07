@@ -17,32 +17,35 @@ extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 namespace at {
 namespace native {
 namespace cpublas {
-namespace {
+namespace internal {
 
 void normalize_last_dims(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    int64_t &lda, int64_t &ldb, int64_t &ldc) {
+    int64_t *lda, int64_t *ldb, int64_t *ldc) {
   if (n == 1) {
-    ldc = m;
+    *ldc = m;
   }
 
   if(transa != NoTranspose) {
-    if(m == 1) {
-      lda = k;
+    if (m == 1) {
+      *lda = k;
     }
   } else if(k == 1) {
-    lda = m;
+    *lda = m;
   }
 
   if(transb != NoTranspose) {
-    if(k == 1) {
-      ldb = n;
+    if (k == 1) {
+      *ldb = n;
     }
   } else if (n == 1) {
-    ldb = k;
+    *ldb = k;
   }
 }
+}  // namespace internal
+
+namespace {
 
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
@@ -92,8 +95,8 @@ void gemm(
     const double *b, int64_t ldb,
     const double beta,
     double *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
-  normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     char transa_ = to_blas(transa), transb_ = to_blas(transb);
@@ -122,8 +125,8 @@ void gemm(
     const float *b, int64_t ldb,
     const float beta,
     float *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
-  normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     char transa_ = to_blas(transa), transb_ = to_blas(transb);
@@ -152,8 +155,8 @@ void gemm(
     const c10::complex<double> *b, int64_t ldb,
     const c10::complex<double> beta,
     c10::complex<double> *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
-  normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     char transa_ = to_blas(transa), transb_ = to_blas(transb);
@@ -182,8 +185,8 @@ void gemm(
     const c10::complex<float> *b, int64_t ldb,
     const c10::complex<float> beta,
     c10::complex<float> *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
-  normalize_last_dims(transa, transb, m, n, k, lda, ldb, ldc);
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     char transa_ = to_blas(transa), transb_ = to_blas(transb);
@@ -212,7 +215,7 @@ void gemm(
     const int64_t *b, int64_t ldb,
     const int64_t beta,
     int64_t *c, int64_t ldc) {
-
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #ifdef USE_FBGEMM
   if (alpha == 1 && (beta == 0 || beta == 1)) {
     // In FBGEMM, we assume row-major ordering; However, here we assume the

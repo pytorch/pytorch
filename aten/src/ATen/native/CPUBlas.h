@@ -15,6 +15,13 @@ enum TransposeType {
   // ConjTranspose, -- Not implemented
 };
 
+namespace internal {
+void normalize_last_dims(
+  TransposeType transa, TransposeType transb,
+  int64_t m, int64_t n, int64_t k,
+  int64_t *lda, int64_t *ldb, int64_t *ldc);
+}  // namespace internal
+
 using gemm_fn = void(*)(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
@@ -36,6 +43,7 @@ void gemm(
     const scalar_t *b, int64_t ldb,
     scalar_t beta,
     scalar_t *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
   gemm_stub(
     kCPU, c10::CppTypeToScalarType<scalar_t>::value,
     transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
