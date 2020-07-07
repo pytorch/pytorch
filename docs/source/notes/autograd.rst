@@ -214,13 +214,13 @@ proper thread locking code to ensure the hooks are thread safe.
 Autograd for Complex Numbers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-What notion of complex derivative does PyTorch use?
-***************************************************
+**What notion of complex derivative does PyTorch use?**
+*******************************************************
 
 PyTorch follows `JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
 convention for autograd for Complex Numbers.
 
-Suppose we have a function :math:`F: C -> C` which we can decompose into functions u and v
+Suppose we have a function :math:`F: ℂ → ℂ` which we can decompose into functions u and v
 which compute the real and imaginary parts of the function:
 
     .. code::
@@ -252,25 +252,25 @@ The Jacobian, JVP and VJP for function :math:`F` at :math:`(x, y)` are defined a
             \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix} \\
 
 In PyTorch, the VJP is mostly what we care about, as it is the computation performed when we do backward
-mode automatic differentiation. Notice that d and i (imaginary number) are negated in the formula above.
+mode automatic differentiation. Notice that d and \emph{i} (imaginary number) are negated in the formula above.
 
-Why is there a negative sign in the formula above?
-**************************************************
+**Why is there a negative sign in the formula above?**
+******************************************************
 
 For a function F: V → W, where are V and W are vector spaces. The output of
 the Vector-Jacobian Product :math:`VJP : V → (W^* → V^*)` is a linear map
 from :math:`W^* → V^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
 The negative signs in the above VJP computation are due to conjugation. The first
-vector in the output returned by VJP for a given cotangent is a covector (\in :math:`C^*`),
-and the last vector in the output is used to get the result in :math:`C`
+vector in the output returned by VJP for a given cotangent is a covector (:math:`\in ℂ^*`),
+and the last vector in the output is used to get the result in :math:`ℂ`
 since the final result of reverse-mode differentiation of a function is a covector belonging
-to :math:`C^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+to :math:`ℂ^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
-What happens if I call backward() on a complex scalar?
-******************************************************
+**What happens if I call backward() on a complex scalar?**
+**********************************************************
 
-For geneneral ℂ→ℂ functions, the Jacobian has 4 real-valued degrees of freedom (as in the 2x2 Jacobian matrices above),
+For geneneral :math:`ℂ → ℂ` functions, the Jacobian has 4 real-valued degrees of freedom (as in the 2x2 Jacobian matrices above),
 so we can’t hope to represent all of them with in a complex number.
 
     1. For holomorphic functions, the gradient can be fully represented with complex numbers due to the Cauchy-Riemann equations. And so,
@@ -280,13 +280,13 @@ so we can’t hope to represent all of them with in a complex number.
        (e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
        For any other desired behavior, you can specify the covector :math:`v` in `torch.autograd.functional.vjp` call.
 
-How are the JVP and VJP defined for cross-domain functions?
-**********************************************************************************
+**How are the JVP and VJP defined for cross-domain functions?**
+***************************************************************
 
-Based on formulas above and the behavior we expect to see (going from C → R^2 → C should be an identity),
+Based on formulas above and the behavior we expect to see (going from :math:`ℂ → ℝ^2 → ℂ` should be an identity),
 we use the following formula for cross-domain functions.
 
-The JVP and VJP for a :math:`f1: C → R^2` are defined as:
+The JVP and VJP for a :math:`f1: ℂ → ℝ^2` are defined as:
 
     .. code::
 
@@ -298,7 +298,7 @@ The JVP and VJP for a :math:`f1: C → R^2` are defined as:
             c, d = real(cotangent), imag(cotangent)
             return [c, d]^T * J * [1, -i]
 
-The JVP and VJP for a :math:`f1: R^2 → C` are defined as:
+The JVP and VJP for a :math:`f1: ℝ^2 → ℂ` are defined as:
 
    .. code::
 
