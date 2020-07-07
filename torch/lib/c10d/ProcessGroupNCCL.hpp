@@ -88,6 +88,13 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
+    // Helper function that returns True if the WorkNCCL object has timed out
+    // and False otherwise.
+    bool timedOut();
+
+    // Overrides ProcessGroup::Work::finish to avoid unnecessary CV notify.
+    void finish(std::exception_ptr exception);
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
