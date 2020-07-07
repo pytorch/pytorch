@@ -85,6 +85,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // execution on the GPUs
     bool finishedGPUExecution();
 
+    // Helper function that sets an exception_ptr on the WorkNCCL object.
+    void setException(std::exception_ptr exception_ptr);
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
