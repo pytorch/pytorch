@@ -18884,57 +18884,49 @@ class TestViewOps(TestCase):
 # the results. In-place variants of the ops can also be run.
 
 # Lists of dtypes to instantiate tensor op test variants.
-_types = (
+_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long,
     torch.uint8
-)
+]
 
-_types_no_half = (
+_types_no_half = [
     torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long,
     torch.uint8
-)
+]
 
 # _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
-_types2 = _types + (torch.bfloat16,) if TEST_WITH_ROCM else _types
+_types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
-_float_types = (torch.half, torch.float, torch.double)
+_float_types = [torch.half, torch.float, torch.double]
 
-_tfloat_types = (tfloat32,)
+_complex_types = [torch.cfloat, torch.cdouble]
 
-_complex_types = (torch.cfloat, torch.cdouble)
+_complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
 
-_complex_types_skip_rocm = () if TEST_WITH_ROCM else _complex_types
-
-_float_types_no_half = (torch.float, torch.double)
-
-_tcomplex_types = (tcomplex64,)
-
-_complex_types_with_tf32_skip_rocm = () if TEST_WITH_ROCM else _complex_types + _tcomplex_types
+_float_types_no_half = [torch.float, torch.double]
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
-_float_types2 = _float_types + (torch.bfloat16,) if TEST_WITH_ROCM else _float_types
-
-_tfloat_types2 = _float_types2 + _tfloat_types
+_float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
 _complex_and_float_types2 = _float_types2 + _complex_types
 
-_signed_types = (
+_signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
-)
+]
 
-_signed_types_no_half = (
+_signed_types_no_half = [
     torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
-)
+]
 
-_cpu_types: Tuple = ()
+_cpu_types: List[torch.dtype] = []
 
-_unsigned_types = (torch.uint8,)
+_unsigned_types = [torch.uint8]
 
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
