@@ -1624,7 +1624,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
-                return torch.flatten(input, start_dim=0, end_dim=-2)
+                return torch.flatten(input)
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
