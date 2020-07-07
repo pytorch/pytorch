@@ -6858,12 +6858,12 @@ a")
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.float):
-            del torch.jit._jit_caching_layer[foo]
+            del torch.jit._state._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
-            del torch.jit._jit_caching_layer[foo]
+            del torch.jit._state._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
