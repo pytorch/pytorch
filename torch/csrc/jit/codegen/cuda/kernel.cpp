@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
 
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
@@ -544,31 +545,6 @@ void runKernel(
   // Naive launch config;
   const size_t numel = outputs[0].numel();
 
-  int blocks = 1;
-  int thread_x = 1;
-  int thread_y = 1;
-  if (!entry->reduction_axes_.empty()) {
-    // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
-    blocks = numel;
-    // Translated to `fcd_reduction`
-    if (entry->reduction_axes_.back() ==
-        outputs[0].dim() + ((int)entry->reduction_axes_.size()) - 1) {
-      thread_x = kFcdReductionThreadX;
-      thread_y = 1;
-    } else {
-      thread_x = kNonFcdReductionThreadX;
-      thread_y = kNonFcdReductionThreadY;
-    }
-  } else {
-    // TODO: we can't randomly clap down this until we got striding.
-    blocks = ceilDiv(numel, kPwThreadX * entry->unroll_factor_);
-    thread_x = kPwThreadX;
-    thread_y = 1;
-  }
-  const auto nBlocks = blocks;
-  const auto nThreadx = thread_x;
-  const auto nThready = thread_y;
-
   KernelArgumentHolder kernel_args;
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
@@ -586,10 +562,41 @@ void runKernel(
     kernel_args.push(output);
   }
 
+  Fusion* fusion = entry->fusion_.get();
+  FusionGuard fg(fusion);
+  EvaluationContext eval_context(fusion);
+  for (int i = 0; i < (int)inputs.size(); i++) {
+    if (inputs[i].isTensor()) {
+      ExtractSizeStride ess(inputs[i].toTensor(), broadcasted_shape);
+      int nDims = ess.sizes.size();
+      TensorView* tv = fusion->inputs()[i]->as<TensorView>();
+      for (int j = 0; j < nDims; j++) {
+        eval_context.bind(tv->getRootDomain()[j]->extent(), ess.sizes[j]);
+      }
+    }
+  }
+
+  auto expr_eval_fn = [&](LaunchConfigType type) {
+    const auto val = ExpressionEvaluator::evaluate(
+        fusion->getLaunchConfig(type), &eval_context);
+    TORCH_CHECK(
+        val.has_value(), "scheduler didn't bind launch configs properly");
+    return val.value();
+  };
+
+  const int nBlocks_x = expr_eval_fn(LaunchConfigType::BIDx);
+  const int nBlocks_y = expr_eval_fn(LaunchConfigType::BIDy);
+  const int nBlocks_z = expr_eval_fn(LaunchConfigType::BIDz);
+  const auto nThreadx = expr_eval_fn(LaunchConfigType::TIDx);
+  const auto nThready = expr_eval_fn(LaunchConfigType::TIDy);
+  const auto nThreadz = expr_eval_fn(LaunchConfigType::TIDz);
+  const auto shared_memory = expr_eval_fn(LaunchConfigType::SharedMemory);
+
   // TODO: this probably won't work for us.
   if (entry->has_random_) {
     std::pair<uint64_t, uint64_t> philox_engine_inputs;
-    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
+    const auto rand_offset =
+        4 * (std::ceil(numel / (4.0 * 128 * nBlocks_x)) + 1);
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     {
       // See Note [Acquire lock when using random generators]
@@ -605,13 +612,13 @@ void runKernel(
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       entry->function_,
-      nBlocks,
-      1,
-      1,
+      nBlocks_x,
+      nBlocks_y,
+      nBlocks_z,
       nThreadx,
       nThready,
-      1,
-      0,
+      nThreadz,
+      shared_memory,
       stream,
       kernel_args.getBuffer(),
       nullptr));

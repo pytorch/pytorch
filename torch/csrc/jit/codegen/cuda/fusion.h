@@ -241,11 +241,29 @@ class TORCH_CUDA_API Fusion final {
     return outputs_;
   }
 
+  const auto& launch_configs() const {
+    return launch_configs_;
+  }
+
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
 
   void replaceInput(Val* replace, Val* with);
   void replaceOutput(Val* replace, Val* with);
+
+  // set new launch config value for given type; return the previous value;
+  const Val* setLaunchConfig(LaunchConfigType type, Val* val) {
+    TORCH_CHECK(val->fusion() == this);
+    const auto ret = getLaunchConfig(type);
+    launch_configs_[type] = val;
+    return ret;
+  }
+
+  // retrieve launch config value for given type;
+  Val* getLaunchConfig(LaunchConfigType type) {
+    const auto it = launch_configs_.find(type);
+    return it != launch_configs_.end() ? it->second : nullptr;
+  }
 
  private:
   // Return an int that monotonically increases for each val/expr, some are
@@ -281,6 +299,10 @@ class TORCH_CUDA_API Fusion final {
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // values for launch configuration:
+  // compatible_flag, BlockDim.x/y/z, GridDim.x/y/z, shared_memory,
+  std::unordered_map<LaunchConfigType, Val*> launch_configs_;
 };
 
 } // namespace fuser

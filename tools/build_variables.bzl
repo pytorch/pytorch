@@ -335,6 +335,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",

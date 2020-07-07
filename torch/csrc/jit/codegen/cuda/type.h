@@ -147,6 +147,17 @@ TORCH_CUDA_API c10::optional<std::string> cast_func_str(
 
 size_t dataTypeSize(DataType type);
 
+enum class LaunchConfigType {
+  Compatible,
+  SharedMemory,
+  BIDz,
+  BIDy,
+  BIDx,
+  TIDz,
+  TIDy,
+  TIDx
+};
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

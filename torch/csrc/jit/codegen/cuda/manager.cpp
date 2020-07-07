@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -103,6 +105,7 @@ class CudaFusionManager {
       //   1. device;
       //   2. launch config;
       parseJitIR(graph, cuda_kernel.value());
+      scheduleFusion(cuda_kernel.value()->fusion_.get(), inputs);
 
       // find device in inputs.
       for (const auto& input : inputs) {

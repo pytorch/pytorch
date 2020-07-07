@@ -86,9 +86,6 @@ class IrParser {
     MergeQueryFuncPtr merge_f_;
   };
 
- private:
-  static const int unroll_factor = 4;
-
  public:
   IrParser(std::shared_ptr<Graph> graph, CudaKernel* cuda_kernel)
       : graph_(std::move(graph)), cuda_kernel_(cuda_kernel) {
@@ -173,7 +170,6 @@ class IrParser {
     for (auto jit_output : block->outputs()) {
       TensorView* out =
           static_cast<TensorView*>(value_map_[jit_output->unique()]);
-
       // demote output dtype to be match PyTorch JIT graph.
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
@@ -182,133 +178,7 @@ class IrParser {
         // No need to update value_map_ after this point.
         out = static_cast<TensorView*>(castOp(DataType::Half, out));
       }
-
       cuda_kernel_->fusion_->addOutput(out);
-
-      // TODO: has_reduction for scheudling should be done on a per output
-      //       tensor basis.
-      if (has_reduction) {
-        // TODO: this scheduling only works for a single reduction operation in
-        //       the fusion, in this case we can coalesc all reduction axes and
-        //       merge them together. (same applies to iteration axes)
-        // TODO: does this work for multiple outputs?
-
-        // query if fastest changing dimension (FCD) is a reduction
-        fcd_reduction = out->axis((int)out->nDims() - 1)->isReduction();
-
-        // TODO: could really use evaluation here. Launch configuration is
-        //       imposed by transformation and the information should be
-        //       embedded in codegen IR.
-        cuda_kernel_->reduction_axes_ = reductionAxes(out);
-
-        // We coalesc all reduction axes to the right;
-        size_t num_reduction_axes = coalescReduction(out);
-
-        // Merge all iteration dimensions
-        while (out->nDims() > num_reduction_axes + 1) {
-          out->merge(0, 1);
-        }
-        // Merge all reduction dimensions
-        while (out->nDims() > 2) {
-          out->merge(1, 2);
-        }
-
-      } else {
-        // Merge all dimensions because we're only supporting pointwise
-        while (out->nDims() > 1)
-          out->merge(0, 1);
-        // Split into 128 which will be bockDim.x
-        out->split(0, kPwThreadX);
-        // Split by another 4 which will be our unroll factor
-        auto ur_factor = disable_unroll ? 1 : unroll_factor;
-        if (!disable_unroll) {
-          out->split(0, ur_factor);
-          cuda_kernel_->unroll_factor_ = ur_factor;
-        }
-      }
-    }
-
-    if (has_reduction) {
-      // Run through outputs, grab all inputs of outputs
-      // squeeze with computeAt to set overall structure.
-      for (auto output : cuda_kernel_->fusion_->outputs()) {
-        if (output->getValType() != ValType::TensorView)
-          continue;
-        TensorView* out_tv = static_cast<TensorView*>(output);
-
-        // fcd_reduction could be queried later via
-        // cuda_kernel_->reduction_axes_, which would ensure we have proper
-        // launch configuratoin.
-        TensorView* intermediate;
-        if (fcd_reduction) {
-          out_tv->split(-1, kFcdReductionThreadX);
-          // necessary to avoid dynamic allocation on intermediates;
-          intermediate = out_tv->rFactor({-2});
-        } else {
-          // TODO: we don't need a full warp here, this should be determined by
-          //       element data type
-          out_tv->split(0, kNonFcdReductionThreadX);
-          out_tv->split(
-              -1, kNonFcdReductionThreadY); // necessary to avoid dynamic
-                                            // allocation on intermediates;
-          intermediate = out_tv->rFactor({-2});
-        }
-        for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          // scheduling of inputs shouldn't change with different fcd_reduction
-          if (inp->getValType().value() == ValType::TensorView) {
-            static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
-          }
-        }
-        // scheduling of inputs shouldn't change with different fcd_reduction
-        intermediate->computeAt(out_tv, -2);
-        if (fcd_reduction) {
-          out_tv->axis(0)->parallelize(ParallelType::BIDx);
-        } else {
-          out_tv->axis(0)->parallelize(ParallelType::BIDx);
-          out_tv->axis(1)->parallelize(ParallelType::TIDx);
-        }
-      }
-      // Run through all values, unroll, and bind their axes
-      for (auto val : cuda_kernel_->fusion_->vals()) {
-        if (val->getValType().value() != ValType::TensorView)
-          continue;
-        TensorView* tv = static_cast<TensorView*>(val);
-        if (fcd_reduction) {
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-        } else {
-          tv->axis(-1)->parallelize(ParallelType::TIDy);
-        }
-      }
-    } else {
-      // Run through outputs, grab all inputs of outputs
-      // squeeze with computeAt to set overall structure.
-      for (auto output : cuda_kernel_->fusion_->outputs()) {
-        if (output->getValType() != ValType::TensorView)
-          continue;
-        TensorView* out_tv = static_cast<TensorView*>(output);
-        for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          if (inp->getValType().value() == ValType::TensorView)
-            static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
-        }
-        out_tv->axis(0)->parallelize(ParallelType::BIDx);
-      }
-
-      // Run through all values, unroll, and bind their axes
-      for (auto val : cuda_kernel_->fusion_->vals()) {
-        if (val->getValType().value() != ValType::TensorView)
-          continue;
-        TensorView* tv = static_cast<TensorView*>(val);
-
-        // Should be true for all intermediates, but if one isn't hooked
-        // up right, skip it and hope for the best for now
-        if (!disable_unroll && tv->nDims() == 3) {
-          tv->axis(-2)->parallelize(ParallelType::Unroll);
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-        } else {
-          if (tv->nDims() == 2)
-            tv->axis(-1)->parallelize(ParallelType::TIDx);
-        }
-      }
     }
   }
 

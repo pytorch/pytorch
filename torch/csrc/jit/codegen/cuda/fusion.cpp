@@ -79,6 +79,8 @@ void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
 
+  swap(a.launch_configs_, b.launch_configs_);
+
   // Fixup the Statement::fusion_ links for a
   for (auto val : a.val_set_) {
     val->fusion_ = &a;
@@ -138,6 +140,11 @@ Fusion::Fusion(const Fusion& other) {
 
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
+
+  for (const auto& kv : other.launch_configs_) {
+    auto val = ir_cloner.clone(kv.second);
+    launch_configs_.insert({kv.first, val});
+  }
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -189,6 +196,8 @@ void Fusion::clear() noexcept {
 
   inputs_.clear();
   outputs_.clear();
+
+  launch_configs_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
