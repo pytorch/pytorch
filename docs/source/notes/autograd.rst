@@ -217,7 +217,8 @@ Autograd for Complex Numbers
 What notion of complex derivative does PyTorch use?
 ***************************************************
 
-   PyTorch follows JAX's convention for autograd for Complex Numbers.
+   PyTorch follows `_JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`
+   convention for autograd for Complex Numbers.
 
     For a function :math:`F: C → C`
 
@@ -253,13 +254,13 @@ Why is there a negative sign in the formula above?
 
     For a function F: V → W, where are V and W are vector spaces. The output of
     the Vector-Jacobian Product (VJP) :math:`VJP : V → (W^* → V^*)` is a linear map
-    from :math:`W^* to V^*` (explained in Chapter 4 of Dougal’s thesis).
+    from :math:`W^* to V^*` (explained in `Chapter 4 of _Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
     The negative signs in the above VJP computation are due to conjugation. The first
     vector in the output returned by VJP for a given cotangent is a covector (\in :math:`C^*`),
     and the last vector in the output is used to get the result in :math:`C`
     since the final result of reverse-mode differentiation of a function is a covector belonging
-    to :math:`C^*` (explained in Chapter 4 of Dougal’s thesis).
+    to :math:`C^*` (explained in `Chapter 4 of _Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
 How are the JVP and VJP defined for :math:`R^2 -> C` and :math:`C -> R^2` functions?
 ************************************************************************************
