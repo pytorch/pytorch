@@ -174,18 +174,19 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
 
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(self.dim() == 2, "input must be a matrix");
-  TORCH_CHECK(m1.dim() == 2, "m1 must be a matrix");
-  TORCH_CHECK(m2.dim() == 2, "m2 must be a matrix");
+  TORCH_CHECK(self.dim() == 2, "input must be a matrix, got ", self.dim(), "-D tensor");
+  TORCH_CHECK(m1.dim() == 2, "mat1 must be a matrix, got ", m1.dim(), "-D tensor");
+  TORCH_CHECK(m2.dim() == 2, "mat2 must be a matrix, got ", m2.dim(), "-D tensor");
 
   TORCH_CHECK(
-      m1.size(1) == m2.size(0), "m1 and m2 shapes cannot be multiplied (",
+      m1.size(1) == m2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       m1.size(0), "x", m1.size(1), " and ", m2.size(0), "x", m2.size(1), ")");
 
   TORCH_CHECK(
       self.size(0) == m1.size(0) && self.size(1) == m2.size(1),
       "input shape is incompatible with matrix multiplication (",
-      m1.size(0), "x", m1.size(1), " and ", m2.size(0), "x", m2.size(1), ")");
+      m1.size(0), "x", m1.size(1), " @ ", m2.size(0), "x", m2.size(1), " != ",
+      self.size(0), "x", self.size(1), ")");
 
   result.resize_as_(self);
 
