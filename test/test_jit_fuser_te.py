@@ -9,6 +9,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
+# these needs to be set before `common_utils`
+# infers `GRAPH_EXECUTOR`.
+# this file **requires** these settings
+# and setting them after `GRAPH_EXECUTOR` is
+# inferred erroneously runs or skips
+# some tests
+torch._C._jit_set_profiling_executor(True)
+torch._C._jit_set_profiling_mode(True)
+
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, skipIfRocm
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
@@ -21,9 +30,6 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 from te_utils import CudaCodeGenExecuted
-
-torch._C._jit_set_profiling_executor(True)
-torch._C._jit_set_profiling_mode(True)
 
 FUSION_GROUP = 'tensorexpr::Group'
 
