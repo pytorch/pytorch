@@ -1127,6 +1127,12 @@
   variants: method
   device_guard: False
 
+- func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
+  variants: function
+  dispatch:
+    QuantizedCPU: empty_quantized
+    QuantizedCUDA: empty_quantized
+
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_guard: False
 
@@ -5108,6 +5114,8 @@
   dispatch:
     CPU: unfold
     CUDA: unfold
+    QuantizedCPU: unfold
+    QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
   variants: function
