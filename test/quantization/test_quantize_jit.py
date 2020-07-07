@@ -1068,7 +1068,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.res2(x, False)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [[torch.rand((1, 3, 10, 10), dtype=torch.float)]]
         qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(M()).eval()
         m = quantize_jit(m, qconfig_dict, test_only_eval_fn, [data])
@@ -1085,7 +1085,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [[torch.rand((1, 5), dtype=torch.float)]]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_jit(model, qconfig_dict, test_only_eval_fn, [data])
@@ -1121,7 +1121,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.avgpool(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [[torch.rand((1, 3, 10, 10), dtype=torch.float)]]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_jit(model, qconfig_dict, test_only_eval_fn, [data], debug=True)
@@ -1211,9 +1211,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.conv(x)
                 return x * x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
-                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-
+        data = [[torch.rand((1, 3, 10, 10), dtype=torch.float)]]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(Mul()).eval()
         m = quantize_jit(model, qconfig_dict, test_only_eval_fn, [data])

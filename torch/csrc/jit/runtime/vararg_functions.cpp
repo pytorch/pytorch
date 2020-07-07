@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/torch.h>
+#include <torch/csrc/api/include/torch/torch.h>
 
 namespace torch {
 namespace jit {
