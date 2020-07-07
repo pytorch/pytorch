@@ -181,6 +181,10 @@ class Module:
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
+
+    :ivar training: Boolean represents whether this module is in training or
+                    evaluation mode.
+    :vartype training: bool
     """
 
     dump_patches: bool = False
@@ -692,9 +696,9 @@ class Module:
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        recording_scopes = torch.jit._trace_module_map is not None
+        recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
             if name:
                 cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
