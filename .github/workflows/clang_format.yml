@@ -29,7 +29,7 @@ jobs:
           set -eu
           # This is necessary to get the same results regardless of whether the
           # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
-          git remote add upstream https://github.com/pytorch/pytorch
+          git remote add upstream https://github.com/csarofeen/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
