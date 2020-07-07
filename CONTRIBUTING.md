@@ -37,13 +37,14 @@
 
 ## Contributing to PyTorch
 
-Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important 
-that you share your intention to contribute with the team, based on the type of contribution:
+Thank you for your interest in contributing to PyTorch! Before you begin writing 
+code, it is important that you share your intention to contribute with the team, 
+based on the type of contribution:
 
 1. You want to propose a new feature and implement it.
     - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues), 
-    and we shall discuss the design and implementation. Once we agree that the plan looks good, 
-    go ahead and implement it.
+    and we shall discuss the design and implementation. Once we agree that the 
+    plan looks good, go ahead and implement it.
 2. You want to implement a feature or bug-fix for an outstanding issue.
     - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
     - Pick an issue and comment that you'd like to work on the feature or bug-fix.
@@ -82,7 +83,8 @@ git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
-If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+If you want to have no-op incremental rebuilds (which are fast), see the section below 
+titled "Make no-op build fast."
 
 
 3. Install PyTorch in `develop` mode:
