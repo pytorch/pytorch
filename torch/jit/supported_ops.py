@@ -230,7 +230,7 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
-        magic_methods_rows.append('":any:`{}`", "``{}``"'.format(fn, magic_method))
+        magic_methods_rows.append('"{}", "``{}``"'.format(fn, magic_method))
 
     schematized_ops = []
     schemaless_ops = []
