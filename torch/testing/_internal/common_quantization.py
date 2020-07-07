@@ -27,13 +27,8 @@ def test_only_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    total, correct = 0, 0
-    for *data, target in calib_data:
-        output = model(*data)
-        _, predicted = torch.max(output, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-    return correct / total
+    for inp in calib_data:
+        output = model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -140,20 +135,18 @@ def get_script_module(model, tracing, data):
 class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        # TODO: reame to img_data2d
-        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float),
-                          torch.randint(0, 1, (1,), dtype=torch.long))
-                         for _ in range(2)]
-        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float),
-                             torch.randint(0, 1, (1,), dtype=torch.long))
+        self.calib_data = [torch.rand(2, 5, dtype=torch.float) for _ in range(2)]
+        self.train_data = [torch.rand(2, 5, dtype=torch.float) for _ in range(2)]
+
+        self.img_data_1d = [[torch.rand(2, 3, 10, dtype=torch.float)]
                             for _ in range(2)]
-        self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
-                             torch.randint(0, 1, (1,), dtype=torch.long))
+        self.img_data_2d = [[torch.rand(1, 3, 10, 10, dtype=torch.float)]
                             for _ in range(2)]
+        self.img_data_3d = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float)]
+                            for _ in range(2)]
+
         self.img_data_dict = {1 : self.img_data_1d,
-                              2 : self.img_data,
+                              2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
     def checkNoPrepModules(self, module):
@@ -294,7 +287,7 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(scripted_output, ref_output)
 
 
-    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
+    def checkGraphModeOp(self, module, inputs, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
@@ -303,16 +296,12 @@ class QuantizationTestCase(TestCase):
             module = module.eval()
         if dynamic:
             qconfig_dict = {'': default_dynamic_qconfig}
-            inputs = data
-        else:
-            *inputs, target = data[0]
-        model = get_script_module(module, tracing, inputs).eval()
+        model = get_script_module(module, tracing, inputs[0]).eval()
         if debug:
             print('input graph:', model.graph)
         models = {}
         outputs = {}
         for d in [True, False]:
-            # TODO: _test_only_eval_fn --> default_eval_fn
             if dynamic:
                 models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
                 # make sure it runs
@@ -320,12 +309,12 @@ class QuantizationTestCase(TestCase):
             else:
                 # module under test can contain in-place ops, and we depend on
                 # input data staying constant for comparisons
-                data_copy = copy.deepcopy(data)
+                inputs_copy = copy.deepcopy(inputs)
                 models[d] = quantize_jit(
-                    model, qconfig_dict, test_only_eval_fn, [data_copy], inplace=False,
+                    model, qconfig_dict, test_only_eval_fn, [inputs_copy], inplace=False,
                     debug=d)
                 # make sure it runs
-                outputs[d] = models[d](*inputs)
+                outputs[d] = models[d](*inputs[0])
 
         if debug:
             print('debug graph:', models[True].graph)
