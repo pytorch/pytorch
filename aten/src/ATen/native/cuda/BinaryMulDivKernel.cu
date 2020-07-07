@@ -9,6 +9,39 @@
 
 namespace at { namespace native {
 
+template<typename scalar_t>
+struct InvDivFunctor {
+    InvDivFunctor(scalar_t inv): inv_b(inv) {}
+    __device__ scalar_t operator() (scalar_t a) const {
+      return a * inv_b;
+    }
+  private:
+    scalar_t inv_b;
+};
+
+template<typename scalar_t>
+struct DivFunctor {
+  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+    return a / b;
+  }
+};
+
+template<typename scalar_t>
+struct MulFunctor {
+  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+    return a * b;
+  }
+};
+
+// Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+template<>
+struct MulFunctor<bool> {
+  __device__ bool operator() (bool a, bool b) const {
+    return a && b;
+  }
+};
+
+
 void div_kernel_cuda(TensorIterator& iter) {
   if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
@@ -17,32 +50,22 @@ void div_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
       auto inv_b = scalar_t(1.0) / iter.scalar_value<scalar_t>(2);
       iter.remove_operand(2);
-      gpu_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return a * inv_b;
-      });
+      InvDivFunctor<scalar_t> f(inv_b);
+      gpu_kernel(iter, f);
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a / b;
-      });
+      DivFunctor<scalar_t> f;
+      gpu_kernel_with_scalars(iter, f);
     });
   }
 }
 
 void mul_kernel_cuda(TensorIterator& iter) {
-  if (iter.common_dtype() == ScalarType::Bool) {
-    // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-      return a && b;
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a * b;
-      });
-    });
-  }
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "mul_cuda", [&]() {
+    MulFunctor<scalar_t> f;
+    gpu_kernel_with_scalars(iter, f);
+  });
 }
 
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
