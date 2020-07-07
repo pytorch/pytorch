@@ -1534,13 +1534,22 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 x += y
                 return x
 
+        class ConstantTensor(torch.nn.Module):
+            def __init__(self):
+                super(ConstantTensor, self).__init__()
+                self.y = torch.rand(1, 2, 5, 5)
+
+            def forward(self, x, y):
+                return x + self.y
+
         data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedAdd(), True),
                              (QuantizedInplaceAdd(), True),
-                             (NonQuantizedAdd(), False),
-                             (NonQuantizedInplaceAdd(), False)]:
+                             (NonQuantizedAdd(), True),
+                             (NonQuantizedInplaceAdd(), True),
+                             (ConstantTensor(), True)]:
             for tracing in [True, False]:
                 op = "quantized::add" if quantized else "aten::add"
                 m = self.checkGraphModeOp(m, data, op, tracing, debug=True)
