@@ -8,30 +8,49 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-namespace {
 // Make sure we can inline something, before we attempt to.
-void check_inlineable(const IRInputOutput* const irio) {
-  for (auto inp : irio->inputs())
+static void checkInlineable(const Expr* expr) {
+  for (auto input : expr->inputs()) {
     TORCH_CHECK(
-        inp->isScalar(),
+        input->isScalar(),
         "Printing inline computations involving values other than scalars is not currently supported.");
+  }
   TORCH_CHECK(
-      irio->nOutputs() == 1,
+      expr->outputs().size() == 1,
       "Cannot print inline computations if there's more than one output.");
   TORCH_CHECK(
-      irio->output(0)->isScalar(),
+      expr->output(0)->isScalar(),
       "Printing inline computations involving values other than scalars is not currently supported.");
 }
-} // namespace
+
+void IRPrinter::handle(const Statement* s) {
+  OptInConstDispatch::handle(s);
+}
+
+void IRPrinter::handle(const Val* v) {
+  if (follow_val_map) {
+    // Follow a single maping (permutation chains are not expected)
+    v = FusionGuard::getCurFusion()->loweredVal(v);
+    TORCH_INTERNAL_ASSERT(v == FusionGuard::getCurFusion()->loweredVal(v));
+  }
+  OptInConstDispatch::handle(v);
+}
+
+void IRPrinter::handle(const Expr* e) {
+  OptInConstDispatch::handle(e);
+}
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   os << "__global__ void " << kernel_name_ << "(";
 
-  std::deque<Val*> vals;
-  for (decltype(fusion->nInputs()) i{0}; i < fusion->nInputs(); i++)
-    vals.push_back(fusion->input(i));
-  for (decltype(fusion->nOutputs()) i{0}; i < fusion->nOutputs(); i++)
-    vals.push_back(fusion->output(i));
+  std::vector<Val*> vals;
+
+  for (auto val : fusion->inputs()) {
+    vals.push_back(val);
+  }
+  for (auto val : fusion->outputs()) {
+    vals.push_back(val);
+  }
 
   for (Val* val : vals) {
     switch (val->getValType().value()) {
@@ -57,6 +76,11 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
 
   if (fusion->hasRNG())
     os << ", unsigned long long seed, unsigned long long offset";
+
+  if (fusion->hasGridReduction()) {
+    os << ", void* work_buf, unsigned* sync_flags";
+  }
+
   os << "){\n";
   indent_size++;
   if (fusion->hasRNG()) {
@@ -64,6 +88,12 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
     os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
     indent();
     os << "Philox rnd(seed, idx, offset);\n";
+  }
+  if (fusion->hasBlockReduction() || fusion->hasGridReduction()) {
+    indent();
+    // TODO: Dynamic sizing possible? blockReduce originally used 1024
+    // values of a given type
+    os << "__shared__ float shared_mem[1024];\n";
   }
 }
 
@@ -74,9 +104,13 @@ void IRPrinter::handle(Fusion* fusion) {
   }
 }
 
-void IRPrinter::handle(const TensorDomain* const td) {
+void IRPrinter::handle(const TensorDomain* td) {
+  if (td->nDims() == 0) {
+    os << "[ 0 ]";
+    return;
+  }
   os << "[ ";
-  for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
+  for (size_t i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
     if (i != td->nDims() - 1)
       os << ", ";
@@ -84,7 +118,7 @@ void IRPrinter::handle(const TensorDomain* const td) {
   os << " ]";
 }
 
-void IRPrinter::handle(const TensorView* const tv) {
+void IRPrinter::handle(const TensorView* tv) {
   os << "T" << tv->name();
   handle(tv->domain());
 
@@ -95,7 +129,7 @@ void IRPrinter::handle(const TensorView* const tv) {
   }
 }
 
-void IRPrinter::handle(const IterDomain* const id) {
+void IRPrinter::handle(const IterDomain* id) {
   if (id->isReduction())
     os << "r";
   else if (id->isBroadcast())
@@ -127,9 +161,14 @@ void IRPrinter::handle(const IterDomain* const id) {
     os << "rf";
 }
 
-void IRPrinter::handle(const TensorIndex* const ti) {
-  os << "T" << ti->view()->name() << "[ ";
+void IRPrinter::handle(const TensorIndex* ti) {
+  os << "T" << ti->view()->name();
+  if (ti->nDims() == 0) {
+    os << "[ 0 ]";
+    return;
+  }
 
+  os << "[ ";
   bool first = true;
   for (auto* ind : ti->indices()) {
     if (!first)
@@ -140,7 +179,7 @@ void IRPrinter::handle(const TensorIndex* const ti) {
   os << " ]";
 }
 
-void IRPrinter::handle(const Bool* const b) {
+void IRPrinter::handle(const Bool* b) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(b));
@@ -155,7 +194,7 @@ void IRPrinter::handle(const Bool* const b) {
   }
 }
 
-void IRPrinter::handle(const Float* const f) {
+void IRPrinter::handle(const Float* f) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(f));
@@ -173,7 +212,7 @@ void IRPrinter::handle(const Float* const f) {
   }
 }
 
-void IRPrinter::handle(const Half* const h) {
+void IRPrinter::handle(const Half* h) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(h));
@@ -188,12 +227,19 @@ void IRPrinter::handle(const Half* const h) {
   }
 }
 
-void IRPrinter::handle(const Int* const i) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(i));
-    os << " )";
-    return;
+void IRPrinter::handle(const Int* i) {
+  // Make sure we didn't bypass the value mapping
+  // (for example calling IRPrinter::handle() with a Int*)
+  TORCH_CHECK(
+      !follow_val_map || i == FusionGuard::getCurFusion()->loweredVal(i));
+
+  if (print_inline_) {
+    if (auto def = FusionGuard::getCurFusion()->origin(i)) {
+      os << "( ";
+      handle(def);
+      os << " )";
+      return;
+    }
   }
 
   if (i->isSymbolic()) {
@@ -203,27 +249,21 @@ void IRPrinter::handle(const Int* const i) {
   }
 }
 
-void IRPrinter::handle(const NamedScalar* const i) {
+void IRPrinter::handle(const NamedScalar* i) {
   os << i->name();
 }
 
-namespace {
-
-bool isTV(const Val* const val) {
-  return (
-      val->getValType().value() == ValType::TensorView ||
-      val->getValType().value() == ValType::TensorIndex);
+static bool isTV(const Val* val) {
+  return val->getValType().value() == ValType::TensorView ||
+      val->getValType().value() == ValType::TensorIndex;
 }
 
 // Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* const expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)))
-    return true;
-  return false;
+static bool isTVOp(const Expr* expr) {
+  return expr->outputs().size() == 1 && isTV(expr->outputs().front());
 }
-} // namespace
 
-void IRPrinter::handle(const UnaryOp* const uop) {
+void IRPrinter::handle(const UnaryOp* uop) {
   bool istvop = isTVOp(uop);
   if (!print_inline_) {
     indent();
@@ -235,7 +275,7 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     }
     os << " = ";
   } else {
-    check_inlineable(uop);
+    checkInlineable(uop);
   }
 
   if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
@@ -269,7 +309,7 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const BinaryOp* const bop) {
+void IRPrinter::handle(const BinaryOp* bop) {
   bool istvop = isTVOp(bop);
   if (!print_inline_) {
     indent();
@@ -284,7 +324,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 
     os << " = ";
   } else {
-    check_inlineable(bop);
+    checkInlineable(bop);
   }
 
   if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
@@ -314,7 +354,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const TernaryOp* const top) {
+void IRPrinter::handle(const TernaryOp* top) {
   bool istvop = isTVOp(top);
   if (!print_inline_) {
     indent();
@@ -329,7 +369,7 @@ void IRPrinter::handle(const TernaryOp* const top) {
 
     os << " = ";
   } else {
-    check_inlineable(top);
+    checkInlineable(top);
   }
 
   os << top->getTernaryOpType() << "(";
@@ -355,7 +395,7 @@ void IRPrinter::handle(const TernaryOp* const top) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const ReductionOp* const rop) {
+void IRPrinter::handle(const ReductionOp* rop) {
   // Check if we've lowered yet.
 
   bool lowered = rop->out()->getValType() == ValType::TensorIndex;
@@ -367,52 +407,77 @@ void IRPrinter::handle(const ReductionOp* const rop) {
     return;
   }
 
-  TensorIndex* out = static_cast<TensorIndex*>(rop->out());
+  auto out = rop->out()->as<TensorIndex>();
   auto vec_domain = out->view()->domain()->domain();
 
-  IterDomain *tidx = nullptr, *tidy = nullptr, *tidz = nullptr;
-  bool is_thread_reduce = false;
-  for (auto id : vec_domain) {
-    if (id->isThreadDim() && id->isReduction()) {
-      switch (id->parallel_method()) {
-        case (ParallelType::TIDz):
-          tidz = id;
-          break;
-        case (ParallelType::TIDy):
-          tidy = id;
-          break;
-        case (ParallelType::TIDx):
-          tidx = id;
-          break;
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false, "Did not recognize parallel type for reduction.");
-      }
-      is_thread_reduce = true;
-    }
-  }
+  bool has_block_reduce = out->view()->hasBlockReduction();
+  bool has_grid_reduce = out->view()->hasGridReduction();
 
-  if (!is_thread_reduce) {
+  if (!has_block_reduce && !has_grid_reduce) {
     handle(new BinaryOp(rop->getReductionOpType(), out, out, rop->in()));
     return;
   }
+
+  auto par_domains = rop->getParallelReductionDomains();
+  bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
+  bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
+  bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+  bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
+  bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
+  bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
+
   auto d_type = rop->out()->getDataType().value();
   auto op_type = rop->getReductionOpType();
-  indent();
-  // Thread all reduce.
-  os << "blockReduce< " << (tidx != nullptr ? "true" : "false") << ", "
-     << (tidy != nullptr ? "true" : "false") << ", "
-     << (tidz != nullptr ? "true" : "false") << " >"
-     << " ( ";
-  handle(rop->out());
-  os << ", ";
-  handle(rop->in());
-  os << ", ";
-  os << "reduction_" << op_type << "_" << d_type;
-  os << ");\n";
+  const std::string block_result = "block_result";
+  if (has_block_reduce) {
+    if (has_grid_reduce) {
+      indent();
+      os << d_type << " " << block_result << ";\n";
+    }
+    indent();
+    // Thread all reduce.
+    os << "blockReduce< " << (tidx ? "true" : "false") << ", "
+       << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false") << " >"
+       << " ( ";
+    if (has_grid_reduce) {
+      os << block_result;
+    } else {
+      handle(rop->out());
+    }
+    os << ", ";
+    handle(rop->in());
+    os << ", ";
+    os << "reduction_" << op_type << "_" << d_type;
+    os << ", threadIdx, blockDim";
+    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+    os << ");\n";
+  }
+  if (has_grid_reduce) {
+    indent();
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid reduction.
+    os << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
+       << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false") << ", "
+       << (!tidx ? "true" : "false") << ", " << (!tidy ? "true" : "false")
+       << ", " << (!tidz ? "true" : "false") << " >"
+       << " ( ";
+    handle(rop->out());
+    os << ", ";
+    if (has_block_reduce) {
+      os << block_result;
+    } else {
+      handle(rop->in());
+    }
+    os << ", ";
+    os << "reduction_" << op_type << "_" << d_type;
+    os << ", static_cast<" << d_type << "*>(work_buf)";
+    os << ", sync_flags";
+    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+    os << ");\n";
+  }
 }
 
-void IRPrinter::handle(const BroadcastOp* const bop) {
+void IRPrinter::handle(const BroadcastOp* bop) {
   indent();
   handle(bop->out());
   os << "\n";
@@ -424,8 +489,8 @@ void IRPrinter::handle(const BroadcastOp* const bop) {
   os << ";\n";
 }
 
-void IRPrinter::handle(const ForLoop* const fl) {
-  if (fl->iter_domain()->isThread()) {
+void IRPrinter::handle(const ForLoop* fl) {
+  if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
     return;
@@ -452,7 +517,7 @@ void IRPrinter::handle(const ForLoop* const fl) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const IfThenElse* const ite) {
+void IRPrinter::handle(const IfThenElse* ite) {
   indent();
 
   // IF
@@ -480,7 +545,7 @@ void IRPrinter::handle(const IfThenElse* const ite) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const Allocate* const a) {
+void IRPrinter::handle(const Allocate* a) {
   indent();
   os << a->buf_type();
   if (a->buffer()->getValType() == ValType::TensorView) {
@@ -501,7 +566,7 @@ void IRPrinter::handle(const Allocate* const a) {
   }
 }
 
-void IRPrinter::handle(const Split* const s) {
+void IRPrinter::handle(const Split* s) {
   os << "Split: ";
   handle(s->in());
   os << " by factor " << s->factor() << " -> ";
@@ -511,20 +576,20 @@ void IRPrinter::handle(const Split* const s) {
   os << "\n";
 }
 
-void IRPrinter::handle(const Merge* const m) {
+void IRPrinter::handle(const Merge* m) {
   os << "Merge: ";
   handle(m->outer());
   os << " and ";
   handle(m->inner());
   os << " -> ";
   handle(m->out());
-  --indent_size;
   os << "\n";
 }
 
 namespace {
 
-struct ReductionOps : OptOutDispatch {
+class ReductionOps : OptOutDispatch {
+ public:
   std::set<std::pair<BinaryOpType, DataType>> rops;
   void handle(ReductionOp* rop) override {
     rops.emplace(std::pair<BinaryOpType, DataType>{
@@ -541,6 +606,7 @@ struct ReductionOps : OptOutDispatch {
     return ROPs.rops;
   }
 };
+
 } // namespace
 
 void IRPrinter::printReductionOps(Fusion* fusion) {
@@ -566,7 +632,6 @@ void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
-
   printReductionOps(fusion);
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {
@@ -575,7 +640,7 @@ void IRPrinter::printKernel(
   os << "}\n";
 }
 
-std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
+std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
   IRPrinter p(os);
   p.handle(stmt);
   return os;

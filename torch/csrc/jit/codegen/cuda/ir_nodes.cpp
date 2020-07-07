@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -13,36 +14,8 @@ namespace jit {
 namespace fuser {
 
 namespace {
-struct ScalarCheck : OptInDispatch {
-  Val* v1_;
-  Val* v2_;
-  bool same = false;
 
-  void handle(Bool* b) override {
-    same = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
-  }
-
-  void handle(Float* f) override {
-    same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
-  }
-
-  void handle(Half* h) override {
-    same = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
-  }
-
-  void handle(Int* i) override {
-    same = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
-  }
-
-  void handle(NamedScalar* ns) override {
-    same =
-        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
-  }
-
-  ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
-    OptInDispatch::handle(v1_);
-  }
-
+class ScalarCheck : OptInDispatch {
  public:
   static bool sameAs(Val* v1, Val* v2) {
     if (v1 == v2)
@@ -55,10 +28,45 @@ struct ScalarCheck : OptInDispatch {
       return false;
 
     ScalarCheck sc(v1, v2);
-    return sc.same;
+    return sc.same_;
   }
+
+ private:
+  void handle(Bool* b) override {
+    same_ = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
+  }
+
+  void handle(Float* f) override {
+    same_ = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
+  }
+
+  void handle(Half* h) override {
+    same_ = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
+  }
+
+  void handle(Int* i) override {
+    same_ = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
+  }
+
+  void handle(NamedScalar* ns) override {
+    same_ =
+        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
+  }
+
+  ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
+    OptInDispatch::handle(v1_);
+  }
+
+ private:
+  Val* v1_ = nullptr;
+  Val* v2_ = nullptr;
+  bool same_ = false;
 };
+
 } // namespace
+
+Bool::Bool(const Bool* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Bool::sameAs(const Bool* const other) const {
   if (isConst() && other->isConst())
@@ -66,17 +74,26 @@ bool Bool::sameAs(const Bool* const other) const {
   return this == other;
 }
 
+Float::Float(const Float* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
 bool Float::sameAs(const Float* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
   return this == other;
 }
 
+Half::Half(const Half* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
 bool Half::sameAs(const Half* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
   return this == other;
 }
+
+Int::Int(const Int* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Int::sameAs(const Int* const other) const {
   if (isConst() && other->isConst())
@@ -90,6 +107,12 @@ UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
+
+UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      unary_op_type_(src->unary_op_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
 
 bool UnaryOp::sameAs(const UnaryOp* const other) const {
   if (this->type() != other->type())
@@ -108,6 +131,13 @@ BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
   addInput(_rhs);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
+
+BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      binary_op_type_(src->binary_op_type_),
+      out_(ir_cloner->clone(src->out_)),
+      lhs_(ir_cloner->clone(src->lhs_)),
+      rhs_(ir_cloner->clone(src->rhs_)) {}
 
 bool BinaryOp::sameAs(const BinaryOp* other) const {
   if (getBinaryOpType() != other->getBinaryOpType())
@@ -136,6 +166,14 @@ TernaryOp::TernaryOp(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      ternary_op_type_(src->ternary_op_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in1_(ir_cloner->clone(src->in1_)),
+      in2_(ir_cloner->clone(src->in2_)),
+      in3_(ir_cloner->clone(src->in3_)) {}
+
 bool TernaryOp::sameAs(const TernaryOp* other) const {
   if (getTernaryOpType() != other->getTernaryOpType())
     return false;
@@ -160,7 +198,7 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
         ndims++;
 
     TORCH_INTERNAL_ASSERT(
-        ndims == (int)static_cast<TensorView*>(in_)->nDims(),
+        ndims == (int)in_->as<TensorView>()->domain()->noReductions().size(),
         "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
   } else {
     TORCH_INTERNAL_ASSERT(
@@ -176,6 +214,11 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
+
+BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
 
 bool BroadcastOp::sameAs(const BroadcastOp* const other) const {
   return other->in() == in() && other->out() == out();
@@ -199,11 +242,49 @@ ReductionOp::ReductionOp(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_type_(src->reduction_op_type_),
+      init_(ir_cloner->clone(src->init_)),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
 bool ReductionOp::sameAs(const ReductionOp* other) const {
   return (
       this->in()->sameAs(other->in()) &&
       this->getReductionOpType() == other->getReductionOpType() &&
       this->init()->sameAs(other->init()));
+}
+
+std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
+  const Val* out_val = out();
+  TORCH_INTERNAL_ASSERT(
+      out_val->getValType() == ValType::TensorView ||
+          out_val->getValType() == ValType::TensorIndex,
+      "Output of reduction must be TensorView or TensorIndex");
+  // out is a TensorIndex after lowering
+  if (out_val->getValType() == ValType::TensorIndex) {
+    out_val = static_cast<const TensorIndex*>(out_val)->view();
+  }
+  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
+  vec_domain.erase(
+      std::remove_if(
+          vec_domain.begin(),
+          vec_domain.end(),
+          [](IterDomain* id) { return !id->isReduction(); }),
+      vec_domain.end());
+  return vec_domain;
+}
+
+std::unordered_map<ParallelType, IterDomain*> ReductionOp::
+    getParallelReductionDomains() const {
+  std::unordered_map<ParallelType, IterDomain*> parallel_domains;
+  for (auto d : getReductionDomains()) {
+    if (d->isThread()) {
+      parallel_domains.insert(std::make_pair(d->parallel_method(), d));
+    }
+  }
+  return parallel_domains;
 }
 
 IterDomain::IterDomain(
@@ -239,6 +320,15 @@ IterDomain::IterDomain(
       " .");
   this->name_ = fusion_->registerVal(this);
 }
+
+IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner),
+      start_(ir_cloner->clone(src->start_)),
+      extent_(ir_cloner->clone(src->extent_)),
+      parallel_method_(src->parallel_method_),
+      is_reduction_domain_(src->is_reduction_domain_),
+      is_rfactor_domain_(src->is_rfactor_domain_),
+      is_broadcast_domain_(src->is_broadcast_domain_) {}
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
   bool is_same = isReduction() == other->isReduction() &&
@@ -393,6 +483,14 @@ TensorDomain::TensorDomain(
   this->name_ = fusion_->registerVal(this);
 }
 
+TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner),
+      root_domain_(ir_cloner->clone(src->root_domain_)),
+      domain_(ir_cloner->clone(src->domain_)),
+      no_bcast_domain_(ir_cloner->clone(src->no_bcast_domain_)),
+      no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
+      rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)) {}
+
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (nDims() != other->nDims())
     return false;
@@ -433,6 +531,18 @@ bool TensorDomain::hasReduction() const {
   return no_reduction_domain_.size() != domain_.size();
 }
 
+bool TensorDomain::hasBlockReduction() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isReduction() && id->isThreadDim();
+  });
+}
+
+bool TensorDomain::hasGridReduction() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isReduction() && id->isBlockDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }
@@ -444,6 +554,8 @@ bool TensorDomain::hasRFactor() const {
 // i here is int, as we want to accept negative value and ::size_type can be a
 // uint.
 IterDomain* TensorDomain::axis(int i) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to access an axis in a 0-dim domain");
   if (i < 0)
     i += nDims();
   TORCH_CHECK(
@@ -456,6 +568,7 @@ IterDomain* TensorDomain::axis(int i) const {
 }
 
 size_t TensorDomain::posOf(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to find an axis in a 0-dim domain");
   size_t i = 0;
   while (i < domain_.size()) {
     if (domain_[i] == id)
@@ -468,6 +581,7 @@ size_t TensorDomain::posOf(IterDomain* id) const {
 // Split "axis" into 2 axes where the inner axes is size of "factor"
 // and outer axis is size axis.extent() / factor
 void TensorDomain::split(int axis_, unsigned int factor) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim domain");
   if (axis_ < 0)
     axis_ += nDims();
 
@@ -485,6 +599,7 @@ void TensorDomain::split(int axis_, unsigned int factor) {
 
 // Merge "axis" and "axis+1" into 1 dimension
 void TensorDomain::merge(int axis_o, int axis_i) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
   if (axis_o < 0)
     axis_o += nDims();
 
@@ -519,6 +634,9 @@ void TensorDomain::merge(int axis_o, int axis_i) {
 
 // Reorder axes according to map[old_pos] = new_pos
 void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(
+      !(nDims() == 0 && old2new_.size() > 0),
+      "Tried to reorder a 0-dim domain");
   domain_ = orderedAs(domain_, old2new_);
   resetDomains();
 }
@@ -526,6 +644,10 @@ void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
 std::vector<IterDomain*> TensorDomain::orderedAs(
     const std::vector<IterDomain*>& dom,
     const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(
+      !(dom.size() == 0 && old2new_.size() > 0),
+      "Tried to reorder a 0-dim domain");
+
   // Eventhough these checks are already in TensorView, we want to redo them as
   // we can enter this function from other places, not through TensorView
 
@@ -678,6 +800,8 @@ bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
+
   std::vector<int> axes(axes_.size());
 
   auto ndims = nDims();
@@ -736,6 +860,13 @@ Split::Split(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+Split::Split(const Split* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      outer_(ir_cloner->clone(src->outer_)),
+      inner_(ir_cloner->clone(src->inner_)),
+      in_(ir_cloner->clone(src->in_)),
+      factor_(ir_cloner->clone(src->factor_)) {}
+
 bool Split::sameAs(const Split* const other) const {
   return (
       outer()->sameAs(other->outer()) && inner()->sameAs(other->inner()) &&
@@ -749,6 +880,12 @@ Merge::Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner)
   addInput(_inner);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
+
+Merge::Merge(const Merge* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      outer_(ir_cloner->clone(src->outer_)),
+      inner_(ir_cloner->clone(src->inner_)) {}
 
 bool Merge::sameAs(const Merge* const other) const {
   return (
@@ -775,6 +912,13 @@ ForLoop::ForLoop(
     body().push_back(expr);
 }
 
+ForLoop::ForLoop(const ForLoop* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      index_(ir_cloner->clone(src->index_)),
+      iter_domain_(ir_cloner->clone(src->iter_domain_)),
+      body_(&src->body_, ir_cloner),
+      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
+
 bool ForLoop::sameAs(const ForLoop* other) const {
   if (this->iter_domain() != other->iter_domain())
     return false;
@@ -798,6 +942,13 @@ IfThenElse::IfThenElse(
     else_body_.push_back(expr);
 }
 
+IfThenElse::IfThenElse(const IfThenElse* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      cond_(src->cond_),
+      body_(&src->body_, ir_cloner),
+      else_body_(&src->else_body_, ir_cloner),
+      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
+
 bool IfThenElse::sameAs(const IfThenElse* other) const {
   if (!(this->cond()->sameAs(other->cond()) &&
         this->constBody().sameAs(other->constBody()) &&
@@ -805,6 +956,11 @@ bool IfThenElse::sameAs(const IfThenElse* other) const {
     return false;
   return true;
 }
+
+TensorIndex::TensorIndex(const TensorIndex* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner),
+      view_(ir_cloner->clone(src->view_)),
+      indices_(ir_cloner->clone(src->indices_)) {}
 
 bool TensorIndex::sameAs(const TensorIndex* const other) const {
   if (nDims() != other->nDims())
@@ -821,6 +977,8 @@ bool TensorIndex::sameAs(const TensorIndex* const other) const {
 }
 
 Val* TensorIndex::index(int i) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
   if (i < 0)
     i += nDims();
   assert(i >= 0 && i < nDims());
@@ -846,6 +1004,11 @@ Allocate::Allocate(Val* _val, Val* _size)
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      buffer_(ir_cloner->clone(src->buffer_)),
+      extent_(ir_cloner->clone(src->extent_)) {}
+
 DataType Allocate::buf_type() const {
   return buffer_->getDataType().value();
 }
@@ -860,6 +1023,9 @@ bool Allocate::sameAs(const Allocate* other) const {
 
   return true;
 }
+
+NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), name_(src->name_) {}
 
 } // namespace fuser
 } // namespace jit

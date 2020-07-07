@@ -1,5 +1,4 @@
 from torch.testing._internal.jit_utils import JitTestCase
-import io
 import os
 import sys
 
@@ -27,7 +26,7 @@ def to_test_backend_multi(module, method_compile_spec):
     return torch._C._jit_to_backend("test_backend", module, method_compile_spec)
 
 
-class MyModule(torch.nn.Module):
+class BasicModule(torch.nn.Module):
     """
     A simple Module used to test to_backend lowering machinery.
     """
@@ -43,20 +42,6 @@ class MyModule(torch.nn.Module):
 
     def sub_accum(self, x, h):
         return x - h
-
-
-class NestedModule(torch.nn.Module):
-    """
-    A Module with one submodule that is used to test that lowered Modules
-    can be used as submodules.
-    """
-
-    def __init__(self, submodule):
-        super().__init__()
-        self.submodule = submodule
-
-    def forward(self, x, h):
-        return self.submodule.forward(x, h)
 
 
 class JitBackendTestCase(JitTestCase):
@@ -95,25 +80,19 @@ class JitBackendTestCase(JitTestCase):
         """
         Save and load the lowered module.
         """
-        # Save the lowered module.
-        buffer = io.BytesIO()
-        torch.jit.save(self.lowered_module, buffer)
-
-        # Load the lowered module.
-        buffer.seek(0)
-        self.lowered_module = torch.jit.load(buffer)
+        self.lowered_module = self.getExportImportCopy(self.lowered_module)
 
 
 class BasicModuleTest(JitBackendTestCase):
     """
-    Tests for MyModule.
+    Tests for BasicModule.
     """
 
     def setUp(self):
         super().setUp()
-        # Create Python, JIT and backend versions of MyModule.
-        self.module = MyModule()
-        self.scripted_module = torch.jit.script(MyModule())
+        # Create Python, JIT and backend versions of BasicModule.
+        self.module = BasicModule()
+        self.scripted_module = torch.jit.script(BasicModule())
         self.lowered_module = to_test_backend_multi(
             self.scripted_module._c,
             {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}},
@@ -154,19 +133,31 @@ class NestedModuleTest(JitBackendTestCase):
     Tests for NestedModule that check that a module lowered to a backend can be used
     as a submodule.
     """
+    class NestedModule(torch.nn.Module):
+        """
+        A Module with one submodule that is used to test that lowered Modules
+        can be used as submodules.
+        """
+
+        def __init__(self, submodule):
+            super().__init__()
+            self.submodule = submodule
+
+        def forward(self, x, h):
+            return self.submodule.forward(x, h)
 
     def setUp(self):
         super().setUp()
         # Create Python, JIT and backend versions of NestedModule.
         # Both modules in self.module are regular Python modules.
-        self.module = NestedModule(MyModule())
+        self.module = NestedModuleTest.NestedModule(BasicModule())
         # Both modules in self.scripted_module are ScriptModules.
-        self.scripted_module = torch.jit.script(NestedModule(MyModule()))
+        self.scripted_module = torch.jit.script(NestedModuleTest.NestedModule(BasicModule()))
         lowered_module = to_test_backend_multi(
             self.scripted_module._c, {"forward": {"": ""}}
         )
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
-        self.lowered_module = torch.jit.script(NestedModule(lowered_module))
+        self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(lowered_module))
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
