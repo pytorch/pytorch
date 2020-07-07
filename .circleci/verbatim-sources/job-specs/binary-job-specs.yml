@@ -326,14 +326,6 @@
 
   binary_windows_upload:
     <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
     docker:
       - image: continuumio/miniconda
     steps:
