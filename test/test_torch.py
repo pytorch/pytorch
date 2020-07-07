@@ -11522,7 +11522,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(expected, actual)
 
     @slowTest
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -16910,7 +16910,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
     @dtypesIfCUDA(torch.float32, torch.float64)
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
             # helper function
