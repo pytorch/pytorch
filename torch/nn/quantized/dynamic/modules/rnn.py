@@ -314,7 +314,19 @@ class RNNBase(torch.nn.Module):
         return self._weight_bias()['bias']
 
 class LSTM(RNNBase):
+    r"""
+    A dynamic quantized LSTM module with floating point tensor as inputs and outputs.
+    We adopt the same interface as `torch.nn.LSTM`, please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.LSTM for documentation.
 
+    Examples::
+
+        >>> rnn = nn.LSTM(10, 20, 2)
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
+        >>> c0 = torch.randn(2, 3, 20)
+        >>> output, (hn, cn) = rnn(input, (h0, c0))
+    """
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
@@ -579,50 +591,9 @@ class RNNCellBase(torch.nn.Module):
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
-
-    .. math::
-
-        h' = \tanh(W_{ih} x + b_{ih}  +  W_{hh} h + b_{hh})
-
-    If :attr:`nonlinearity` is `'relu'`, then ReLU is used in place of tanh.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
-            Default: ``True``
-        nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
-
-    Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-          Defaults to zero if not provided.
-
-    Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-
-    Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized RNNCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.RNNCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.RNNCell for documentation.
 
     Examples::
 
@@ -673,51 +644,9 @@ class RNNCell(RNNCellBase):
 class LSTMCell(RNNCellBase):
     r"""A long short-term memory (LSTM) cell.
 
-    .. math::
-
-        \begin{array}{ll}
-        i = \sigma(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        f = \sigma(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
-        g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\
-        o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
-        c' = f * c + i * g \\
-        h' = o * \tanh(c') \\
-        \end{array}
-
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: ``True``
-
-    Inputs: input, (h_0, c_0)
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **h_0** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-        - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state
-          for each element in the batch.
-
-          If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
-
-    Outputs: (h_1, c_1)
-        - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-        - **c_1** of shape `(batch, hidden_size)`: tensor containing the next cell state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(4*hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(4*hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized LSTMCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.LSTMCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.LSTMCell for documentation.
 
     Examples::
 
@@ -757,53 +686,9 @@ class LSTMCell(RNNCellBase):
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
 
-    .. math::
-
-        \begin{array}{ll}
-        r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
-        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - z) * n + z * h
-        \end{array}
-
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: ``True``
-
-    Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-          Defaults to zero if not provided.
-
-    Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-
-    Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(3*hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(3*hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized GRUCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.GRUCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.GRUCell for documentation.
 
     Examples::
 
