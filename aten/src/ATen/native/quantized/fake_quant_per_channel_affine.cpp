@@ -12,6 +12,8 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_per_channel_stub);
 DEFINE_DISPATCH(fake_quant_grad_per_channel_stub);
+DEFINE_DISPATCH(fake_quant_grad_learnable_sc_channel_stub);
+DEFINE_DISPATCH(fake_quant_grad_learnable_z_point_channel_stub);
 
 /* Per channel fake-quantizes the 'inputs' tensor.
 Args:
@@ -151,6 +153,95 @@ Tensor fake_quantize_per_channel_affine_backward(
   fake_quant_grad_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return dX;
+}
+
+template<typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor> fake_quantize_learnable_per_channel_affine_backward(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    int64_t axis,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float);
+
+  TORCH_CHECK(X.sizes() == dY.sizes(), "`X` and `dY` are not the same size");
+  TORCH_CHECK(
+      quant_min <= 0 && quant_max >= 0,
+      "`quant_min` should be less than or \
+        equal to `quant_max`, and the quantization range should include 0.");
+  TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
+  TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
+  TORCH_CHECK(
+      scale.numel() == zero_point.numel(),
+      "scale and zero-point need to have the same dimensions");
+  TORCH_CHECK(
+    at::min(zero_point).item().toLong() >= 0,
+    "`zero_point` must be at least 0 or greater.");
+  TORCH_CHECK(
+      scale.numel() == X.size(axis),
+      "dimensions of scale and zero-point are not consistent with input tensor")
+
+  TORCH_CHECK(
+      at::min(zero_point).item().toLong() >= quant_min &&
+          at::max(zero_point).item().toLong() <= quant_max,
+      "`zero_point` must be between `quant_min` and `quant_max`.");
+
+  TORCH_CHECK(
+      axis >= 0 && axis <= X.dim(),
+      "`axis` must be between 0 and number of dimensions of input");
+
+  if (X.numel() <= 0) {
+    return std::make_tuple(X, scale, zero_point);
+  }
+
+  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+
+  std::vector<int64_t> expected_shape_X(X.dim(), 1);
+  expected_shape_X[axis] = X.size(axis);
+
+  TensorIterator iter_X = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(dX)
+    .add_input(X)
+    .add_input(dY)
+    .add_input(native::_unsafe_view(scale, expected_shape_X))
+    .add_input(native::_unsafe_view(zero_point, expected_shape_X))
+    .build();
+
+  fake_quant_grad_per_channel_stub(iter_X.device_type(), iter_X, quant_min, quant_max);
+
+  auto dScale = at::empty_like(scale, scale.options(), MemoryFormat::Preserve);
+
+  TensorIterator iter_Scale = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(dScale)
+    .add_input(X)
+    .add_input(dY)
+    .add_input(native::_unsafe_view(scale, expected_shape_X))
+    .add_input(native::_unsafe_view(zero_point, expected_shape_X))
+    .build();
+
+  fake_quant_grad_learnable_sc_channel_stub(iter_Scale.device_type(), iter_Scale, quant_min, quant_max);
+
+  auto dZeroPoint = at::empty_like(zero_point, zero_point.options(), MemoryFormat::Preserve);
+
+  TensorIterator iter_ZeroPoint = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(dZeroPoint)
+    .add_input(X)
+    .add_input(dY)
+    .add_input(native::_unsafe_view(scale, expected_shape_X))
+    .add_input(native::_unsafe_view(zero_point, expected_shape_X))
+    .build();
+
+  fake_quant_grad_learnable_z_point_channel_stub(iter_ZeroPoint.device_type(), iter_ZeroPoint, quant_min, quant_max);
+
+  return std::make_tuple(dX, dScale, dZeroPoint);
 }
 } // namespace native
 } // namespace at
