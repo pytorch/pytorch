@@ -211,75 +211,77 @@ Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
 
-Vector-Jacobian Product and Jacobian-Vector Product for complex numbers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Autograd for Complex Numbers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Consider a function F: V → W, where are V and W are vector spaces. As described in
-Chapter 4 of Dougal's thesis, the output of Jacobian-Vector Product (JVP) function
-:math:`J_f : V → (V → W)` is a linear map.
+What notion of complex derivative does PyTorch use?
+***************************************************
 
-The Vector-Jacobian function can be written as the transpose of this linear map
-:math:`{J_f}^T : V → (W^* → V^*)`. The output of the Vector-Jacobian Product (VJP)
-is a linear map from :math:`W^* to V^*`.
+   PyTorch follows JAX's convention for autograd for Complex Numbers.
 
-Now consider a function :math:`F: \C → \C` and a corresponding function :math:`F_R: \R^2 → \R^2`
+    For a function :math:`F: C → C`
 
-.. math::
-    def F(z):
-        x, y = real(z), imag(z)
-        return u(x, y) + v(x, y) * 1j
+    .. math::
+        def F(z):
+            x, y = real(z), imag(z)
+            return u(x, y) + v(x, y) * 1j
 
-    def F_R(x, y):
-        return (u(x, y), v(x, y))
+    The JVP and VJP for function :math:`F` are defined as:
 
-Note that :math:`F_R` is a function written by decomposing complex values as :math:`R^2`.
+    .. math::
 
-Given a tangent vector :math:`(c, d)` belongs to :math:`R^2`, :math:`JVP: \R^2 → (\R^2 → \R^2)`
-for :math:`f_R` can be written as:
+        J = \begin{bmatrix}
+            \partial_0u(x, y) & \partial_1u(x, y)\\
+            \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix}
 
-..math::
-    J * [c, d]
+        def JVP(tangent):
+            c, d = real(tangent), imag(tangent)
+            return \begin{bmatrix} 1 & i \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
 
-where J is
+        def VJP(cotangent):
+            c, d = real(cotangent), imag(cotangent)
+            return \begin{bmatrix} c & -d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -i \end{bmatrix}
 
-.. math::
-    \begin{bmatrix}
-    \partial_0u(x, y) & \partial_1u(x, y)\\
-    \partial_0v(x, y) & \partial_1v(x, y)
-    \end{bmatrix}
+What happens if I call backward() on a complex scalar?
+******************************************************
 
+    1. For holomorphic functions, you get the same result as expected from using Cauchy-Riemann equations.
+    2. For non-holomorphic functions, the partial derivatives of :math:`v(x, y)` are discarded.
 
-Now given a tangent vector :math:`(c+di) \in \C`, :math:`JVP: \C → (\C → \C)` for f can be defined
-in a similar way but just additionally identifying the result as a complex number:
+Why is there a negative sign in the formula above?
+**************************************************
 
-..math::
-    [1  i]^T * J * [c   d]
+    For a function F: V → W, where are V and W are vector spaces. The output of
+    the Vector-Jacobian Product (VJP) :math:`VJP : V → (W^* → V^*)` is a linear map
+    from :math:`W^* to V^*` (explained in Chapter 4 of Dougal’s thesis).
 
-VJP for :math:`f` can be defined as transpose of JVP, i.e. :math:`VJP: \C → (\C^* → \C^*),
-where :math:`\C^*` is the dual space for vector space :math:`\C`
+    The negative signs in the above VJP computation are due to conjugation. The first
+    vector in the output returned by VJP for a given cotangent is a covector (\in :math:`C^*`),
+    and the last vector in the output is used to get the result in :math:`C`
+    since the final result of reverse-mode differentiation of a function is a covector belonging
+    to :math:`C^*` (explained in Chapter 4 of Dougal’s thesis).
 
-Thus VJP for a cotangent vector :math:`(c+di)` equals:
+How are the JVP and VJP defined for :math:`R^2 -> C` and :math:`C -> R^2` functions?
+************************************************************************************
 
-..math::
-    [c  -d]^T * J * [1  -i]
+    The JVP and VJP for a :math:`f1: C → R^2` are defined as:
 
-where the negative signs are due to conjugation. The first vector in the output is a
-covector (belongs to :math:`\C^*`), and the last vector in the output is used
-to get the result in :math:`\C` since the final result of reverse-mode differentiation of a
-function is a covector belonging to :math:`\C^*` (explained in Chapter 4 of Dougal’s thesis).
+    ..math::
+        def JVP(tangent):
+            c, d = real(tangent), imag(tangent)
+            return J * \begin{bmatrix} c \\ d \end{bmatrix}
 
-Based on formulas above and the behavior we expect to see (going from :math:`\C → \R^2 → \C`
-should be an identity), we use the following formula for cross-domain functions.
+        def VJP(cotangent):
+            c, d = real(cotangent), imag(cotangent)
+            return \begin{bmatrix} c & d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -i \end{bmatrix}
 
-For a function :math:`f1: \C → \R^2`, :math:`JVP: \C → (\C → \R^2)` and :math:`VJP: \C --> (\R^2 → \C^*)`
-equal to:
+    The JVP and VJP for a :math:`f1: R^2 → C` are defined as:
 
-..math::
-    JVP = J * [c    d]
-    VJP = [c    d]^T * J * [1   -i]
+    ..math::
+        def JVP(tangent):
+            c, d = real(tangent), imag(tangent)
+            return \begin{bmatrix} 1 & i \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
 
-For a function :math:`f1: \R^2 → \C`, :math:`JVP: \R^2 → (\R^2 → \C)` and :math:`VJP: \R^2 --> (\C^* → \R^2)`
-
-..math::
-    JVP = [1    i]^T * J * [c   d]
-    VJP = [c    -d]^T * J
+        def VJP(cotangent):
+            c, d = real(cotangent), imag(cotangent)
+            return \begin{bmatrix} c & -d \end{bmatrix} * J
