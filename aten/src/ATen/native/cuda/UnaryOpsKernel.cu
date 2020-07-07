@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/complex.h>
 
 namespace at {
@@ -150,7 +151,12 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return std::min(std::max(v, lower), upper);
+        // Propagate nan, which doesn't propagate automatically for ROCm
+        if (_isnan(v)) {
+          return v;
+        } else {
+          return ::min(::max(v, lower), upper);
+        }
     });
   });
 }
@@ -159,7 +165,12 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return std::min(v, upper);
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::min(v, upper);
+      }
     });
   });
 }
@@ -168,7 +179,12 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return std::max(v, lower);
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::max(v, lower);
+      }
     });
   });
 }
@@ -176,8 +192,13 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
 void clamp_with_tensors_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_cuda", [&]() {
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-       return std::min(std::max(a, min), max);
+      []GPU_LAMBDA(scalar_t v, scalar_t min, scalar_t max) -> scalar_t {
+        // Propagate nan, which doesn't propagate automatically for ROCm
+        if (_isnan(v)) {
+          return v;
+        } else {
+          return ::min(::max(v, min), max);
+        }
     });
   });
 }
@@ -185,8 +206,13 @@ void clamp_with_tensors_kernel_cuda(TensorIterator& iter) {
 void clamp_max_with_tensor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_max_cuda", [&]() {
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(scalar_t a, scalar_t max) -> scalar_t {
-       return std::min(a, max);
+      []GPU_LAMBDA(scalar_t v, scalar_t max) -> scalar_t {
+        // Propagate nan, which doesn't propagate automatically for ROCm
+        if (_isnan(v)) {
+          return v;
+        } else {
+          return ::min(v, max);
+        }
     });
   });
 }
@@ -194,8 +220,13 @@ void clamp_max_with_tensor_kernel_cuda(TensorIterator& iter) {
 void clamp_min_with_tensor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_min_cuda", [&]() {
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(scalar_t a, scalar_t min) -> scalar_t {
-       return std::max(a, min);
+      []GPU_LAMBDA(scalar_t v, scalar_t min) -> scalar_t {
+        // Propagate nan, which doesn't propagate automatically for ROCm
+        if (_isnan(v)) {
+          return v;
+        } else {
+          return ::max(v, min);
+        }
     });
   });
 }
