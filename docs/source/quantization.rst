@@ -374,6 +374,9 @@ Layers used in dynamically quantized models (i.e. quantized only on weights)
 
 * :class:`~torch.nn.quantized.dynamic.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.quantized.dynamic.LSTM` — Long-Short Term Memory RNN module
+* :class:`~torch.nn.quantized.dynamic.LSTMCell` — LSTM Cell
+* :class:`~torch.nn.quantized.dynamic.GRUCell` — GRU Cell
+* :class:`~torch.nn.quantized.dynamic.RNNCell` — RNN Cell
 
 ``torch.nn.quantized.functional``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -397,7 +400,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
-* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
+* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilinear
   upsampler. Will be deprecated in favor of
 * :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_nearest` — Nearest neighbor
@@ -648,7 +651,7 @@ LinearReLU
 .. autoclass:: LinearReLU
     :members:
 
-torch.nn.instrinsic.qat
+torch.nn.intrinsic.qat
 --------------------------------
 
 This module implements the versions of those fused operations needed for
@@ -853,4 +856,19 @@ Linear
 LSTM
 ~~~~~~~~~~~~~~~
 .. autoclass:: LSTM
+    :members:
+
+LSTMCell
+~~~~~~~~~~~~~~~
+.. autoclass:: LSTMCell
+    :members:
+
+GRUCell
+~~~~~~~~~~~~~~~
+.. autoclass:: GRUCell
+    :members:
+    
+RNNCell
+~~~~~~~~~~~~~~~
+.. autoclass:: RNNCell
     :members:

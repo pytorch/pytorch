@@ -275,11 +275,15 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
                     print("Error while processing function {}".format(fname))
                     raise
 
-        if is_tensor:
-            if 'self: Tensor' in python_args:
-                python_args.remove('self: Tensor')
+        if 'self: Tensor' in python_args:
+            self_index = python_args.index('self: Tensor')
+            python_args.remove('self: Tensor')
+            if is_tensor:
                 python_args = ['self'] + python_args
             else:
+                python_args.insert(self_index, 'input: Tensor')
+        else:
+            if is_tensor:
                 raise Exception("method without self is unexpected")
 
         if has_out:
@@ -456,9 +460,11 @@ def gen_pyi(declarations_path, out):
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
-        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+        'randint': ['def randint(low: _int, high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
-                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    'def randint(high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
                  ' out: Optional[Tensor]=None, {}) -> Tensor: ...'

@@ -341,6 +341,12 @@
 - name: cosh(Tensor self) -> Tensor
   self: grad * self.sinh()
 
+- name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
+  self: not_implemented("count_nonzero")
+
+- name: count_nonzero(Tensor self, int? dim=None) -> Tensor
+  self: not_implemented("count_nonzero")
+
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
