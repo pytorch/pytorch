@@ -451,8 +451,7 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
 
     final_shape = g.op("Concat", *slices, axis_i=0)
     from torch.onnx.symbolic_opset9 import _reshape_from_tensor
-    p = _reshape_from_tensor(g, input, final_shape)
-    return p
+    return _reshape_from_tensor(g, input, final_shape)
 
 # ---------------------------------------------------------------------
 # ONNX operator version
