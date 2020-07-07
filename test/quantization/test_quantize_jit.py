@@ -1543,7 +1543,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceAdd(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add" if quantized else "aten::add"
-                m = self.checkGraphModeOp(m, data, op, tracing)
+                m = self.checkGraphModeOp(m, data, op, tracing, debug=True)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::add") \
