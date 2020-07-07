@@ -33,11 +33,11 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, tfloat32, tcomplex64, tf32_to_fp32
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import setup_tf32, tf32_is_not_fp32, tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -19082,13 +19082,13 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2),
+        1e-1, 1e-1, 1e-4, _float_types2, _float_types2, True, [tf32_on_and_off()]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
@@ -19113,25 +19113,26 @@ tensor_op_tests = [
         1e-1, 1e-5, _types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2),
+        1e-1, 1e-1, 1e-4, _float_types2, _float_types2, True, [tf32_on_and_off()]),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _float_types2 + _complex_types_skip_rocm,
+        True, [tf32_on_and_off()]),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        [tf32_on_and_off(), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
     ('addr', 'scalar', _medium_2d,
@@ -19406,12 +19407,7 @@ def generate_test_function(cls,
                            dtype_list,
                            dtype_cpu_list,
                            decorators) -> None:
-    def fn_(self, device, dtype_, disable_tf32_on_fp32) -> None:
-        if dtype_ in {tfloat32, tcomplex64}:
-            torch.backends.cuda.matmul.allow_tf32 = True
-        elif disable_tf32_on_fp32 and dtype_ in {torch.float32, torch.complex64}:
-            torch.backends.cuda.matmul.allow_tf32 = False
-        dtype = tf32_to_fp32(dtype_)
+    def fn(self, device, dtype) -> None:
         # Generates the CPU inputs
         # Note: CPU tensors are never torch.half
         cpu_tensor = tensor_ctor(dtype, 'cpu')
@@ -19432,32 +19428,20 @@ def generate_test_function(cls,
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
         device_result = getattr(device_tensor, op_str)(*device_args)
 
-        dtype2precision: Dict[Union[torch.dtype, str], float] = {
+        dtype2precision = {
             torch.half : half_precision,
-            torch.bfloat16 : bfloat16_precision}
-        if tf32_is_not_fp32():
-            dtype2precision.update({tfloat32 : half_precision,
-                                    tcomplex64 : half_precision})
+            torch.bfloat16 : bfloat16_precision
+        }
 
         # Compares CPU and device inputs and outputs
-        precision = dtype2precision.get(dtype_, float_precision)
+        precision = dtype2precision.get(dtype, float_precision)
 
         self.assertEqual(cpu_tensor, device_tensor, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_args, device_args, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_result, device_result, atol=precision, rtol=0, exact_dtype=False)
-        torch.backends.cuda.matmul.allow_tf32 = True
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
-
-    # if a test does not care about TF32 or not, then we should not change TF32 flags before test
-    # otherwise, both tf32 and fp32 should be tested
-    if tfloat32 in dtype_list or tcomplex64 in dtype_list:
-        def fn(self, device, dtype_):
-            return fn_(self, device, dtype_, True)
-    else:
-        def fn(self, device, dtype_):
-            return fn_(self, device, dtype_, False)
 
     # Constructs decorator list and applies decorators
     if decorators is None:

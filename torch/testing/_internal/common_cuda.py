@@ -5,7 +5,6 @@ import contextlib
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
-from torch.testing._internal.common_device_type import tfloat32, tcomplex64, tf32_to_fp32
 import inspect
 
 
@@ -46,24 +45,6 @@ def tf32_is_not_fp32():
     if int(torch.version.cuda.split('.')[0]) < 11:
         return False
     return True
-
-
-@contextlib.contextmanager
-def setup_tf32(dtype, rtol=0.001, atol=1e-5):
-    old = torch.backends.cuda.matmul.allow_tf32
-    try:
-        if dtype in {tfloat32, tcomplex64}:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            if tf32_is_not_fp32():
-                yield tf32_to_fp32(dtype), rtol, atol
-            else:
-                yield tf32_to_fp32(dtype), None, None
-        else:
-            if dtype in {torch.float32, torch.complex64}:
-                torch.backends.cuda.matmul.allow_tf32 = False
-            yield dtype, None, None
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old
 
 
 def tf32_on_and_off(precision=1e-5):

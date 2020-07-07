@@ -574,22 +574,6 @@ class precisionOverride(object):
         return fn
 
 
-tfloat32 = "_testing.tfloat32"
-tcomplex64 = "_testing.tcomplex64"
-
-
-def tf32_to_fp32(dtype):
-    if dtype == tfloat32:
-        return torch.float32
-    elif dtype == tcomplex64:
-        return torch.complex64
-    return dtype
-
-
-def is_dtype(x):
-    return isinstance(tf32_to_fp32(x), torch.dtype)
-
-
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
@@ -611,9 +595,9 @@ class dtypes(object):
                     "When one dtype variant is a tuple or list, " \
                     "all dtype variants must be. " \
                     "Received non-list non-tuple dtype {0}".format(str(arg))
-                assert all(is_dtype(dtype) for dtype in arg), "Unknown dtype in {0}".format(str(arg))
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), "Unknown dtype in {0}".format(str(arg))
         else:
-            assert all(is_dtype(arg) for arg in args), "Unknown dtype in {0}".format(str(args))
+            assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
 
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
