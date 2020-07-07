@@ -661,7 +661,6 @@ class TestDataParallel(TestCase):
             "G1": nn.Parameter(torch.tensor(14.0)),
             "G2": nn.Parameter(torch.tensor(15.0)),
         })
-
         nested_net.cuda()
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(nested_net, devices)
@@ -698,6 +697,45 @@ class TestDataParallel(TestCase):
                     self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
                     self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parameters_list_dict_grads(self):
+        class TestNetWithParamListDict(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.beta = nn.ParameterList([
+                    nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(2.0)), nn.Parameter(torch.tensor(3.0))
+                ])
+                self.gamma = nn.ParameterDict({
+                    "g0": nn.Parameter(torch.tensor(4.0)),
+                    "g1": nn.Parameter(torch.tensor(5.0)),
+                    "g2": nn.Parameter(torch.tensor(6.0)),
+                })
+
+            def forward(self, x):
+                o1 = self.beta[0] * x[:, 0] + self.beta[1] * x[:, 1] + self.beta[2] * x[:, 2]
+                o2 = self.gamma["g0"] * x[:, 0] ** 2 + self.gamma["g1"] * x[:, 1] ** 2 + self.gamma["g2"] * x[:, 2] ** 2
+                return o1 + o2
+
+        net = TestNetWithParamListDict().cuda()
+
+        copy_net = TestNetWithParamListDict().cuda()
+        dpnet = nn.parallel.DataParallel(copy_net, device_ids=[0, 1])
+
+        x = torch.tensor([[1.1, 1.2, 1.3], [2.1, 2.2, 2.3]], device="cuda")
+
+        # compute param grads on non-wrapped model
+        res = net(x)
+        res.sum().backward()
+
+        # compute param grads on DP model
+        res = dpnet(x)
+        res.sum().backward()
+        for i in range(3):
+            self.assertTrue(net.beta[i].grad.equal(dpnet.module.beta[i].grad))
+
+        for key in ["g0", "g1", "g2"]:
+            self.assertTrue(net.gamma[key].grad.equal(dpnet.module.gamma[key].grad))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_zero_grad(self):
