@@ -835,24 +835,38 @@ def _prepare_onnx_paddings(dim, pad):
     paddings = paddings[-2::-2] + paddings[-1::-2]
     return paddings
 
+def _convert_padding_node(padding):
+    padding = sym_help._maybe_get_const(padding, 'is')
+    if sym_help._is_value(padding) and sym_help._is_packed_list(padding):
+        input_list = sym_help._unpack_list(padding)
+        try:
+            padding = [sym_help._get_const(v, 'i', 'padding') for v in input_list]
+        except Exception:
+            return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The sizes of the padding must be constant')
+    return padding
 
-@parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
     mode = "constant"
+    try:
+        value = sym_help._get_const(value, 'f', 'value')
+    except Exception:
+        return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The value for the padding must be constant')
+
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
-@parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     mode = "reflect"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
-@parse_args('v', 'is')
 def replication_pad(g, input, padding):
     mode = "edge"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
