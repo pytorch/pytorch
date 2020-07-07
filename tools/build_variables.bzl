@@ -26,28 +26,31 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
-libtorch_generated_sources = [
-    ":generate-code[autograd/generated/Functions.cpp]",
-    ":generate-code[jit/generated/generated_unboxing_wrappers_0.cpp]",
-    ":generate-code[jit/generated/generated_unboxing_wrappers_1.cpp]",
-    ":generate-code[jit/generated/generated_unboxing_wrappers_2.cpp]",
-    ":generate-code[autograd/generated/VariableType_0.cpp]",
-    ":generate-code[autograd/generated/VariableType_1.cpp]",
-    ":generate-code[autograd/generated/VariableType_2.cpp]",
-    ":generate-code[autograd/generated/VariableType_3.cpp]",
-    ":generate-code[autograd/generated/VariableType_4.cpp]",
-    ":generate-code[autograd/generated/ProfiledType_0.cpp]",
-    ":generate-code[autograd/generated/ProfiledType_1.cpp]",
-    ":generate-code[autograd/generated/ProfiledType_2.cpp]",
-    ":generate-code[autograd/generated/ProfiledType_3.cpp]",
-    ":generate-code[autograd/generated/ProfiledType_4.cpp]",
-    ":generate-code[autograd/generated/TraceType_0.cpp]",
-    ":generate-code[autograd/generated/TraceType_1.cpp]",
-    ":generate-code[autograd/generated/TraceType_2.cpp]",
-    ":generate-code[autograd/generated/TraceType_3.cpp]",
-    ":generate-code[autograd/generated/TraceType_4.cpp]",
-    "torch/csrc/autograd/VariableTypeManual.cpp",
-]
+def libtorch_generated_sources(gencode_pattern):
+    return [gencode_pattern.format(name) for name in [
+        "autograd/generated/Functions.cpp",
+        "jit/generated/generated_unboxing_wrappers_0.cpp",
+        "jit/generated/generated_unboxing_wrappers_1.cpp",
+        "jit/generated/generated_unboxing_wrappers_2.cpp",
+        "autograd/generated/VariableType_0.cpp",
+        "autograd/generated/VariableType_1.cpp",
+        "autograd/generated/VariableType_2.cpp",
+        "autograd/generated/VariableType_3.cpp",
+        "autograd/generated/VariableType_4.cpp",
+        "autograd/generated/ProfiledType_0.cpp",
+        "autograd/generated/ProfiledType_1.cpp",
+        "autograd/generated/ProfiledType_2.cpp",
+        "autograd/generated/ProfiledType_3.cpp",
+        "autograd/generated/ProfiledType_4.cpp",
+        "autograd/generated/TraceType_0.cpp",
+        "autograd/generated/TraceType_1.cpp",
+        "autograd/generated/TraceType_2.cpp",
+        "autograd/generated/TraceType_3.cpp",
+        "autograd/generated/TraceType_4.cpp",
+    ]] + [
+        "torch/csrc/autograd/TraceTypeManual.cpp",
+        "torch/csrc/autograd/VariableTypeManual.cpp",
+    ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
@@ -283,6 +286,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
+    "torch/csrc/distributed/rpc/metrics/registry.cpp",
 ]
 
 jit_sources_full = [
@@ -301,6 +305,7 @@ libtorch_core_jit_sources = sorted(jit_sources_common + jit_sources_full)
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
+    "torch/csrc/autograd/TraceTypeManual.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
@@ -316,7 +321,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/utils/byte_order.cpp",
 ]
 
-libtorch_sources = libtorch_generated_sources + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
+    return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
@@ -325,20 +331,26 @@ libtorch_cuda_sources = [
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
+    "torch/csrc/jit/codegen/cuda/compute_at.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
+    "torch/csrc/jit/codegen/cuda/ir_cloner.cpp",
     "torch/csrc/jit/codegen/cuda/ir_graphviz.cpp",
     "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_iostream.cpp",
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_validation.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
     "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
@@ -346,7 +358,6 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/parser.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/tensor_meta.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
@@ -467,7 +478,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
-    "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
@@ -529,13 +539,13 @@ libtorch_python_distributed_sources = [
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
 ]
 
-def glob_libtorch_python_sources():
-    _libtorch_python_sources = [
-        ":generate-code[autograd/generated/python_functions.cpp]",
-        ":generate-code[autograd/generated/python_nn_functions.cpp]",
-        ":generate-code[autograd/generated/python_torch_functions.cpp]",
-        ":generate-code[autograd/generated/python_variable_methods.cpp]",
-    ]
+def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
+    _libtorch_python_sources = [gencode_pattern.format(name) for name in [
+        "autograd/generated/python_functions.cpp",
+        "autograd/generated/python_nn_functions.cpp",
+        "autograd/generated/python_torch_functions.cpp",
+        "autograd/generated/python_variable_methods.cpp",
+    ]]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
     _libtorch_python_sources.extend(libtorch_python_distributed_sources)

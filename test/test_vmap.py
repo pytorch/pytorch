@@ -2,7 +2,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import vmap
 
-class TestVmap(TestCase):
+class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
             output = vmap(lambda x: 3.14)(torch.ones(3))
@@ -135,6 +135,143 @@ class TestVmap(TestCase):
                 RuntimeError, 'Tried to call KernelFunction::call'):
             vmap(foo)(x)
 
+    def test_nonzero_out_dims(self):
+        # Basic test
+        tensor = torch.randn(2, 3)
+        result = vmap(lambda x: x, out_dims=1)(tensor)
+        self.assertEqual(result, tensor.permute(1, 0))
+        self.assertEqual(result.data_ptr(), tensor.data_ptr())
+
+        # Test that the batch dimension gets permuted to dim 2
+        tensor = torch.randn(2, 3, 5, 7)
+        result = vmap(lambda x: x, out_dims=2)(tensor)
+        self.assertEqual(result, tensor.permute(1, 2, 0, 3))
+        self.assertEqual(result.data_ptr(), tensor.data_ptr())
+
+        # negative out_dim
+        tensor = torch.randn(2, 3, 5, 7)
+        result = vmap(lambda x: x, out_dims=-1)(tensor)
+        self.assertEqual(result, tensor.permute(1, 2, 3, 0))
+        self.assertEqual(result.data_ptr(), tensor.data_ptr())
+
+        # check that out_dims works on ALL outputs
+        tensor = torch.randn(2, 3, 5, 7)
+        other = torch.randn(2, 3, 5, 7)
+        result = vmap(lambda x, y: (x, y), out_dims=2)(tensor, other)
+        self.assertEqual(result, (tensor.permute(1, 2, 0, 3), other.permute(1, 2, 0, 3)))
+
+        # use out_dims with the maximum vmap-able tensor dims (64 dims)
+        ndims = 64
+        shape = [2] + [1] * (ndims - 1)
+        expected_shape = [1, 1, 2] + [1] * (ndims - 3)
+        tensor = torch.randn(shape)
+        result = vmap(lambda x: x, out_dims=2)(tensor)
+        self.assertEqual(result.shape, expected_shape)
+
+        # test something that is not the identity function
+        def foo(x, y):
+            return x, x * y, x * y * y
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
+        result = vmap(foo, out_dims=1)(x, y)
+        self.assertEqual(
+            result,
+            (x.permute(1, 0, 2), (x * y).permute(1, 0, 2), (x * y * y).permute(1, 0, 2)))
+
+    def test_multiple_out_dims(self):
+        def foo(x):
+            return x, x
+
+        def bar(x, y):
+            return x, x, x, x * y
+
+        x = torch.randn(2, 3, 5)
+        y = torch.randn(2, 3, 5)
+        result = vmap(foo, out_dims=(0, 1))(x)
+        self.assertEqual(result, (x, x.permute(1, 0, 2)))
+
+        result = vmap(bar, out_dims=(-1, 0, 1, 2))(x, y)
+        expected = (
+            x.permute(1, 2, 0),
+            x,
+            x.permute(1, 0, 2),
+            (x * y).permute(1, 2, 0),
+        )
+        self.assertEqual(result, expected)
+
+    def test_nested_out_dims(self):
+        y = torch.randn(2, 3, 5, 7)
+
+        # Inner vmap has non-zero out_dim
+        result = vmap(lambda y: vmap(lambda x: x, out_dims=1)(y))(y)
+        self.assertEqual(result.shape, (2, 5, 3, 7))
+        self.assertEqual(result, y.permute(0, 2, 1, 3))
+
+        # all vmaps have non-zero out_dim
+        result = vmap(lambda y: vmap(lambda x: x, out_dims=1)(y), out_dims=1)(y)
+        self.assertEqual(result.shape, (5, 2, 3, 7))
+        self.assertEqual(result, y.permute(2, 0, 1, 3))
+
+        # throwing in some negative out_dims
+        result = vmap(lambda y: vmap(lambda x: x, out_dims=-1)(y), out_dims=-1)(y)
+        self.assertEqual(result.shape, (5, 7, 3, 2))
+        self.assertEqual(result, y.permute(2, 3, 1, 0))
+
+        # testing fn that isn't the identity
+        x = torch.randn(2, 3)
+        y = torch.randn(5, 3)
+        result = vmap(lambda y: vmap(lambda x: x * y, out_dims=1)(x), out_dims=-1)(y)
+        self.assertEqual(result.shape, (3, 2, 5))
+        self.assertEqual(result, (y.view(5, 1, 3) * x).permute(2, 1, 0))
+
+    def test_out_dims_edge_case(self):
+        def foo(x):
+            return x
+
+        # Test that we accept out_dims=(1,) for a function with one output.
+        tensor = torch.randn(2, 3)
+        expected = vmap(foo, out_dims=1)(tensor)
+        result = vmap(foo, out_dims=(1,))(tensor)
+        self.assertEqual(result, expected)
+
+    def test_out_dims_must_be_int_or_tuple_of_int_err_msg(self):
+        msg = '`out_dims` must be an int or a tuple of int'
+        tensor = torch.randn(2, 3)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: x, out_dims='lol')(tensor)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: x, out_dims=('lol',))(tensor)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: x, out_dims=None)(tensor)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: x, out_dims=(None,))(tensor)
+
+    def test_out_dims_and_num_outputs_mismatch_err_msg(self):
+        msg = '`out_dims` must have one dim per output'
+        x = torch.randn(2, 3, 5)
+
+        # Too many out_dims
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: x, out_dims=(0, 0))(x)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: (x, x, x), out_dims=(0, 0, 0, 0))(x)
+
+        # Too few out_dims
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: (x, x), out_dims=(0,))(x)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda x: (x, x, x), out_dims=(0, 0))(x)
+
+    def test_out_dim_out_of_bounds_err_msg(self):
+        # TODO(rzou): This error message isn't that great. It comes straight
+        # from maybe_wrap_dim. Consider doing a try-catch-(add some context) to
+        # the error message in the future in C++
+        msg = 'Dimension out of range'
+        x = torch.randn(2, 3, 5)
+        with self.assertRaisesRegex(IndexError, msg):
+            vmap(lambda x: x, out_dims=3)(x)
+        with self.assertRaisesRegex(IndexError, msg):
+            vmap(lambda x: x, out_dims=-4)(x)
 
 if __name__ == '__main__':
     run_tests()
