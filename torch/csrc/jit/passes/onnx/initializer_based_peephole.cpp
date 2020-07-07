@@ -39,7 +39,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
     for (auto* child_block : it->blocks()) {
       fuseConvBatchNorm(child_block, valsToParamsMap);
     }
-    if (it->kind() == onnx::Conv and
+    if (it->kind() == onnx::Conv &&
         it->next()->kind() == onnx::BatchNormalization) {
       auto bnNode = it->next();
       auto origconvNode = *it;

@@ -509,36 +509,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-5)
 
-    def test_fuse_conv_bn2d(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-                self.conv2 = torch.nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=0, bias=False)
-                self.conv3 = torch.nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(64)
-                self.bn2 = torch.nn.BatchNorm2d(2)
-                self.relu = torch.nn.ReLU(inplace=True)
-                self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                x = self.maxpool(x)
-                x = self.conv2(x)
-                x = self.bn2(x)
-                x = self.relu(x)
-                x = self.conv3(x)
-                x = self.bn2(x)
-                x = self.relu(x)
-                return x
-
-        model = MyModule()
-        x = torch.randn(2, 3, 224, 224)
-        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
-
     def test_squeezenet(self):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         state_dict = model_zoo.load_url(model_urls['squeezenet1_1'], progress=False)
