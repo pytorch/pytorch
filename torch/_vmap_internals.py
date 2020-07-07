@@ -1,6 +1,7 @@
 import torch
 import functools
 from torch import Tensor
+from typing import Any, Callable, Optional, Tuple, Union
 import warnings
 
 REQUIRE_SAME_MAP_SIZE = (
@@ -34,36 +35,119 @@ OUT_DIMS_AND_NUM_OUTPUTS_MISMATCH = (
     'output (got {num_outputs} outputs) of {fn}.'
 )
 
+EXPECTED_IN_DIMS_TO_BE_INT_OR_TUPLE = (
+    'vmap({fn}, in_dims={in_dims}, ...): expected `in_dims` to be int or tuple, '
+    'got: {actual_type}.'
+)
 
-# Checks that all args have the same batch dim size.
-def _validate_and_get_batch_size(args):
-    batch_sizes = [arg.size(0) for arg in args]
+IN_DIMS_AND_NUM_INPUTS_MISMATCH = (
+    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): expected one `in_dim` per '
+    'input (got {num_inputs} inputs) of {fn}'
+)
+
+IN_DIMS_MUST_BE_FLAT_TUPLE = (
+    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): in_dims must be a flat '
+    'tuple containing ints and/or Nones. If you were trying to vmap over a '
+    'Tensor inside a Python collection in `inputs`, we do not yet support that.'
+)
+
+CANT_VMAP_A_NONTENSOR = (
+    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): Got in_dim={in_dim} for '
+    'input {idx}, but input {idx} is not a Tensor (got {arg_type}) so it '
+    'cannot be vmap\'ed over. If you were trying to vmap over a Tensor inside '
+    'a Python collection in `inputs`, we do not yet support that; otherwise, '
+    'use None as the respective in_dim for input {idx}.'
+)
+
+IN_DIM_NOT_IN_TENSOR = (
+    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): Got in_dim={in_dim} for '
+    'input {idx}, but input {idx} is a Tensor of dimensionality {tensor_dim} '
+    'so expected in_dim to satisfy 0 <= in_dim < {tensor_dim}.'
+)
+
+in_dims_t = Union[int, Tuple[Optional[int], ...]]
+out_dims_t = Union[int, Tuple[int, ...]]
+
+# Checks that all args-to-be-batched have the same batch dim size
+def _validate_and_get_batch_size(
+        in_dims_as_tuple: Tuple[Optional[int], ...],
+        args: Tuple) -> int:
+    batch_sizes = [arg.size(in_dim) for in_dim, arg in zip(in_dims_as_tuple, args)
+                   if in_dim is not None]
     if batch_sizes and any([size != batch_sizes[0] for size in batch_sizes]):
         raise ValueError(REQUIRE_SAME_MAP_SIZE.format(sizes=batch_sizes))
     return batch_sizes[0]
 
+# Check compatibility of `in_dims` and `args`. More specifically, checks the following:
+# Wherever an in_dim is not None, then the corresponding index in args must be
+# a Tensor. Furthermore, tensor must have the `in_dim` (0 <= in_dim < tensor.dim())
+def _check_args_can_be_mapped_with_in_dims(
+        in_dims_as_tuple: Tuple[Optional[int], ...],
+        args: Tuple,
+        fn_name: str,
+        in_dims: in_dims_t) -> None:
+    for idx, (in_dim, arg) in enumerate(zip(in_dims_as_tuple, args)):
+        if in_dim is None:
+            continue
+        if not isinstance(in_dim, int):
+            raise ValueError(IN_DIMS_MUST_BE_FLAT_TUPLE.format(
+                fn=fn_name, in_dims=in_dims))
+        if not isinstance(arg, Tensor):
+            raise ValueError(CANT_VMAP_A_NONTENSOR.format(
+                fn=fn_name, in_dims=in_dims, in_dim=in_dim,
+                idx=idx, arg_type=str(type(arg))))
+        # NB: We don't do dimension wrapping here. Consider allowing it in the
+        # future if there is demand.
+        if in_dim >= 0 and in_dim < arg.dim():
+            continue
+        raise ValueError(IN_DIM_NOT_IN_TENSOR.format(
+            fn=fn_name, in_dims=in_dims, idx=idx, tensor_dim=arg.dim(), in_dim=in_dim))
 
-def _validate_inputs_and_get_batch_size(args, fn_name):
-    if len(args) == 0:
-        raise ValueError(NO_INPUTS.format(fn=fn_name))
-    return _validate_and_get_batch_size(args)
 
-def _num_outputs(batched_outputs):
+def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
 
 # If value is a tuple, check it has length `num_elements`.
 # If value is not a tuple, make a tuple with `value` repeated `num_elements` times
-def _as_tuple(value, num_elements, error_message_lambda):
+def _as_tuple(value: Any, num_elements: int, error_message_lambda: Callable[[], str]) -> Tuple:
     if not isinstance(value, tuple):
         return (value,) * num_elements
     if len(value) != num_elements:
         raise ValueError(error_message_lambda())
     return value
 
+# Creates BatchedTensors for every Tensor in arg that should be batched.
+# Returns the (potentially) batched arguments and the batch_size.
+def _create_batched_inputs(
+        in_dims: in_dims_t, args: Tuple, vmap_level: int, fn_name: str) -> Tuple[Tuple, int]:
+    if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
+        raise ValueError(EXPECTED_IN_DIMS_TO_BE_INT_OR_TUPLE.format(
+            fn=fn_name, in_dims=in_dims, actual_type=str(type(in_dims))))
+
+    # NB: Checks that len(in_dims) == len(args) (if in_dims is a tuple).
+    in_dims_as_tuple = _as_tuple(
+        in_dims, len(args),
+        lambda: IN_DIMS_AND_NUM_INPUTS_MISMATCH.format(
+            fn=fn_name, in_dims=in_dims, num_inputs=len(args)))
+
+    if len(args) == 0:
+        raise ValueError(NO_INPUTS.format(fn=fn_name))
+
+    _check_args_can_be_mapped_with_in_dims(in_dims_as_tuple, args, fn_name, in_dims)
+    batch_size = _validate_and_get_batch_size(in_dims_as_tuple, args)
+    # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
+    batched_inputs = tuple(arg if in_dim is None else
+                           torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                           for in_dim, arg in zip(in_dims_as_tuple, args))
+    return batched_inputs, batch_size
+
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
-def _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, fn_name):
+def _unwrap_batched(
+        batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
+        out_dims: out_dims_t,
+        vmap_level: int, batch_size: int, fn_name: str) -> Tuple:
     num_outputs = _num_outputs(batched_outputs)
     out_dims_as_tuple = _as_tuple(
         out_dims, num_outputs,
@@ -83,7 +167,7 @@ def _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, fn_name):
 # NB: A python function that return multiple arguments returns a single tuple,
 # so we are effectively checking that `outputs` is a single Tensor or a tuple of
 # Tensors.
-def _validate_outputs(outputs, fn_name):
+def _validate_outputs(outputs: Any, fn_name: str) -> None:
     if isinstance(outputs, Tensor):
         return
     if not isinstance(outputs, tuple):
@@ -93,7 +177,7 @@ def _validate_outputs(outputs, fn_name):
             continue
         raise ValueError(ELEMENT_MUST_BE_TENSOR.format(fn=fn_name, out=type(output), idx=idx))
 
-def _check_out_dims_is_int_or_int_tuple(out_dims, fn_name):
+def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, fn_name: str) -> None:
     if isinstance(out_dims, int):
         return
     if not isinstance(out_dims, tuple) or \
@@ -101,12 +185,12 @@ def _check_out_dims_is_int_or_int_tuple(out_dims, fn_name):
         raise ValueError(OUT_DIMS_MUST_BE_INT_OR_TUPLE_OF_INT.format(out_dims=out_dims, fn=fn_name))
 
 # This is the global tracker for how many nested vmaps we are currently inside.
-VMAP_LEVEL = 0
+VMAP_LEVEL: int = 0
 
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
-def vmap(func, in_dims=0, out_dims=0):
+def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     """
     vmap is the vectorizing map. Returns a new function that maps `func` over some
     dimension of the inputs. Semantically, vmap pushes the map into PyTorch
@@ -148,22 +232,14 @@ def vmap(func, in_dims=0, out_dims=0):
         'torch.vmap is an experimental prototype that is subject to '
         'change and/or deletion. Please use at your own risk.')
 
-    if in_dims != 0:
-        raise NotImplementedError('NYI: vmap with `in_dims` other than 0')
-
     @functools.wraps(func)
     def wrapped(*args):
-        if any(not isinstance(arg, Tensor) for arg in args):
-            raise NotImplementedError('NYI: vmap with non-tensor inputs')
-
         fn_name = func.__name__
         _check_out_dims_is_int_or_int_tuple(out_dims, fn_name)
-        batch_size = _validate_inputs_and_get_batch_size(args, fn_name)
         global VMAP_LEVEL
         VMAP_LEVEL += 1
         try:
-            # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
-            batched_inputs = [torch._add_batch_dim(arg, 0, VMAP_LEVEL) for arg in args]  # type: ignore
+            batched_inputs, batch_size = _create_batched_inputs(in_dims, args, VMAP_LEVEL, fn_name)
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, fn_name)
             return _unwrap_batched(batched_outputs, out_dims, VMAP_LEVEL, batch_size, fn_name)

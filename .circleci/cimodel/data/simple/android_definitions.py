@@ -1,7 +1,5 @@
-import cimodel.data.simple.util.branch_filters
-from cimodel.data.simple.util.docker_constants import (
-    DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK
-)
+import cimodel.data.simple.util.branch_filters as branch_filters
+from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_NDK
 
 
 class AndroidJob:
@@ -36,11 +34,10 @@ class AndroidJob:
             "name": full_job_name,
             "build_environment": "\"{}\"".format(build_env_name),
             "docker_image": "\"{}\"".format(DOCKER_IMAGE_NDK),
-            "requires": [DOCKER_REQUIREMENT_NDK]
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
+            props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.NON_PR_BRANCH_LIST)
 
         return [{self.template_name: props_dict}]
 
@@ -50,12 +47,14 @@ class AndroidGradleJob:
                  job_name,
                  template_name,
                  dependencies,
-                 is_master_only=True):
+                 is_master_only=True,
+                 is_pr_only=False):
 
         self.job_name = job_name
         self.template_name = template_name
         self.dependencies = dependencies
         self.is_master_only = is_master_only
+        self.is_pr_only = is_pr_only
 
     def gen_tree(self):
 
@@ -65,7 +64,9 @@ class AndroidGradleJob:
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
+            props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.NON_PR_BRANCH_LIST)
+        elif self.is_pr_only:
+            props_dict["filters"] = branch_filters.gen_filter_dict(branch_filters.PR_BRANCH_LIST)
 
         return [{self.template_name: props_dict}]
 
@@ -80,7 +81,14 @@ WORKFLOW_DATA = [
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
         "pytorch_android_gradle_build-x86_32",
         ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
-        is_master_only=False),
+        is_master_only=False,
+        is_pr_only=True),
+    AndroidGradleJob(
+        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
+        "pytorch_android_gradle_custom_build_single",
+        [],
+        is_master_only=False,
+        is_pr_only=True),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
         "pytorch_android_gradle_build",

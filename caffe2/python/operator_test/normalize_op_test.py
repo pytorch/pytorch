@@ -35,20 +35,6 @@ class TestNormalizeOp(hu.HypothesisTestCase):
             self.assertDeviceChecks(dc, op, [x], [0])
             self.assertGradientChecks(gc, op, [x], 0, [0])
 
-    @given(**hu.gcs)
-    def test_normalize_empty(self, gc, dc):
-        def ref_normalize(_):
-            return (np.array([]).astype(np.float32),)
-
-        x = np.array([]).astype(np.float32)
-        op = core.CreateOperator("Normalize", "X", "Y")
-        self.assertReferenceChecks(
-            gc, op, [x], ref_normalize
-        )
-        self.assertDeviceChecks(dc, op, [x], [0])
-        self.assertGradientChecks(gc, op, [x], 0, [0])
-
-
     @given(
         X=hu.tensor(
             min_dim=1, max_dim=5, elements=hu.floats(min_value=0.5, max_value=1.0)
@@ -65,15 +51,3 @@ class TestNormalizeOp(hu.HypothesisTestCase):
             op = core.CreateOperator("NormalizeL1", "X", "Y", axis=axis)
             self.assertReferenceChecks(gc, op, [X], functools.partial(ref, axis=axis))
             self.assertDeviceChecks(dc, op, [X], [0])
-
-    @given(**hu.gcs)
-    def test_normalize_L1_empty(self, gc, dc):
-        def ref_normalize(_):
-            return (np.array([]).astype(np.float32),)
-
-        x = np.array([]).astype(np.float32)
-        op = core.CreateOperator("NormalizeL1", "X", "Y")
-        self.assertReferenceChecks(
-            gc, op, [x], ref_normalize
-        )
-        self.assertDeviceChecks(dc, op, [x], [0])
