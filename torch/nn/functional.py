@@ -2942,75 +2942,6 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 @_overload  # noqa: F811
-def _interp_output_size(closed_over_args):  # noqa: F811
-    # type: (Tuple[Tensor, Optional[int], Optional[List[float]], Optional[bool]]) -> List[int]
-    pass
-
-@_overload  # noqa: F811
-def _interp_output_size(closed_over_args):  # noqa: F811
-    # type: (Tuple[Tensor, Optional[List[int]], Optional[List[float]], Optional[bool]]) -> List[int]
-    pass
-
-@_overload  # noqa: F811
-def _interp_output_size(closed_over_args):  # noqa: F811
-    # type: (Tuple[Tensor, Optional[int], Optional[float], Optional[bool]]) -> List[int]
-    pass
-
-@_overload  # noqa: F811
-def _interp_output_size(closed_over_args):  # noqa: F811
-    # type: (Tuple[Tensor, Optional[List[int]], Optional[float], Optional[bool]]) -> List[int]
-    pass
-
-def _interp_output_size(closed_over_args):  # noqa: F811
-    input, size, scale_factor, recompute_scale_factor = closed_over_args
-    dim = input.dim() - 2
-    if size is None and scale_factor is None:
-        raise ValueError('either size or scale_factor should be defined')
-    if size is not None and scale_factor is not None:
-        raise ValueError('only one of size or scale_factor should be defined')
-    if scale_factor is not None:
-        if isinstance(scale_factor, (list, tuple)):
-            if len(scale_factor) != dim:
-                raise ValueError('scale_factor shape must match input shape. '
-                                 'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-
-    if size is not None:
-        if isinstance(size, (list, tuple)):
-            return size
-        else:
-            return [size for i in range(dim)]
-
-    assert scale_factor is not None
-    if isinstance(scale_factor, (list, tuple)):
-        scale_factors = scale_factor
-    else:
-        scale_factors = [scale_factor for _ in range(dim)]
-
-    if recompute_scale_factor is None:
-        # only warn when the scales have floating values since
-        # the result for ints is the same with/without recompute_scale_factor
-
-        is_float_scale_factor = False
-        for scale in scale_factors:
-            is_float_scale_factor = math.floor(scale) != scale
-            if is_float_scale_factor:
-                break
-
-        if is_float_scale_factor:
-            warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                          "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                          "instead of relying on the computed output size. "
-                          "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-                          "See the documentation of nn.Upsample for details. ")
-
-    if not torch.jit.is_scripting():
-        # make scale_factor a tensor in tracing so constant doesn't get baked in
-        if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
-                    dtype=torch.float32)).float())) for i in range(dim)]
-    return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
-
-@_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
@@ -3134,9 +3065,53 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     # Give this variable a short name because it has to be repeated multiple times below.
     sfl = scale_factor_list
 
-    # TODO: rewrite _interp_output_size as inner function when TS supports closures, or just inline it.
-    closed_over_args = (input, size, scale_factor, recompute_scale_factor)
-    output_size = _interp_output_size(closed_over_args)
+    dim = input.dim() - 2
+    if size is None and scale_factor is None:
+        raise ValueError('either size or scale_factor should be defined')
+    if size is not None and scale_factor is not None:
+        raise ValueError('only one of size or scale_factor should be defined')
+    if scale_factor is not None:
+        if isinstance(scale_factor, (list, tuple)):
+            if len(scale_factor) != dim:
+                raise ValueError('scale_factor shape must match input shape. '
+                                 'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
+
+    if size is not None:
+        if isinstance(size, (list, tuple)):
+            output_size = size
+        else:
+            output_size = [size for i in range(dim)]
+    else:
+        assert scale_factor is not None
+        if isinstance(scale_factor, (list, tuple)):
+            scale_factors = scale_factor
+        else:
+            scale_factors = [scale_factor for _ in range(dim)]
+
+        if recompute_scale_factor is None:
+            # only warn when the scales have floating values since
+            # the result for ints is the same with/without recompute_scale_factor
+
+            is_float_scale_factor = False
+            for scale in scale_factors:
+                is_float_scale_factor = math.floor(scale) != scale
+                if is_float_scale_factor:
+                    break
+
+            if is_float_scale_factor:
+                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "instead of relying on the computed output size. "
+                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+                              "See the documentation of nn.Upsample for details. ")
+
+        if not torch.jit.is_scripting() and torch._C._get_tracing_state():
+            # make scale_factor a tensor in tracing so constant doesn't get baked in
+            output_size = [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                           dtype=torch.float32)).float())) for i in range(dim)]
+        else:
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, output_size, sfl[0])
     if input.dim() == 4 and mode == 'nearest':
