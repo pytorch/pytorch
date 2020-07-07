@@ -3045,6 +3045,8 @@ class TestQuantizeJit(QuantizationTestCase):
         result_eager = model_eager(self.calib_data[0][0])
 
         for trace in [True, False]:
-           quantized_model = self.checkGraphModeOp(linear_model, self.calib_data[0][0], "quantized::linear_dynamic_fp16", tracing=trace, dynamic=True, qconfig=float16_dynamic_qconfig)
-           # compare result with eager mode
-           self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)
+            quantized_model = self.checkGraphModeOp(linear_model, self.calib_data[0][0],
+                                                    "quantized::linear_dynamic_fp16", tracing=trace,
+                                                    dynamic=True, qconfig=float16_dynamic_qconfig)
+            # compare result with eager mode
+            self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)
