@@ -1,0 +1,72 @@
+name: jit-triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v2
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            // Arguments available:
+            // - github: A pre-authenticated octokit/rest.js client
+            // - context: An object containing the context of the workflow run
+            // - core: A reference to the @actions/core package
+            // - io: A reference to the @actions/io package
+
+            // Check if issue has a JIT label.
+            const kJitLabel = "jit";
+            const hasJitLabel = context.issue.labels.filter(label => label.name == kJitLabel).length > 0;
+
+            if (!hasJitLabel) {
+              return;
+            }
+
+            // Get project column ID.
+            const kProjectName = "JIT Triage";
+            const kColumnName = "Need triage";
+            const kPyTorch = "pytorch";
+
+            // Query all projects in the repository.
+            // TODO: Support pagination once there are > 30 projects.
+            const projects = await github.projects.listForRepo({
+              owner: kPyTorch,
+              repo: kPyTorch,
+            });
+
+            // Filter out unwanted projects and get the ID for the JIT Triage project.
+            const filteredProjects = projects.filter(project => project.name == kProjectName);
+
+            if (filteredProjects.length != 1) {
+              console.log("Unable to find a project named " + kProjectName);
+              return;
+            }
+
+            const projectId = filteredProjects[0].id;
+
+            // First, query all columns in the project.
+            // TODO: Support pagination once there are > 30 columns.
+            const columns = await github.projects.listColumns({
+              project_id: projectId,
+            });
+
+            // Filter out unwanted projects and get the ID for the Need triage column.
+            const filteredColumns = columns.filter(column => column.name == kColumnName);
+
+            if (filteredColumns != 1) {
+              console.log("Unable to find a column named " + kColumnName);
+              return;
+            }
+
+            const columnId = filteredColumns[0].id;
+
+            // Create a project card for this new issue.
+            await octokit.projects.createCard({
+              column_id: columnId,
+              content_id: context.issue.id,
+              content_type: "Issue",
+            })
