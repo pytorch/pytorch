@@ -294,7 +294,7 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(scripted_output, ref_output)
 
 
-    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
+    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False, qconfig=None):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
@@ -302,7 +302,7 @@ class QuantizationTestCase(TestCase):
         if eval_mode:
             module = module.eval()
         if dynamic:
-            qconfig_dict = {'': default_dynamic_qconfig}
+            qconfig_dict = {'': default_dynamic_qconfig if qconfig is None else qconfig}
             inputs = data
         else:
             *inputs, target = data[0]

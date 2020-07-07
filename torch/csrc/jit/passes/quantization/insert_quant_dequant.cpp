@@ -191,28 +191,14 @@ DynamicQuantOps insertChooseQParamQuantDequant(
 }
 
 Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
-  auto default_false = graph->insertConstant(false);
-  Value* none = graph->insertConstant(IValue());
-  Value* fp16_dtype = graph->insertConstant(IValue(c10::kHalf));
-  Value* float_dtype = graph->insertConstant(IValue(c10::kFloat));
-
-  std::vector<Value*> input_to_fp16 = {observer_out,
-                                       fp16_dtype,
-                                       /* non_blocking */ default_false,
-                                       /* copy */ default_false};
-  Node* cast_to_fp16 = graph->create(Symbol::aten("to"), input_to_fp16);
-  graph->insertNode(cast_to_fp16);
-
-  auto fp16_out = cast_to_fp16->output();
-  std::vector<Value*> input_to_fp32 = {fp16_out,
-                                       float_dtype,
-                                       /* non_blocking */ default_false,
-                                       /* copy */ default_false};
-  Node* cast_to_fp32 = graph->create(Symbol::aten("to"), input_to_fp32);
-  graph->insertNode(cast_to_fp32);
+  // If the weight value is outside of the range for FP16 range, i.e. [5.96e-8,
+  // 65504], we saturate the values to the min/max of this range.
+  Node* saturated_weight =
+      graph->create(Symbol::aten("_saturate_weight_to_fp16"), {observer_out});
+  graph->insertNode(saturated_weight);
   graph->lint();
 
-  return cast_to_fp32;
+  return saturated_weight;
 }
 
 bool isNoopObserver(Value* observer) {

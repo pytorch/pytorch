@@ -2757,8 +2757,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
-        FileCheck().check("aten::to") \
-                   .check_next("aten::to") \
+        FileCheck().check("aten::_saturate_weight_to_fp16") \
                    .check("aten::linear") \
                    .check_not("aten::dequantize") \
                    .check_not("aten::quantize") \
@@ -3038,14 +3037,14 @@ class TestQuantizeJit(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_linear_dynamic_fp16(self):
         linear_model = SingleLayerLinearModel().eval()
+        # Create weight tensor values that are beyond fp16 max
+        x = torch.ones(5, 5) * 65532
+        linear_model.fc1.weight = torch.nn.Parameter(x)
+
         model_eager = quantize_dynamic(linear_model, dtype=torch.float16)
         result_eager = model_eager(self.calib_data[0][0])
-        model_script = torch.jit.script(linear_model)
-        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-        qconfig_dict = {'' : float16_dynamic_qconfig}
-        for model in [model_script, model_traced]:
-            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
-            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=True)
-            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for trace in [True, False]:
+           quantized_model = self.checkGraphModeOp(linear_model, self.calib_data[0][0], "quantized::linear_dynamic_fp16", tracing=trace, dynamic=True, qconfig=float16_dynamic_qconfig)
+           # compare result with eager mode
+           self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)
