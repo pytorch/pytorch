@@ -294,7 +294,8 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(scripted_output, ref_output)
 
 
-    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False, qconfig=None):
+    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False,
+                         check=True, eval_mode=True, dynamic=False, qconfig=None):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
