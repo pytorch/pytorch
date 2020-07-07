@@ -418,15 +418,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   c10::optional<FutureError> error_;
 };
 
-/*
-  Wrap a callback with TLS state. This will cause the callback to run with the
-  thread local state of the caller thread. Example usage:
- fut->addCallback(wrapPropagateTLSState(cb_that_requires_tls_state));
-  */
-  template <typename T>
-  TORCH_API std::function<T(void)> wrapPropagateTLSState(
-      std::function<T(void)> callback);
-
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(

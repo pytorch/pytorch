@@ -1,7 +1,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <ATen/ThreadLocalState.h>
-#include <ATen/core/ivalue.h>
+
 #include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
@@ -9,7 +9,6 @@ namespace caffe2 {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CAFFE_KNOWN_TYPE(at::RecordFunction);
 } // namespace caffe2
-
 
 namespace torch {
 namespace autograd {
