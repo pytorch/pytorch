@@ -2575,7 +2575,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src) -> Tensor
+scatter_(dim, index, src, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -2599,6 +2599,27 @@ Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
 along the specified dimension :attr:`dim` must be unique.
 
+Additionally accepts an optional :attr:`reduce` argument that allows
+specification of an optional reduction operation, which is applied to all
+values in the tensor :attr:`src` into :attr:`self` at the indicies
+specified in the :attr:`index`. For each value in :attr:`src`, the reduction
+operation is applied to an index in :attr:`self` which is specified by
+its index in :attr:`src` for ``dimension != dim`` and by the corresponding
+value in :attr:`index` for ``dimension = dim``.
+
+Given a 3-D tensor and reduction using the multiplication operation, :attr:`self`
+is updated as::
+
+    self[index[i][j][k]][j][k] *= src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] *= src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] *= src[i][j][k]  # if dim == 2
+
+Reducing with the addition operation is the same as using
+:meth:`~torch.Tensor.scatter_add_`.
+
+Note:
+    Reduction is not yet implemented for the CUDA backend.
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
@@ -2608,6 +2629,8 @@ Args:
       incase `value` is not specified
     value (float): the source element(s) to scatter,
       incase `src` is not specified
+    reduce (string): reduction operation to apply,
+      can be either 'add', 'subtract', 'multiply' or 'divide'.
 
 Example::
 
@@ -2624,6 +2647,11 @@ Example::
     >>> z
     tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
             [ 0.0000,  0.0000,  0.0000,  1.2300]])
+
+    >>> z = torch.ones(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23, reduce='multiply')
+    >>> z
+    tensor([[1.0000, 1.0000, 1.2300, 1.0000],
+            [1.0000, 1.0000, 1.0000, 1.2300]])
 """)
 
 add_docstr_all('scatter_add_',
