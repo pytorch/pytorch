@@ -8439,8 +8439,8 @@ class TestTorchDeviceType(TestCase):
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
-    def test_broadcast_batched_matmul(self, device, rtol, atol):
+    @tf32_on_and_off(precision=0.001)
+    def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
         p_dim = random.randint(1, 8)
@@ -8490,19 +8490,19 @@ class TestTorchDeviceType(TestCase):
                         for r in (rhs, rhs_expanded):
                             l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
-                            self.assertEqual(truth, result, rtol=rtol, atol=atol)
+                            self.assertEqual(truth, result)
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
-                            self.assertEqual(truth, torch_result, rtol=rtol, atol=atol)
+                            self.assertEqual(truth, torch_result)
                             # test torch.matmul with out
                             out = torch.zeros_like(torch_result)
                             torch.matmul(l, r, out=out)
-                            self.assertEqual(truth, maybe_squeeze_result(l, r, out), rtol=rtol, atol=atol)
+                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
                                         rhs_expanded.contiguous().view(-1, *rhs_mat_dims)))
-                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims), rtol=rtol, atol=atol)
+                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims))
 
         for indices in product((True, False), repeat=2):
             verify_batched_matmul(*indices)
@@ -10429,8 +10429,8 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @tf32_on_and_off(atol_=0.001, rtol_=0.001)
-    def test_qr(self, device, rtol, atol):
+    @tf32_on_and_off(precision=0.001)
+    def test_qr(self, device):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
             Q, R = torch.qr(A, some=some)
@@ -10443,12 +10443,12 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(Q.size(-1), n_columns)
 
             # Check1: A = QR
-            self.assertEqual(A, torch.matmul(Q, R), rtol=rtol, atol=atol)
+            self.assertEqual(A, torch.matmul(Q, R))
 
             # Check2: A = QR (with out)
             Q_out, R_out = torch.Tensor().to(device), torch.Tensor().to(device)
             torch.qr(A, some=some, out=(Q_out, R_out))
-            self.assertEqual(A, torch.matmul(Q_out, R_out), rtol=rtol, atol=atol)
+            self.assertEqual(A, torch.matmul(Q_out, R_out))
 
             # Check3: Q == Q_out, R == R_out
             self.assertEqual(Q, Q_out)
@@ -11507,27 +11507,27 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off(atol_=0.005, rtol_=0.005)
-    def test_cdist_large(self, device, rtol, atol):
+    @tf32_on_and_off(precision=0.005)
+    def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
     @slowTest
-    @tf32_on_and_off(atol_=0.005, rtol_=0.005)
-    def test_cdist_large_batch(self, device, rtol, atol):
+    @tf32_on_and_off(precision=0.005)
+    def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
             y = torch.randn(4, 3, 1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
     @tf32_on_and_off()
-    def test_cdist_non_contiguous(self, device, rtol, atol):
+    def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).transpose(-1, -2)
             y = torch.randn(5, 3, device=device).transpose(-1, -2)
@@ -11535,7 +11535,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
             x = torch.randn(7, 5, device=device)
             y = torch.randn(5, 3, device=device).t()
@@ -11543,7 +11543,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(3, 5, device=device)
@@ -11551,10 +11551,10 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
     @tf32_on_and_off()
-    def test_cdist_non_contiguous_batch(self, device, rtol, atol):
+    def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
@@ -11562,7 +11562,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
             x = torch.randn(7, 2, 7, 5, device=device)
             y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
@@ -11570,7 +11570,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
             x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 5, device=device)
@@ -11578,7 +11578,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
-            self.assertEqual(expected, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expected, actual)
 
     def test_multinomial_constraints(self, device):
         x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
@@ -12390,8 +12390,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @tf32_on_and_off(atol_=0.005, rtol_=0.005)
-    def test_tensordot(self, device, rtol, atol):
+    @tf32_on_and_off(precision=0.005)
+    def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
         c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
@@ -12407,10 +12407,10 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
             torch.tensordot(a, b, dims=-1)
 
-        self.assertEqual(c, cn, rtol=rtol, atol=atol)
+        self.assertEqual(c, cn)
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
-        self.assertEqual(c, cn, rtol=rtol, atol=atol)
+        self.assertEqual(c, cn)
 
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -16471,8 +16471,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(res1, res2, atol=prec, rtol=0)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*((torch.float, torch.double, tfloat32) +
-                    (() if TEST_WITH_ROCM else (tcomplex64, *torch.testing.get_all_complex_dtypes()))))
+    @dtypesIfCUDA(*([torch.float, torch.double] +
+                    ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
+    @tf32_on_and_off()
     def test_addmm_sizes(self, device, dtype):
         with setup_tf32(dtype, atol=0.005, rtol=0.005) as (dtype, rtol, atol):
             for m in [0, 1, 25]:
@@ -16488,7 +16489,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             for j in range(m):
                                 for l in range(k):
                                     res2[i, j] += m1[i, l] * m2[l, j]
-                        self.assertEqual(res1, res2, rtol=rtol, atol=atol)
+                        self.assertEqual(res1, res2)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -17953,13 +17954,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCUDA
     @tf32_on_and_off()
-    def test_mv_stride_0(self, device, rtol, atol):
+    def test_mv_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
         vec = torch.tensor(2., device=device).expand(2)
         mat_cpu = mat.cpu()
         vec_cpu = vec.cpu()
-        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu, rtol=rtol, atol=atol)
+        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64)
