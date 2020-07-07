@@ -10,37 +10,35 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
-struct Statement;
+class Statement;
 
-struct Val;
-struct Expr;
+class Val;
+class Expr;
 
-struct UnaryOp;
-struct BinaryOp;
-struct TernaryOp;
-struct ReductionOp;
-struct BroadcastOp;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
 
-struct ForLoop;
-struct IfThenElse;
+class ForLoop;
+class IfThenElse;
 
-struct TensorDomain;
-struct TensorView;
-struct IterDomain;
-struct TensorIndex;
+class TensorDomain;
+class TensorView;
+class IterDomain;
+class TensorIndex;
 
-struct TensorContiguity;
+class Split;
+class Merge;
 
-struct Split;
-struct Merge;
-
-struct Bool;
-struct Float;
-struct Half;
-struct Int;
-struct Add;
+class Bool;
+class Float;
+class Half;
+class Int;
+class Add;
 
 /*
  * Define pretty printing functions for all nodes. handle is used so we can take
@@ -50,13 +48,16 @@ struct Add;
  * stream operator <<.
  */
 
-struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
  public:
   std::ostream& os;
   bool print_inline_ = false;
 
   // Track the indentation size for pretty printing
   int indent_size = 0;
+
+  // Handle value mapping
+  bool follow_val_map = true;
 
   // Indent the generated code
   void indent() {
@@ -72,54 +73,48 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   IRPrinter(std::ostream& _os) : os(_os) {}
 
-  virtual void handle(Fusion* const f);
+  virtual void handle(Fusion* f);
 
   // handle calls some non const fusion ops,
   // eventhough fusion should remain unchanged.
   // Need to look into this.
-  virtual void handle(const Fusion* const f) {
+  virtual void handle(const Fusion* f) {
     handle(const_cast<Fusion*>(f));
   }
+
   virtual void handle(Fusion& f) {
     handle(&f);
   }
 
-  virtual void handle(const Statement* const s) {
-    OptInConstDispatch::handle(s);
-  };
+  void handle(const Statement* s) override;
+  void handle(const Val* v) override;
+  void handle(const Expr* e) override;
 
-  virtual void handle(const Val* const v) {
-    OptInConstDispatch::handle(v);
-  };
-  virtual void handle(const Expr* const e) {
-    OptInConstDispatch::handle(e);
-  };
+  void handle(const TensorDomain*) override;
+  void handle(const TensorView*) override;
+  void handle(const IterDomain*) override;
+  void handle(const TensorIndex*) override;
 
-  virtual void handle(const TensorDomain* const) override;
-  virtual void handle(const TensorView* const) override;
-  virtual void handle(const IterDomain* const) override;
-  virtual void handle(const TensorIndex* const) override;
+  void handle(const Bool*) override;
+  void handle(const Float*) override;
+  void handle(const Half*) override;
+  void handle(const Int*) override;
+  void handle(const NamedScalar*) override;
 
-  virtual void handle(const Bool* const) override;
-  virtual void handle(const Float* const) override;
-  virtual void handle(const Half* const) override;
-  virtual void handle(const Int* const) override;
-  virtual void handle(const NamedScalar* const) override;
+  void handle(const UnaryOp*) override;
+  void handle(const BinaryOp*) override;
+  void handle(const TernaryOp*) override;
+  void handle(const ReductionOp*) override;
+  void handle(const BroadcastOp*) override;
 
-  virtual void handle(const UnaryOp* const) override;
-  virtual void handle(const BinaryOp* const) override;
-  virtual void handle(const TernaryOp* const) override;
-  virtual void handle(const ReductionOp* const) override;
-  virtual void handle(const BroadcastOp* const) override;
+  void handle(const ForLoop*) override;
+  void handle(const IfThenElse*) override;
+  void handle(const Allocate*) override;
 
-  virtual void handle(const ForLoop* const) override;
-  virtual void handle(const IfThenElse* const) override;
-  virtual void handle(const Allocate* const) override;
+  void handle(const Split*) override;
+  void handle(const Merge*) override;
 
-  virtual void handle(const Split* const) override;
-  virtual void handle(const Merge* const) override;
-
-  void print_inline(const Statement* const stmt) {
+  void print_inline(const Statement* stmt) {
     bool prev = print_inline_;
     print_inline_ = true;
     handle(stmt);
@@ -135,7 +130,7 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& os,
-    const Statement* const stmt);
+    const Statement* stmt);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 

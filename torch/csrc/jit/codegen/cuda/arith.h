@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
-struct Val;
+class Val;
 
 /*
  * The operations defined in this header is intended as user facing functions.
@@ -60,7 +60,8 @@ TORCH_CUDA_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
 
-// BINARY OPAERATIONS
+// BINARY OPERATIONS
+// add
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(TensorView* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(Val* v1, TensorView* v2);
@@ -90,6 +91,11 @@ TORCH_CUDA_API Val* lt(Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* lt(TensorView* v1, Val* v2);
 TORCH_CUDA_API TensorView* lt(Val* v1, TensorView* v2);
 TORCH_CUDA_API TensorView* lt(TensorView* v1, TensorView* v2);
+// eq
+TORCH_CUDA_API Val* eq(Val* v1, Val* v2);
+TORCH_CUDA_API TensorView* eq(TensorView* v1, Val* v2);
+TORCH_CUDA_API TensorView* eq(Val* v1, TensorView* v2);
+TORCH_CUDA_API TensorView* eq(TensorView* v1, TensorView* v2);
 // ceilDiv
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* ceilDiv(TensorView* v1, Val* v2);
