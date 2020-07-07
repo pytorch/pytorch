@@ -7,13 +7,13 @@ import torch
 
 try:
     from benchmarks.fastrnns.factory import lstm_creator
-except:
+except ImportError:
     from caffe2.benchmarks.fastrnns.factory import lstm_creator
 
 try:
     from benchmarks.experimental_components.utils import Timer, Compare
     HAS_TIMER = True
-except:
+except ImportError:
     HAS_TIMER = False
 
 from torchvision.models import resnet50
@@ -73,7 +73,7 @@ def run_bench(model_names, bench_args):
                         label="Record function overhead",
                         sub_label=f"with{'' if with_rec_fn else 'out'}_rec_fn, num_threads {num_threads}",
                         num_threads=num_threads)
-                    result = timer.blocked_autorange(bench_args.timer_min_run_time=30)
+                    result = timer.blocked_autorange(min_run_time=bench_args.timer_min_run_time)
                     print("finished")
                     print(result)
                     print()
