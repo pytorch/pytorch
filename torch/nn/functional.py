@@ -3152,27 +3152,28 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if input.dim() == 3 and mode == 'linear':
         assert align_corners is not None
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, sfl[0])
-    if input.dim() == 3 and mode == 'bilinear':
-        raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
-    if input.dim() == 3 and mode == 'trilinear':
-        raise NotImplementedError("Got 3D input, but trilinear mode needs 5D input")
-    if input.dim() == 4 and mode == 'linear':
-        raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     if input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, sfl[0], sfl[1])
-    if input.dim() == 4 and mode == 'trilinear':
-        raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
-    if input.dim() == 5 and mode == 'linear':
-        raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
-    if input.dim() == 5 and mode == 'bilinear':
-        raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     if input.dim() == 5 and mode == 'trilinear':
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, sfl[0], sfl[1], sfl[2])
     if input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, sfl[0], sfl[1])
+
+    if input.dim() == 3 and mode == 'bilinear':
+        raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
+    if input.dim() == 3 and mode == 'trilinear':
+        raise NotImplementedError("Got 3D input, but trilinear mode needs 5D input")
+    if input.dim() == 4 and mode == 'linear':
+        raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
+    if input.dim() == 4 and mode == 'trilinear':
+        raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
+    if input.dim() == 5 and mode == 'linear':
+        raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
+    if input.dim() == 5 and mode == 'bilinear':
+        raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
 
     raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                               " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
