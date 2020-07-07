@@ -713,10 +713,14 @@ class TestSerialization(TestCase, SerializationMixin):
 
         test(io.BytesIO())
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile_actually_jit(self):
+        with tempfile.NamedTemporaryFile() as f:
+            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
+            f.seek(0)
+            torch.load(f)
+
     # Ensure large zip64 serialization works properly
-    @unittest.skipIf(IS_WINDOWS,
-                     '<built-in method read of BytesIOContext object at 0x0000022C21F2B468> returned a result'
-                     ' with an error set')
     def test_serialization_2gb_file(self):
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
