@@ -82,7 +82,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         if nargs == 2:
             @functools.wraps(f)
             def wrapped(self, device):
-                if self.device_type and tf32_is_not_fp32():
+                if self.device_type == 'cuda' and tf32_is_not_fp32():
                     call_with_tf32_on_and_off(self, lambda: f(self, device))
                 else:
                     f(self, device)
@@ -91,7 +91,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
             @functools.wraps(f)
             def wrapped(self, device, dtype):
-                if self.device_type and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
+                if self.device_type == 'cuda' and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
                     call_with_tf32_on_and_off(self, lambda: f(self, device, dtype))
                 else:
                     f(self, device, dtype)
