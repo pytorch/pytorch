@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
 /*
  * Mutators are the mechanism used to modify IR nodes. Since most nodes are
@@ -25,7 +25,7 @@ struct Fusion;
 
 // Search through "within" and replace all instances of "instance" with the
 // value "with".
-struct TORCH_CUDA_API ReplaceAll : public OptOutMutator {
+class TORCH_CUDA_API ReplaceAll : public OptOutMutator {
  private:
   // Will look in fusion and if we're replacing an input or output we register
   // those changes
