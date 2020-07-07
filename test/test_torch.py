@@ -16474,21 +16474,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
     @tf32_on_and_off()
     def test_addmm_sizes(self, device, dtype):
-        with setup_tf32(dtype, atol=0.005, rtol=0.005) as (dtype, rtol, atol):
-            for m in [0, 1, 25]:
-                for n in [0, 1, 10]:
-                    for k in [0, 1, 8]:
-                        M = torch.randn(n, m, device=device, dtype=dtype)
-                        m1 = torch.randn(n, k, device=device, dtype=dtype)
-                        m2 = torch.randn(k, m, device=device, dtype=dtype)
-                        res1 = torch.addmm(M, m1, m2)
-                        res2 = torch.zeros(n, m, device=device, dtype=dtype)
-                        res2 += M
-                        for i in range(n):
-                            for j in range(m):
-                                for l in range(k):
-                                    res2[i, j] += m1[i, l] * m2[l, j]
-                        self.assertEqual(res1, res2)
+        for m in [0, 1, 25]:
+            for n in [0, 1, 10]:
+                for k in [0, 1, 8]:
+                    M = torch.randn(n, m, device=device, dtype=dtype)
+                    m1 = torch.randn(n, k, device=device, dtype=dtype)
+                    m2 = torch.randn(k, m, device=device, dtype=dtype)
+                    res1 = torch.addmm(M, m1, m2)
+                    res2 = torch.zeros(n, m, device=device, dtype=dtype)
+                    res2 += M
+                    for i in range(n):
+                        for j in range(m):
+                            for l in range(k):
+                                res2[i, j] += m1[i, l] * m2[l, j]
+                    self.assertEqual(res1, res2)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
