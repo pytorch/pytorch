@@ -217,72 +217,92 @@ Autograd for Complex Numbers
 What notion of complex derivative does PyTorch use?
 ***************************************************
 
-   PyTorch follows `_JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`
-   convention for autograd for Complex Numbers.
+PyTorch follows `JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
+convention for autograd for Complex Numbers.
 
-    For a function :math:`F: C → C`
+Suppose we have a function :math:`F: C -> C` which we can decompose into functions u and v
+which compute the real and imaginary parts of the function:
 
-    .. math::
+    .. code::
+
         def F(z):
             x, y = real(z), imag(z)
             return u(x, y) + v(x, y) * 1j
 
-    The JVP and VJP for function :math:`F` are defined as:
+The Jacobian, JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
+
+    .. code::
+
+        def JVP(tangent):
+            c, d = real(tangent), imag(tangent)
+            return [1, i]^T * J * [c, d]
+
+    .. code::
+
+        def VJP(cotangent):
+            c, d = real(cotangent), imag(cotangent)
+            return [c, -d]^T * J * [1, -i]
+
+    where
 
     .. math::
 
         J = \begin{bmatrix}
             \partial_0u(x, y) & \partial_1u(x, y)\\
-            \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix}
+            \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix} \\
 
-        def JVP(tangent):
-            c, d = real(tangent), imag(tangent)
-            return \begin{bmatrix} 1 & i \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
-
-        def VJP(cotangent):
-            c, d = real(cotangent), imag(cotangent)
-            return \begin{bmatrix} c & -d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -i \end{bmatrix}
-
-What happens if I call backward() on a complex scalar?
-******************************************************
-
-    1. For holomorphic functions, you get the same result as expected from using Cauchy-Riemann equations.
-    2. For non-holomorphic functions, the partial derivatives of :math:`v(x, y)` are discarded.
+In PyTorch, the VJP is mostly what we care about, as it is the computation performed when we do backward
+mode automatic differentiation. Notice that d and i (imaginary number) are negated in the formula above.
 
 Why is there a negative sign in the formula above?
 **************************************************
 
-    For a function F: V → W, where are V and W are vector spaces. The output of
-    the Vector-Jacobian Product (VJP) :math:`VJP : V → (W^* → V^*)` is a linear map
-    from :math:`W^* to V^*` (explained in `Chapter 4 of _Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+For a function F: V → W, where are V and W are vector spaces. The output of
+the Vector-Jacobian Product :math:`VJP : V → (W^* → V^*)` is a linear map
+from :math:`W^* → V^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
-    The negative signs in the above VJP computation are due to conjugation. The first
-    vector in the output returned by VJP for a given cotangent is a covector (\in :math:`C^*`),
-    and the last vector in the output is used to get the result in :math:`C`
-    since the final result of reverse-mode differentiation of a function is a covector belonging
-    to :math:`C^*` (explained in `Chapter 4 of _Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+The negative signs in the above VJP computation are due to conjugation. The first
+vector in the output returned by VJP for a given cotangent is a covector (\in :math:`C^*`),
+and the last vector in the output is used to get the result in :math:`C`
+since the final result of reverse-mode differentiation of a function is a covector belonging
+to :math:`C^*` (explained in `Chapter 4 of Dougal’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
-How are the JVP and VJP defined for :math:`R^2 -> C` and :math:`C -> R^2` functions?
-************************************************************************************
+What happens if I call backward() on a complex scalar?
+******************************************************
 
-    The JVP and VJP for a :math:`f1: C → R^2` are defined as:
+For geneneral ℂ→ℂ functions, the Jacobian has 4 real-valued degrees of freedom (as in the 2x2 Jacobian matrices above),
+so we can’t hope to represent all of them with in a complex number.
 
-    ..math::
+    1. For holomorphic functions, the gradient can be fully represented with complex numbers due to the Cauchy-Riemann equations. And so,
+       we can obtain that gradient using backward which is just a call to vjp with covector 1.0.
+    2. For non-holomorphic functions, the gradient can't be fully represented with complex numbers.
+       The partial derivatives of the imaginary part of the function (:math:`v(x, y)` above) are discarded
+       (e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
+       For any other desired behavior, you can specify the covector :math:`v` in `torch.autograd.functional.vjp` call.
+
+How are the JVP and VJP defined for :math:`R^2 → C` and :math:`C → R^2` functions?
+**********************************************************************************
+
+The JVP and VJP for a :math:`f1: C → R^2` are defined as:
+
+    .. code::
+
         def JVP(tangent):
             c, d = real(tangent), imag(tangent)
-            return J * \begin{bmatrix} c \\ d \end{bmatrix}
+            return J * [c, d]
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
-            return \begin{bmatrix} c & d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -i \end{bmatrix}
+            return [c, d]^T * J * [1, -i]
 
-    The JVP and VJP for a :math:`f1: R^2 → C` are defined as:
+The JVP and VJP for a :math:`f1: R^2 → C` are defined as:
 
-    ..math::
+   .. code::
+
         def JVP(tangent):
             c, d = real(tangent), imag(tangent)
-            return \begin{bmatrix} 1 & i \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
+            return [1, i]^T * J * [c, d]
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
-            return \begin{bmatrix} c & -d \end{bmatrix} * J
+            return [c, -d]^T * J
