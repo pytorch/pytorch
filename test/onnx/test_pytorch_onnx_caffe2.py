@@ -510,19 +510,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                             state_dict=state_dict, atol=1e-5)
 
     def test_fuse_conv_bn2d(self):
-        # class Fuse(torch.nn.Module):
-        #     def __init__(self):
-        #         super(Fuse, self).__init__()
-        #         self.conv = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        #         self.bn = torch.nn.BatchNorm2d(64)
-
-        #     def forward(self, x):
-        #         x = self.conv(x)
-        #         x = self.bn(x)
-        #         return x
-
-        # x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        # model = Fuse()
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()

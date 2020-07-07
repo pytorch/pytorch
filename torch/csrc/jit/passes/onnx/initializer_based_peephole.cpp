@@ -64,25 +64,32 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
         continue;
       }
 
-      bn_var = bn_var.add(epsilon);
-      bn_var = bn_var.sqrt();
-      bn_scale = bn_scale.div(bn_var);
+      auto bn_var_helper = bn_var.toType(c10::kDouble);
+      auto bn_scale_helper = bn_scale.toType(c10::kDouble);
+      bn_var_helper = bn_var_helper.add(epsilon);
+      bn_var_helper = bn_var_helper.sqrt();
+      bn_scale_helper = bn_scale_helper.div(bn_var_helper);
 
       // Calculate weight
-      for (size_t i = 0; i < w_conv.size(0); i++) {
-        w_conv[i] = w_conv[i].mul(bn_scale[i]);
+      auto w_conv_helper = w_conv.toType(c10::kDouble);
+      for (size_t i = 0; i < w_conv_helper.size(0); i++) {
+        w_conv_helper[i] = w_conv_helper[i].mul(bn_scale_helper[i]);
       }
 
       // Calculate bias
+      auto b_conv_helper = b_conv;
+      auto bn_mean_helper = bn_mean.toType(c10::kDouble);
+      auto bn_B_helper = bn_B.toType(c10::kDouble);
       if (origconvNode->inputs().size() == 3) {
         b_conv = w_conv_value[1];
-        b_conv = b_conv.sub(bn_mean);
-        b_conv = b_conv.mul(bn_scale);
-        b_conv = b_conv.add(bn_B);
+        b_conv_helper = b_conv.toType(c10::kDouble);
+        b_conv_helper = b_conv_helper.sub(bn_mean_helper);
+        b_conv_helper = b_conv_helper.mul(bn_scale_helper);
+        b_conv_helper = b_conv_helper.add(bn_B_helper);
       } else {
-        bn_mean = bn_mean.mul(bn_scale);
-        bn_B = bn_B.sub(bn_mean);
-        b_conv = bn_B;
+        bn_mean_helper = bn_mean_helper.mul(bn_scale_helper);
+        bn_B_helper = bn_B_helper.sub(bn_mean_helper);
+        b_conv_helper = bn_B_helper;
       }
 
       Node* convNode =
@@ -97,13 +104,17 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
 
       auto conv_W = b->addInput();
       valsToParamsMap.insert(
-          {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
+          {conv_W,
+           std::make_pair(
+               conv_W->debugName(), w_conv_helper.toType(c10::kFloat))});
       conv_W->inferTypeFrom(w_conv);
       convNode->addInput(conv_W);
 
       auto conv_B = b->addInput();
       valsToParamsMap.insert(
-          {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
+          {conv_B,
+           std::make_pair(
+               conv_B->debugName(), b_conv_helper.toType(c10::kFloat))});
       conv_B->inferTypeFrom(bn_B);
       convNode->addInput(conv_B);
 
