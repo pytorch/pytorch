@@ -575,10 +575,48 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
+# NOTE [ Linking AVX and non-AVX files ]
+#
+# Regardless of the CPU capabilities, we build some files with AVX and AVX2
+# instruction set. If the host CPU doesn't support those, we simply ignore their
+# functions at runtime during dispatch.
+#
+# We must make sure that those files are at the end of the input list when
+# linking the torch_cpu library. Otherwise, the following error scenario might
+# occur:
+# 1. A non-AVX and an AVX file both call a function defined with the `inline`
+#    keyword
+# 2. The compiler decides not to inline this function
+# 3. Two different versions of the machine code are generated for this function:
+#    one without AVX instructions and one with AVX.
+# 4. When linking, the AVX version is found earlier in the input object files,
+#    so the linker makes the entire library use it, even in code not guarded by
+#    the dispatcher.
+# 5. A CPU without AVX support executes this function, encounters an AVX
+#    instruction and crashes.
+#
+# Thus we organize the input files in the following order:
+# 1. All files with no AVX support
+# 2. All files with AVX support (conveniently, they all have names ending with
+#    'AVX.cpp')
+# 3. All files with AVX2 support ('*AVX2.cpp')
+set(Caffe2_CPU_SRCS_NON_AVX)
+set(Caffe2_CPU_SRCS_AVX)
+set(Caffe2_CPU_SRCS_AVX2)
+foreach(input_filename ${Caffe2_CPU_SRCS})
+  if(${input_filename} MATCHES "AVX\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX ${input_filename})
+  elseif(${input_filename} MATCHES "AVX2\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX2 ${input_filename})
+  else()
+    list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
+  endif()
+endforeach(input_filename)
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
+
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
-
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
