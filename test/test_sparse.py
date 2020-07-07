@@ -3008,6 +3008,128 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
+    @cpu_only
+    def test_sparse_matmul(self):
+
+        def sparse_mm(a, b):
+            if a.shape[1] != b.shape[0]:
+                print("Incompatible matrices")
+                return None
+            n, p = a.shape
+            p, m = b.shape
+            indices_a = a._indices()
+            values_a = a._values()
+            indices_b = b._indices()
+            values_b = b._values()
+
+            # sorting the triplets
+            _, map_a = torch.sort(indices_a[1])
+            _, map_b = torch.sort(indices_b[0])
+
+            # build vectors of indices b1 and b2, which contain the indices
+            # of elements which begin a new column for A1 and which begin a
+            # new row for A2.
+            b1 = [0]
+            for i in range(values_a.numel() - 1):
+                idx = map_a[i]
+                idx_1 = map_a[i + 1]
+                if indices_a[1][idx] != indices_a[1][idx_1]:
+                    b1.append(i + 1)
+            b1.append(values_a.numel())
+
+            b2 = [0]
+            for i in range(values_b.numel() - 1):
+                idx = map_b[i]
+                idx_1 = map_b[i + 1]
+                if indices_b[0][idx] != indices_b[0][idx_1]:
+                    b2.append(i + 1)
+            b2.append(values_b.numel())
+
+            i = 0
+            j = 0
+            nnz_result = 0
+            while i < len(b1) - 1 and j < len(b2) - 1:
+                b1i = map_a[b1[i]]
+                b2j = map_b[b2[j]]
+                if indices_a[1][b1i] == indices_b[0][b2j]:
+                    nnz_result += (b1[i + 1] - b1[i]) * (b2[j + 1] - b2[j])
+                    i += 1
+                    j += 1
+                elif indices_a[1][b1i] < indices_b[0][b2j]:
+                    i += 1
+                else:
+                    j += 1
+
+            result_indices = [[0] * nnz_result, [0] * nnz_result]
+            result_values = [0] * nnz_result
+            # exploiting the special sorting of l1, l2 we are able to pass
+            # in a single loop all and only the elements of the matrices
+            # A1, A2 which will be paired when one computes A1*A2.
+            i = 0
+            j = 0
+            index = 0
+            while i < len(b1) - 1 and j < len(b2) - 1:
+                b1i = map_a[b1[i]]
+                b2j = map_b[b2[j]]
+                if indices_a[1][b1i] == indices_b[0][b2j]:
+                    for c1 in range(b1[i], b1[i + 1]):
+                        for c2 in range(b2[j], b2[j + 1]):
+                            mc1 = map_a[c1]
+                            mc2 = map_b[c2]
+                            result_indices[0][index] = indices_a[0][mc1]
+                            result_indices[1][index] = indices_b[1][mc2]
+                            result_values[index] = values_a[mc1] * values_b[mc2]
+                            index += 1
+                    i += 1
+                    j += 1
+                else:
+                    if indices_a[1][b1i] < indices_b[0][b2j]:
+                        i += 1
+                    else:
+                        j += 1
+            return torch.sparse_coo_tensor(torch.tensor(result_indices), torch.tensor(result_values), (n, m))
+
+        def test_op(sparse_dims, nnz, shape_a, shape_b):
+            a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
+            a_dense = a.to_dense()
+            b_dense = b.to_dense()
+            r1 = a_dense.matmul(b_dense)
+
+            # python implementation
+            r2 = sparse_mm(a, b)
+            self.assertEqual(r1, r2.to_dense())
+            self.assertEqual((r2._values() != 0).all(), True)
+
+            # cpp implementation
+            r2 = torch.sparse.mm(a, b)
+            self.assertEqual(r1, r2.to_dense())
+
+            # check autograd support on sparse matmul
+            a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
+            a.requires_grad = True
+            b.requires_grad = True
+            a_dense = a.to_dense().detach()
+            b_dense = b.to_dense().detach()
+            a_dense.requires_grad = True
+            b_dense.requires_grad = True
+            r1 = a_dense.matmul(b_dense)
+            r2 = torch.sparse.mm(a, b)
+
+            f1 = torch.sum(r1)
+            f1.backward()
+
+            f2 = torch.sparse.sum(r2)
+            f2.backward()
+            self.assertEqual(a.grad.to_dense(), a_dense.grad)
+            self.assertEqual(b.grad.to_dense(), b_dense.grad)
+
+        for n in range(2, 5):
+            for m in range(2, 8):
+                for p in range(2, 8):
+                    test_op(2, 10, [n, m], [m, p])
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

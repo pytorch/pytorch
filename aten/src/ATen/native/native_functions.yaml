@@ -2969,6 +2969,15 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   use_c10_dispatcher: full
 
+- func: _sparse_matmul(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: sparse_matmul
+
+- func: _sparse_matmul_backward_data(Tensor grad, Tensor var, int order) -> Tensor
+  dispatch:
+    SparseCPU: sparse_matmul_backward_cpu
+
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
