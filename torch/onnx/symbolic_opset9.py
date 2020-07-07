@@ -1992,7 +1992,7 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
-    if input_dim is None:
+    if dim is None:
         return _unimplemented("dim",
                               "ONNX and PyTorch use different strategies to split the input. "
                               "Input rank must be known at export time.")
