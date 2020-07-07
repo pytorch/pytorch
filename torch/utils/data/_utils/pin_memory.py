@@ -12,8 +12,8 @@ from torch._utils import ExceptionWrapper
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
-    # This setting is thread local, and prevents the copy in pin_memory from
-    # consuming all CPU cores.
+    # This setting is thread local, and prevents the `copy` op in `pin_memory`
+    # from consuming all CPU cores.
     torch.set_num_threads(1)
 
     torch.cuda.set_device(device_id)
@@ -25,14 +25,14 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
             continue
-        idx, data = r
+        idx, data, num_samples = r
         if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
                 data = pin_memory(data)
             except Exception:
                 data = ExceptionWrapper(
                     where="in pin memory thread for device {}".format(device_id))
-            r = (idx, data)
+            r = (idx, data, num_samples)
         while not done_event.is_set():
             try:
                 out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
