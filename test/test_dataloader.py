@@ -1579,8 +1579,8 @@ except RuntimeError as e:
                             fail(fail_reason + ', and had no exception')
                     _, alive = psutil.wait_procs(worker_psutil_ps, timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT))
                     if len(alive) > 0:
-                        self.fail(get_fail_msg('worker process (pid(s) {}) did not terminate'.format(
-                            ', '.join(str(p.pid) for p in alive))))
+                        fail('worker process (pid(s) {}) did not terminate'.format(
+                            ', '.join(str(p.pid) for p in alive)))
                     if exit_method is None:
                         if loader_p.exitcode != 0:
                             fail('loader process had nonzero exitcode {}'.format(loader_p.exitcode))
