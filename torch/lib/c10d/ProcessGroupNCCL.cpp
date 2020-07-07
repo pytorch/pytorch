@@ -341,6 +341,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+  std::unique_lock<std::mutex> lock(workVectorMutex_);
+  // Wait for workVector_ to become empty before proceeding with shutdown.
+  workVectorCV_.wait(lock, [&]() -> bool { return workVector_.empty(); });
+  lock.unlock();
+
   terminateProcessGroup_.store(true);
   watchdogCV_.notify_one();
   workVectorCV_.notify_one();
@@ -503,6 +508,12 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // completed.
         ++it;
       }
+    }
+
+    if (workVector_.empty()) {
+      // Notify the main thread if it is blocked in the shutdown sequence,
+      // waiting for the work vector to become empty.
+      workVectorCV_.notify_one();
     }
   }
 }
