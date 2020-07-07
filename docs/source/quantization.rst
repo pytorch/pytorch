@@ -400,7 +400,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
-* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
+* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilinear
   upsampler. Will be deprecated in favor of
 * :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_nearest` — Nearest neighbor
@@ -651,7 +651,7 @@ LinearReLU
 .. autoclass:: LinearReLU
     :members:
 
-torch.nn.instrinsic.qat
+torch.nn.intrinsic.qat
 --------------------------------
 
 This module implements the versions of those fused operations needed for
