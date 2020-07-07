@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 import threading
 import itertools
 import warnings
+from typing import Any, Tuple
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -339,7 +340,7 @@ class _BaseDataLoaderIter(object):
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
-        self._num_yielded = 0
+        self._num_samples_yielded = 0
 
     def __iter__(self):
         return self
@@ -347,22 +348,22 @@ class _BaseDataLoaderIter(object):
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
 
-    def _next_data(self):
+    def _next_data(self) -> Tuple[Any, int]:  # returns (data, num_samples), and may raise StopIteration
         raise NotImplementedError
 
-    def __next__(self):
-        data = self._next_data()
+    def __next__(self) -> Any:
+        data, num_samples = self._next_data()
         # num_yielded and the value of _IterableDataset_len_called are in units of "samples" rather than
         # batches, so when using auto_collation, we need to increment by the length of the batch we're
         # yielding
-        self._num_yielded += len(data) if self._auto_collation else 1
+        self._num_samples_yielded += num_samples
 
         if self._dataset_kind == _DatasetKind.Iterable and \
                 self._IterableDataset_len_called is not None and \
-                self._num_yielded > self._IterableDataset_len_called:
+                self._num_samples_yielded > self._IterableDataset_len_called:
             warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
                         "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                              self._num_yielded)
+                                                              self._num_samples_yielded)
             if self._num_workers > 0:
                 warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
                              "IterableDataset replica at each worker. Please see "
@@ -370,9 +371,7 @@ class _BaseDataLoaderIter(object):
             warnings.warn(warn_msg)
         return data
 
-    next = __next__  # Python 2 compatibility
-
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._index_sampler)
 
     def __getstate__(self):
@@ -395,10 +394,10 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
     def _next_data(self):
         index = self._next_index()  # may raise StopIteration
-        data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+        data, num_samples = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
             data = _utils.pin_memory.pin_memory(data)
-        return data
+        return data, num_samples
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
@@ -700,8 +699,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._send_idx = 0  # idx of the next task to be sent to workers
         self._rcvd_idx = 0  # idx of the next task to be returned in __next__
         # information about data not yet yielded, i.e., tasks w/ indices in range [rcvd_idx, send_idx).
-        # map: task idx => - (worker_id,)        if data isn't fetched (outstanding)
-        #                  \ (worker_id, data)   if data is already fetched (out-of-order)
+        # map: task idx => - (worker_id,)                     if data isn't fetched (outstanding)
+        #                  \ (worker_id, data, num_samples)   if data is already fetched (out-of-order)
         self._task_info = {}
         self._tasks_outstanding = 0  # always equal to count(v for v in task_info.values() if len(v) == 1)
         self._workers_done_event = multiprocessing_context.Event()
@@ -949,7 +948,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             while self._rcvd_idx < self._send_idx:
                 info = self._task_info[self._rcvd_idx]
                 worker_id = info[0]
-                if len(info) == 2 or self._workers_status[worker_id]:  # has data or is still active
+                if len(info) > 1 or self._workers_status[worker_id]:  # has data or is still active
                     break
                 del self._task_info[self._rcvd_idx]
                 self._rcvd_idx += 1
@@ -961,12 +960,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Now `self._rcvd_idx` is the batch index we want to fetch
 
             # Check if the next sample has already been generated
-            if len(self._task_info[self._rcvd_idx]) == 2:
-                data = self._task_info.pop(self._rcvd_idx)[1]
-                return self._process_data(data)
+            if len(self._task_info[self._rcvd_idx]) > 1:
+                data, num_samples = self._task_info.pop(self._rcvd_idx)[1:]
+                return self._process_data(data), num_samples
 
             assert not self._shutdown and self._tasks_outstanding > 0
-            idx, data = self._get_data()
+            idx, data, num_samples = self._get_data()
             self._tasks_outstanding -= 1
 
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -978,10 +977,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             if idx != self._rcvd_idx:
                 # store out-of-order samples
-                self._task_info[idx] += (data,)
+                self._task_info[idx] += (data, num_samples)
             else:
                 del self._task_info[idx]
-                return self._process_data(data)
+                return self._process_data(data), num_samples
 
     def _try_put_index(self):
         assert self._tasks_outstanding < 2 * self._num_workers
@@ -1053,7 +1052,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._pin_memory_thread_done_event.set()
                     # Send something to pin_memory_thread in case it is waiting
                     # so that it can wake up and check `pin_memory_thread_done_event`
-                    self._worker_result_queue.put((None, None))
+                    self._worker_result_queue.put((None, None, None))
                     self._pin_memory_thread.join()
                     self._worker_result_queue.cancel_join_thread()
                     self._worker_result_queue.close()

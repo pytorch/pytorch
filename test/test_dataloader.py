@@ -1059,6 +1059,8 @@ except RuntimeError as e:
             self.assertEqual(a, b)
         # DataLoader should match len of the iterable-style dataset (if implemented)
         self.assertEqual(len(dataloader), len(dataset))
+
+        # [no auto-batching] test len warning
         # When loading more than len(dataset) data, after accessing len(dataloader),
         # we should get a warning. See NOTE [ IterableDataset and __len__ ].
         dataset = CountingIterableDataset(20)
@@ -1068,7 +1070,7 @@ except RuntimeError as e:
         for _ in range(40):
             self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
         self.assertEqual(len(dataloader), len(dataset))
-        self.assertEqual(len(dataloader), 20)
+        self.assertEqual(len(dataset), 20)
         it = iter(dataloader)
         for _ in range(20):
             self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
@@ -1114,6 +1116,29 @@ except RuntimeError as e:
         self.assertEqual(len(fetched), 4)
         fetched = set(tuple(t.tolist()) for t in fetched)
         self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
+
+        # [auto-batching] test len warning
+        # When loading more than len(dataset) data, after accessing len(dataloader),
+        # we should get a warning. See NOTE [ IterableDataset and __len__ ].
+        batch_size = 2
+        dataset = CountingIterableDataset(20)
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=2,
+                                worker_init_fn=set_faulthander_if_available)
+        it = iter(dataloader)
+        expected_dataloader_len = (len(dataset) + batch_size - 1) // batch_size
+        for _ in range(expected_dataloader_len * 2):
+            self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
+        self.assertEqual(len(dataloader), expected_dataloader_len)
+        self.assertEqual(len(dataset), 20)
+        it = iter(dataloader)
+        for _ in range(expected_dataloader_len):
+            self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
+        for _ in range(3):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                    msg="Should always warn after exceeding length"):
+                next(it)
 
         # [auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
