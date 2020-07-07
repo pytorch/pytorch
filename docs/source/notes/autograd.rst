@@ -252,7 +252,7 @@ The Jacobian, JVP and VJP for function :math:`F` at :math:`(x, y)` are defined a
             \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix} \\
 
 In PyTorch, the VJP is mostly what we care about, as it is the computation performed when we do backward
-mode automatic differentiation. Notice that d and \emph{i} (imaginary number) are negated in the formula above.
+mode automatic differentiation. Notice that d and *i* (imaginary number) are negated in the formula above.
 
 **Why is there a negative sign in the formula above?**
 ******************************************************
