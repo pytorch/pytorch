@@ -306,7 +306,6 @@ Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
     result = result.zero_();
   } else {
     nansum_stub(iter.device_type(), iter);
-    result = result;
   }
   return result;
 }
