@@ -160,7 +160,7 @@ class TestModels(TestCase):
         self.exportTest(toC(FakeQuantNet()), toC(x))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quant_resnet(self):
+    def test_qat_resnet(self):
         # Quantize ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         qat_resnet50 = resnet50()
