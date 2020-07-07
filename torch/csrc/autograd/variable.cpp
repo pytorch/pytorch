@@ -79,6 +79,8 @@ namespace impl {
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
+
+      // See NOTE [ View + Inplace detection ]
       if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
         // Do not use handle_view_on_rebase here as check_inplace should have been called before this
         // and either throw an error or clear the warning
@@ -336,6 +338,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+
+    // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
       if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
@@ -460,9 +464,9 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
       } else if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
         msg = c10::str(msg, " This view is the output of a function that "
                        "returns multiple views. Inplace operators on such "
-                       "views are being deprecated and soon will not be "
-                       "allowed. Consider using `unsafe_` version of the "
-                       "function that produced this view.");
+                       "views are being deprecated and will be forbidden "
+                       "starting from version 1.8. Consider using `unsafe_` "
+                       "version of the function that produced this view.");
       } else {
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }

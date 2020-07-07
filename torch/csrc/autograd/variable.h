@@ -379,7 +379,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///   multiple differentiable views
 /// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
 ///   that returns multiple views, and unsafe_* version of that function
-///   exists
+///   exists. These are note considered as views for now for the view+inplace
+///   logic! The graph won't be rewritten when an inplace is done, only a
+///   warning will be thrown.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
                                    NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
