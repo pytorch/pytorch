@@ -147,19 +147,6 @@
       - real value
 ]]
 [[
-  name: _th_equal
-  cname: equal
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants:
-    - function
-  return: bool
-  arguments:
-    - THTensor* self
-    - THTensor* other
-]]
-[[
   name: _th_mode
   variants: function
   cname: mode
