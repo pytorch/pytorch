@@ -355,7 +355,15 @@ def _model_to_graph(model, args, verbose=False,
         try:
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
-            method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
+
+            freezed_m = torch._C._freeze_module(model._c)
+            method_graph = freezed_m._get_method('forward').graph
+            params = []
+
+            # method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
+
+            method_graph.eraseInput(0)
+
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
