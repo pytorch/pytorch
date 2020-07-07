@@ -5,7 +5,17 @@ import sys
 import timeit
 import torch
 
-from benchmarks.fastrnns.factory import lstm_creator
+try:
+    from benchmarks.fastrnns.factory import lstm_creator
+except:
+    from caffe2.benchmarks.fastrnns.factory import lstm_creator
+
+try:
+    from benchmarks.experimental_components.utils import Timer, Compare
+    HAS_TIMER = True
+except:
+    HAS_TIMER = False
+
 from torchvision.models import resnet50
 
 def prepare_lstm_jit(bench_args):
@@ -26,37 +36,65 @@ def prepare_resnet50_jit(bench_args):
     return inputs, model
 
 MODELS = {
+    'resnet50_jit' : prepare_resnet50_jit,
     'lstm_jit' : prepare_lstm_jit,
-    'resnet50_jit' : prepare_resnet50_jit
 }
 
-def run_bench(model_name, bench_args):
-    model_creator = MODELS[model_name]
-    inputs, model = model_creator(bench_args)
+NUM_THREADS = [1, 2, 4, 8, 16, 32]
 
-    print("Benchmarking RecordFunction overhead for", model_name)
-    print("Running warmup...", end=" ")
-    for _ in range(bench_args.warmup):
-        model(*inputs)
-    print("finished")
+def run_bench(model_names, bench_args):
+    results = []
+    for model_name in model_names:
+        model_creator = MODELS[model_name]
+        inputs, model = model_creator(bench_args)
 
-    for with_rec_fn in [True, False]:
-        torch.autograd._enable_record_function(with_rec_fn)
-        torch.autograd._clear_callbacks()
-        if with_rec_fn:
-            torch.autograd._set_empty_test_observer(True, 0.0001)
-        print("Running {} iterations {} RecordFunction...".format(
-            bench_args.nloops, "with" if with_rec_fn else "without"), end=" ")
-        sys.stdout.flush()
-        runtimes = timeit.repeat(
-            partial(model, *inputs),
-            repeat=bench_args.nloops,
-            number=1)
+        print("Benchmarking RecordFunction overhead for", model_name)
+        print("Running warmup...", end=" ")
+        for _ in range(bench_args.warmup):
+            model(*inputs)
         print("finished")
-        avg_time = statistics.mean(runtimes) * 1000.0
-        stddev_time = statistics.stdev(runtimes) * 1000.0
-        print("N = {}, avg. time: {:.3f} ms, stddev: {:.3f} ms".format(
-            bench_args.nloops, avg_time, stddev_time))
+
+        for num_threads in NUM_THREADS:
+            for with_rec_fn in [True, False]:
+                torch.autograd._enable_record_function(with_rec_fn)
+                torch.autograd._clear_callbacks()
+                if with_rec_fn:
+                    torch.autograd._set_empty_test_observer(True, 0.0001)
+
+                print("Running {} iterations {} RecordFunction, num threads {} ...".format(
+                    bench_args.nloops, "with" if with_rec_fn else "without", num_threads), end=" ")
+                sys.stdout.flush()
+
+                if bench_args.use_timer and HAS_TIMER:
+                    timer = Timer(
+                        stmt="model(*inputs)",
+                        globals={"model": model, "inputs": inputs},
+                        description=model_name,
+                        label="Record function overhead",
+                        sub_label=f"with{'' if with_rec_fn else 'out'}_rec_fn, num_threads {num_threads}",
+                        num_threads=num_threads)
+                    result = timer.blocked_autorange(bench_args.timer_min_run_time=30)
+                    print("finished")
+                    print(result)
+                    print()
+                    results.append(result)
+                else:
+                    torch.set_num_threads(num_threads)
+                    runtimes = timeit.repeat(
+                        partial(model, *inputs),
+                        repeat=bench_args.nloops,
+                        number=1)
+                    print("finished")
+                    avg_time = statistics.mean(runtimes) * 1000.0
+                    stddev_time = statistics.stdev(runtimes) * 1000.0
+                    print("N = {}, avg. time: {:.3f} ms, stddev: {:.3f} ms".format(
+                        bench_args.nloops, avg_time, stddev_time))
+
+    if bench_args.use_timer and HAS_TIMER:
+        comparison = Compare(results)
+        comparison.trim_significant_figures()
+        comparison.highlight_warnings()
+        comparison.print()
 
 
 if __name__ == '__main__':
@@ -64,7 +102,7 @@ if __name__ == '__main__':
         description='Benchmark RecordFunction overhead for ResNet and LSTM models')
 
     parser.add_argument('--models', nargs='*',
-                        help='What model to run: ' + str(MODELS))
+                        help='What model to run: ' + str(MODELS.keys()))
 
     parser.add_argument('--lstmSeqLength', default='100', type=int)
     parser.add_argument('--lstmNumLayers', default='1', type=int)
@@ -73,11 +111,16 @@ if __name__ == '__main__':
     parser.add_argument('--lstmMiniBatch', default='64', type=int)
     parser.add_argument('--warmup', default='10', type=int)
     parser.add_argument('--nloops', default='100', type=int)
+    parser.add_argument('--use_timer', default=True, type=bool)
+    parser.add_argument('--timer_min_run_time', default=30, type=int)
 
     args = parser.parse_args()
 
     models = args.models or MODELS.keys()
 
+    if args.use_timer and not HAS_TIMER:
+        print("Warning: benchmark Timer not available")
+
     for model in models:
         assert model in MODELS
-        run_bench(model, args)
+    run_bench(models, args)
