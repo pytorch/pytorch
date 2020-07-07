@@ -671,10 +671,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       // If a parameter is globally unused, we keep its grad untouched.
       if (!global_unused) {
-        if (!grad.defined()) {
-          grad = at::empty(bucket_view.sizes(), bucket_view.options());
+        if (grad.defined()) {
+          grad.copy_(bucket_view);
         }
-        grad.copy_(bucket_view);
       }
     }
   }
