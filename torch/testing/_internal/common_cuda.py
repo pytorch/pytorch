@@ -1,7 +1,6 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
-import contextlib
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
@@ -60,6 +59,7 @@ def tf32_on_and_off(precision=1e-5):
         finally:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
             self.precision = old_precison
+
     def wrapper(f):
         nargs = len(inspect.signature(f).parameters)
         if nargs == 2:
@@ -72,6 +72,7 @@ def tf32_on_and_off(precision=1e-5):
                     f(self, device)
         else:
             assert nargs == 3, "this decorator only support function with signature (self, device) or (self, device, dtype)"
+
             @functools.wraps(f)
             def wrapped(self, device, dtype):
                 assert isinstance(device, str)
