@@ -311,6 +311,19 @@ TORCH_CUDA_API TensorView* lt(Val* v1, TensorView* v2) {
 TORCH_CUDA_API TensorView* lt(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(lt, v1, v2);
 }
+// eq
+TORCH_CUDA_API Val* eq(Val* v1, Val* v2) {
+  return binaryOp(BinaryOpType::Eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(TensorView* v1, Val* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(Val* v1, TensorView* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
 // ceilDiv
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
@@ -348,9 +361,10 @@ TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2) {
 
 // REDUCTION OPERATIONS
 
-namespace {
 // TODO: How do we adjust this so we can reduce to a single scalar value?
-TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
+static TensorView* newForReduction(
+    TensorView* tv,
+    const std::vector<unsigned int>& axes) {
   auto orig_domain = TensorDomain::noReductions(tv->getRootDomain());
   std::set<unsigned int> axes_set(axes.begin(), axes.end());
 
@@ -363,24 +377,34 @@ TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
       (*(axes_set.rbegin())) < orig_domain.size(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
-  for (decltype(orig_domain.size()) dim = 0; dim < orig_domain.size(); dim++) {
-    IterDomain* id = orig_domain[dim];
-
+  for (size_t dim = 0; dim < orig_domain.size(); dim++) {
     bool isReduction = false;
-    if ((*axes_set.begin()) == dim) {
+    if (!axes_set.empty() && *axes_set.begin() == dim) {
       isReduction = true;
       axes_set.erase(axes_set.begin());
     }
 
+    const IterDomain* id = orig_domain[dim];
+
+    TORCH_CHECK(
+        !(isReduction && id->isBroadcast()),
+        "Cannot reduce an axis that is marked as broadcasted as it has an undetermined size. Tried to reduce ID = ",
+        id,
+        " of tensor ",
+        tv);
+
     new_domain.push_back(new IterDomain(
-        id->start(), id->extent(), ParallelType::Serial, isReduction));
+        id->start(),
+        id->extent(),
+        ParallelType::Serial,
+        isReduction,
+        false,
+        id->isBroadcast()));
   }
 
   TensorDomain* td = new TensorDomain(new_domain);
   return new TensorView(td, tv->getDataType().value());
 }
-
-} // namespace
 
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
@@ -394,6 +418,8 @@ TensorView* reductionOp(
   TORCH_CHECK(
       TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
+
+  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
 
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
@@ -447,9 +473,9 @@ TORCH_CUDA_API TensorView* broadcast(
     if (ent)
       n_broadcasts++;
   TORCH_CHECK(
-      nBCastDims - n_broadcasts == inp->nDims(),
+      nBCastDims - n_broadcasts == inp->domain()->noReductions().size(),
       "Invalid broadcast, number of false entries in is_broadcast_dim expected to be ",
-      inp->nDims(),
+      inp->domain()->noReductions().size(),
       " but received ",
       nBCastDims - n_broadcasts);
 
@@ -468,7 +494,8 @@ TORCH_CUDA_API TensorView* broadcast(
       out_domain.push_back(new IterDomain(
           new Int(0), new Int(1), ParallelType::Serial, false, false, true));
     } else {
-      out_domain.push_back(inp->axis(iinp));
+      // Don't propagate reduction IDs through arith ops.
+      out_domain.push_back(inp->domain()->noReductions()[iinp]);
       iinp++;
     }
     ibdim++;

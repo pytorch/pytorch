@@ -10,7 +10,7 @@ class SobolEngine(object):
     This implementation of an engine for Sobol sequences is capable of
     sampling sequences up to a maximum dimension of 1111. It uses direction
     numbers to generate these sequences, and these numbers have been adapted
-    from `here <http://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
+    from `here <https://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
 
     References:
       - Art B. Owen. Scrambling Sobol and Niederreiter-Xing points.
