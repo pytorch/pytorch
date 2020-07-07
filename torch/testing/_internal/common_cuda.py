@@ -36,6 +36,9 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
+# Test whether hardware TF32 math mode enabled. It is enabled only on:
+# - CUDA >= 11
+# - arch >= Ampere
 def tf32_is_not_fp32():
     if not torch.cuda.is_available():
         return False
@@ -46,7 +49,21 @@ def tf32_is_not_fp32():
     return True
 
 
-def tf32_on_and_off(precision=1e-5):
+# This is a wrapper that wraps a test to run this test twice, one with
+# allow_tf32=True, another with allow_tf32=False. When running with
+# allow_tf32=True, it will use reduced precision as pecified by the
+# argument. For example:
+#    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+#    @tf32_on_and_off(0.005)
+#    def test_matmul(self, device, dtype):
+#        a = ...; b = ...;
+#        c = torch.matmul(a, b)
+#        self.assertEqual(c, expected)
+# In the above example, when testing torch.float32 and torch.complex64 on CUDA
+# on a CUDA >= 11 build on an >=Ampere architecture, the matmul will be running at
+# TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
+# precision to check values.
+def tf32_on_and_off(tf32_precision=1e-5):
     def call_with_tf32_on_and_off(self, function_call):
         old_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         old_precison = self.precision
@@ -54,7 +71,7 @@ def tf32_on_and_off(precision=1e-5):
             torch.backends.cuda.matmul.allow_tf32 = False
             function_call()
             torch.backends.cuda.matmul.allow_tf32 = True
-            self.precision = precision
+            self.precision = tf32_precision
             function_call()
         finally:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
@@ -65,8 +82,7 @@ def tf32_on_and_off(precision=1e-5):
         if nargs == 2:
             @functools.wraps(f)
             def wrapped(self, device):
-                assert isinstance(device, str)
-                if device == 'cuda' and tf32_is_not_fp32():
+                if self.device_type and tf32_is_not_fp32():
                     call_with_tf32_on_and_off(self, lambda: f(self, device))
                 else:
                     f(self, device)
@@ -75,8 +91,7 @@ def tf32_on_and_off(precision=1e-5):
 
             @functools.wraps(f)
             def wrapped(self, device, dtype):
-                assert isinstance(device, str)
-                if device == 'cuda' and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
+                if self.device_type and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
                     call_with_tf32_on_and_off(self, lambda: f(self, device, dtype))
                 else:
                     f(self, device, dtype)
