@@ -77,6 +77,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Helper function used in CUDA Stream callbacks to complete WorkNCCL
+    // objects and throw exceptions when neeeded.
+    void handleNCCLGuard();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();

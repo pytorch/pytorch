@@ -126,6 +126,12 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
+void CUDART_CB
+errorGuard(cudaStream_t /* unused */, cudaError_t /* unused */, void* data) {
+  ProcessGroupNCCL::WorkNCCL* work = (ProcessGroupNCCL::WorkNCCL*)data;
+  work->handleNCCLGuard();
+}
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -199,12 +205,31 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
+void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  completed_ = true;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
+}
+
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
+
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
+    // Enqueue guard function as a callback on the current stream to throw
+    // user-stream exception upon error.
+    if (!blockingWait_) {
+      cudaStreamAddCallback(currentStream, errorGuard, this, 0);
+    }
+    // If we use the work to do barrier, we should block here
+    if (!barrierTensors_.empty()) {
+      at::cuda::CUDAGuard gpuGuard(devices_[i]);
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
+    }
   }
 
   // In case of blocking, wait for the operation to complete.
