@@ -185,6 +185,10 @@ def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
     raise RuntimeError('Unsupported: ONNX export of {} in '
                        'opset {}. Please try opset version {}.'.format(op_name, current_opset, supported_opset))
 
+def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
+    raise RuntimeError('Unsupported: ONNX export of {} in '
+                       'opset {}. {}. Please try opset version {}.'.format(op_name, current_opset, reason, supported_opset))
+
 
 def _black_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
