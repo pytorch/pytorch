@@ -280,8 +280,11 @@ so we can’t hope to represent all of them with in a complex number.
        (e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
        For any other desired behavior, you can specify the covector :math:`v` in `torch.autograd.functional.vjp` call.
 
-How are the JVP and VJP defined for :math:`R^2 → C` and :math:`C → R^2` functions?
+How are the JVP and VJP defined for cross-domain functions?
 **********************************************************************************
+
+Based on formulas above and the behavior we expect to see (going from C → R^2 → C should be an identity),
+we use the following formula for cross-domain functions.
 
 The JVP and VJP for a :math:`f1: C → R^2` are defined as:
 
