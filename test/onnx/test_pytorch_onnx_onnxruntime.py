@@ -16,7 +16,8 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
-                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack,
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -2979,6 +2980,26 @@ class TestONNXRuntime(unittest.TestCase):
 
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
+
+    @skipIfUnsupportedMaxOpsetVersion(10)
+    def test_unsupported_pad(self):
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        def run():
+            x = torch.randn(2, 2, 4, 4)
+            y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+            p = Pad()
+            f = io.BytesIO()
+            torch.onnx._export(p, (x, y), f)
+
+        with self.assertRaises(RuntimeError) as cm:
+            run()
+
+        the_exception = cm.exception
+        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
+                         'Please try opset version 11.', the_exception.args[0])
 
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
