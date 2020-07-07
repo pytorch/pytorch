@@ -2,8 +2,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
-
 #include <algorithm>
 #include <ostream>
 

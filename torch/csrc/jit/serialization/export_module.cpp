@@ -81,6 +81,11 @@ c10::IValue getFunctionTuple(const Function& func) {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
+    } else {
+      TORCH_CHECK(
+          isOpSupportedInMobile(ins.op),
+          toString(ins.op),
+          " is not supported in mobile module.");
     }
   }
 

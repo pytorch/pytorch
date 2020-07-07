@@ -212,14 +212,56 @@ inline CallbackManager& manager() {
   return _manager;
 }
 
-} // namespace
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
 
-/* static */
-double RecordFunctionCallback::sample_zero_one() {
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
   static thread_local auto gen =
       std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
+}
+
+} // namespace
+
+bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
+  // first check whether this callback is interested in
+  // the given scope type
+  if (!checkScope(scope)) {
+    return false;
+  }
+  // if we have registered should_run_ function, use it
+  if (should_run_) {
+    return should_run_(*this);
+  }
+  // otherwise potentially do the uniform sampling
+  if (sampling_prob_ != 1.0) {
+    // model the low probability events as events happening
+    // with prob. kLowProb followed by another sampling with
+    // prob. (sampling_prob_ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution
+    if (sampling_prob_ < kLowProb) {
+      if (tries_left_ == 0) {
+        tries_left_ = sample_geometric();
+        return (sample_zero_one() < sampling_prob_ / kLowProb);
+      } else {
+        --tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < sampling_prob_);
+    }
+  }
+  return true;
 }
 
 RecordFunctionCallbacks _getTLSCallbacks() {
