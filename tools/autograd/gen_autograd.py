@@ -73,7 +73,7 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
 # Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of otputs is being gradually deprecated.
+# which inplace modification of outputs is being gradually deprecated.
 MULTI_OUTPUT_SAFE_FUNCTIONS = {
     'split',
     'split_with_sizes',
@@ -87,7 +87,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag',
+    'expand_as', 'view_as', 'real', 'imag', 'narrow',
 })
 
 def format_return_type(returns):
