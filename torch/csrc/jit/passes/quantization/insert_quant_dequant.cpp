@@ -246,8 +246,15 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
+  bool has_dequant = true;
   if (quant_type == QuantType::DYNAMIC && isNoopObserver(observer->input(0))) {
-    dequant = insertFP16CastOps(g, observer_out);
+    // We don't need to insert cast operators for activation tensors for fp16
+    // quant.
+    if (isWeight(module, observer_out)) {
+      dequant = insertFP16CastOps(g, observer_out);
+    } else {
+      has_dequant = false;
+    }
   } else if (
       quant_type == QuantType::DYNAMIC && !isWeight(module, observer_out)) {
     Value* dtype = g->insertGetAttr(self, qparam_names.back());
@@ -269,8 +276,9 @@ void insertQuantizationOps(
     dequant = insertDeQuant(g, quant->output(), original_val);
   }
   observer_out->replaceAllUsesWith(original_val);
-
-  original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+  if (has_dequant) {
+    original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+  }
 }
 
 // find the observer for Value `v` and return the name of the observer

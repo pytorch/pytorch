@@ -3043,8 +3043,9 @@ class TestQuantizeJit(QuantizationTestCase):
         model_script = torch.jit.script(linear_model)
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
         qconfig_dict = {'' : float16_dynamic_qconfig}
-
-        for model in [model_traced, model_script]:
+        for model in [model_script, model_traced]:
             model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
-            # TODO check model with debug=True matches quantized model result
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)

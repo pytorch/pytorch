@@ -1006,15 +1006,13 @@ graph(%packed_params, %a, %reduce_range, %a_dtype):
         return (%r) )";
 
   std::string linear_dynamic_fp16 = R"(
-graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
-        %fp16_tensor = aten::to(%a, %dtype_fp16, %false, %false)
-        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %false, %false)
+graph(%packed_params, %a):
         %w_unpacked : Tensor, %b : Tensor? = quantized::linear_unpack_fp16(%packed_params)
-        %r = aten::linear(%fp32_tensor, %w_unpacked, %b)
+        %r = aten::linear(%a, %w_unpacked, %b)
         return (%r) )";
 
   std::string quantized_linear_dynamic_fp16 = R"(
-graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
+graph(%packed_params, %a):
         %r = quantized::linear_dynamic_fp16(%a, %packed_params)
         return (%r) )";
 
@@ -1022,8 +1020,7 @@ graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
       {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
       {"quantized::linear_dynamic_fp16",
        linear_dynamic_fp16,
-       quantized_linear_dynamic_fp16,
-       {is_half_dtype, is_float_dtype, is_false_value}},
+       quantized_linear_dynamic_fp16},
   };
 }
 
