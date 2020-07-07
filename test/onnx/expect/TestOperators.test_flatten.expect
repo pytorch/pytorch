@@ -30,37 +30,24 @@ graph {
     }
   }
   node {
-    input: "1"
     output: "3"
-    name: "Slice_2"
-    op_type: "Slice"
+    name: "Constant_2"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
     }
-    attribute {
-      name: "ends"
-      ints: 4
-      type: INTS
-    }
-    attribute {
-      name: "starts"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "3"
-    output: "4"
-    name: "ReduceProd_3"
-    op_type: "ReduceProd"
   }
   node {
     input: "2"
-    input: "4"
-    output: "5"
-    name: "Concat_4"
+    input: "3"
+    output: "4"
+    name: "Concat_3"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -70,9 +57,9 @@ graph {
   }
   node {
     input: "0"
-    input: "5"
-    output: "6"
-    name: "Reshape_5"
+    input: "4"
+    output: "5"
+    name: "Reshape_4"
     op_type: "Reshape"
   }
   name: "torch-jit-export"
@@ -99,7 +86,7 @@ graph {
     }
   }
   output {
-    name: "6"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1
