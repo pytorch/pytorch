@@ -1320,6 +1320,20 @@ gather(dim, index) -> Tensor
 See :func:`torch.gather`
 """)
 
+add_docstr_all('gcd',
+               r"""
+gcd(value) -> Tensor
+
+See :func:`torch.gcd`
+""")
+
+add_docstr_all('gcd_',
+               r"""
+gcd_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.gcd`
+""")
+
 add_docstr_all('ge',
                r"""
 ge(other) -> Tensor
@@ -1704,6 +1718,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('lcm',
+               r"""
+lcm(value) -> Tensor
+
+See :func:`torch.lcm`
+""")
+
+add_docstr_all('lcm_',
+               r"""
+lcm_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.lcm`
 """)
 
 add_docstr_all('le',

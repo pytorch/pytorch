@@ -19202,6 +19202,7 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('fill_', '', _medium_2d, lambda t, d: [_number(3.14, 3, t)], 1e-3, 1e-5, 1e-5, _types, _cpu_types, False),
     ('gcd', '', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-1, 1e-0, 1e-5, [torch.int16, torch.int32, torch.int64], [torch.int16, torch.int32, torch.int64]),
+    ('lcm', '', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-1, 1e-0, 1e-5, [torch.int16, torch.int32, torch.int64], [torch.int16, torch.int32, torch.int64]),
     ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),

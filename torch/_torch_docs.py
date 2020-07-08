@@ -2496,6 +2496,30 @@ Example::
             [ 4,  3]])
 """)
 
+
+add_docstr(torch.gcd,
+           r"""
+gcd(input, other, out=None) -> LongTensor
+
+Computes the element-wise greatest common divisor (GCD).
+
+The two tensors involved in the operation must be integral.
+
+Args:
+    input (LongTensor)
+    other (LongTensor)
+    {out}
+
+Example::
+
+    >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
+    tensor([-1., -0., -1.,  1.,  0.,  1.])
+    >>> torch.fmod(torch.tensor([1., 2, 3, 4, 5]), 1.5)
+    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
+
+
+""".format(**common_args))
+
 add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor

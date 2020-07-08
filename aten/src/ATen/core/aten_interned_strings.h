@@ -346,6 +346,7 @@ _(aten, frobenius_norm) \
 _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
+_(aten, gcd) \
 _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
@@ -407,6 +408,7 @@ _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
+_(aten, lcm) \
 _(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
