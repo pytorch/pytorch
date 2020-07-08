@@ -543,6 +543,9 @@ static Tensor& _norm_matrix_out(Tensor &result, const Tensor &self, optional<Sca
   } else {
     self_ = self;
   }
+  TORCH_CHECK(result.dtype() == self_.dtype(),
+    "_norm_matrix: provided dtype must match dtype of result. Got ",
+    result.dtype(), " and ", self_.dtype());
 
   if (std::abs(p) == 2) {
     // Need to shift the reduction dims to the back, because at::svd will only operate on
@@ -590,12 +593,8 @@ static Tensor& _norm_matrix_out(Tensor &result, const Tensor &self, optional<Sca
 }
 
 Tensor _norm_matrix(const Tensor &self, Scalar p) {
-  if (self.is_sparse()) {
-    return at::_native_norm_matrix(self, p);
-  } else {
-    Tensor result = at::empty_like(self);
-    return at::native::_norm_matrix_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
-  }
+  Tensor result = at::empty_like(self);
+  return at::native::_norm_matrix_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
 }
 
 Tensor &_norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
@@ -609,6 +608,9 @@ Tensor &_norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p,
 static Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   Tensor result = at::empty_like(self);
+  if (opt_dtype.has_value()) {
+    result = result.toType(opt_dtype.value());
+  }
   return at::native::_norm_matrix_out(result, self, p, dim, keepdim, opt_dtype);
 }
 
