@@ -21,6 +21,7 @@ class CompilationUnit {
 
 class TORCH_API Module {
  public:
+  c10::intrusive_ptr<c10::ivalue::Object> object_;
   Module(
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
@@ -39,8 +40,13 @@ class TORCH_API Module {
   }
   const std::vector<at::Tensor> parameters() const;
 
+  void ExportModule(
+      const Module& module,
+      const std::string& filename,
+      bool bytecode_format) const;
+
  private:
-  c10::intrusive_ptr<c10::ivalue::Object> object_;
+  // c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::shared_ptr<CompilationUnit> cu_;
 };
 } // namespace mobile
