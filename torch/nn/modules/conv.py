@@ -155,7 +155,7 @@ class Conv1d(_ConvNd):
 
     Note:
 
-        Depending of the size of your kernel, several (of the last)
+        Depending on the size of your kernel, several (of the last)
         columns of the input might be lost, because it is a valid
         `cross-correlation`_, and not a full `cross-correlation`_.
         It is up to the user to add proper padding.
@@ -306,7 +306,7 @@ class Conv2d(_ConvNd):
 
     Note:
 
-         Depending of the size of your kernel, several (of the last)
+         Depending on the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
@@ -460,7 +460,7 @@ class Conv3d(_ConvNd):
 
     Note:
 
-         Depending of the size of your kernel, several (of the last)
+         Depending on the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
@@ -653,7 +653,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     Note:
 
-         Depending of the size of your kernel, several (of the last)
+         Depending on the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
@@ -792,7 +792,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     .. note::
 
-         Depending of the size of your kernel, several (of the last)
+         Depending on the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
@@ -957,13 +957,13 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     Note:
 
-         Depending of the size of your kernel, several (of the last)
+         Depending on the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
     Note:
-        The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
+        The :attr:`padding` argument effectively adds zero padding of ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
