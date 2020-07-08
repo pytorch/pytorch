@@ -19248,7 +19248,7 @@ tensor_op_tests = [
     ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
-        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfRocm]),
+        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
