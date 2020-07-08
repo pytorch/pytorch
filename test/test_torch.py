@@ -18056,12 +18056,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
                         if count_dim == ():
                             # Default `dims=None` case
-                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None, atol=atol, rtol=rtol)
+                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None,
+                                                    atol=atol, rtol=rtol)
                         else:
                             # With `dims: tuple of ints` case
                             torch_func_partial = partial(torch_func, dim=count_dim)
                             np_func_partial = partial(np_func, axis=count_dim)
-                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None, atol=atol, rtol=rtol)
+                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                                                    atol=atol, rtol=rtol)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
