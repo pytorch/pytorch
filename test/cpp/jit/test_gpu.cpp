@@ -403,16 +403,20 @@ void testGPU_FusionClear() {
     fusion.addInput(tv1);
     fusion.addOutput(tv3);
 
+    // tv3 [i0, i1, i2]
     tv3->reorder({{0, 2}, {2, 0}});
+    // tv3 [i2, i1, i0]
     tv3->split(-1, 4);
+    // tv3 [i2, i1, i0outer, i0inner{4}]
     tv3->reorder({{2, 0}, {3, 1}, {0, 3}});
+    // tv3 [i0outer, i0inner{4}, i1, i2]
     tv0->computeAt(tv3, -1);
     tv1->computeAt(tv3, -1);
+    tv3->axis(1)->parallelize(ParallelType::BIDx);
   }
 
   prog.device_ = 0;
   prog.grid(4);
-  prog.block(8);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -420,11 +424,9 @@ void testGPU_FusionClear() {
   at::Tensor input2 = at::randn_like(input1);
   at::Tensor output = at::empty_like(input1);
 
-  fuser::cuda::scheduleFusion(&fusion, {input1, input2});
   torch::jit::fuser::cuda::compileKernel(&prog);
   prog.device_ = 0;
-  torch::jit::fuser::cuda::runKernel(
-      &prog, {input1, input2}, {output}, output.sizes().vec());
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
@@ -1036,32 +1038,32 @@ void testGPU_FusionParser() {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
   float T2[4];
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i24 = 0; i24 < 4; ++i24 ) {
-      T2[ i24 ]
-         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i33 = 0; i33 < 4; ++i33 ) {
+      T2[ i33 ]
+         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
     }
   } else { 
-    for(size_t i24 = 0; i24 < 4; ++i24 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T2[ i24 ]
-           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i33 = 0; i33 < 4; ++i33 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T2[ i33 ]
+           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
       }
     }
   }
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i25 = 0; i25 < 4; ++i25 ) {
-      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-         = T2[ i25 ]
-         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i34 = 0; i34 < 4; ++i34 ) {
+      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+         = T2[ i34 ]
+         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
     }
   } else { 
-    for(size_t i25 = 0; i25 < 4; ++i25 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-           = T2[ i25 ]
-           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i34 = 0; i34 < 4; ++i34 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+           = T2[ i34 ]
+           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
       }
     }
   }
