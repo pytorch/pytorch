@@ -5,9 +5,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Kepler Maxwell Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
+#      NAME: Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal Volta Turing Ampere
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            3.5 3.7 5.0 5.2 5.3 6.0 6.1 6.2 7.0 7.2 7.5
+#            3.5 3.7 5.0 5.2 5.3 6.0 6.2 7.0 7.2 7.5 8.0
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -39,8 +39,8 @@ endif()
 # This list is used to filter CUDA archs when autodetecting
 set(CUDA_ALL_GPU_ARCHITECTURES "3.5" "5.0")
 
-if(CUDA_VERSION VERSION_GREATER "6.5")
-  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tesla" "Maxwell+Tegra")
+if(CUDA_VERSION VERSION_GREATER_EQUAL "7.0")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tegra" "Kepler+Tesla" "Maxwell+Tegra")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2")
 
   if(CUDA_VERSION VERSION_LESS "8.0")
@@ -49,33 +49,45 @@ if(CUDA_VERSION VERSION_GREATER "6.5")
   endif()
 endif()
 
-if(CUDA_VERSION VERSION_GREATER "7.5")
+if(CUDA_VERSION VERSION_GREATER_EQUAL "8.0")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Pascal")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.0" "6.1")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "6.0" "6.1" "6.2")
 
   if(CUDA_VERSION VERSION_LESS "9.0")
-    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
+    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.2+PTX")
     set(CUDA_LIMIT_GPU_ARCHITECTURE "7.0")
   endif()
 endif ()
 
-if(CUDA_VERSION VERSION_GREATER "8.5")
+if(CUDA_VERSION VERSION_GREATER_EQUAL "9.0")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Volta")
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0" "7.0+PTX")
-  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.0" "7.0+PTX" "7.2" "7.2+PTX")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.0" "7.2")
 
   if(CUDA_VERSION VERSION_LESS "10.0")
+    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.2+PTX")
     set(CUDA_LIMIT_GPU_ARCHITECTURE "8.0")
   endif()
 endif()
 
-if(CUDA_VERSION VERSION_GREATER "9.5")
+if(CUDA_VERSION VERSION_GREATER_EQUAL "10.0")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Turing")
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.5" "7.5+PTX")
-  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.5" "7.5+PTX")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.5")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.5")
 
   if(CUDA_VERSION VERSION_LESS "11.0")
+    set(CUDA_LIMIT_GPU_ARCHITECTURE "8.0")
+    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.5+PTX")
+  endif()
+endif()
+
+if(CUDA_VERSION VERSION_GREATER_EQUAL "11.0")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Ampere")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "8.0" "8.0+PTX")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "8.0")
+
+  if(CUDA_VERSION VERSION_LESS "12.0")
     set(CUDA_LIMIT_GPU_ARCHITECTURE "9.0")
   endif()
 endif()
@@ -138,8 +150,7 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
     set(CUDA_GPU_DETECT_OUTPUT_FILTERED "")
     separate_arguments(CUDA_GPU_DETECT_OUTPUT)
     foreach(ITEM IN ITEMS ${CUDA_GPU_DETECT_OUTPUT})
-        if(CUDA_LIMIT_GPU_ARCHITECTURE AND (ITEM VERSION_GREATER CUDA_LIMIT_GPU_ARCHITECTURE OR
-                                            ITEM VERSION_EQUAL CUDA_LIMIT_GPU_ARCHITECTURE))
+        if(CUDA_LIMIT_GPU_ARCHITECTURE AND ITEM VERSION_GREATER_EQUAL CUDA_LIMIT_GPU_ARCHITECTURE)
         list(GET CUDA_COMMON_GPU_ARCHITECTURES -1 NEWITEM)
         string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${NEWITEM}")
       else()
@@ -211,6 +222,9 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       elseif(${arch_name} STREQUAL "Turing")
         set(arch_bin 7.5)
         set(arch_ptx 7.5)
+      elseif(${arch_name} STREQUAL "Ampere")
+        set(arch_bin 8.0)
+        set(arch_ptx 8.0)
       else()
         message(SEND_ERROR "Unknown CUDA Architecture Name ${arch_name} in CUDA_SELECT_NVCC_ARCH_FLAGS")
       endif()
