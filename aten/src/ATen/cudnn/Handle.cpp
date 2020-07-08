@@ -16,10 +16,15 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 // happens in fbcode setting. @colesbury and I decided to not destroy
 // the handle as a workaround.
 //   - @soumith
-#ifdef NO_CUDNN_DESTROY_HANDLE
-#else
-    cudnnDestroy(handle);
-#endif
+//
+// Further note: this is now disabled globally, because we are seeing
+// the same issue as mentioned above in CUDA 11 CI.
+//   - @zasdfgbnm
+//
+// #ifdef NO_CUDNN_DESTROY_HANDLE
+// #else
+//   cudnnDestroy(handle);
+// #endif
 }
 
 using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>;

@@ -20,6 +20,30 @@ struct TensorArgCodegen {
   constexpr int nDims() {
     return N;
   }
+  void setSize(int i, int64_t s) {
+    size[i] = s;
+  }
+  void setStride(int i, int64_t s) {
+    stride[i] = s;
+  }
+};
+
+template <typename T>
+struct TensorArgCodegen<T, 0> {
+  T& operator[](int64_t ind) {
+    return data[ind];
+  };
+
+  T* data;
+  constexpr int nDims() {
+    return 0;
+  }
+  void setSize(int, int64_t) {
+    TORCH_INTERNAL_ASSERT(false, "Tried to set size of a 0-dim tensor");
+  }
+  void setStride(int, int64_t) {
+    TORCH_INTERNAL_ASSERT(false, "Tried to set stride of a 0-dim tensor");
+  }
 };
 
 struct ArgAbstract {
@@ -64,10 +88,10 @@ struct TensorArg : public TensorArgAbstract {
   TENSOR_TYPE instance_;
 
   void setSize(int i, int64_t size) override {
-    instance_.size[i] = size;
+    instance_.setSize(i, size);
   }
   void setStride(int i, int64_t stride) override {
-    instance_.stride[i] = stride;
+    instance_.setStride(i, stride);
   }
   void setPointer(void* ptr) override {
     instance_.data = static_cast<decltype(TENSOR_TYPE::data)>(ptr);
@@ -81,6 +105,8 @@ struct TensorArg : public TensorArgAbstract {
 template <typename T>
 TensorArgAbstract* getTensorArg(int nDims) {
   switch (nDims) {
+    case (0):
+      return new TensorArg<TensorArgCodegen<T, 0>>();
     case (1):
       return new TensorArg<TensorArgCodegen<T, 1>>();
     case (2):

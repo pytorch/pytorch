@@ -39,7 +39,11 @@ namespace torch {
 /// - `long long int`
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
-    tensor_data_container.convert_to_tensor(options),
+    // note: we remove the requires_grad setting from the TensorOptions because
+    // it is ignored anyways (and we actually have an assertion that it isn't set
+    // which would fail otherwise). We handle requires_grad explicitly here
+    // instead of passing it through to the kernel.
+    tensor_data_container.convert_to_tensor(options.requires_grad(c10::nullopt)),
     options.requires_grad());
 }
 
