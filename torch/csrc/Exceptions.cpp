@@ -178,8 +178,14 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
   if (warning_buffer_.size() > 0) {
+    PyObject *type, *value, *traceback;
     pybind11::gil_scoped_acquire gil;
     auto result = 0;
+    if (in_exception_) {
+      // This (combined with PyErr_Restore below also works when no python
+      // error has been set yet
+      PyErr_Fetch(&type, &value, &traceback);
+    }
     for (const auto& warning : warning_buffer_) {
       auto source_location = warning.source_location_;
       const auto& msg = processErrorMsg(warning.msg_);
@@ -220,6 +226,9 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       /// A warning raised an error, we need to force the parent
       /// function to return an error code.
       throw python_error();
+    }
+    if (in_exception_) {
+      PyErr_Restore(type, value, traceback);
     }
   }
 }
