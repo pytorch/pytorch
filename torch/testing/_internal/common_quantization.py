@@ -135,8 +135,8 @@ def get_script_module(model, tracing, data):
 class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        self.calib_data = [torch.rand(2, 5, dtype=torch.float) for _ in range(2)]
-        self.train_data = [torch.rand(2, 5, dtype=torch.float) for _ in range(2)]
+        self.calib_data = [[torch.rand(2, 5, dtype=torch.float)] for _ in range(2)]
+        self.train_data = [[torch.rand(2, 5, dtype=torch.float)] for _ in range(2)]
 
         self.img_data_1d = [[torch.rand(2, 3, 10, dtype=torch.float)]
                             for _ in range(2)]
