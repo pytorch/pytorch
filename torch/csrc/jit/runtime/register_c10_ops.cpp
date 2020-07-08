@@ -100,7 +100,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
           } else if (elem_type->kind() == TypeKind::IntType) {
             AT_ASSERT(iter->isIntList());
             tracer::addInputs(
-                node, args[i].name().c_str(), c10::IntArrayRef(iter->toIntVector()));
+                node,
+                args[i].name().c_str(),
+                c10::IntArrayRef(iter->toIntVector()));
           } else if (elem_type->kind() == TypeKind::BoolType) {
             AT_ASSERT(iter->isBoolList());
             tracer::addInputs(
