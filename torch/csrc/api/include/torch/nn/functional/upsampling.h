@@ -98,7 +98,7 @@ inline Tensor interpolate(
 
   auto scale_factor_len = input.dim() - 2;
   std::vector<c10::optional<double>> scale_factor_list(scale_factor_len, c10::nullopt);
-  if (scale_factor != c10::nullopt && (recompute_scale_factor == c10::nullopt || !recompute_scale_factor.value_or(false))) {
+  if (scale_factor != c10::nullopt && !recompute_scale_factor.value_or(false)) {
     auto _scale_factor_repeated = *scale_factor;
     scale_factor_list = {};
     for (const auto& elem : _scale_factor_repeated) {
