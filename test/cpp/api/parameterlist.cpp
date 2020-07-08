@@ -23,6 +23,15 @@ TEST_F(ParameterListTest, ConstructsFromSharedPointer) {
   ASSERT_EQ(list->size(), 3);
 }
 
+TEST_F(ParameterListTest, isEmpty) {
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  ParameterList list;
+  ASSERT_TRUE(list->is_empty());
+  list->append(ta);
+  ASSERT_FALSE(list->is_empty());
+  ASSERT_EQ(list->size(), 1);
+}
+
 TEST_F(ParameterListTest, PushBackAddsAnElement) {
   ParameterList list;
   torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
@@ -39,6 +48,20 @@ TEST_F(ParameterListTest, PushBackAddsAnElement) {
   ASSERT_EQ(list->size(), 3);
   list->append(td);
   ASSERT_EQ(list->size(), 4);
+}
+TEST_F(ParameterListTest, ForEachLoop) {
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
+  torch::Tensor td = torch::randn({1, 2, 3});
+  ParameterList list(ta, tb, tc, td);
+  std::vector<torch::Tensor> params = {ta, tb, tc, td};
+  ASSERT_EQ(list->size(), 4);
+  int idx = 0;
+  for (const auto& pair : *list) {
+    ASSERT_TRUE(
+        torch::all(torch::eq(pair.value(), params[idx++])).item<bool>());
+  }
 }
 
 TEST_F(ParameterListTest, AccessWithAt) {
@@ -112,4 +135,28 @@ TEST_F(ParameterListTest, PrettyPrintParameterList) {
       "(1): Parameter containing: [Float of size [1, 2]]\n"
       "(2): Parameter containing: [Float of size [1, 2]]\n"
       ")");
+}
+
+TEST_F(ParameterListTest, IncrementAdd) {
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
+  torch::Tensor td = torch::randn({1, 2, 3});
+  torch::Tensor te = torch::randn({1, 2});
+  torch::Tensor tf = torch::randn({1, 2, 3});
+  ParameterList listA(ta, tb, tc);
+  ParameterList listB(td, te, tf);
+  std::vector<torch::Tensor> tensors{ta, tb, tc, td, te, tf};
+  int idx = 0;
+  *listA += *listB;
+  ASSERT_TRUE(torch::all(torch::eq(listA[0], ta)).item<bool>());
+  ASSERT_TRUE(torch::all(torch::eq(listA[1], tb)).item<bool>());
+  ASSERT_TRUE(torch::all(torch::eq(listA[2], tc)).item<bool>());
+  ASSERT_TRUE(torch::all(torch::eq(listA[3], td)).item<bool>());
+  ASSERT_TRUE(torch::all(torch::eq(listA[4], te)).item<bool>());
+  ASSERT_TRUE(torch::all(torch::eq(listA[5], tf)).item<bool>());
+  for (const auto& P : listA->named_parameters(false))
+    ASSERT_TRUE(torch::all(torch::eq(P.value(), tensors[idx++])).item<bool>());
+
+  ASSERT_EQ(idx, 6);
 }
