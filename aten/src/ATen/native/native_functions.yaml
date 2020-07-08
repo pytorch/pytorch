@@ -6520,3 +6520,9 @@
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
+
+# Note: this function is only for testing.
+- func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: _test_optional_intlist
