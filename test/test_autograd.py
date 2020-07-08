@@ -3342,6 +3342,7 @@ class TestAutograd(TestCase):
                     d1 += 1
                     torch.autograd.grad(d2.sum(), a)
 
+        self.assertEqual(len(w), 2)
         self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
         self.assertIn('Error detected in PowBackward0', str(w[1].message))
 
@@ -3349,9 +3350,7 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "one of the variables needed for gradient computation has been "
                                     "modified by an inplace operation"):
-            with warnings.catch_warnings():
-                # ignore the Anomaly Detection has been enabled warning
-                warnings.simplefilter("ignore")
+            with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     warnings.simplefilter("error")
                     with StdErrDiverter() as s:
@@ -3361,6 +3360,8 @@ class TestAutograd(TestCase):
                         d1 += 1
                         torch.autograd.grad(d2.sum(), a)
 
+        self.assertEqual(len(w), 1)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
         self.assertIn('Error detected in PowBackward0', s.captured)
 
     @skipIfNoLapack
