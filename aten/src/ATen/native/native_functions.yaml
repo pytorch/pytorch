@@ -1019,7 +1019,7 @@
   variants: function, method
   dispatch:
     CPU: dot
-    CUDA: legacy::cuda::_th_dot
+    CUDA: dot_cuda
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1813,6 +1813,13 @@
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
   use_c10_dispatcher: full
 
+# why we give weight not wieght_size? For mkldnn bf16 training, we are now support input is bf16 mkldnn tensor,
+# and weight is fp32 cpu tensor which user don't change optimizer(grad update will using fp32 data type for accuracy,
+# and tensor is cpu tensor), but we want also give user another option, user can rewite the optimizer to support
+# MKLDNN bf16 tensor's grad update, i.e, input is bf16 mkldnn tensor, weight is bf16 MKLDNN tensor, this case can
+# reduce the reorder time at the forward step, but user need care about bf16 grad update accuracy problem(may need
+# convert FP32 type first to do update) and make torch.save to support MKLDNN tensor when user need save model.
+# we give the weight to there to know which type of weight's grad should be.
 - func: mkldnn_convolution_backward_weights(Tensor weight, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> (Tensor, Tensor)
   use_c10_dispatcher: full
 
