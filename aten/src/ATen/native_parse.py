@@ -55,8 +55,6 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
-    elif t == 'int[]?':
-        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
