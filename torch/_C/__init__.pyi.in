@@ -34,7 +34,16 @@ class device:
 
 # Defined in torch/csrc/Size.cpp
 class Size(Tuple[_int, ...]):
-    # TODO: numel, __reduce__
+    # TODO: __reduce__
+
+    @overload
+    def __getitem__(self: Size, key: _int) -> _int: ...
+
+    @overload
+    def __getitem__(self: Size, key: slice) -> Size: ...
+
+    def numel(self: Size) -> _int: ...
+
     ...
 
 # Defined in torch/csrc/Dtype.cpp
@@ -233,7 +242,10 @@ class _TensorBase(object):
     layout: _layout
     real: Tensor
     imag: Tensor
+    T: Tensor
     _version: _bool
+    _base: Optional[Tensor]
+    grad_fn: Any
     ${tensor_method_hints}
 
 # Defined in torch/csrs/cuda/Module.cpp

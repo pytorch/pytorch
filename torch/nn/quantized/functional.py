@@ -82,7 +82,7 @@ def adaptive_avg_pool2d(input, output_size):
     Applies a 2D adaptive average pooling over a quantized input signal composed
     of several quantized input planes.
 
-    .. note:: The input quantization paramteres propagate to the output.
+    .. note:: The input quantization parameters propagate to the output.
 
     See :class:`~torch.nn.quantized.AdaptiveAvgPool2d` for details and output shape.
 
