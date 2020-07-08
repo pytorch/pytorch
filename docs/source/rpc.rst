@@ -12,6 +12,9 @@ machines.
      APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
 
 Basics
 ------
