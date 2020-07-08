@@ -27,11 +27,11 @@ constexpr auto kKernelName = "kernel";
 namespace {
 
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
-static const at::cuda::NVRTC& nvrtc() {
+const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static int ceilDiv(const int a, const int b) {
+int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 
