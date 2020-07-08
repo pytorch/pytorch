@@ -1038,32 +1038,32 @@ void testGPU_FusionParser() {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
   float T2[4];
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i33 = 0; i33 < 4; ++i33 ) {
-      T2[ i33 ]
-         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i29 = 0; i29 < 4; ++i29 ) {
+      T2[ i29 ]
+         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
     }
   } else { 
-    for(size_t i33 = 0; i33 < 4; ++i33 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T2[ i33 ]
-           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i33 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i29 = 0; i29 < 4; ++i29 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T2[ i29 ]
+           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
       }
     }
   }
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i34 = 0; i34 < 4; ++i34 ) {
-      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-         = T2[ i34 ]
-         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i30 = 0; i30 < 4; ++i30 ) {
+      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+         = T2[ i30 ]
+         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
     }
   } else { 
-    for(size_t i34 = 0; i34 < 4; ++i34 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-           = T2[ i34 ]
-           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i34 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i30 = 0; i30 < 4; ++i30 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+           = T2[ i30 ]
+           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
       }
     }
   }
@@ -3055,79 +3055,277 @@ void testGPU_FusionSimpleGemm() {
   }
 }
 
-// This test currently requires a combination of broadcast and reduction
-// operations and parellelization strategy that is currently not supported.
-// It is a goal to get this example working and this test is added so we
-// can continue working on getting this example fixed. Right now it
-// produces an incorrect result. Either we need to error coherently on the
-// optimization strategy we don't support and set this test to one we do support
-// or we need to get this schedule working correctly.
-void testGPU_FusionSoftmax() {
+// Softmax with a 1D tensor. Parallelized only with a single thread block.
+void testGPU_FusionSoftmax1D() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
   FusionGuard fg(&fusion);
+
+  const int tidx = 128;
+  const int dimx = 1000;
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(1);
+  fusion.addInput(input_tv0);
+
+  TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_tv0);
+  TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
+  TensorView* bcast_sum_tv3 = broadcast(sum_exp_tv2, {true});
+
+  // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
+  // computed at sum_exp_rf_tv8.
+  TensorView* exp_tv1_copy = unaryOp(UnaryOpType::Exp, input_tv0);
+
+  TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
+
+  fusion.addOutput(output_tv4);
+
+  sum_exp_tv2->split(-1, tidx);
+  TensorView* sum_exp_rf_tv5 = sum_exp_tv2->rFactor({-2});
+
+  output_tv4->split(-1, tidx);
+
+  exp_tv1->computeAt(sum_exp_rf_tv5, -1);
+  exp_tv1_copy->computeAt(output_tv4, -1);
+
+  TensorView* tensors_to_parallelize[] = {
+      sum_exp_tv2, bcast_sum_tv3, output_tv4, sum_exp_rf_tv5};
+
+  for (auto tv : tensors_to_parallelize) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  prog.device_ = 0;
+  prog.grid(1, 1);
+  prog.block(tidx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dimx}, options);
+  at::Tensor cg_output = at::empty({dimx}, options);
+  at::Tensor t3_output = at::empty_like(cg_output, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
+
+  auto t2 = at::_softmax(t0, -1, false);
+  TORCH_CHECK(
+      t2.allclose(cg_output, 1e-5, 1e-5),
+      "Error of: ",
+      t2.sub(cg_output).abs().max());
+}
+
+// Softmax with a 1D tensor with input normalization.
+void testGPU_FusionSoftmax1DNormalized() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int tidx = 128;
+  const int dimx = 1000;
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(1);
+  fusion.addInput(input_tv0);
+
+  // Normalize with the max value before computing exp.
+  TensorView* max_val_tv1 =
+      reductionOp(BinaryOpType::Max, {-1}, new Float(0), input_tv0);
+  TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {true});
+  TensorView* sub_tv3 = sub(input_tv0, bcast_max_tv2);
+  TensorView* exp_tv4 = unaryOp(UnaryOpType::Exp, sub_tv3);
+  TensorView* sum_exp_tv5 = sum(exp_tv4, {-1});
+  TensorView* bcast_sum_tv6 = broadcast(sum_exp_tv5, {true});
+
+  // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
+  // computed at sum_exp_rf_tv8.
+  TensorView* sub_tv3_copy = sub(input_tv0, bcast_max_tv2);
+  TensorView* exp_tv4_copy = unaryOp(UnaryOpType::Exp, sub_tv3_copy);
+
+  TensorView* output_tv7 = div(exp_tv4_copy, bcast_sum_tv6);
+
+  fusion.addOutput(output_tv7);
+
+  max_val_tv1->split(-1, tidx);
+  TensorView* max_val_rf_tv8 = max_val_tv1->rFactor({-2});
+
+  sum_exp_tv5->split(-1, tidx);
+  TensorView* sum_exp_rf_tv9 = sum_exp_tv5->rFactor({-2});
+
+  output_tv7->split(-1, tidx);
+
+  sub_tv3->computeAt(sum_exp_rf_tv9, -1);
+  sub_tv3_copy->computeAt(output_tv7, -1);
+
+  TensorView* tensors_to_parallelize[] = {max_val_tv1,
+                                          bcast_max_tv2,
+                                          sum_exp_tv5,
+                                          bcast_sum_tv6,
+                                          output_tv7,
+                                          max_val_rf_tv8,
+                                          sum_exp_rf_tv9};
+
+  for (auto tv : tensors_to_parallelize) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  prog.device_ = 0;
+  prog.grid(1, 1);
+  prog.block(tidx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dimx}, options);
+  at::Tensor cg_output = at::empty({dimx}, options);
+  at::Tensor t3_output = at::empty_like(cg_output, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
+
+  auto t2 = at::_softmax(t0, -1, false);
+  TORCH_CHECK(
+      t2.allclose(cg_output, 1e-5, 1e-5),
+      "Error of: ",
+      t2.sub(cg_output).abs().max());
+}
+
+// Softmax with a 3D tensor, where the inner-most 3rd dimension is
+// normalized. Pallelized with multiple thread blocks.
+void testGPU_FusionSoftmax3D() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int tidx = 32;
+  const int dimx = 32;
+  const int dimy = 16;
+  const int dimz = 130;
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(3);
   fusion.addInput(input_tv0);
 
-  TensorView* max_val_tv1 =
-      reductionOp(BinaryOpType::Max, {2}, new Float(0), input_tv0);
-  TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {false, false, true});
-  TensorView* exp_tv3 = sub(input_tv0, bcast_max_tv2);
-  TensorView* sum_exp_tv4 =
-      reductionOp(BinaryOpType::Add, {2}, new Float(0), exp_tv3);
-  TensorView* bcast_sum_tv5 = broadcast(sum_exp_tv4, {false, false, true});
-  TensorView* output_tv6 = div(exp_tv3, bcast_sum_tv5);
+  TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_tv0);
+  TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
+  TensorView* bcast_sum_tv3 = broadcast(sum_exp_tv2, {false, false, true});
 
-  max_val_tv1->split(-1, 32);
-  TensorView* max_val_rf_tv7 = max_val_tv1->rFactor({-2});
-  sum_exp_tv4->split(-1, 32);
-  TensorView* sum_exp_rf_tv8 = sum_exp_tv4->rFactor({-2});
+  // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
+  // computed at sum_exp_rf_tv8.
+  TensorView* exp_tv1_copy = unaryOp(UnaryOpType::Exp, input_tv0);
 
-  exp_tv3->computeAt(sum_exp_rf_tv8, 2);
+  TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
 
-  max_val_rf_tv7->axis(0)->parallelize(ParallelType::BIDx);
-  max_val_tv1->axis(0)->parallelize(ParallelType::BIDx);
-  bcast_max_tv2->axis(0)->parallelize(ParallelType::BIDx);
-  sum_exp_rf_tv8->axis(0)->parallelize(ParallelType::BIDx);
-  sum_exp_tv4->axis(0)->parallelize(ParallelType::BIDx);
-  bcast_sum_tv5->axis(0)->parallelize(ParallelType::BIDx);
-  output_tv6->axis(0)->parallelize(ParallelType::BIDx);
+  fusion.addOutput(output_tv4);
 
-  max_val_rf_tv7->axis(1)->parallelize(ParallelType::BIDy);
-  max_val_tv1->axis(1)->parallelize(ParallelType::BIDy);
-  bcast_max_tv2->axis(1)->parallelize(ParallelType::BIDy);
-  sum_exp_rf_tv8->axis(1)->parallelize(ParallelType::BIDy);
-  sum_exp_tv4->axis(1)->parallelize(ParallelType::BIDy);
-  bcast_sum_tv5->axis(1)->parallelize(ParallelType::BIDy);
-  output_tv6->axis(1)->parallelize(ParallelType::BIDy);
+  sum_exp_tv2->split(-1, tidx);
+  TensorView* sum_exp_rf_tv5 = sum_exp_tv2->rFactor({-2});
 
-  max_val_rf_tv7->axis(-1)->parallelize(ParallelType::TIDx);
-  max_val_tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  bcast_max_tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  exp_tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  sum_exp_rf_tv8->axis(-1)->parallelize(ParallelType::TIDx);
-  sum_exp_tv4->axis(-1)->parallelize(ParallelType::TIDx);
-  bcast_sum_tv5->axis(-1)->parallelize(ParallelType::TIDx);
-  output_tv6->axis(-1)->parallelize(ParallelType::TIDx);
+  output_tv4->split(-1, tidx);
 
-  fusion.addOutput(output_tv6);
+  exp_tv1->computeAt(sum_exp_rf_tv5, -1);
+  exp_tv1_copy->computeAt(output_tv4, -1);
+
+  TensorView* tensors_to_parallelize[] = {
+      sum_exp_tv2, bcast_sum_tv3, output_tv4, sum_exp_rf_tv5};
+
+  for (auto tv : tensors_to_parallelize) {
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
 
   prog.device_ = 0;
-  prog.grid(32, 32);
-  prog.block(32);
+  prog.grid(dimx, dimy);
+  prog.block(tidx);
+
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({32, 32, 128}, options);
-  at::Tensor cg_output = at::empty({32, 32, 128}, options);
+  at::Tensor t0 = at::randn({dimx, dimy, dimz}, options);
+  at::Tensor cg_output = at::empty({dimx, dimy, dimz}, options);
+  at::Tensor t3_output = at::empty_like(cg_output, options);
   torch::jit::fuser::cuda::compileKernel(&prog);
+
   torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
 
   auto t2 = at::_softmax(t0, -1, false);
-  // TORCH_CHECK(
-  //     t2.allclose(cg_output, 1e-5, 1e-5),
-  //     "Error of: ",
-  //     t2.sub(cg_output).abs().max());
+  TORCH_CHECK(
+      t2.allclose(cg_output, 1e-5, 1e-5),
+      "Error of: ",
+      t2.sub(cg_output).abs().max());
+}
+
+// Softmax with a 3D tensor with input normalization.
+void testGPU_FusionSoftmax3DNormalized() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int tidx = 32;
+  const int dimx = 32;
+  const int dimy = 16;
+  const int dimz = 130;
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(3);
+  fusion.addInput(input_tv0);
+
+  // Normalize with the max value before computing exp.
+  TensorView* max_val_tv1 =
+      reductionOp(BinaryOpType::Max, {-1}, new Float(0), input_tv0);
+  TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {false, false, true});
+  TensorView* sub_tv3 = sub(input_tv0, bcast_max_tv2);
+  TensorView* exp_tv4 = unaryOp(UnaryOpType::Exp, sub_tv3);
+  TensorView* sum_exp_tv5 = sum(exp_tv4, {-1});
+  TensorView* bcast_sum_tv6 = broadcast(sum_exp_tv5, {false, false, true});
+
+  // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
+  // computed at sum_exp_rf_tv8.
+  TensorView* sub_tv3_copy = sub(input_tv0, bcast_max_tv2);
+  TensorView* exp_tv4_copy = unaryOp(UnaryOpType::Exp, sub_tv3_copy);
+
+  TensorView* output_tv7 = div(exp_tv4_copy, bcast_sum_tv6);
+
+  fusion.addOutput(output_tv7);
+
+  max_val_tv1->split(-1, tidx);
+  TensorView* max_val_rf_tv8 = max_val_tv1->rFactor({-2});
+
+  sum_exp_tv5->split(-1, tidx);
+  TensorView* sum_exp_rf_tv9 = sum_exp_tv5->rFactor({-2});
+
+  output_tv7->split(-1, tidx);
+
+  sub_tv3->computeAt(sum_exp_rf_tv9, -1);
+  sub_tv3_copy->computeAt(output_tv7, -1);
+
+  TensorView* tensors_to_parallelize[] = {max_val_tv1,
+                                          bcast_max_tv2,
+                                          sum_exp_tv5,
+                                          bcast_sum_tv6,
+                                          output_tv7,
+                                          max_val_rf_tv8,
+                                          sum_exp_rf_tv9};
+
+  for (auto tv : tensors_to_parallelize) {
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::BIDy);
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  prog.device_ = 0;
+  prog.grid(dimx, dimy);
+  prog.block(tidx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dimx, dimy, dimz}, options);
+  at::Tensor cg_output = at::empty({dimx, dimy, dimz}, options);
+  at::Tensor t3_output = at::empty_like(cg_output, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
+
+  auto t2 = at::_softmax(t0, -1, false);
+  TORCH_CHECK(
+      t2.allclose(cg_output, 1e-5, 1e-5),
+      "Error of: ",
+      t2.sub(cg_output).abs().max());
 }
 
 void testGPU_FusionSoftmaxComputeAt() {
@@ -3913,6 +4111,61 @@ void testGPU_FusionZeroDimReduction() {
       aten_output.allclose(output),
       "Error of: ",
       aten_output.sub(output).abs().max());
+}
+
+void testGPU_FusionBCastAfterReduce() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int tidx = 128;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+
+  tv1->split(1, tidx);
+  auto tv3 = tv1->rFactor({-2});
+
+  TensorView* tv4 = makeDummyTensor(2);
+  fusion.addInput(tv4);
+
+  auto tv5 = add(tv2, tv4);
+  fusion.addOutput(tv5);
+  tv5->split(1, tidx);
+
+  tv3->computeAt(tv5, 1);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+
+  size_t x = 63, y = 200;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({x, y}, options);
+  at::Tensor t4 = at::randn({x, y}, options);
+
+  at::Tensor cg_output = at::empty({x, y}, options);
+
+  prog.device_ = 0;
+  prog.grid(x);
+  prog.block(tidx);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t4}, {cg_output});
+
+  auto t3 = t0.sum({1}).unsqueeze(-1).expand({x, y});
+  auto t5 = t3.add(t4);
+
+  // Error is larger than the default threshold
+  TORCH_CHECK(t5.allclose(cg_output, 1e-5, 1e-5));
 }
 
 } // namespace jit

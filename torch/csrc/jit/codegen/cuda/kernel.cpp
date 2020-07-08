@@ -156,7 +156,8 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
              << code_random_number_gen << "\n"
              << code_helper_funcs << "\n"
              << code_template_block_reduction << "\n"
-             << code_template_grid_reduction << "\n";
+             << code_template_grid_reduction << "\n"
+             << code_template_block_broadcast << "\n";
   std::stringstream cdg;
   GPULower gpulw(fusion);
   gpulw.printKernel(str_stream, kKernelName);

@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -40,7 +42,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
 
   // Predicates from ThreadPredicates that we will extend to reduction buffer
   // initialization
-  std::unordered_map<const TensorView*, Bool*>& thread_predicates_;
+  ThreadPredicateMap& thread_predicates_;
 
   // Create, place, and return the allocation for tv
   Expr* pushAlloc(TensorView*);
@@ -71,16 +73,14 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Run the pass and accumulate output in lowered_exprs
   void generate(const std::vector<Expr*>& exprs);
 
-  LoopNestGenerator(
-      Fusion* _fusion,
-      std::unordered_map<const TensorView*, Bool*>& _thread_predicates)
+  LoopNestGenerator(Fusion* _fusion, ThreadPredicateMap& _thread_predicates)
       : fusion_(_fusion), thread_predicates_(_thread_predicates) {}
 
  public:
   static std::vector<Expr*> getLoopNest(
       Fusion* fusion,
       std::vector<Expr*> exprs,
-      std::unordered_map<const TensorView*, Bool*>& thread_predicates) {
+      ThreadPredicateMap& thread_predicates) {
     FusionGuard fg(fusion);
     LoopNestGenerator lng(fusion, thread_predicates);
     lng.generate(exprs);

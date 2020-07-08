@@ -20,7 +20,7 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   // Validate and make some minor modifications in preparation to generate code.
   PrepareForLowering(fusion_);
 
-  auto preds = ThreadPredicates::compute(fusion_);
+  ThreadPredicateMap preds(fusion_);
 
   // Run our passes keeping the lowered expressions and forwarding them.
   auto loop_nests = LoopNestGenerator::getLoopNest(

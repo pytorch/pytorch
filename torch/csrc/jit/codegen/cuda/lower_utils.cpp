@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -465,6 +467,138 @@ bool isUnrolledFor(const Expr* expr) {
   }
   return static_cast<const ForLoop*>(expr)->iter_domain()->parallel_method() ==
       ParallelType::Unroll;
+}
+
+const std::unordered_map<ParallelType, int> ParallelTypeBitmap::pt_to_offset_{
+    {ParallelType::BIDx, 0},
+    {ParallelType::BIDy, 1},
+    {ParallelType::BIDz, 2},
+    {ParallelType::TIDx, 3},
+    {ParallelType::TIDy, 4},
+    {ParallelType::TIDz, 5}};
+
+const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
+    {{0, ParallelType::BIDx},
+     {1, ParallelType::BIDy},
+     {2, ParallelType::BIDz},
+     {3, ParallelType::TIDx},
+     {4, ParallelType::TIDy},
+     {5, ParallelType::TIDz}};
+
+bool ParallelTypeBitmap::get(ParallelType pt) const {
+  if (pt_to_offset_.find(pt) == pt_to_offset_.end()) {
+    TORCH_INTERNAL_ASSERT(false, "Could not recognize parallel type.");
+  }
+  return bitset_[pt_to_offset_.at(pt)];
+}
+
+bool ParallelTypeBitmap::set(ParallelType pt, bool new_val) {
+  if (pt_to_offset_.find(pt) == pt_to_offset_.end()) {
+    TORCH_INTERNAL_ASSERT(false, "Could not recognize parallel type.");
+  }
+  bool old_val = bitset_[pt_to_offset_.at(pt)];
+  bitset_[pt_to_offset_.at(pt)] = new_val;
+  return old_val;
+}
+
+ParallelTypeBitmap ParallelTypeBitmap::operator&=(
+    const ParallelTypeBitmap& other) {
+  bitset_ &= other.bitset_;
+  return *this;
+}
+
+ParallelTypeBitmap ParallelTypeBitmap::operator|=(
+    const ParallelTypeBitmap& other) {
+  bitset_ |= other.bitset_;
+  return *this;
+}
+
+ParallelTypeBitmap ParallelTypeBitmap::operator^=(
+    const ParallelTypeBitmap& other) {
+  bitset_ ^= other.bitset_;
+  return *this;
+}
+
+ParallelTypeBitmap ParallelTypeBitmap::operator~() const {
+  return ParallelTypeBitmap(~bitset_);
+}
+
+bool ParallelTypeBitmap::none() const {
+  return bitset_.none();
+}
+
+bool ParallelTypeBitmap::any() const {
+  return bitset_.any();
+}
+
+bool ParallelTypeBitmap::all() const {
+  return bitset_.all();
+}
+
+bool ParallelTypeBitmap::operator[](size_t pos) const {
+  TORCH_INTERNAL_ASSERT(
+      pos < num_p_type, "Invalid index to ParallelTypeBitset: ", pos);
+  return bitset_[pos];
+}
+
+std::map<ParallelType, bool> ParallelTypeBitmap::getMap() const {
+  std::map<ParallelType, bool> map;
+  for (const auto& pt_offset : pt_to_offset_) {
+    map.emplace(std::make_pair(pt_offset.first, bitset_[pt_offset.second]));
+  }
+  return map;
+}
+
+ParallelTypeBitmap operator&(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs) {
+  auto x = lhs;
+  x &= rhs;
+  return x;
+}
+
+ParallelTypeBitmap operator|(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs) {
+  auto x = lhs;
+  x |= rhs;
+  return x;
+}
+
+ParallelTypeBitmap operator^(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs) {
+  auto x = lhs;
+  x ^= rhs;
+  return x;
+}
+
+ParallelTypeBitmap getParallelBroadcastDomains(
+    const BroadcastOp* const bop,
+    const ThreadPredicateMap& preds) {
+  const Val* bop_out = bop->out();
+  if (bop_out->getValType().value() == ValType::TensorIndex) {
+    bop_out = bop_out->as<const TensorIndex>()->view();
+  }
+  TORCH_INTERNAL_ASSERT(
+      bop_out->getValType().value() == ValType::TensorView,
+      "Out is not tensor view");
+  auto out_tv = bop_out->as<TensorView>();
+  // If no pred is found for out_tv, no predicate is necessary
+  if (preds.find(out_tv) == preds.end()) {
+    return ParallelTypeBitmap();
+  }
+  const ParallelTypeBitmap& out_pred = preds.at(out_tv);
+
+  ParallelTypeBitmap parallel_broadcast;
+  const auto& iter_domains = out_tv->domain()->domain();
+  for (auto id : iter_domains) {
+    if (id->isBroadcast() && id->isThread()) {
+      parallel_broadcast.set(id->parallel_method(), true);
+    }
+  }
+
+  return parallel_broadcast & out_pred;
 }
 
 } // namespace ir_utils

@@ -8,58 +8,25 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-const static std::unordered_map<ParallelType, int, TypeHash> pt_to_offset{
-    {ParallelType::BIDx, 0},
-    {ParallelType::BIDy, 1},
-    {ParallelType::BIDz, 2},
-    {ParallelType::TIDx, 3},
-    {ParallelType::TIDy, 4},
-    {ParallelType::TIDz, 5}};
-
-const static std::unordered_map<int, ParallelType> offset_to_pt{
-    {0, ParallelType::BIDx},
-    {1, ParallelType::BIDy},
-    {2, ParallelType::BIDz},
-    {3, ParallelType::TIDx},
-    {4, ParallelType::TIDy},
-    {5, ParallelType::TIDz}};
-
-static constexpr int num_p_type = 6;
-
 namespace {
 
-void flip_true(std::bitset<num_p_type>& bits, const ParallelType p_type) {
-  if (pt_to_offset.find(p_type) == pt_to_offset.end()) {
-    TORCH_INTERNAL_ASSERT(false, "Could not recognize parallel type.");
-  }
-  bits[pt_to_offset.at(p_type)] = true;
+Val* threadPredicate(ParallelType pt) {
+  return eq(new NamedScalar(stringifyThread(pt), DataType::Int), new Int(0));
 }
 
-Val* threadPredicate(int i) {
-  if (offset_to_pt.find(i) == offset_to_pt.end()) {
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "Invalid int for predicate computation, should be from [0-5], but recieved, ",
-        i,
-        ".");
-  }
-  return eq(
-      new NamedScalar(stringifyThread(offset_to_pt.at(i)), DataType::Int),
-      new Int(0));
-}
-
-Bool* getThreadPredicate(std::bitset<num_p_type> bits) {
-  if (bits.none())
+Bool* getThreadPredicate(const ir_utils::ParallelTypeBitmap& bits) {
+  if (bits.none()) {
     return new Bool(true);
+  }
 
   Val* pred = nullptr;
 
-  for (int i = 0; i < num_p_type; i++) {
-    if (bits[i]) {
+  for (const auto& pt_bool : bits.getMap()) {
+    if (pt_bool.second) {
       if (pred == nullptr) {
-        pred = threadPredicate(i);
+        pred = threadPredicate(pt_bool.first);
       } else {
-        pred = andOp(pred, threadPredicate(i));
+        pred = andOp(pred, threadPredicate(pt_bool.first));
       }
     }
   }
@@ -76,25 +43,16 @@ Bool* getThreadPredicate(std::bitset<num_p_type> bits) {
 
 } // namespace
 
-std::bitset<num_p_type> ThreadPredicates::getThreadPredicates(
-    const TensorView* tv) {
-  TORCH_INTERNAL_ASSERT(
-      thread_predicates.find(tv) != thread_predicates.end(),
-      "Invalid predicate initialization, couldn't find ",
-      tv);
-  return thread_predicates[tv];
-}
-
 // Update the reduction_deps bitset based on provided Expr
-void ThreadPredicates::updateBitSet(Expr* expr) {
+void ThreadPredicateMap::updateBitSet(Expr* expr) {
   // Which predicates were set for the inputs
-  std::bitset<num_p_type> input_preds;
+  ir_utils::ParallelTypeBitmap input_preds;
 
   // Which dims are reductions in inputs
-  std::bitset<num_p_type> input_reductions;
+  ir_utils::ParallelTypeBitmap input_reductions;
 
   // Which dims are bcast in inputs
-  std::bitset<num_p_type> input_bcasts;
+  ir_utils::ParallelTypeBitmap input_bcasts;
 
   // Run through inputs and update bitsets
   for (const auto* inp : expr->inputs()) {
@@ -103,28 +61,28 @@ void ThreadPredicates::updateBitSet(Expr* expr) {
 
     auto tv_inp = ir_utils::asConstTV(inp);
     TORCH_INTERNAL_ASSERT(
-        thread_predicates.find(tv_inp) != thread_predicates.end(),
+        thread_predicates_.find(tv_inp) != thread_predicates_.end(),
         "Thread predicate map was not initialized, couldn't find ",
         inp);
 
-    input_preds |= thread_predicates[tv_inp];
+    input_preds |= thread_predicates_[tv_inp];
 
-    std::bitset<num_p_type> id_reductions;
-    std::bitset<num_p_type> id_bcasts;
-    std::bitset<num_p_type> id_ptypes;
+    ir_utils::ParallelTypeBitmap id_reductions;
+    ir_utils::ParallelTypeBitmap id_bcasts;
+    ir_utils::ParallelTypeBitmap id_ptypes;
 
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
-        flip_true(id_ptypes, id->parallel_method());
+        id_ptypes.set(id->parallel_method(), true);
         if (id->isReduction())
-          flip_true(id_reductions, id->parallel_method());
+          id_reductions.set(id->parallel_method(), true);
         if (id->isBroadcast())
-          flip_true(id_bcasts, id->parallel_method());
+          id_bcasts.set(id->parallel_method(), true);
       }
     }
 
     // Validate the combination of ptypes, reductions, bcasts
-    for (size_t i = 0; i < num_p_type; i++) {
+    for (size_t i = 0; i < ir_utils::ParallelTypeBitmap::num_p_type; i++) {
       if (input_reductions[i]) {
         if (id_ptypes[i]) {
           TORCH_INTERNAL_ASSERT(
@@ -161,25 +119,48 @@ void ThreadPredicates::updateBitSet(Expr* expr) {
   for (const auto* out : expr->outputs()) {
     if (!ir_utils::isTV(out))
       continue;
-    thread_predicates[ir_utils::asConstTV(out)] = output_preds;
+    thread_predicates_[ir_utils::asConstTV(out)] = output_preds;
   }
-}
-ThreadPredicates::ThreadPredicates(Fusion* _fusion) : fusion_(_fusion) {
-  for (auto inp : fusion_->inputs())
-    if (ir_utils::isTV(inp))
-      thread_predicates[ir_utils::asConstTV(inp)] = std::bitset<num_p_type>();
 }
 
-std::unordered_map<const TensorView*, Bool*> ThreadPredicates::compute(
-    Fusion* fusion) {
-  ThreadPredicates tp(fusion);
-  for (auto expr : fusion->exprs(true))
-    tp.updateBitSet(expr);
-  std::unordered_map<const TensorView*, Bool*> preds;
-  for (auto entry : tp.thread_predicates) {
-    preds[entry.first] = getThreadPredicate(entry.second);
+ThreadPredicateMap::ThreadPredicateMap(Fusion* _fusion) : fusion_(_fusion) {
+  for (auto inp : fusion_->inputs()) {
+    if (ir_utils::isTV(inp)) {
+      thread_predicates_[ir_utils::asConstTV(inp)] =
+          ir_utils::ParallelTypeBitmap();
+    }
   }
-  return preds;
+  for (auto expr : fusion_->exprs(true)) {
+    updateBitSet(expr);
+  }
+}
+
+ThreadPredicateMap::const_iterator ThreadPredicateMap::find(
+    const TensorView* tv) const {
+  return thread_predicates_.find(tv);
+}
+
+ThreadPredicateMap::const_iterator ThreadPredicateMap::end() const {
+  return thread_predicates_.end();
+}
+
+const ir_utils::ParallelTypeBitmap& ThreadPredicateMap::at(
+    const TensorView* tv) const {
+  return thread_predicates_.at(tv);
+}
+
+ir_utils::ParallelTypeBitmap& ThreadPredicateMap::at(const TensorView* tv) {
+  return thread_predicates_.at(tv);
+}
+
+ir_utils::ParallelTypeBitmap& ThreadPredicateMap::operator[](
+    const TensorView* tv) {
+  return thread_predicates_[tv];
+}
+
+Bool* ThreadPredicateMap::getExpr(const TensorView* tv) const {
+  TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
+  return getThreadPredicate(at(tv));
 }
 
 } // namespace fuser

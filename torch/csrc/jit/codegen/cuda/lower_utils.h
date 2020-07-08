@@ -4,11 +4,15 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
+#include <bitset>
+
 // Provides utilities for dealing with nested ForLoop and IfThenElse scopes
 
 namespace torch {
 namespace jit {
 namespace fuser {
+
+class ThreadPredicateMap;
 
 namespace scope_utils {
 
@@ -74,6 +78,50 @@ ForLoop* asForLoop(Statement*);
 const TensorView* asConstTV(const Val* const);
 
 bool isUnrolledFor(const Expr*);
+
+// Represents mapping to bool from BIDx, BIDy, BIDz, TIDx, TIDy and TIDz.
+class ParallelTypeBitmap {
+ public:
+  static constexpr int num_p_type = 6;
+  ParallelTypeBitmap() = default;
+  bool get(ParallelType pt) const;
+  bool set(ParallelType pt, bool);
+  ParallelTypeBitmap operator&=(const ParallelTypeBitmap& other);
+  ParallelTypeBitmap operator|=(const ParallelTypeBitmap& other);
+  ParallelTypeBitmap operator^=(const ParallelTypeBitmap& other);
+  ParallelTypeBitmap operator~() const;
+  bool none() const;
+  bool any() const;
+  bool all() const;
+  bool operator[](size_t pos) const;
+  std::map<ParallelType, bool> getMap() const;
+
+ private:
+  ParallelTypeBitmap(const std::bitset<num_p_type>& bs) : bitset_(bs) {}
+  std::bitset<num_p_type> bitset_;
+  const static std::unordered_map<ParallelType, int> pt_to_offset_;
+  const static std::unordered_map<int, ParallelType> offset_to_pt_;
+};
+
+ParallelTypeBitmap operator&(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs);
+
+ParallelTypeBitmap operator|(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs);
+
+ParallelTypeBitmap operator^(
+    const ParallelTypeBitmap& lhs,
+    const ParallelTypeBitmap& rhs);
+
+// Returns a ParallelTypeBitmap representing which domain needs
+// blockBroadcast.
+// Even when a domain is broadcast and parallelized, it does not need
+// blockBroadcast unless it is predicated.
+ParallelTypeBitmap getParallelBroadcastDomains(
+    const BroadcastOp* const,
+    const ThreadPredicateMap& preds);
 
 } // namespace ir_utils
 } // namespace fuser

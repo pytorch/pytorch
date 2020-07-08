@@ -10,12 +10,18 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-Bool* UnrollPass::getThreadPredicate(const TensorView* tv) {
-  TORCH_INTERNAL_ASSERT(
-      thread_predicates_.find(tv) != thread_predicates_.end(),
-      "Invalid predicate initialization, couldn't find ",
-      tv);
-  return thread_predicates_[tv];
+Bool* UnrollPass::getThreadPredicate(TensorView* tv) {
+  // No thread predicate is needed predicate when tv is output of a
+  // parallel broadcast expression.
+  if (tv->getOrigin() != nullptr &&
+      tv->getOrigin()->getExprType() == ExprType::BroadcastOp &&
+      ir_utils::getParallelBroadcastDomains(
+          static_cast<BroadcastOp*>(tv->getOrigin()), thread_predicates_)
+          .any()) {
+    return nullptr;
+  }
+
+  return thread_predicates_.getExpr(tv);
 }
 
 // Custom dispatch for Expr, want to find out of it's a TV op
@@ -56,7 +62,9 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
   std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
       new TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
 
-  all_preds.push_back(thread_pred);
+  if (thread_pred != nullptr) {
+    all_preds.push_back(thread_pred);
+  }
 
   std::vector<Bool*> preds;
 
@@ -222,7 +230,7 @@ void UnrollPass::computeMap() {
 std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<Expr*>& exprs,
-    std::unordered_map<const TensorView*, Bool*>& thread_predicates) {
+    const ThreadPredicateMap& thread_predicates) {
   FusionGuard fg(fusion);
   UnrollPass up(fusion, exprs, thread_predicates);
   up.computeMap();

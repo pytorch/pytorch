@@ -51,7 +51,7 @@ namespace fuser {
 class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
  private:
   // Wrapper to access thread_predicates_
-  Bool* getThreadPredicate(const TensorView*);
+  Bool* getThreadPredicate(TensorView*);
 
   // We will track which loops in the incomming IR will be replaced and by what
   std::unordered_map<Expr*, Expr*> loop_replacement_map;
@@ -65,7 +65,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   std::vector<ForLoop*> for_loops;
 
   // Map from TensorView
-  std::unordered_map<const TensorView*, Bool*>& thread_predicates_;
+  const ThreadPredicateMap& thread_predicates_;
 
   // keep track if we're within an unrolled loop
   bool within_unroll = false;
@@ -80,7 +80,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   UnrollPass(
       Fusion* _fusion,
       const std::vector<Expr*>& _incoming_exprs,
-      std::unordered_map<const TensorView*, Bool*>& _thread_predicates)
+      const ThreadPredicateMap& _thread_predicates)
       : fusion_(_fusion),
         incoming_exprs_(_incoming_exprs),
         thread_predicates_(_thread_predicates) {}
@@ -94,7 +94,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   static std::vector<Expr*> runPass(
       Fusion* fusion,
       const std::vector<Expr*>& exprs,
-      std::unordered_map<const TensorView*, Bool*>& thread_predicates);
+      const ThreadPredicateMap& thread_predicates);
 };
 
 } // namespace fuser

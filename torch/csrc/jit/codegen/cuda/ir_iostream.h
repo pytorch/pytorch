@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <iostream>
 
@@ -126,6 +127,11 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void printKernel(
       const std::vector<Expr*>& exprs,
       const std::string& kernel_name);
+
+ private:
+  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
+
+  const ThreadPredicateMap& getThreadPredicateMap();
 };
 
 TORCH_CUDA_API std::ostream& operator<<(

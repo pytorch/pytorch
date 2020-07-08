@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <iostream>
 
@@ -478,15 +480,50 @@ void IRPrinter::handle(const ReductionOp* rop) {
 }
 
 void IRPrinter::handle(const BroadcastOp* bop) {
-  indent();
-  handle(bop->out());
-  os << "\n";
-  indent_size++;
-  indent();
-  os << " = ";
-  handle(bop->in());
-  indent_size--;
-  os << ";\n";
+  // Check if we've lowered yet.
+  bool lowered = bop->out()->getValType() == ValType::TensorIndex;
+  if (!lowered) {
+    os << bop->out() << " = broadcast( " << bop->in() << " )\n";
+    return;
+  }
+
+  const ir_utils::ParallelTypeBitmap domains =
+      ir_utils::getParallelBroadcastDomains(bop, getThreadPredicateMap());
+  const bool thread_x = domains.get(ParallelType::TIDx);
+  const bool thread_y = domains.get(ParallelType::TIDy);
+  const bool thread_z = domains.get(ParallelType::TIDz);
+  const bool block_x = domains.get(ParallelType::BIDx);
+  const bool block_y = domains.get(ParallelType::BIDy);
+  const bool block_z = domains.get(ParallelType::BIDz);
+
+  const bool grid_broadcast_needed = block_x || block_y || block_z;
+  const bool block_broadcast_needed = thread_x || thread_y || thread_z;
+
+  TORCH_INTERNAL_ASSERT(
+      !grid_broadcast_needed, "Parallel broadcast across blocks not supported");
+
+  if (block_broadcast_needed) {
+    indent();
+    os << "broadcast::blockBroadcast<";
+    os << (thread_x ? "true" : "false") << ", ";
+    os << (thread_y ? "true" : "false") << ", ";
+    os << (thread_z ? "true" : "false");
+    os << ">(";
+    handle(bop->out());
+    os << ", ";
+    handle(bop->in());
+    os << ");\n";
+  } else {
+    indent();
+    handle(bop->out());
+    os << "\n";
+    indent_size++;
+    indent();
+    os << " = ";
+    handle(bop->in());
+    indent_size--;
+    os << ";\n";
+  }
 }
 
 void IRPrinter::handle(const ForLoop* fl) {
@@ -638,6 +675,14 @@ void IRPrinter::printKernel(
     handle(expr);
   }
   os << "}\n";
+}
+
+const ThreadPredicateMap& IRPrinter::getThreadPredicateMap() {
+  if (thread_predicates_ == nullptr) {
+    Fusion* fusion = FusionGuard::getCurFusion();
+    thread_predicates_ = std::make_unique<ThreadPredicateMap>(fusion);
+  }
+  return *thread_predicates_;
 }
 
 std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
