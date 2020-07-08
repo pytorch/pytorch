@@ -222,6 +222,7 @@ BestEffortReplay::BestEffortReplay(
   for (auto entry : id_map_)
     leaf_ids_[entry.second] = counter++;
 
+  // Grab expr history of iter domains in target_domain
   std::vector<Expr*> t_exprs = Exprs::getFrom(
       std::vector<Val*>(target_domain.begin(), target_domain.end()));
 
@@ -231,6 +232,7 @@ BestEffortReplay::BestEffortReplay(
   // replay_domain domain. This will be used to propagate the target_domain to
   // replay_domain map.
 
+  // Maps replay domain's IterDomains to the Exprs they're used in
   std::vector<Expr*> r_exprs = Exprs::getFrom(
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
   std::unordered_map<IterDomain*, Expr*> replay_expr_map;
@@ -248,6 +250,8 @@ BestEffortReplay::BestEffortReplay(
   std::string err_str(
       "Error during replay, a computeAt was called that conflicts with an rfactor call.");
 
+  // Iterate through target IterDomains' history and compare with what we
+  // recorded from replay_domain
   for (auto t_expr : t_exprs) {
     // Going to map the target_domain inputs/outputs to replay_domain
     // inputs/outputs
@@ -355,6 +359,38 @@ BestEffortReplay::BestEffortReplay(
       }
     }
   }
+}
+
+// Find the first position i where td1[i] is not the same as td2[i].
+// "Same" means the DAG to generate td1[i] and td2[i] are the
+// equivelent.
+int BestEffortReplay::findFirstMismatchedID(
+    const TensorDomain* td1,
+    const TensorDomain* td2) {
+  std::unordered_map<IterDomain*, IterDomain*> id_map;
+  auto rd1 = td1->rootDomain();
+  std::unordered_set<IterDomain*> rd2_set(
+      td2->rootDomain().begin(), td2->rootDomain().end());
+
+  // Find matching root IterDomains, we could make this O(nlog(n)) if we could
+  // sort IterDomains.
+  for (auto rd1i : rd1) {
+    for (IterDomain* rd2_id : rd2_set) {
+      if (rd1i->sameAs(rd2_id)) {
+        id_map[rd1i] = rd2_id;
+        rd2_set.erase(rd2_id);
+        break;
+      }
+    }
+  }
+
+  BestEffortReplay ber(td2->domain(), td1->domain(), id_map);
+
+  for (size_t i = 0; i < td1->domain().size(); i++) {
+    if (ber.getReplay().find(td1->axis(i)) == ber.getReplay().end())
+      return i;
+  }
+  return td1->nDims();
 }
 
 } // namespace fuser

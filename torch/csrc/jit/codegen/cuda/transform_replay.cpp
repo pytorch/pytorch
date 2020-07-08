@@ -248,6 +248,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   BestEffortReplay forward_replay(
       producer->domain(), consumer_CA_ids, replay_root_map);
 
+  // Make a new map based on all the leaves resulting from best effort replay
   id_map forwarded_replay_map;
   for (auto entry : forward_replay.getReplay()) {
     if (forward_replay.getUnorderedLeafIDs().find(entry.second) !=

@@ -114,7 +114,7 @@ void UnrollPass::handle(ForLoop* fl) {
     // Setup unrolled loop information:
 
     // Indices used to detect when we can unroll a loop safely
-    // For loops outside the unroll, it's just he index, for loops inside
+    // For loops outside the unroll, it's just the index, for loops inside
     // the unroll, if it's a thread it's the thread index, otherwise it's
     // the size-1
     std::vector<Val*> unroll_pred_inds;

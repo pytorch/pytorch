@@ -1036,32 +1036,32 @@ void testGPU_FusionParser() {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
   float T2[4];
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i49 = 0; i49 < 4; ++i49 ) {
-      T2[ i49 ]
-         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i49 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i49 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i24 = 0; i24 < 4; ++i24 ) {
+      T2[ i24 ]
+         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
     }
   } else { 
-    for(size_t i49 = 0; i49 < 4; ++i49 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i49 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T2[ i49 ]
-           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i49 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i49 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+    for(size_t i24 = 0; i24 < 4; ++i24 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T2[ i24 ]
+           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
+           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i24 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
       }
     }
   }
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-    for(size_t i50 = 0; i50 < 4; ++i50 ) {
-      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i50 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-         = T2[ i50 ]
-         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i50 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i25 = 0; i25 < 4; ++i25 ) {
+      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+         = T2[ i25 ]
+         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
     }
   } else { 
-    for(size_t i50 = 0; i50 < 4; ++i50 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i50 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
-        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i50 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
-           = T2[ i50 ]
-           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i50 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+    for(size_t i25 = 0; i25 < 4; ++i25 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+           = T2[ i25 ]
+           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i25 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
       }
     }
   }
@@ -1339,12 +1339,13 @@ int ceilDiv_(int a, int b) {
 void testGPU_FusionAdvancedComputeAt() {
   // Case 1
   /*
-   * tv1 = tv0 * -1
-   * tv2 = tv0 + 3
-   * tv3 = tv0 * 2
-   * tv4 = tv2 + tv1
-   * tv5 = tv4 + tv3
-   * tv6 = tv0 + tv3
+   * tv1 = tv0 * 0.5
+   * tv2 = tv1 * -1
+   * tv3 = tv1 + 3
+   * tv4 = tv1 * 2
+   * tv5 = tv3 + tv2
+   * tv6 = tv5 + tv4
+   * tv7 = tv1 + tv4
    */
   {
     torch::jit::fuser::cuda::CudaKernel prog;
@@ -1354,44 +1355,34 @@ void testGPU_FusionAdvancedComputeAt() {
     TensorView* tv0 = makeDummyTensor(2);
     fusion.addInput(tv0);
 
-    TensorView* tv1 = mul(tv0, new Float(-1.0));
-    TensorView* tv2 = add(tv0, new Float(3.0));
-    TensorView* tv3 = mul(tv0, new Float(2.0));
-    TensorView* tv4 = add(tv2, tv1);
+    TensorView* tv1 = mul(tv0, new Float(0.5));
+    TensorView* tv2 = mul(tv1, new Float(-1.0));
+    TensorView* tv3 = add(tv1, new Float(3.0));
+    TensorView* tv4 = mul(tv1, new Float(2.0));
+    TensorView* tv5 = add(tv3, tv2);
 
-    TensorView* tv5 = add(tv4, tv3);
-    TensorView* tv6 = add(tv0, tv3);
+    TensorView* tv6 = add(tv5, tv4);
+    TensorView* tv7 = add(tv1, tv4);
 
-    fusion.addOutput(tv5);
     fusion.addOutput(tv6);
-
-    tv0->computeAt(tv3, 1);
-
-    // Check propagation of this computeAt.
-    TORCH_CHECK(tv0->getComputeAtView() == tv3);
-    TORCH_CHECK(tv1->getComputeAtView() == tv4);
-    TORCH_CHECK(tv2->getComputeAtView() == tv4);
-    TORCH_CHECK(tv3->getComputeAtView() == tv6);
-    TORCH_CHECK(tv4->getComputeAtView() == tv5);
-    TORCH_CHECK(tv5->getComputeAtView() == tv6);
-    TORCH_CHECK(!tv6->hasComputeAt());
+    fusion.addOutput(tv7);
 
     // Lets setup to actually run
-    tv6->merge(0);
-    tv6->split(0, 128);
-    tv6->split(0, 4);
+    tv7->merge(0);
+    tv7->split(0, 128);
+    tv7->split(0, 4);
 
-    tv6->axis(0)->parallelize(ParallelType::BIDx);
+    tv7->axis(0)->parallelize(ParallelType::BIDx);
 
-    tv0->computeAt(tv6, 1);
+    tv0->computeAt(tv7, 1);
 
-    TORCH_CHECK(tv0->getComputeAtView() == tv6 && tv0->nDims() == 3);
-    TORCH_CHECK(tv1->getComputeAtView() == tv4 && tv1->nDims() == 3);
-    TORCH_CHECK(tv2->getComputeAtView() == tv4 && tv2->nDims() == 3);
-    TORCH_CHECK(tv3->getComputeAtView() == tv6 && tv3->nDims() == 3);
-    TORCH_CHECK(tv4->getComputeAtView() == tv5 && tv4->nDims() == 3);
+    TORCH_CHECK(tv1->hasComputeAt() && tv1->nDims() == 3);
+    TORCH_CHECK(tv2->getComputeAtView() == tv5 && tv2->nDims() == 3);
+    TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
+    TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
     TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-    TORCH_CHECK(!tv6->hasComputeAt());
+    TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
+    TORCH_CHECK(!tv7->hasComputeAt());
 
     for (Val* val : fusion.vals()) {
       if (!fusion.hasInput(val) &&
@@ -1406,15 +1397,16 @@ void testGPU_FusionAdvancedComputeAt() {
 
     at::Tensor t0 = at::randn({129, 127}, options);
 
-    auto t1 = t0.mul({-1.0});
-    auto t2 = t0.add({3.0});
-    auto t3 = t0.mul({2.0});
-    auto t4 = t2.add(t1);
-    auto t5 = t4.add(t3);
-    auto t6 = t0.add(t3);
+    auto t1 = t0.mul({0.5});
+    auto t2 = t1.mul({-1.0});
+    auto t3 = t1.add({3.0});
+    auto t4 = t1.mul({2.0});
+    auto t5 = t3.add(t2);
+    auto t6 = t5.add(t4);
+    auto t7 = t1.add(t4);
 
-    at::Tensor kernel_tv5 = at::empty_like(t0, options);
     at::Tensor kernel_tv6 = at::empty_like(t0, options);
+    at::Tensor kernel_tv7 = at::empty_like(t0, options);
 
     prog.device_ = 0;
 
@@ -1424,10 +1416,10 @@ void testGPU_FusionAdvancedComputeAt() {
     prog.block(128);
     torch::jit::fuser::cuda::compileKernel(&prog);
     torch::jit::fuser::cuda::runTestKernel(
-        &prog, {t0}, {kernel_tv5, kernel_tv6});
+        &prog, {t0}, {kernel_tv6, kernel_tv7});
 
-    TORCH_CHECK(at::allclose(kernel_tv5, t5));
     TORCH_CHECK(at::allclose(kernel_tv6, t6));
+    TORCH_CHECK(at::allclose(kernel_tv7, t7));
   }
 
   // Case 2
@@ -1457,16 +1449,6 @@ void testGPU_FusionAdvancedComputeAt() {
 
     fusion.addOutput(tv5);
     fusion.addOutput(tv6);
-
-    tv2->computeAt(tv4, 1);
-
-    TORCH_CHECK(!tv0->hasComputeAt());
-    TORCH_CHECK(!tv1->hasComputeAt());
-    TORCH_CHECK(tv2->getComputeAtView() == tv4);
-    TORCH_CHECK(!tv3->hasComputeAt());
-    TORCH_CHECK(!tv4->hasComputeAt());
-    TORCH_CHECK(!tv5->hasComputeAt());
-    TORCH_CHECK(!tv6->hasComputeAt());
 
     // Lets setup to actually run
     tv6->merge(0);
@@ -3145,6 +3127,33 @@ void testGPU_FusionSoftmax() {
   //     "Error of: ",
   //     t2.sub(cg_output).abs().max());
 }
+
+void testGPU_FusionSoftmaxComputeAt() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+
+  auto tv3 = add(tv0, new Float(1.0));
+
+  auto tv4 = mul(tv2, tv3);
+
+  auto tv5 = sum(tv4, {1});
+  auto tv6 = broadcast(tv5, {false, true});
+
+  auto tv7 = sub(tv6, tv4);
+  fusion.addOutput(tv7);
+
+  tv1->computeAt(tv7, 1);
+  ASSERT_ANY_THROW(tv1->computeAt(tv7, -1));
+}
+
 // Similar to FusionReduction but uses grid reduction
 void testGPU_FusionGridReduction1() {
   const int gdimx = 32;
