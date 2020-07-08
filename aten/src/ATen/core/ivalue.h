@@ -39,6 +39,36 @@ struct Object;
 struct PyObjectHolder;
 }
 
+// This is an owning wrapper for a c10::optional<std::vector<T>>
+// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
+// Its purpose is to be used in generated code to keep the vector alive
+// either until the end of a statement (as a temporary), or as a saved arg
+// in autograd.
+template<typename T>
+struct OptionalArray {
+  c10::optional<std::vector<T>> list;
+
+  OptionalArray() {};
+  OptionalArray(std::vector<T> val) : list(std::move(val)) {}
+
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::optional<ArrayRef<T>> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
+  operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+};
+
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
 // It is a 16-byte object with an 8-byte payload and an 8-byte tag.
@@ -569,6 +599,10 @@ struct CAFFE2_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and None
   template<typename T>
   optional<T> toOptional();
+
+  /// @private [doxygen private]
+  /// Only for use in generated code.
+  OptionalArray<int64_t> toOptionalIntArray();
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity

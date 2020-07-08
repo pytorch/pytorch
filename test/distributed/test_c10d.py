@@ -2113,20 +2113,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus[:2]
         model = DoubleGpuNet(gpus)
 
-        with self.assertRaisesRegex(AssertionError, "output_device .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "output_device .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "only works with CUDA devices"):
+        with self.assertRaisesRegex(AssertionError, "input module must be on the same type of devices"):
             model.fc1 = model.fc1.cpu()
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
