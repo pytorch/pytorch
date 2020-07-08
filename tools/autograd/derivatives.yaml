@@ -216,7 +216,7 @@
   self: grad
 
 - name: angle(Tensor self) -> Tensor
-  self: grad.to(self.scalar_type()) * (self*Scalar(std::complex<double>{0.0, 1.0})).conj() / self.abs().pow(2)
+  self: grad.to(self.scalar_type()) * (self*Scalar(c10::complex<double>{0.0, 1.0})).conj() / self.abs().pow(2)
 
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
@@ -340,6 +340,12 @@
 
 - name: cosh(Tensor self) -> Tensor
   self: grad * self.sinh()
+
+- name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
+  self: not_implemented("count_nonzero")
+
+- name: count_nonzero(Tensor self, int? dim=None) -> Tensor
+  self: not_implemented("count_nonzero")
 
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   self: other.cross(grad, dim)
