@@ -1033,7 +1033,7 @@ class JitRpcTest(
             with torch.autograd.profiler.profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch.jit._qualified_name(one_arg),
+                    torch._jit_internal._qualified_name(one_arg),
                     "worker0",
                     "worker1",
                 )
@@ -1045,7 +1045,7 @@ class JitRpcTest(
             # After that, this test should be modified to validate the function time.
             events = prof.function_events
             function_event = get_function_event(events, prof_key)
-            self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(one_arg) in function_event.name)
 
     @dist_init
     def test_rpc_async_jit_profiled(self):
@@ -1063,7 +1063,7 @@ class JitRpcTest(
 
             # Ensure rpc_async call is profiled
             function_events = prof.function_events
-            qual_name = torch.jit._qualified_name(two_args_two_kwargs)
+            qual_name = torch._jit_internal._qualified_name(two_args_two_kwargs)
             rpc_async_jit_event = [
                 event
                 for event in function_events

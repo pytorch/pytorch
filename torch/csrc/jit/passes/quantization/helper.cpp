@@ -307,8 +307,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     } else {
       return {};
     }
-  } else if (n->kind() == prim::ListConstruct &&
-             v->type()->isSubtypeOf(ListType::ofTensors())) {
+  } else if (
+      n->kind() == prim::ListConstruct &&
+      v->type()->isSubtypeOf(ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -324,8 +325,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   } else if (n->kind() == Symbol::aten("append")) {
-    TORCH_WARN("Quantization for inplace operation aten::append "
-               "is not supported");
+    TORCH_WARN(
+        "Quantization for inplace operation aten::append "
+        "is not supported");
   }
 
   return {};
