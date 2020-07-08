@@ -77,7 +77,6 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
 MULTI_OUTPUT_SAFE_FUNCTIONS = {
     'split',
     'split_with_sizes',
-    'chunk',
 }
 
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
