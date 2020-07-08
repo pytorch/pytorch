@@ -2,7 +2,7 @@ name: jit-triage
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled]
 
 jobs:
   welcome:
@@ -23,6 +23,7 @@ jobs:
             const hasJitLabel = context.issue.labels.filter(label => label.name == kJitLabel).length > 0;
 
             if (!hasJitLabel) {
+              core.info("Issue " + context.issue.title + " does not have JIT label")
               return;
             }
 
@@ -42,7 +43,7 @@ jobs:
             const filteredProjects = projects.filter(project => project.name == kProjectName);
 
             if (filteredProjects.length != 1) {
-              console.log("Unable to find a project named " + kProjectName);
+              core.setFailed("Unable to find a project named " + kProjectName);
               return;
             }
 
@@ -58,7 +59,7 @@ jobs:
             const filteredColumns = columns.filter(column => column.name == kColumnName);
 
             if (filteredColumns != 1) {
-              console.log("Unable to find a column named " + kColumnName);
+              console.setFailed("Unable to find a column named " + kColumnName);
               return;
             }
 

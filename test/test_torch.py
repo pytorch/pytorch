@@ -14738,6 +14738,7 @@ class TestTorchDeviceType(TestCase):
         expected_val = torch.ones(2, 2, 2, 2, device=device)
         expected_val[:, 0, :, :] *= 2.
         expected_val[:, 1, :, :] *= 1.5
+        print(val, ind)
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
