@@ -228,7 +228,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
   explicit SugaredTupleValue(std::vector<std::shared_ptr<SugaredValue>> tup)
-      : tup_(tup){};
+      : tup_(std::move(tup)){};
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
@@ -362,7 +362,7 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(Function* callee) : callees_({std::move(callee)}) {}
+  FunctionValue(Function* callee) : callees_({callee}) {}
   FunctionValue(const StrongFunctionPtr& p)
       : callees_({p.function_}), cu_(p.cu_) {}
   FunctionValue(const std::vector<StrongFunctionPtr>& callees) {
@@ -427,9 +427,9 @@ struct TORCH_API ClosureValue : public SugaredValue {
 // defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::vector<std::string> method_names)
-      : self_(std::move(self)), method_names_(std::move(method_names)) {}
+      : self_(self), method_names_(std::move(method_names)) {}
   MethodValue(Value* self, std::string method_name)
-      : MethodValue(self, std::vector<std::string>({method_name})) {}
+      : MethodValue(self, std::vector<std::string>({std::move(method_name)})) {}
 
   std::string kind() const override {
     return "method";

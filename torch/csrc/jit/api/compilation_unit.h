@@ -33,7 +33,7 @@ struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
 struct Self {
-  virtual ~Self() {}
+  virtual ~Self() = default;
   virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
   virtual ClassTypePtr getClassType() const = 0;
 };
@@ -207,7 +207,7 @@ struct TORCH_API CompilationUnit {
   // have isolation.
   void _clear_python_cu() {
     // Delete all the associated class methods
-    for (auto type : classes_) {
+    for (const auto& type : classes_) {
       if (auto cls = type->cast<ClassType>()) {
         for (auto method : cls->methods()) {
           // Tombstone the method in the compilation unit.

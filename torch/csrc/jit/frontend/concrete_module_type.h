@@ -63,7 +63,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addConstant(std::string name, py::object value);
   void addAttribute(
       std::string name,
-      TypePtr type,
+      const TypePtr& type,
       bool isParameter,
       bool isBuffer);
   void addFunctionAttribute(
@@ -76,7 +76,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
-  void addBuiltinFunction(std::string name, std::string symbol_name);
+  void addBuiltinFunction(std::string name, const std::string& symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
 
@@ -143,7 +143,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
  private:
-  ConcreteModuleTypeBuilder() {}
+  ConcreteModuleTypeBuilder() = default;
   ClassTypePtr createTypeFromThis() const;
 
   // If true, this type will never compare equally to anything else. This is
@@ -226,7 +226,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void dump() const;
 
  private:
-  ConcreteModuleType() {}
+  ConcreteModuleType() = default;
 
   // The JIT type derived from this ConcreteModuleType.
   ConcreteModuleTypeBuilder data_;

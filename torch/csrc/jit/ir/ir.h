@@ -345,7 +345,7 @@ struct TORCH_API Node {
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
-  void setCallStack(InlinedCallStackPtr cs) {
+  void setCallStack(const InlinedCallStackPtr& cs) {
     callstack_ = cs;
   }
 
@@ -928,14 +928,14 @@ struct Block {
     return owning_node_;
   }
 
-  Value* addInput(std::string name = "") {
+  Value* addInput(const std::string& name = "") {
     Value* v = input_->addOutput();
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
-  Value* insertInput(size_t i, std::string name = "") {
+  Value* insertInput(size_t i, const std::string& name = "") {
     Value* v = input_->insertOutput(i);
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -1079,11 +1079,11 @@ struct Graph {
     current_scope_ = std::move(scope);
   }
 
-  Value* addInput(std::string name = "") {
-    return block_->addInput(std::move(name));
+  Value* addInput(const std::string& name = "") {
+    return block_->addInput(name);
   }
-  Value* insertInput(size_t i, std::string name = "") {
-    return block_->insertInput(i, std::move(name));
+  Value* insertInput(size_t i, const std::string& name = "") {
+    return block_->insertInput(i, name);
   }
   void eraseInput(size_t i) {
     block_->eraseInput(i);
@@ -1318,7 +1318,7 @@ inline const Graph* Value::owningGraph() const {
 struct ProfileOp : public Node {
   static constexpr Symbol Kind = ::c10::prim::profile;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile), callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;
@@ -1328,7 +1328,7 @@ struct ProfileOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:

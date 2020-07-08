@@ -200,7 +200,7 @@ void ConcreteModuleTypeBuilder::addConstant(
 
 void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
-    TypePtr type,
+    const TypePtr& type,
     bool isParameter,
     bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
@@ -225,7 +225,7 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
     std::string name,
-    std::string symbol_name) {
+    const std::string& symbol_name) {
   builtinFunctions_.emplace(
       std::move(name), c10::Symbol::fromQualString(symbol_name));
 }

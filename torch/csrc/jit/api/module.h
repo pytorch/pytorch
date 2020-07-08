@@ -87,13 +87,17 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
-  Module() {}
+  Module() = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
-  ~Module() {}
+  ~Module() = default;
+  Module(const Module&) = default;
+  Module(Module&&) = default;
+  Module& operator=(const Module&) = default;
+  Module& operator=(Module&&) = default;
 
   void set_optimized(bool o) {
     TORCH_WARN(
@@ -133,7 +137,7 @@ struct TORCH_API Module : public Object {
 
   void register_attribute(
       const std::string& name,
-      const TypePtr t,
+      const TypePtr& t,
       IValue v,
       bool is_param = false,
       bool is_buffer = false) {
@@ -262,7 +266,7 @@ struct TORCH_API Module : public Object {
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(*type()->name(), basename);
+    return QualifiedName(*type()->name(), std::move(basename));
   }
 
   void to_impl(
@@ -292,7 +296,7 @@ struct slot_iterator_impl {
   using SlotCursor = detail::SlotCursor;
   using value_type = typename Policy::value_type;
   slot_iterator_impl(
-      Module root,
+      const Module& root,
       bool recurse, // if true, do a depth-first search, otherwise, just look at
                     // slots of root
       bool return_module) // if true include root itself as the first thing
@@ -531,7 +535,7 @@ struct NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
-      IValue v) {
+      const IValue& v) {
     std::string name;
     if (cursors.size() == 1) {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());

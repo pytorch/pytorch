@@ -41,7 +41,7 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct Refinement {
   Refinement(std::string identifier, TypePtr type)
-      : identifier_(std::move(identifier)), type_(type) {}
+      : identifier_(std::move(identifier)), type_(std::move(type)) {}
   const std::string& identifier() const {
     return identifier_;
   }
@@ -69,7 +69,7 @@ struct RefinementSet {
       : RefinementSet(
             Refinements({std::move(single_true)}),
             Refinements({std::move(single_false)})) {}
-  RefinementSet() {} // empty
+  RefinementSet() = default; // empty
   RefinementSet And(const RefinementSet& rhs) const {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
@@ -142,7 +142,7 @@ struct CondValue {
       c10::optional<bool> static_if)
       : value_(value),
         refinements_(std::move(refinements)),
-        static_if_(static_if) {}
+        static_if_(std::move(static_if)) {}
   CondValue(
       Graph& g,
       const SourceRange& loc,
@@ -194,7 +194,7 @@ static Value* asSimple(const SugaredValuePtr& value) {
 
 static std::shared_ptr<MagicMethod> makeMagic(
     const std::string& name,
-    SugaredValuePtr base) {
+    const SugaredValuePtr& base) {
   return std::make_shared<MagicMethod>(name, base);
 }
 
@@ -243,7 +243,7 @@ struct Environment {
     while (runner->next) {
       runner = runner->next.get();
     }
-    runner->error_messages[name] = msg;
+    runner->error_messages[name] = std::move(msg);
   }
 
   // see if type error has been set for a variable
@@ -279,7 +279,7 @@ struct Environment {
       TypePtr type) {
     auto g = b->owningGraph();
     g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = type;
+    type_table[name] = std::move(type);
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -402,7 +402,7 @@ struct Environment {
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, std::move(as_simple_value), annotated_type);
+      insertStore(name, loc, as_simple_value, annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -1058,9 +1058,9 @@ struct to_ir {
   }
 
   RefinementSet findIsNoneRefinements(
-      Expr lhs,
+      const Expr& lhs,
       Value* lhs_value,
-      Expr rhs,
+      const Expr& rhs,
       Value* rhs_value,
       int tok) {
     if (rhs.kind() != TK_NONE && lhs.kind() == TK_NONE) {
@@ -1312,7 +1312,7 @@ struct to_ir {
     auto emit_if_expr = [this, &range](
                             Block* b,
                             const RefinementSet& refinements,
-                            std::function<Value*()> expr_value) {
+                            const std::function<Value*()>& expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
       insertRefinements(range, refinements);
@@ -1543,7 +1543,7 @@ struct to_ir {
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
       GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
-      void gather(Expr classinfo) {
+      void gather(const Expr& classinfo) {
         if (classinfo.kind() == TK_TUPLE_LITERAL) {
           for (Expr e : TupleLiteral(classinfo).inputs()) {
             gather(e);
@@ -1636,7 +1636,7 @@ struct to_ir {
   // semantics specified at
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
-      SourceRange range,
+      const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
@@ -1701,7 +1701,7 @@ struct to_ir {
   void emitUnrolledLoop(
       const SourceRange& loc,
       const std::function<void()>& emit_body,
-      SugaredValuePtr iterable,
+      const SugaredValuePtr& iterable,
       const List<Expr>& targets) {
     auto static_len = iterable->staticLen();
     TORCH_INTERNAL_ASSERT(

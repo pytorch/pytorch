@@ -13,7 +13,7 @@ using ResolverPtr = std::shared_ptr<Resolver>;
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
 struct TORCH_API Object {
-  Object() {}
+  Object() = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
