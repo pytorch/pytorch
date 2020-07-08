@@ -257,6 +257,7 @@ else
 fi
 
 git clean --force
+git rm -r --cached .
 assert_git_not_dirty
 
 # Test XLA build
