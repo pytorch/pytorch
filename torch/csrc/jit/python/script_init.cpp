@@ -537,8 +537,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       }
       visited.emplace(item.a.internalToPointer());
     }
-    if (!unshapedType(item.b.type())
-             ->isSubtypeOf(unshapedType(item.b.type()))) {
+    if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
       // Since named types are saved and loaded in the test suite, we cannot
       // expect them to be equal. We should still check their slots however.
       if (!item.a.type()->cast<c10::NamedType>()) {
