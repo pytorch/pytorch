@@ -245,7 +245,7 @@ static void compute_dwconv_multiipass(
   const size_t output_height = context->output_height;
   PYTORCH_QNNP_ALIGN(16)
 #ifdef _MSC_VER
-  int32_t* multipass_acc = _malloca(sizeof(int32_t) * context->group_stride);
+  int32_t* multipass_acc = (int32_t*)_malloca(sizeof(int32_t) * context->group_stride);
 #else
   int32_t multipass_acc[context->group_stride];
 #endif

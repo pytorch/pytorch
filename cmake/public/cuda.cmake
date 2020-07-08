@@ -404,15 +404,15 @@ if((CUDA_VERSION VERSION_EQUAL   9.0) OR
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   9.2)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.13 AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.14 AND
       NOT DEFINED ENV{CUDAHOSTCXX})
     message(FATAL_ERROR
       "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.13. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
+      ">= 19.14. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
       "Please upgrade to CUDA >= 10.0 or set the following environment "
       "variable to use another version (for example): \n"
       "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe\"\n")
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.13.26132\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   10.0)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
