@@ -256,10 +256,6 @@ else
   fi
 fi
 
-git clean --force
-git rm -r --cached .
-assert_git_not_dirty
-
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
