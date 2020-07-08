@@ -224,6 +224,7 @@ accuracy
   * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
 
 * ``torch.nn.intrinsic.qat`` — versions of layers for quantization-aware training:
+
   * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
   * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
   * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
@@ -232,6 +233,7 @@ accuracy
 * ``torch.nn.intrinsic.quantized`` — quantized version of fused layers for
   inference (no BatchNorm variants as it's usually folded into convolution for
   inference):
+
   * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU1d` — 1D Convolution + ReLU
   * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
@@ -271,10 +273,11 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.swap_module` — Swaps the module with its
     quantized counterpart (if quantizable and if it has an observer)
   * :func:`~torch.quantization.default_eval_fn` — Default evaluation function
-  used by the :func:`torch.quantization.quantize`
+    used by the :func:`torch.quantization.quantize`
   * :func:`~torch.quantization.fuse_modules`
 
 * Functions for graph mode quantization:
+
   * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
   * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
@@ -304,10 +307,13 @@ Layers for the quantization-aware training
     * :class:`~torch.quantization.DeQuantStub`
 
 * Observers for computing the quantization parameters
+
   * Default Observers. The rest of observers are available from
     ``torch.quantization.observer``:
+
     * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
     * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
+
   * :class:`~torch.quantization.Observer` — Abstract base class for observers
   * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
     parameters from the running minimum and maximum of the observed tensor inputs
@@ -332,8 +338,8 @@ Layers for the quantization-aware training
       quantization to ``float16``)
 
 * FakeQuantize module
-  * :class:`~torch.quantization.FakeQuantize` — Module for simulating the
-    quantization/dequantization at training time
+    * :class:`~torch.quantization.FakeQuantize` — Module for simulating the
+      quantization/dequantization at training time
 
 ``torch.nn.quantized``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -400,7 +406,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
-* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
+* :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilinear
   upsampler. Will be deprecated in favor of
 * :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_nearest` — Nearest neighbor
@@ -651,7 +657,7 @@ LinearReLU
 .. autoclass:: LinearReLU
     :members:
 
-torch.nn.instrinsic.qat
+torch.nn.intrinsic.qat
 --------------------------------
 
 This module implements the versions of those fused operations needed for
