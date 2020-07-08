@@ -963,7 +963,7 @@ class ConvTranspose3d(_ConvTransposeNd):
          It is up to the user to add proper padding.
 
     Note:
-        The :attr:`padding` argument effectively adds``dilation * (kernel_size - 1) - padding``
+        The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
