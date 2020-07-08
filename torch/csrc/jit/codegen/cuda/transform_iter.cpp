@@ -26,7 +26,7 @@ void ReplayTransformations::handle(Split* s) {
   // going to replay the split on
   auto it = id_map_.find(id_in);
   if (it == id_map_.end()) {
-    if (check_all_ops_run_) {
+    if (error_on_failure_) {
       TORCH_INTERNAL_ASSERT(
           false, "Transform traversal failed, dependencies not met.");
     } else {
@@ -67,18 +67,42 @@ void ReplayTransformations::handle(Merge* m) {
   // we're going to replay the merge on
   auto it_outer = id_map_.find(id_outer);
   auto it_inner = id_map_.find(id_inner);
-  if (it_outer == id_map_.end() || it_inner == id_map_.end()) {
-    if (check_all_ops_run_) {
-      TORCH_INTERNAL_ASSERT(
-          false, "Transform traversal failed, dependencies not met.");
-    } else {
-      return;
+
+  const bool outer_found = it_outer != id_map_.end();
+  const bool outer_bcast = id_outer->isBroadcast();
+  const bool inner_found = it_inner != id_map_.end();
+  const bool inner_bcast = id_inner->isBroadcast();
+
+  // If either are not found
+  if (!outer_found || !inner_found) {
+    // If both aren't found, it's a failure
+    // If outer is found && inner is bcast it is not a failure
+    // If inner is found && outer is bcast it is not a failure
+    if (!(outer_found || inner_found) || (outer_found && !inner_bcast) ||
+        (inner_found && !outer_bcast)) {
+      if (error_on_failure_) {
+        TORCH_INTERNAL_ASSERT(
+            false, "Transform traversal failed, dependencies not met.");
+      } else {
+        return;
+      }
     }
   }
 
+  // If we merge a broadcast dim with a non-broadcast dim, just remap the output
+  // to the non-broadcast dim.
+  if (inner_found && !outer_found && outer_bcast) {
+    id_map_[m->out()] = it_inner->second;
+    return;
+  }
+  if (outer_found && !inner_found && inner_bcast) {
+    id_map_[m->out()] = it_outer->second;
+    return;
+  }
+
   // Grab the IDs we're going to replay this merge on
-  auto id_outer_mapped = (*it_outer).second;
-  auto id_inner_mapped = (*it_inner).second;
+  const auto id_outer_mapped = it_outer->second;
+  const auto id_inner_mapped = it_inner->second;
 
   // Make sure these IDs are leaf IDs (meaning they have no uses we generated)
   TORCH_INTERNAL_ASSERT(
@@ -107,15 +131,15 @@ void ReplayTransformations::handle(Merge* m) {
 ReplayTransformations::ReplayTransformations(
     const std::vector<IterDomain*>& _target_domain,
     std::unordered_map<IterDomain*, IterDomain*> _id_map,
-    bool _check_all_ops_run)
+    bool _error_on_failure)
     : target_domain_(_target_domain),
       id_map_(std::move(_id_map)),
-      check_all_ops_run_(_check_all_ops_run) {
+      error_on_failure_(_error_on_failure) {
   // Make sure id_map has all the inputs needed to replay target_domain
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(target_domain_.begin(), target_domain_.end()));
 
-  if (check_all_ops_run_)
+  if (error_on_failure_)
     std::for_each(inps.begin(), inps.end(), [this](Val* val) {
       TORCH_INTERNAL_ASSERT(
           val->getValType().value() == ValType::IterDomain,
@@ -149,7 +173,7 @@ void ReplayTransformations::runReplay() {
       target_domain_.begin(), target_domain_.end());
   traverseFrom(traversal_vals[0]->fusion(), traversal_vals);
 
-  if (check_all_ops_run_)
+  if (error_on_failure_)
     TORCH_INTERNAL_ASSERT(
         leaf_ids_.size() >= target_domain_.size(),
         "Transform traversal failed, did not find enough output IterDomains.");
@@ -158,7 +182,7 @@ void ReplayTransformations::runReplay() {
   for (auto out : target_domain_) {
     auto it_replayed = id_map_.find(out);
     if (it_replayed == id_map_.end()) {
-      if (check_all_ops_run_) {
+      if (error_on_failure_) {
         TORCH_INTERNAL_ASSERT(
             false,
             "Transform traversal failed, could not find expected output.");
@@ -170,7 +194,9 @@ void ReplayTransformations::runReplay() {
     auto it_leaf = leaf_ids_.find(id_replayed);
     TORCH_INTERNAL_ASSERT(
         it_leaf != leaf_ids_.end(),
-        "Transform Traversal failed, expected matched output to be a leaf of the replay, but was not.");
+        "Transform Traversal failed, expected a replayed dim for ",
+        out,
+        " but one was not created.");
   }
 
   // Populate leaf_vec_ in a deterministic manner. This is deterministic
@@ -275,7 +301,7 @@ BestEffortReplay::BestEffortReplay(
       continue;
     }
 
-    if (t_expr->nOutputs() != r_expr->nOutputs()) {
+    if (t_expr->outputs().size() != r_expr->outputs().size()) {
       TORCH_INTERNAL_ASSERT(!has_rfactor, err_str);
       continue;
     }
@@ -318,7 +344,7 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Add outputs to map.
-    for (size_t i = 0; i < t_expr->nOutputs(); i++) {
+    for (size_t i = 0; i < t_expr->outputs().size(); i++) {
       auto t_out = t_expr->output(i);
       auto r_out = r_expr->output(i);
       if (t_out->getValType() == ValType::IterDomain &&
