@@ -56,7 +56,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -b remove_arches_5_0 -q https://github.com/seemethere/builder.git "$BUILDER_ROOT"
+retry git clone -b remove_arches_ptx -q https://github.com/seemethere/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
