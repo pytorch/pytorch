@@ -182,7 +182,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
     pybind11::gil_scoped_acquire gil;
     auto result = 0;
     if (in_exception_) {
-      // This (combined with PyErr_Restore below also works when no python
+      // This (combined with PyErr_Restore below) also works when no python
       // error has been set yet
       PyErr_Fetch(&type, &value, &traceback);
     }
