@@ -16,7 +16,8 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
-                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack,
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -2236,6 +2237,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
 
+    def test_view_dynamic(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view(other.shape)
+
+        x = torch.randn(2, 3, 4)
+        shape = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, shape))
+
+    def test_view_as(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view_as(other)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, y))
+
     def test_weight_norm(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
@@ -2687,6 +2706,26 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(12.)
         self.run_test(FullModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full_like(x, 4)
+
+        x = torch.tensor(12)
+        self.run_test(FullLikeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like_value(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x, y):
+                out = y + 2
+                return torch.full_like(x, out)
+
+        x = torch.tensor(12)
+        y = torch.tensor(2)
+        self.run_test(FullLikeModel(), (x, y))
+
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -2979,6 +3018,26 @@ class TestONNXRuntime(unittest.TestCase):
 
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
+
+    @skipIfUnsupportedMaxOpsetVersion(10)
+    def test_unsupported_pad(self):
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        def run():
+            x = torch.randn(2, 2, 4, 4)
+            y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+            p = Pad()
+            f = io.BytesIO()
+            torch.onnx._export(p, (x, y), f)
+
+        with self.assertRaises(RuntimeError) as cm:
+            run()
+
+        the_exception = cm.exception
+        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
+                         'Please try opset version 11.', the_exception.args[0])
 
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)

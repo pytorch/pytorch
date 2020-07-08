@@ -13,7 +13,20 @@
         DOCKER_BUILDKIT: 1
       steps:
         - checkout
-        - calculate_docker_image_tag
+        - run:
+            name: Calculate docker tag
+            command: |
+              set -x
+              mkdir .circleci/shared
+              # git keeps a hash of all sub trees
+              echo "export DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)" >> .circleci/shared/env_file
+        # Saves our calculated docker tag to our workpace for later use
+        - persist_to_workspace:
+            root: .
+            paths:
+              - .circleci/shared/
+        - load_shared_env:
+            root: .
         - run:
             name: Check if image should be built
             command: |
