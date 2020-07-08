@@ -145,7 +145,7 @@ std::tuple<Tensor, Tensor, Tensor> fake_quantize_learnable_per_tensor_affine_bac
 
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   fake_quant_grad_tensor_stub(
-    X.device().type(), dX, X, dY, scale, zero_point, quant_min, quant_max);
+    X.device().type(), dX, X, dY, scale_val, zero_point_val, quant_min, quant_max);
 
   auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   fake_quant_grad_learnable_sc_tensor_stub(
