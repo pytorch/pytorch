@@ -3331,7 +3331,9 @@ class TestAutograd(TestCase):
 
 
         # if the warnings don't throw, they will be handled as regular warnings
-        with self.assertRaisesRegex(RuntimeError, "one of the variables needed for gradient computation has been modified by an inplace operation"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
             with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     a = torch.randn(5, requires_grad=True)
@@ -3343,7 +3345,9 @@ class TestAutograd(TestCase):
         self.assertIn('Error detected in PowBackward0', str(w[1].message))
 
         # if the warning throws, it will be printed to sys.stderr
-        with self.assertRaisesRegex(RuntimeError, "one of the variables needed for gradient computation has been modified by an inplace operation"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 with detect_anomaly():
