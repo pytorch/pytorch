@@ -5901,7 +5901,7 @@ add_docstr(torch.nansum,
            r"""
 nansum(input, dtype=None) -> Tensor
 
-Return the sum of array elements over a given axis treating Not a Numbers (NaNs) as zero.
+Returns the sum of all elements treating Not a Numbers (NaNs) as zero.
 
 Args:
     {input}
