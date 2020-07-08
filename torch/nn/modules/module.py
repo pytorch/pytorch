@@ -203,6 +203,9 @@ class Module:
 
     training: bool
 
+    r"""Flag that shows if the module holds uninitialized parameters."""
+    _needs_initialization: bool = False
+
     def __init__(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
@@ -329,6 +332,9 @@ class Module:
         else:
             self._parameters[name] = param
 
+        if isinstance(param, _UninitializedParameter):
+            self._needs_initialization = True
+
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
 
@@ -373,8 +379,6 @@ class Module:
 
         for key, param in self._parameters.items():
             if param is not None:
-                if isinstance(param, _UninitializedParameter):
-                    raise ValueError('Can\'t apply a function to an uninitialized parameter {}'.format(key))
                 # Tensors stored in modules are graph leaves, and we don't want to
                 # track autograd history of `param_applied`, so we have to use
                 # `with torch.no_grad():`
@@ -399,8 +403,6 @@ class Module:
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
-            if isinstance(buf, _UninitializedBuffer):
-                raise ValueError('Can\'t apply a function to an uninitialized buffer {}'.format(key))
             if buf is not None:
                 self._buffers[key] = fn(buf)
 
@@ -724,6 +726,8 @@ class Module:
                 if not isinstance(result, tuple):
                     result = (result,)
                 input = result
+        if self._needs_initialization:
+            raise RuntimeError('Module {} has not been correctly initialized'.format(self._get_name()))
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -1112,9 +1116,9 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
+        if self.has_uninitialized_params():
+            raise ValueError('Can\'t retrieve an uninitialized parameter {}'.format(self._get_name()))
         for name, param in self.named_parameters(recurse=recurse):
-            if isinstance(param, _UninitializedParameter):
-                raise ValueError('Can\'t retrieve an uninitialized parameter {}'.format(name))
             yield param
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
@@ -1358,7 +1362,7 @@ class Module:
     def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())
 
-    def initialize_parameters(self, input):
+    def initialize_parameters(self, *args, **kwargs):
         r"""Initialize parameters according to the input batch properties.
 
         This adds an interface to isolate parameter initialization from the
@@ -1428,3 +1432,36 @@ class Module:
         replica._is_replica = True
 
         return replica
+
+    def has_uninitialized_params(self):
+        r"""Check if a module has parameters that hasn't been initialized
+        """
+        for name, param in self.named_parameters(recurse=False):
+            if isinstance(param, _UninitializedParameter):
+                return True
+        return False
+
+    def infer_parameters(self, *args, **kwargs):
+        r"""Infers the size and initializes the parameters according to the
+        provided input batch
+        """
+        def initialize_hook(module, input):
+            module.initialize_parameters(*input) 
+            module._needs_initialization = False
+            if module.has_uninitialized_params():
+                raise RuntimeError('module {} has not been fully initialized'.format(module._get_name()))
+
+        initialize_hooks = []
+
+        def set_hooks(module):
+            if module._needs_initialization:
+                hook = module.register_forward_pre_hook(initialize_hook)
+                initialize_hooks.append(hook)
+        previous_mode = self.training
+        self.train(False)
+        self.apply(set_hooks) 
+        self(*args, **kwargs)
+        # Delete the hooks
+        for hook in initialize_hooks:
+            hook.remove()
+        self.train(previous_mode)

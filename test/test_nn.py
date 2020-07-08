@@ -11556,16 +11556,16 @@ class TestLazyModules(TestCase):
         self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
         input = torch.ones(5, 5)
         module.initialize_parameters(input)
-        y = module(input)
         self.assertTrue(module.weight.shape == (10, 5))
+        y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
     def test_conv(self):
         def conv_check(module, input, shape, check_fn):
             self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
             module.initialize_parameters(input)
-            y = module(input)
             self.assertTrue(module.weight.shape == shape)
+            y = module(input)
             self.assertTrue(torch.equal(check_fn(input, module.weight, module.bias), y))
 
         module = nn.Conv1d(nn.parameter.ParameterMode.Infer, 4, 2)

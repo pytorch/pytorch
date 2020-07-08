@@ -120,8 +120,6 @@ class _ConvNd(Module):
             self.padding_mode = 'zeros'
 
     def initialize_parameters(self, input):
-        prev_mode = self.training
-        self.train(False)
         if self.in_channels is None:
             with torch.no_grad():
                 self.in_channels = input.shape[1]
@@ -133,7 +131,6 @@ class _ConvNd(Module):
                              *self.kernel_size)
                 self.weight = torch.nn.Parameter(self.weight.new_empty(*shape))
                 self.reset_parameters()
-        self.train(prev_mode)
 
 
 class Conv1d(_ConvNd):

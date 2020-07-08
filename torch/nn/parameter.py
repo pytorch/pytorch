@@ -55,6 +55,15 @@ class _UninitializedParameter(Parameter):
         data = torch.Tensor()
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
+    def materialize(self, shape, device=None, dtype=None):
+        r"""Given a shape, it materializes a parameter in the same device
+        as the current one"""
+        if device is None:
+            device = self.data.device
+        if dtype is None:
+            dtype = self.data.dtype
+        return Parameter(torch.empty(shape, device=device, dtype=dtype))
+
     def __repr__(self):
         return 'Uninitialized parameter'
 
