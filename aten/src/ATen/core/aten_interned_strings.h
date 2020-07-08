@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -159,6 +162,7 @@ _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
 _(aten, _unsafe_view) \
+_(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \
 _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \
@@ -258,6 +262,7 @@ _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
+_(aten, count_nonzero) \
 _(aten, cross) \
 _(aten, std_mean) \
 _(aten, var_mean) \
@@ -330,6 +335,8 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
@@ -727,6 +734,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

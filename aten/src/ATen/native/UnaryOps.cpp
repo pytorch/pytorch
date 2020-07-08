@@ -160,8 +160,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
-    return at::select(float_tensor, float_tensor.dim() - 1, 0);
+    auto real_tensor = at::view_as_real(self);
+    return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
   }
@@ -169,8 +169,8 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
-    return at::select(float_tensor, float_tensor.dim() - 1, 1);
+    auto real_tensor = at::view_as_real(self);
+    return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
@@ -275,6 +275,18 @@ Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
+Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acosh_stub); }
+Tensor acosh(const Tensor& self) { return unary_op_impl(self, at::acosh_out); }
+Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
+
+Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asinh_stub); }
+Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
+Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
+
+Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atanh_stub); }
+Tensor atanh(const Tensor& self) { return unary_op_impl(self, at::atanh_out); }
+Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
+
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
@@ -323,12 +335,12 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TensorIterator iter;
-  iter.dont_compute_common_dtype();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(result);
-  iter.add_input(self);
-  iter.build();
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self)
+    .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
 }
@@ -477,6 +489,9 @@ DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
+DEFINE_DISPATCH(acosh_stub);
+DEFINE_DISPATCH(asinh_stub);
+DEFINE_DISPATCH(atanh_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);

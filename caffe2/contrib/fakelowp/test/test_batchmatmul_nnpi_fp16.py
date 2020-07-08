@@ -13,7 +13,6 @@ from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 from hypothesis import given, settings
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -28,10 +27,9 @@ class TestBatchMatMul(serial.SerializedTestCase):
         rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
-        run_ints=st.booleans(),
-        **hu.gcs
+        run_ints=st.booleans()
     )
-    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints, gc, dc):
+    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
         C = 0  # TODO

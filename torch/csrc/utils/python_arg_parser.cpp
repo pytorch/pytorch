@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TracerMode.h>
 
 #include <sstream>
 #include <stdexcept>
@@ -472,7 +473,12 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
-      next_offset = offset + 1;
+      next_offset = offset+ 1;
+      // this 'if' happens for an empty parameter list, i.e. fn().
+      if (offset == last_offset) {
+        last_offset = next_offset;
+        break;
+      }
     } else {
       next_offset = offset + 2;
     }
@@ -480,7 +486,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       throw std::runtime_error("missing closing parenthesis: " + fmt);
     }
     if (offset == last_offset) {
-      break;
+      throw std::runtime_error("malformed signature: " + fmt);
     }
 
     auto param_str = fmt.substr(last_offset, offset - last_offset);
@@ -837,7 +843,8 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::AutoNonVariableTypeMode guard;
+  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);

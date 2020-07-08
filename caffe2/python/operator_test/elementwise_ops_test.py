@@ -142,7 +142,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(
         X=hu.tensor(
-            elements=st.floats(0.1, 10),
+            elements=hu.floats(0.1, 10),
             # allow empty tensor
             min_value=0),
         inplace=st.booleans(),
@@ -196,7 +196,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                 ensure_outputs_are_inferred=True,
             )
 
-    @given(X=hu.tensor(elements=st.floats(0.1, 10.0), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(0.1, 10.0), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
         op = core.CreateOperator(
@@ -267,7 +267,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             ensure_outputs_are_inferred=True,
         )
 
-    @given(X=hu.tensor(elements=st.floats(1.0, 10.0), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(1.0, 10.0), dtype=np.float32),
            in_place=st.booleans(), **hu.gcs)
     def test_cbrt_grad(self, X, in_place, gc, dc):
         op = core.CreateOperator(
@@ -283,6 +283,63 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [-X], 0, [0],
             ensure_outputs_are_inferred=True,
+        )
+
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+    def test_mish(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+        X = np.random.rand(n, m).astype(np.float32)
+
+        def mish(X):
+            return [X * np.tanh(np.log(1 + np.exp(X)))]
+
+        op = core.CreateOperator(
+            "Mish",
+            ["X"],
+            ["Z"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=mish,
+            ensure_outputs_are_inferred=True,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2,
+            ensure_outputs_are_inferred=True)
+
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+    def test_mish_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def mish(X):
+            return [X * np.tanh(np.log(1 + np.exp(X)))]
+
+        def mish_gradient(X, Y, dY):
+            w = np.exp(3 * X) + 4 * np.exp(2 * X) + (6 + 4 * X) * np.exp(X) + 4 * (1 + X)
+            sigma2 = np.square(np.square(np.exp(X) + 1) + 1)
+            return [dY * np.exp(X) * w / sigma2]
+            # return [dY * (Y + np.divide(1. - Y, 1. + np.exp(-X)))]
+
+        X = np.random.rand(n, m).astype(np.float32)
+        Y = mish(X)[0]
+        dY = np.random.rand(n, m).astype(np.float32)
+        op = core.CreateOperator(
+            "MishGradient",
+            ["X", "Y", "grad"],
+            "grad"
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, Y, dY],
+            reference=mish_gradient,
         )
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
@@ -689,7 +746,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
 
-    @given(X=hu.tensor(elements=st.floats(0.5, 2), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(0.5, 2), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_reciprocal(self, X, inplace, gc, dc):
         def reciprocal_op(X):

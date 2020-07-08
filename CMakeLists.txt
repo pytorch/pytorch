@@ -327,6 +327,14 @@ if(MSVC)
     endif()
   endforeach(flag_var)
 
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
@@ -379,7 +387,7 @@ endif()
 # When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  if(NOT BUILD_SHARED_LIBS)
+  if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_EXPORT")
   endif()
   set(BUILD_PYTHON OFF)
@@ -473,7 +481,7 @@ if(USE_PYTORCH_QNNPACK)
 endif()
 
 if(USE_XNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
 endif()
 
 if(USE_VULKAN)

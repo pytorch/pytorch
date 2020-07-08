@@ -1819,6 +1819,34 @@ void testSimplifyConstantCond() {
   }
 }
 
+void testSimplifyEliminateEmptyCond() {
+  KernelScope kernel_scope;
+  // If the branches are empty in different ways, eliminate.
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* true_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), true_val, nullptr);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* false_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), nullptr, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
 void testSimplifyEliminateZeroLengthFor() {
   KernelScope kernel_scope;
 

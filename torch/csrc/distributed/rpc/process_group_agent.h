@@ -93,6 +93,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   // put SendWork into a queue and notify the worker thread
   virtual void enqueueSend(SendWork work);
+  // Bypass handleSend() logic and send a message to self rank
+  virtual void sendToSelf(Message&& message);
 
  private:
   class MessageCounter {

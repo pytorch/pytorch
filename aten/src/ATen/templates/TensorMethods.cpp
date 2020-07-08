@@ -149,6 +149,10 @@ bool Tensor::is_quantized() const {
   return impl_->is_quantized();
 }
 
+bool Tensor::is_meta() const {
+  return impl_->is_meta();
+}
+
 bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
@@ -169,25 +173,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-template <>
-TORCH_API std::complex<float>* Tensor::data_ptr() const {
-  TORCH_CHECK(scalar_type() == ScalarType::ComplexFloat,
-    "expected scalar type ComplexFloat but found ",
-    c10::toString(scalar_type()));
-  return static_cast<std::complex<float>*>(this->unsafeGetTensorImpl()->data());
-}
-template <>
-TORCH_API std::complex<double>* Tensor::data_ptr() const {
-  TORCH_CHECK(scalar_type() == ScalarType::ComplexDouble,
-    "expected scalar type ComplexDouble but found ",
-    c10::toString(scalar_type()));
-  return static_cast<std::complex<double>*>(this->unsafeGetTensorImpl()->data());
-}
-// end TODO
-
 #define DEFINE_ITEM(T, name)      \
   template <>                     \
   TORCH_API T Tensor::item() const { \
@@ -196,20 +181,5 @@ TORCH_API std::complex<double>* Tensor::data_ptr() const {
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
-
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-template <>
-TORCH_API std::complex<float> Tensor::item() const {
-  // casting from c10::complex<float> to std::complex<float>
-  return static_cast<std::complex<float>>(item().toComplexFloat());
-}
-template <>
-TORCH_API std::complex<double> Tensor::item() const {
-  // casting from c10::complex<double> to std::complex<double>
-  return static_cast<std::complex<double>>(item().toComplexFloat());
-}
-// end TODO
 
 } //namespace at

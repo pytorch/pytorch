@@ -714,6 +714,32 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 #endif
 
 template <typename T>
+inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+  a = a + b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a - b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a / b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a % b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a * b;
+  return a;
+}
+
+template <typename T>
 inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
   return a * b + c;
 }

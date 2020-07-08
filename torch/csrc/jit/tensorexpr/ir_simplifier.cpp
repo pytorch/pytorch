@@ -1049,6 +1049,15 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
     return Stmt::clone(true_new);
   }
 
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
+  }
+
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }

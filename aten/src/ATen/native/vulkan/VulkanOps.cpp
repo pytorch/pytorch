@@ -176,7 +176,7 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
 }
 
 VBuffer bufferFromOptionalHostData(
-    c10::optional<float*> data,
+    c10::optional<const float*> data,
     const uint32_t size) {
   const auto sizeAligned =
       ROUND_UP(size, context().limits().minStorageBufferOffsetAlignment);
@@ -202,15 +202,15 @@ uint32_t conv2d_biasBufferSize(uint32_t oc) {
 void conv2d_depthwise(
     VulkanTensor& output,
     const VulkanTensor& input,
-    const float* weight,
-    const c10::optional<float*> bias,
-    const Conv2DParams params) {
+    const VulkanTensor& weight,
+    const VBuffer& biasBuffer,
+    const Conv2DParams& params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
   TORCH_INTERNAL_ASSERT(params.G == params.C);
   auto osizes = output.sizes();
   TORCH_INTERNAL_ASSERT(osizes[2] == params.OH);
   TORCH_INTERNAL_ASSERT(osizes[3] == params.OW);
-  auto biasBuffer =
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC));
   struct ConstBlock {
     int32_t padding[2];
     int32_t kernelSize[2];
@@ -218,17 +218,19 @@ void conv2d_depthwise(
     int32_t dilate[2];
     int32_t inputSize[4];
     int32_t outputSize[4];
+    float outputMin;
+    float outputMax;
   };
-  ConstBlock cb{{params.PX, params.PY},
-                {params.KW, params.KH},
-                {params.SX, params.SY},
-                {params.DX, params.DY},
-                {params.OW, params.OH, params.OC_4, 0},
-                {params.W, params.H, params.C_4, 0}};
+  ConstBlock cb{
+      {params.PX, params.PY},
+      {params.KW, params.KH},
+      {params.SX, params.SY},
+      {params.DX, params.DY},
+      {params.OW, params.OH, params.OC_4, 0},
+      {params.W, params.H, params.C_4, 0},
+      output_min ? *output_min : -std::numeric_limits<float>::infinity(),
+      output_max ? *output_max : std::numeric_limits<float>::infinity()};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
-
-  VulkanTensor kernel{{params.OC, params.KH, params.KW}};
-  kernel.set_data_from_host(weight);
 
   VkDescriptorSetLayout descriptorSetLayout{};
   VkDescriptorPool descriptorPool{};
@@ -249,20 +251,20 @@ void conv2d_depthwise(
 
   output.image()->bindStorageImage(descriptorSet, 0);
   input.image()->bindShaderRead(descriptorSet, 1);
-  kernel.image()->bindShaderRead(descriptorSet, 2);
+  weight.image()->bindShaderRead(descriptorSet, 2);
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   ComputeUnit computeUnit =
-      ComputeUnit{at::native::vulkan::GLSL_SPV(convDW_tex),
+      ComputeUnit{at::native::vulkan::GLSL_SPV(conv2d_dw_clamp),
                   descriptorSetLayout,
                   workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
   input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  kernel.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+  weight.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(
       params.OW, params.OH, params.OC_4, workGroupSize);
   computeUnit.endCommandBuffer();
@@ -270,6 +272,44 @@ void conv2d_depthwise(
 
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
+void conv2d_depthwise(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const VulkanTensor& weight,
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  conv2d_depthwise(
+      output,
+      input,
+      weight,
+      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      params,
+      output_min,
+      output_max);
+}
+
+void conv2d_depthwise(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const float* weight,
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  VulkanTensor weightTensor{{params.OC, params.KH, params.KW}};
+  weightTensor.set_data_from_host(weight);
+  conv2d_depthwise(
+      output,
+      input,
+      weightTensor,
+      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      params,
+      output_min,
+      output_max);
 }
 
 ImageSizes conv2d_prepack_weights_image_sizes(
@@ -372,7 +412,9 @@ void conv2d(
     const VulkanTensor& input,
     const VImage& kernelImage,
     const VBuffer& biasBuffer,
-    const Conv2DParams& params) {
+    const Conv2DParams& params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
   TORCH_INTERNAL_ASSERT(
       params.G == 1, "Prepacked kernel VImage for non-group conv2d only");
   auto osizes = output.sizes();
@@ -390,13 +432,21 @@ void conv2d(
     int32_t dilate[2];
     int32_t inputSize[4];
     int32_t outputSize[4];
+    float outputMin;
+    float outputMax;
   };
+  float outputMin =
+      output_min ? *output_min : -std::numeric_limits<float>::infinity();
+  float outputMax =
+      output_max ? *output_max : std::numeric_limits<float>::infinity();
   ConstBlock cb{{params.PX, params.PY},
                 {params.KW, params.KH},
                 {params.SX, params.SY},
                 {params.DX, params.DY},
                 {params.OW, params.OH, params.OC_4, params.OC},
-                {params.W, params.H, params.C_4, params.C}};
+                {params.W, params.H, params.C_4, params.C},
+                outputMin,
+                outputMax};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   auto device = context().device();
@@ -423,7 +473,7 @@ void conv2d(
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{1, 1, params.OC_4};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(conv_tex_IKnc4hw),
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(conv2d_nogroup_clamp),
                           descriptorSetLayout,
                           workGroupSize};
   computeUnit.createCommandBuffer(descriptorSet);
@@ -446,8 +496,10 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VImage& kernelImage,
-    const c10::optional<float*> bias,
-    const Conv2DParams& params) {
+    const c10::optional<const float*> bias,
+    const Conv2DParams& params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
   TORCH_INTERNAL_ASSERT(
       params.G == 1, "Prepacked kernel VImage for non-group conv2d only");
   conv2d(
@@ -455,16 +507,39 @@ void conv2d(
       input,
       kernelImage,
       bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
-      params);
+      params,
+      output_min,
+      output_max);
 }
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
-    c10::optional<float*> bias,
-    const Conv2DParams params) {
-  conv2d(output, input, *(weight_prepacked.image()), bias, params);
+    c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  if (params.G > 1) {
+    conv2d_depthwise(
+        output,
+        input,
+        weight_prepacked,
+        bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+        params,
+        output_min,
+        output_max);
+    return;
+  }
+
+  conv2d(
+      output,
+      input,
+      *(weight_prepacked.image()),
+      bias,
+      params,
+      output_min,
+      output_max);
 }
 
 void conv2d(
@@ -472,21 +547,45 @@ void conv2d(
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
     const VulkanTensor& bias,
-    const Conv2DParams params) {
-  conv2d(output, input, *(weight_prepacked.image()), *(bias.buffer()), params);
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  if (params.G > 1) {
+    conv2d_depthwise(
+        output,
+        input,
+        weight_prepacked,
+        *(bias.buffer()),
+        params,
+        output_min,
+        output_max);
+    return;
+  }
+
+  conv2d(
+      output,
+      input,
+      *(weight_prepacked.image()),
+      *(bias.buffer()),
+      params,
+      output_min,
+      output_max);
 }
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
-    const c10::optional<float*> bias,
-    const Conv2DParams params) {
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
   if (params.G > 1) {
     TORCH_INTERNAL_ASSERT(
         params.G == params.C,
         "Vulkan conv2d supports only no-group and depthwise");
-    conv2d_depthwise(output, input, weight, bias, params);
+    conv2d_depthwise(
+        output, input, weight, bias, params, output_min, output_max);
     return;
   }
 
@@ -496,7 +595,9 @@ void conv2d(
       conv2d_prepack_weights_image(
           weight, params.OC, params.C, params.KH, params.KW),
       bias,
-      params);
+      params,
+      output_min,
+      output_max);
 }
 
 void clamp(

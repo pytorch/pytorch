@@ -825,6 +825,11 @@ class THCCachingAllocator {
 
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && device < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;

@@ -2,6 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
+#include <torch/custom_class.h>
 
 namespace at {
 namespace native {

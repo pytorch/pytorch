@@ -76,23 +76,13 @@ void div_kernel(TensorIterator& iter) {
         return a / b;
       });
     });
-  } else if (isComplexType(iter.dtype())) {
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
-        cpu_kernel_vec(iter,
-          [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-             return a / b;
-          },
-          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-            return a / b;
-          });
-      });
-    } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
       cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-           return a / b;
+        [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return a / b;
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
           return a / b;
         });
     });
@@ -294,7 +284,7 @@ void rshift_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return static_cast<std::make_unsigned_t<scalar_t>>(a) >> b;
+          return a >> b;
       });
     });
   }
@@ -522,31 +512,17 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  if (isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-      auto one_vec = Vec256<scalar_t>(scalar_t{1, 0});
-      cpu_kernel_vec(
-          iter,
-          [=](scalar_t a, scalar_t b) -> scalar_t {
-            return a * (scalar_t{1, 0} - b * b);
-          },
-          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-            return a * (one_vec - b * b);
-          });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-      auto one_vec = Vec256<scalar_t>(scalar_t{1});
-      cpu_kernel_vec(
-          iter,
-          [=](scalar_t a, scalar_t b) -> scalar_t {
-            return a * (scalar_t{1} - b * b);
-          },
-          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-            return a * (one_vec - b * b);
-          });
-    });
-  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+    auto one_vec = Vec256<scalar_t>(scalar_t{1});
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        return a * (scalar_t{1} - b * b);
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a * (one_vec - b * b);
+      });
+  });
 }
 
 void mse_kernel(TensorIterator& iter) {

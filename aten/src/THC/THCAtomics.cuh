@@ -1,7 +1,7 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <THC/THC.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>

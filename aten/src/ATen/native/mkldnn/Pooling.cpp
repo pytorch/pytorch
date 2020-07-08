@@ -76,6 +76,7 @@ static Tensor _mkldnn_pool2d(
     bool ceil_mode,
     ideep::algorithm algo) {
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", 2);
+  if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", 2);
   auto padding_vec = expand_param_if_needed(padding, "padding", 2);
   auto padding_vec_l = padding_vec;
