@@ -14,7 +14,6 @@
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 namespace {
