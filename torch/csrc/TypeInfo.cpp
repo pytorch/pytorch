@@ -63,10 +63,10 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
     AT_ASSERT(at::isFloatingType(scalar_type));
   } else {
     scalar_type = r.scalartype(0);
-    if (!at::isFloatingType(scalar_type)) {
+    if (!at::isFloatingType(scalar_type) and !at::isComplexType(scalar_type)) {
       return PyErr_Format(
           PyExc_TypeError,
-          "torch.finfo() requires a floating point input type. Use torch.iinfo to handle '%s'",
+          "torch.finfo() requires a floating point or complex input type. Use torch.iinfo to handle '%s'",
           type->tp_name);
     }
   }
@@ -118,7 +118,15 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
-  int bits = elementSize(self->type) * 8;
+  unsigned int bits;
+  const unsigned int BITS_FLOAT_MULTIPLIER = 4;
+  const unsigned int BITS_COMPLEX_MULTIPLIER = 8;
+  if (at::isComplexType(self->type)) {
+    bits = elementSize(self->type) * BITS_FLOAT_MULTIPLIER;
+  }
+  else {
+    bits = elementSize(self->type) * BITS_COMPLEX_MULTIPLIER;
+  }
   return THPUtils_packInt64(bits);
 }
 
