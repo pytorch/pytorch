@@ -1,6 +1,5 @@
-#include <ATen/ATen.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-
+#include <ATen/ATen.h>
 
 namespace torch {
 namespace jit {
@@ -149,8 +148,11 @@ void dequantize(Stack& stack) {
     }
     push(stack, std::move(output_list));
   } else {
-    TORCH_CHECK(false, "Unsupported type in dequantize, only List[Tensor] and \
- Tuple[Tensor or other types] are supported, got type:", toString(iv.type()));
+    TORCH_CHECK(
+        false,
+        "Unsupported type in dequantize, only List[Tensor] and \
+ Tuple[Tensor or other types] are supported, got type:",
+        toString(iv.type()));
   }
 }
 

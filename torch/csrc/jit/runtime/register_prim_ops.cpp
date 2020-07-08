@@ -424,9 +424,10 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
-     Operator("aten::dequantize.any(Any tensors) -> Any",
-              [](Stack* stack) { dequantize(*stack); },
-              aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dequantize.any(Any tensors) -> Any",
+         [](Stack* stack) { dequantize(*stack); },
+         aliasAnalysisFromSchema()),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),

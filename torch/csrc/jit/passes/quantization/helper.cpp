@@ -307,8 +307,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     } else {
       return {};
     }
-  } else if (n->kind() == prim::ListConstruct &&
-             v->type()->isSubtypeOf(ListType::ofTensors())) {
+  } else if (
+      n->kind() == prim::ListConstruct &&
+      v->type()->isSubtypeOf(ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
