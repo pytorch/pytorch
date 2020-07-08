@@ -2109,6 +2109,52 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
+void fake_quantize_learnable_sc_grad_channel_kernel(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  // TODO: Implement the vectorized version for the learnable backprop kernel on zero point.
+  cpu_kernel(
+    iter, [=](float x, float dy, float scale, float zero_point) -> float {
+        float zero_point_clamped = std::min(std::max(zero_point, quant_min), quant_max);
+        int64_t zero_point_val = static_cast<int64_t>(zero_point_clamped);
+        float inv_scale = 1.0f / scale;
+
+        float grad_small = quant_min - zero_point_val;
+        float grad_big = quant_max - zero_point_val;
+
+        int64_t xq = static_cast<int64_t>(zero_point_val + std::nearbyint(x * inv_scale));
+        xq = std::min(std::max(xq, quant_min), quant_max);
+        if (xq == quant_max) {
+          return dy * grad_small;
+        } else if (xq == quant_min) {
+          return dy * grad_big;
+        }
+        float x_fq = static_cast<float>((xq - zero_point_val) * scale);
+        return dy * (x_fq - x) * inv_scale;
+    });
+}
+
+void fake_quantize_learnable_z_point_grad_channel_kernel(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  // TODO: Implement the vectorized version for the learnable backprop kernel on scale.
+  cpu_kernel(
+    iter, [=](float x, float dy, float scale, float zero_point) -> float {
+        float zero_point_clamped = std::min(std::max(zero_point, quant_min), quant_max);
+        int64_t zero_point_val = static_cast<int64_t>(zero_point_clamped);
+        float inv_scale = 1.0f / scale;
+
+        int64_t xq = static_cast<int64_t>(zero_point_val + std::nearbyint(x * inv_scale));
+        xq = std::min(std::max(xq, quant_max), quant_min);
+        if (xq == quant_min || xq == quant_max) {
+          return dy * (-1) * scale;
+        }
+        return 0;
+    });
+}
+
 // Assumes X is composed of M groups of N elements. Normalizes each of the
 // groups and optionally applies affine scaling. Useful for LayerNorm,
 // GroupNorm, InstanceNorm.
@@ -2571,6 +2617,8 @@ REGISTER_DISPATCH(fake_quant_grad_learnable_sc_tensor_stub, &fake_quantize_learn
 REGISTER_DISPATCH(fake_quant_grad_learnable_z_point_tensor_stub, &fake_quantize_learnable_z_point_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_sc_channel_stub, &fake_quantize_learnable_sc_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_z_point_channel_stub, &fake_quantize_learnable_z_point_grad_channel_kernel);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
