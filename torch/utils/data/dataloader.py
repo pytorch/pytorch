@@ -93,6 +93,9 @@ class DataLoader(Generic[T_co]):
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
+        prefetch_factor (int, optional): multiply factor to affect how many samples
+            will be prefethed. ``2`` means there will be ``2 * num_workers`` get
+            prefetched. (default: ``2``)
         collate_fn (callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
@@ -140,6 +143,7 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
+    prefetch_factor: int
     sampler: Sampler
 
     __initialized = False
@@ -147,9 +151,10 @@ class DataLoader(Generic[T_co]):
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
-                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
-                 pin_memory: bool = False, drop_last: bool = False,
-                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 num_workers: int = 0, prefetch_factor: int = 2, 
+                 collate_fn: _collate_fn_t = None, pin_memory: bool = False, 
+                 drop_last: bool = False, timeout: float = 0, 
+                 worker_init_fn: _worker_init_fn_t = None,
                  multiprocessing_context=None, generator=None):
         torch._C._log_api_usage_once("python.data_loader")  # type: ignore
 
@@ -162,6 +167,7 @@ class DataLoader(Generic[T_co]):
 
         self.dataset = dataset
         self.num_workers = num_workers
+        self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
@@ -368,6 +374,7 @@ class _BaseDataLoaderIter(object):
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
+        self._prefetch_factor = loader.prefetch_factor
         self._pin_memory = loader.pin_memory and torch.cuda.is_available()
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
@@ -716,6 +723,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         super(_MultiProcessingDataLoaderIter, self).__init__(loader)
 
         assert self._num_workers > 0
+        assert self._prefetch_factor > 0
 
         if loader.multiprocessing_context is None:
             multiprocessing_context = multiprocessing
@@ -789,7 +797,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._worker_pids_set = True
 
         # prime the prefetch loop
-        for _ in range(2 * self._num_workers):
+        for _ in range(self._prefetch_factor * self._num_workers):
             self._try_put_index()
 
     def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
