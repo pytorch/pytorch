@@ -589,6 +589,14 @@ void listSetItem(Stack* stack);
         push(stack, op);                        \
       },                                        \
       aliasAnalysisFromSchema())
-
+#define DEFINE_STRING_OP(op_name, string_op, result) \
+  Operator(                                          \
+      #op_name ".str(str a, str b) ->" #result,      \
+      [](Stack* stack) {                             \
+        auto b = pop(stack).toStringRef();           \
+        auto a = pop(stack).toStringRef();           \
+        push(stack, string_op);                      \
+      },                                             \
+      aliasAnalysisFromSchema())
 } // namespace jit
 } // namespace torch
