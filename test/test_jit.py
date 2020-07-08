@@ -10412,6 +10412,15 @@ a")
         FileCheck().check_not("aten::dropout").run(str(m.graph))
         torch.testing.assert_allclose(ref_res, res, rtol=1e-2, atol=1e-3)
 
+    def test_unfold_zero_dim(self):
+        def fn(x):
+            return x.unfold(0, 1, 1)
+
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.tensor(0.39),), False)
+        out_dims = fn(torch.tensor(0.3923)).ndim
+        self.assertEqual(graph.findNode("aten::unfold").output().type().dim(), out_dims)
+
     def test_mm_batching(self):
 
         with enable_profiling_mode_for_profiling_tests():
