@@ -2876,7 +2876,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, default_eval_fn, self.img_data_2d)
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
         model_script = torch.jit.script(conv_model)
@@ -2885,7 +2885,7 @@ class TestQuantizeJit(QuantizationTestCase):
             model_quantized = quantize_jit(
                 model_under_test,
                 qconfig_dict,
-                default_eval_fn,
+                test_only_eval_fn,
                 [self.img_data_2d],
                 inplace=False)
             self.assertEqual(model_quantized(self.img_data_2d[0][0]), result_eager)
@@ -2902,7 +2902,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # compare the result of the two quantized models later
         conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
         fuse_modules(conv_model, ['conv', 'bn'], inplace=True)
-        model_eager = quantize(conv_model, default_eval_fn,
+        model_eager = quantize(conv_model, test_only_eval_fn,
                                self.img_data_2d)
         qconfig_dict = {
             '': default_qconfig
@@ -2910,7 +2910,7 @@ class TestQuantizeJit(QuantizationTestCase):
         model_script = quantize_jit(
             torch.jit.script(conv_model_to_script),
             qconfig_dict,
-            default_eval_fn,
+            test_only_eval_fn,
             [self.img_data_2d],
             inplace=False)
         result_eager = model_eager(self.img_data_2d[0][0])
