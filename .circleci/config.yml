@@ -525,6 +525,7 @@ jobs:
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
+            echo "COMMIT_DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             time docker push ${COMMIT_DOCKER_IMAGE}
           fi
