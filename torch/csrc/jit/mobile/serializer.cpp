@@ -57,7 +57,6 @@ class ScriptModuleSerializer {
   void serialize(
       const torch::jit::mobile::Module& module,
       bool bytecode_format) {
-    C10_LOG_API_USAGE_ONCE("torch.script.save");
     // Serialize the model object
 
     writeArchive("data", IValue(module.object_));
