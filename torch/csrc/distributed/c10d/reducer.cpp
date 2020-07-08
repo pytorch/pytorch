@@ -953,10 +953,22 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->process_future(bucket.future_work->value());
 
-      // TODO(@sinannasir): Put future_result to bucket_view to avoid the
-      // inefficiency caused by double copying.
+      // Reinitialize bucket_views with the future_result by following
+      // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
-        bucket.replicas[i].contents.copy_(future_result[i]);
+        bucket.replicas[i].bucket_views.clear();
+        for (size_t j = 0; j < bucket.replicas[i].variables.size(); j++) {
+          const auto& v = bucket.replicas[i].variables[j];
+          const auto offset = bucket.replicas[i].offsets[j];
+          const auto length = bucket.replicas[i].lengths[j];
+          if (v.is_non_overlapping_and_dense()) {
+            bucket.replicas[i].bucket_views.push_back(
+                future_result[i].as_strided(v.sizes(), v.strides(), offset));
+          } else {
+            bucket.replicas[i].bucket_views.push_back(
+                future_result[i].narrow(0, offset, length).view(v.sizes()));
+          }
+        }
       }
     }
     if (!bucket.expect_sparse_gradient) {
