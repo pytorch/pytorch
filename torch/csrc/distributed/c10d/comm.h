@@ -18,7 +18,6 @@ class GradBucket {
  public:
   explicit GradBucket(std::vector<at::Tensor>& tensors);
   std::vector<at::Tensor> get_tensors();
-  void set_tensors(std::vector<at::Tensor>& tensors);
 
  private:
   std::vector<at::Tensor> tensors_;
@@ -28,6 +27,7 @@ struct CommHookInterface {
  public:
   virtual c10::intrusive_ptr<torch::jit::Future> operate(
       const GradBucket& bucket) = 0;
+  virtual std::vector<at::Tensor> process_future(c10::IValue future_value) = 0;
 };
 
 class TORCH_API PythonCommHook : public CommHookInterface {
@@ -36,6 +36,7 @@ class TORCH_API PythonCommHook : public CommHookInterface {
 
   c10::intrusive_ptr<torch::jit::Future> operate(
       const GradBucket& bucket) override;
+  std::vector<at::Tensor> process_future(c10::IValue future_value) override;
 
  private:
   py::object state_;

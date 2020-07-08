@@ -527,19 +527,16 @@ RegisterOperators reg(
              // Make an exception for the case in which the annotated type is
              // float and the Tensor data type is also float; the elements will
              // be casted to double later.
-             auto scalarTypeForJitType = tryScalarTypeFromJitType(out_ty);
-             if (scalarTypeForJitType != at::ScalarType::Double ||
-                 t.scalar_type() != at::ScalarType::Float) {
-               TORCH_CHECK(
-                   tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                   "Output annotation element type and runtime tensor element type must match for tolist()")
-             }
+             TORCH_CHECK(
+                 (out_ty == FloatType::get() && t.is_floating_point()) ||
+                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                 "Output annotation element type and runtime tensor element type must match for tolist()");
 
              // Check that the dimension of the Tensor matches that of the
              // annotation.
              TORCH_CHECK(
                  dim_val == t.dim(),
-                 "Output annotation list dimension and runtime tensor dimension must match for tolist()")
+                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
              // Wrap out_ty in a ListType dim times.
              for (int i = 0; i < dim_val; ++i) {

@@ -86,10 +86,6 @@ std::vector<at::Tensor> GradBucket::get_tensors() {
   return tensors_;
 };
 
-void GradBucket::set_tensors(std::vector<at::Tensor>& tensors) {
-  tensors_ = tensors;
-}
-
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::operate(
@@ -101,4 +97,12 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::operate(
       .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()
       ->fut;
 };
+std::vector<at::Tensor> PythonCommHook::process_future(
+    c10::IValue future_value) {
+  py::object obj =
+      py::reinterpret_borrow<py::object>(future_value.toPyObject());
+  auto value =
+      torch::jit::toIValue(obj, c10::ListType::create(c10::TensorType::get()));
+  return value.toTensorVector();
+}
 } // namespace c10d

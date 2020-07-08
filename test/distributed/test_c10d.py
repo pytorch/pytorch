@@ -2113,20 +2113,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus[:2]
         model = DoubleGpuNet(gpus)
 
-        with self.assertRaisesRegex(AssertionError, "output_device .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "output_device .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "only works with CUDA devices"):
+        with self.assertRaisesRegex(AssertionError, "input module must be on the same type of devices"):
             model.fc1 = model.fc1.cpu()
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
@@ -3003,40 +3003,120 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def forward(self, x, rank):
                 return self.t0(x + rank)
 
-        def run_and_verify_grad(model):
-            # Run forward
-            output = model(8, self.rank)
-
-            # # The grads of all parameters should be None at this point.
-            [self.assertIsNone(p.grad) for p in model.parameters()]
-
-            # Run backward
-            output.mean().backward()
-
-            # # # Now locally unused parameter should have grad updated on all ranks.
-            [self.assertEqual(p.grad, torch.ones(2, 2)) for p in model.parameters()]
-
-        def simple_hook(state, bucket):
+        def simple_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
             fut = torch.futures.Future()
-            fut.set_result([torch.ones(4)])
+            fut_result = []
+            # Outside then callback, set the result to all zeros.
+            fut.set_result([torch.zeros_like(t) for t in bucket.get_tensors()])
 
             def fut_then(fut):
-                # bucket.set_tensors(fut.wait())
-                for bt, ft in zip(bucket.get_tensors(), fut.wait()):
-                    bt.copy_(ft)
+                # Return all ones, something different from what fut has at its result.
+                return [torch.ones_like(t) for t in bucket.get_tensors()]
+
             return fut.then(fut_then)
 
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         # Test on CPU
-        cpu_model = DistributedDataParallel(
+        model = DistributedDataParallel(
             test_ddp_comm_hook().cpu(),
             process_group=process_group
         )
-        cpu_model.reducer.register_comm_hook(None, simple_hook)
-        run_and_verify_grad(cpu_model)
+        # Register DDP Communication Hook
+        model.register_comm_hook(None, simple_hook)
 
+        # Run forward
+        output = model(8, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook expected result would be 0.25 * torch.ones(2, 2).
+        [self.assertEqual(p.grad, torch.ones(2, 2)) for p in model.parameters()]
+
+    @requires_gloo()
+    def test_ddp_comm_hook_funtion_checks(self):
+        """
+        This unit test makes sure that register_comm_hook properly checks the format
+        of hook defined by user. The Python hook must be callable and defined with
+        annotations. This test also checks whether type of annotations checked properly.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            torch.nn.Linear(10, 5),
+            process_group=process_group
+        )
+
+        try:
+            got_exception = False
+            model.register_comm_hook(state=None, hook=1)
+        except Exception as e:
+            if "Communication hook must be callable." in str(e):
+                got_exception = True
+            else:
+                raise e
+        if not got_exception:
+            raise Exception('Communication hook callable check is missing.')
+
+        try:
+            got_exception = False
+
+            def comm_hook(state: object, bucket) -> torch.futures.Future:
+                return torch.futures.Future()
+            model.register_comm_hook(state=None, hook=comm_hook)
+        except Exception as e:
+            if "Communication hook is missing annotations." in str(e):
+                got_exception = True
+            else:
+                raise e
+        if not got_exception:
+            raise Exception('Communication hook annotation check is missing.')
+
+        try:
+            got_exception = False
+
+            def comm_hook(state: int, bucket: dist.GradBucket) -> torch.futures.Future:
+                return torch.futures.Future()
+            model.register_comm_hook(state=None, hook=comm_hook)
+        except Exception as e:
+            if "Communication hook: state annotation is not object." in str(e):
+                got_exception = True
+            else:
+                raise e
+        if not got_exception:
+            raise Exception('Communication hook object type check is missing.')
+
+        try:
+            got_exception = False
+
+            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+                return torch.futures.Future()
+            model.register_comm_hook(state=None, hook=comm_hook)
+        except Exception as e:
+            if "Communication hook: bucket annotation is not dist.GradBucket." in str(e):
+                got_exception = True
+            else:
+                raise e
+        if not got_exception:
+            raise Exception('Communication hook bucket type check is missing.')
+
+        try:
+            got_exception = False
+
+            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
+                return torch.futures.Future()
+            model.register_comm_hook(state=None, hook=comm_hook)
+        except Exception as e:
+            if "Communication hook: return annotation is not torch.futures.Future." in str(e):
+                got_exception = True
+            else:
+                raise e
+        if not got_exception:
+            raise Exception('Communication hook return type check is missing.')
 
 class ReducerModule(nn.Module):
     def __init__(self):
@@ -3193,21 +3273,8 @@ class ReducerTest(TestCase):
                 return
             else:
                 raise e
+        raise Exception('Communication hook multiple register check is missing in reducer.')
 
-    def test_ddp_comm_hook_callable(self):
-        """
-        The Python hook must be callable. This unit test checks whether this condition
-        is properly checked inside reducer.
-        """
-        model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
-        try:
-            reducer.register_comm_hook(state=None, hook=1)
-        except Exception as e:
-            if "comm_hook must be callable" in str(e):
-                return
-            else:
-                raise e
 
 
 class ComputeBucketAssignmentTest(TestCase):

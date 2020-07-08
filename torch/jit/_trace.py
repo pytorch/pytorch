@@ -638,7 +638,7 @@ def trace(
             single Tensor in which case it is automatically wrapped in a tuple.
 
     Keyword arguments:
-        check_trace (bool, optional): Check if the same inputs run through
+        check_trace (``bool``, optional): Check if the same inputs run through
             traced code produce the same outputs. Default: ``True``. You might want
             to disable this if, for example, your network contains non-
             deterministic ops or if you are sure that the network is correct despite
@@ -655,7 +655,7 @@ def trace(
             to use in the checker procedure.  This can be used to relax the
             checker strictness in the event that results diverge numerically
             for a known reason, such as operator fusion.
-        strict (bool, optional): run the tracer in a strict mode or not
+        strict (``bool``, optional): run the tracer in a strict mode or not
             (default: ``True``). Only turn this off when you want the tracer to
             record your mutable container types (currently ``list``/``dict``)
             and you are sure that the containuer you are using in your

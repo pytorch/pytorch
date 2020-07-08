@@ -1,10 +1,11 @@
 from contextlib import contextmanager
 import copy
 import itertools
+import inspect
 
 import torch
 
-import torch.cuda.comm
+from . import comm
 import torch.distributed as dist
 
 if dist.is_available():
@@ -14,7 +15,7 @@ from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather
 from .parallel_apply import parallel_apply
-from torch.cuda._utils import _get_device_index
+from torch._utils import _get_device_index, _get_all_device_indices
 
 
 def _find_tensors(obj):
@@ -268,21 +269,26 @@ class DistributedDataParallel(Module):
         )
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
-        self.is_cuda = all([p.device.type == 'cuda' for p in module.parameters()])
+        distinct_device_types = {p.device.type for p in module.parameters()}
+        assert len(distinct_device_types) == 1, (
+            "DistributedDataParallel's input module must be on "
+            "the same type of devices, but input module parameters locate in {}."
+        ).format(distinct_device_types)
+        self.device_type = list(distinct_device_types)[0]
 
-        if not self.is_cuda or self.is_multi_device_module:
+        if self.device_type == "cpu" or self.is_multi_device_module:
             assert not device_ids and not output_device, (
                 "DistributedDataParallel device_ids and output_device arguments "
-                "only work with single-device CUDA modules, but got "
+                "only work with single-device GPU modules, but got "
                 "device_ids {}, output_device {}, and module parameters {}."
             ).format(device_ids, output_device, {p.device for p in module.parameters()})
 
             self.device_ids = None
             self.output_device = None
         else:
-            # Use all devices by default for single-device CUDA modules
+            # Use all devices by default for single-device GPU modules
             if device_ids is None:
-                device_ids = list(range(torch.cuda.device_count()))
+                device_ids = _get_all_device_indices()
 
             self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
 
@@ -290,12 +296,6 @@ class DistributedDataParallel(Module):
                 output_device = device_ids[0]
 
             self.output_device = _get_device_index(output_device, True)
-
-        if self.is_multi_device_module:
-            assert self.is_cuda, (
-                "DistributedDataParallel with multi-device module only works "
-                "with CUDA devices, but module parameters locate in {}."
-            ).format({p.device for p in module.parameters()})
 
         if process_group is None:
             self.process_group = _get_default_group()
@@ -542,6 +542,12 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
+    # Communication hook is an enhancement that provides a hook which can be
+    # used to implement various Gradient Compression algorithms.
+    def register_comm_hook(self, state: object, hook: callable):
+        self._check_comm_hook(hook)
+        self.reducer.register_comm_hook(state, hook)
+
     def _distributed_broadcast_coalesced(self, tensors, buffer_size):
         dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
 
@@ -551,7 +557,7 @@ class DistributedDataParallel(Module):
             # CUDA modules
             if self.device_ids and len(self.device_ids) > 1:
                 # intra-node parameter sync
-                result = torch.cuda.comm.broadcast_coalesced(
+                result = comm.broadcast_coalesced(
                     self.modules_params[0],
                     self.device_ids,
                     self.broadcast_bucket_size)
@@ -584,7 +590,7 @@ class DistributedDataParallel(Module):
                 # CUDA modules
                 if self.device_ids and len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = torch.cuda.comm.broadcast_coalesced(
+                    result = comm.broadcast_coalesced(
                         self.modules_buffers[0],
                         self.device_ids,
                         self.broadcast_bucket_size)
@@ -597,6 +603,25 @@ class DistributedDataParallel(Module):
         for dev_idx, module in enumerate(module_copies):
             for layer in module.modules():
                 if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                    assert self.is_cuda, "SyncBatchNorm layers only work with CUDA modules"
+                    assert self.device_type != 'cpu', "SyncBatchNorm layers only work with GPU modules"
                     layer._specify_ddp_gpu_num(
                         len(self.device_ids) if self.device_ids else 1)
+
+    def _check_comm_hook(self, hook):
+        assert callable(hook), "Communication hook must be callable."
+
+        sig = inspect.signature(hook)
+        assert (sig.parameters['state'].annotation != inspect._empty and
+                sig.parameters['bucket'].annotation != inspect._empty and
+                sig.return_annotation != inspect._empty), (
+                    "Communication hook is missing annotations."
+        )
+        assert sig.parameters['state'].annotation == object, (
+            "Communication hook: state annotation is not object."
+        )
+        assert sig.parameters['bucket'].annotation == dist.GradBucket, (
+            "Communication hook: bucket annotation is not dist.GradBucket."
+        )
+        assert sig.return_annotation == torch.futures.Future, (
+            "Communication hook: return annotation is not torch.futures.Future."
+        )

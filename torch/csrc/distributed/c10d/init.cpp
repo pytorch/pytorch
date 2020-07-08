@@ -120,11 +120,6 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(
           "get_tensors",
           &::c10d::GradBucket::get_tensors,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "set_tensors",
-          &::c10d::GradBucket::set_tensors,
-          py::arg("tensors"),
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")

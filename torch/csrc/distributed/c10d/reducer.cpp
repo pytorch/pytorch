@@ -173,6 +173,17 @@ Reducer::Reducer(
 // Therefore, we can avoid allocating memory for local_used_maps and
 // local_used_maps_dev_ if find_unused_parameters_ is false.
 
+// Note [DDP Communication Hook]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// If DDP communication hook is not registered, the reducer reduces the buckets
+// by just calling allreduce. If registered, it calls the hook and uses future
+// work handle.
+// DDP communication hook is an enhancement that provides a hook which can be
+// used to implement various Gradient Compression algorithms. This hook can be
+// registered from Python API using `register_comm_hook`. `PythonCommHook` is a
+// sub class of `CommHookInterface` to enable `CppCommHook` registration in the
+// future.
+
 Reducer::~Reducer() noexcept(false) {
   // Remove all hooks on variables registered by this Reducer. This is necessary
   // to make DDP failure recoverable. Otherwise, multiple Reducer instances
@@ -578,6 +589,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       //
       tensors.push_back(replica.contents);
     }
+    // See Note [DDP Communication Hook]
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
@@ -931,12 +943,22 @@ void Reducer::finalize_backward() {
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
+    // See Note [DDP Communication Hook]
     if (comm_hook_ == nullptr) {
       TORCH_INTERNAL_ASSERT(bucket.work);
       bucket.work->wait();
     } else {
       TORCH_INTERNAL_ASSERT(bucket.future_work);
       bucket.future_work->wait();
+
+      auto future_result =
+          comm_hook_->process_future(bucket.future_work->value());
+
+      // TODO(@sinannasir): Put future_result to bucket_view to avoid the
+      // inefficiency caused by double copying.
+      for (size_t i = 0; i < future_result.size(); i++) {
+        bucket.replicas[i].contents.copy_(future_result[i]);
+      }
     }
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
@@ -1091,14 +1113,15 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   return rebuilt_bucket_indices;
 }
 
+// See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(py::object state, py::object comm_hook) {
-  TORCH_CHECK(
-      py::isinstance<py::function>(comm_hook), "comm_hook must be callable.");
-
   Reducer::register_comm_hook_internal(
       std::make_unique<PythonCommHook>(std::move(state), std::move(comm_hook)));
 }
 
+// The reason we have an internal `register_comm_hook` that takes a
+// CommHookInterface (base class of PythonCommHook) as input is to enable
+// CppCommHook in the future.
 void Reducer::register_comm_hook_internal(
     std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
