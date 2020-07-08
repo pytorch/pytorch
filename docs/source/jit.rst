@@ -317,7 +317,7 @@ including control flow operators for loops and conditionals. As an example:
 
     ...
 
-``graph`` follows the same rules described in the `Inspecting Code`_ section
+``graph`` follows the same rules described in the `inspecting-code` section
 with regard to ``forward`` method lookup.
 
 The example script above produces the graph::
