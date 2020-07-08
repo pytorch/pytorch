@@ -1,11 +1,11 @@
 import torch._C
 
-from torch._jit_internal import Future
 from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
     Final,
+    Future,
     _overload,
     _overload_method,
     ignore,
