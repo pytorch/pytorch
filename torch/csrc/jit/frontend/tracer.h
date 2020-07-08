@@ -241,6 +241,10 @@ TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const c10::optional<ArrayRef<int64_t>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
