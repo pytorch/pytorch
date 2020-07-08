@@ -2807,8 +2807,7 @@ class AbstractTestCases:
                         src = torch.randn(num_copy - 1)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            # Only 16 (not 25) here as the warnings in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 16)
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -2841,8 +2840,8 @@ class AbstractTestCases:
                         dst.masked_fill_((dst > 0).to(dtype), val)
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
-                # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
-                self.assertEqual(len(w), 33)
+
+                self.assertEqual(len(w), 34)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
