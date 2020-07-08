@@ -534,7 +534,7 @@ void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
     const std::vector<at::Tensor>& outputs,
-    const std::vector<int64_t>& broadcasted_shape) {
+    const c10::optional<at::IntArrayRef>& broadcasted_size) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -552,7 +552,7 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      kernel_args.push(input.toTensor(), broadcasted_shape);
+      kernel_args.push(input.toTensor(), broadcasted_size);
     } else {
       kernel_args.push(input);
     }
@@ -567,7 +567,7 @@ void runKernel(
   EvaluationContext eval_context(fusion);
   for (int i = 0; i < (int)inputs.size(); i++) {
     if (inputs[i].isTensor()) {
-      ExtractSizeStride ess(inputs[i].toTensor(), broadcasted_shape);
+      ExtractSizeStride ess(inputs[i].toTensor(), broadcasted_size);
       int nDims = ess.sizes.size();
       TensorView* tv = fusion->inputs()[i]->as<TensorView>();
       for (int j = 0; j < nDims; j++) {

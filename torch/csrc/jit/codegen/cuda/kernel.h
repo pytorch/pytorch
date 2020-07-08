@@ -92,7 +92,7 @@ TORCH_CUDA_API void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<c10::IValue> inputs,
     const std::vector<at::Tensor>& outputs,
-    const std::vector<int64_t>& broadcasted_shape);
+    const c10::optional<at::IntArrayRef>& broadcasted_size = c10::nullopt);
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(

@@ -1029,7 +1029,6 @@ void testGPU_FusionParser() {
   at::Tensor input1 = at::randn({16}, options);
   at::Tensor input2 = at::randn({16}, options);
   fuser::cuda::scheduleFusion(prog.fusion_.get(), {input1, input2});
-
   // CONSIDER:
   // 1. this can be moved to a dedicated "golden" file
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
@@ -1082,6 +1081,12 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
         << actual_kernel.str() << "\n=================" << std::endl;
     TORCH_CHECK(false);
   }
+  fuser::cuda::compileKernel(&prog);
+  at::Tensor output = at::empty_like(input1);
+  // no broadcasting needed, omitting the last optional argument;
+  torch::jit::fuser::cuda::runKernel(&prog, {input1, input2}, {output});
+  at::Tensor output_ref = input1 * input2 * input1;
+  TORCH_CHECK(output_ref.equal(output));
 }
 
 void testGPU_FusionForLoop() {
