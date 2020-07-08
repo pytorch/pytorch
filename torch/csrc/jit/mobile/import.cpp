@@ -86,7 +86,7 @@ void parseMethods(
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(
       vals.size() > 0,
-      "Bytecode has no elements. At least one element of version number is required.");
+      "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
   // version number don't have to be re-generated.
