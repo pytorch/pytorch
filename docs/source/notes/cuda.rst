@@ -59,16 +59,58 @@ Below you can find a small example showcasing this::
 TensorFloat-32(TF32) on Ampere devices
 --------------------------------------
 
-Starting from `CUDA 11`_ and the `Ampere architecture`_, it is possible to compute
-matrix multiplications and convolutions for ``torch.float32`` data type using the
-new `TensorFloat-32`_ tensor cores. TensorFloat-32 is a new math mode that approaches
-up to 10x speedups by sacrificing precision. If you are using a device with TF32 support,
-the default math mode will be TF32. The precision for TF32 will be enough for most AI
-use cases, but if you are seeing precision issue, try manually turning it off:
+Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
+This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
+available on new NVIDIA GPUs since Ampere, internally to compute GEMMs and convolutions.
+
+TF32 tensor cores are designed to achieve better performance on GEMMs and convolutions on
+`torch.float32` tensors by doing arithmetics at the precision of `torch.half` while still
+maintaining the dynamic range of `torch.float32`.
+
+GEMMs and convolutions are controlled separately, and their corresponding flag can be accessed at:
 
 .. code:: python
 
-  torch.backends.cuda.matmul.allow_tf32 = False  # for matrix multiplications
+  # The flag below controls whether to allow TF32 on GEMMs. This flag defaults to True.
+  torch.backends.cuda.matmul.allow_tf32 = True
+
+  # The allow_tf32 flag for convolutions is not implemented yet
+
+To get an idea of the precision and speed, see the example code below:
+
+.. code:: python
+
+  a_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
+  b_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
+  ab_full = a_full @ b_full
+
+  a = a_full.float()
+  b = b_full.float()
+
+  # Do matmul at TF32 mode.
+  ab_tf32 = a @ b  # takes 0.018s on GA100
+  error = (ab_tf32 - ab_full).abs().max()  # 0.1713
+
+  # Do matmul with TF32 disabled.
+  torch.backends.cuda.matmul.allow_tf32 = False
+  ab_fp32 = a @ b  # takes 0.14s on GA100
+  error = (ab_fp32 - ab_full).abs().max()  # 0.0028
+  
+From the above example, we can see that with TF32 enabled, the speed is ~8x faster, but the precision
+has ~2 digits less in the result.  For most AI applications, the default value `allow_tf32 = True` is
+the optimal choice because its precision is large enough and has better performance. For some scientific
+computing and some uncommon AI applications, full FP32 precision may be needed. In such a scenario,
+users can disable TF32 by:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_tf32 = False
+
+For more information about TF32, see:
+
+- `TensorFloat-32`_
+- `CUDA 11`_
+- `Ampere architecture`_
 
 .. _TensorFloat-32: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
