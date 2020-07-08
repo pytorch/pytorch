@@ -350,7 +350,7 @@ void ComputeAt::runPass() {
   traverseBackward();
 
   // Clear data from backward traversal:
-  for (auto entry : tv_data) {
+  for (auto& entry : tv_data) {
     entry.second.clearPass();
   }
 
