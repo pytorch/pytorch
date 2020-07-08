@@ -63,7 +63,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
     AT_ASSERT(at::isFloatingType(scalar_type));
   } else {
     scalar_type = r.scalartype(0);
-    if (!at::isFloatingType(scalar_type) and !at::isComplexType(scalar_type)) {
+    if (!at::isFloatingType(scalar_type) && !at::isComplexType(scalar_type)) {
       return PyErr_Format(
           PyExc_TypeError,
           "torch.finfo() requires a floating point or complex input type. Use torch.iinfo to handle '%s'",
