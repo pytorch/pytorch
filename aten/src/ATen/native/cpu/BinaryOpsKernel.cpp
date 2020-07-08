@@ -7,6 +7,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -666,14 +667,7 @@ void gcd_kernel(TensorIterator& iter) {
       cpu_kernel(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
-            a = std::abs(a);
-            b = std::abs(b);
-            while (b) {
-              auto r = a % b;
-              a = b;
-              b = r;
-            }
-            return a;
+            return calc_gcd(a, b);
           });
     });
 }
@@ -682,8 +676,9 @@ void lcm_kernel(TensorIterator& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
       cpu_kernel(
           iter,
-          [](scalar_t p_gcd_e, scalar_t a_x_b) -> scalar_t {
-            return 0 ? (!p_gcd_e) : (a_x_b / p_gcd_e);
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            scalar_t g = calc_gcd(a, b);
+            return (g == 0) ? 0 : a / g * b;
           });
     });
 }

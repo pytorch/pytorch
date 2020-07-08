@@ -88,5 +88,19 @@ static inline __host__ __device__ scalar_t calc_trigamma(scalar_t in) {
   return static_cast<scalar_t>(sign * result);
 }
 
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_gcd(scalar_t a, scalar_t b) {
+  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+  accscalar_t acc_a = ::abs(static_cast<accscalar_t>(a));
+  accscalar_t acc_b = ::abs(static_cast<accscalar_t>(b));
+  while (acc_a != 0) {
+    accscalar_t acc_c = acc_a;
+    acc_a = acc_b % acc_a;
+    acc_b = acc_c; 
+  }
+  return acc_b;
+}
+
+
 }
 }
