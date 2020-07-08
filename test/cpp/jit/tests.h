@@ -170,7 +170,8 @@ namespace jit {
   _(GPU_FusionZeroDimBroadcast)       \
   _(GPU_FusionZeroDimReduction)       \
   _(GPU_FusionReductionMultiConsumer) \
-  _(GPU_FusionBCastAfterReduce)
+  _(GPU_FusionBCastAfterReduce)       \
+  _(GPU_FusionReductionScheduler)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
