@@ -21,6 +21,13 @@ except ImportError:
     print('Cannot import torch, hence caffe2-torch test will not run.')
     sys.exit(0)
 
+def check_params(onnx_model, caffe2_input):
+    if (len(onnx_model.graph.input) != len(caffe2_input)):
+        return False
+    for k, l in zip(onnx_model.graph.input, caffe2_input.keys()):
+        if (k.name != l):
+            return False 
+    return True
 
 def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
     """
@@ -59,5 +66,6 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
             W[k.name] = v.cpu().numpy()
 
     caffe2_out = prepared.run(inputs=W)
+    check = check_params(model_def, W)
 
-    return caffe2_out
+    return caffe2_out, check

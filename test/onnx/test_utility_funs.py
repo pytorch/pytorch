@@ -721,17 +721,16 @@ class TestUtilityFuns(TestCase):
 
         model = MyModule()
         x = torch.randn(10, 3, 128, 128)
-        model.train()
-        model_export = MyModule()
+
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
+        torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
         ort_outs1 = ort_sess.run(None, ort_inputs)
-        model.eval()
+
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
+        torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
@@ -766,17 +765,15 @@ class TestUtilityFuns(TestCase):
 
         model = MyModule()
         x = torch.randn(2, 3, 224, 224)
-        model.train()
-        model_export = MyModule()
+
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
+        torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs1 = ort_sess.run(None, ort_inputs)
-        model.eval()
+        ort_outs1 = ort_sess.run(None, ort_inputs)      
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
+        torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}

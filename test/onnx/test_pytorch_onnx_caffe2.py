@@ -158,9 +158,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
-        caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
-            np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
+        caffe2_out, check_param = run_embed_params(onnxir, model, input, state_dict, use_gpu)
+        if check_param:
+            for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+                np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -229,6 +230,36 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = MyModel()
         input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
+
+    def test_conv_bn(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                self.conv2 = torch.nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=0, bias=False)
+                self.conv3 = torch.nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(64)
+                self.bn2 = torch.nn.BatchNorm2d(2)
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                # x = self.maxpool(x)
+                # x = self.conv2(x)
+                # x = self.bn2(x)
+                # x = self.relu(x)
+                # x = self.conv3(x)
+                # x = self.bn2(x)
+                # x = self.relu(x)
+                return x
+
+        model = MyModule()
+        x = torch.randn(2, 3, 224, 224)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=x)
 
     def test_onnx_export_with_parameter_renaming(self):
         class SimpleFcNet(nn.Module):
