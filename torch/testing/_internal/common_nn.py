@@ -2046,9 +2046,9 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_groups',
-        constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
-        cpp_constructor_args='torch::nn::Conv3dOptions(4, 6, 3).groups(2)',
-        input_size=(1, 4, 3, 3, 3),
+        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
+        cpp_constructor_args='torch::nn::Conv3dOptions(2, 4, 3).groups(2)',
+        input_size=(1, 2, 4, 5, 4),
         cudnn=True,
         check_with_long_tensor=True,
     ),
