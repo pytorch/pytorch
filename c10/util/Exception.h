@@ -271,12 +271,26 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
-          ::c10::error_value(__VA_ARGS__)     \
+        ::c10::error_value(__VA_ARGS__)       \
     );                                        \
   }
+#else
+#define TORCH_INTERNAL_ASSERT(cond, ...)      \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    C10_THROW_ERROR(Error, ::c10::str(        \
+        #cond " INTERNAL ASSERT FAILED at "   \
+        C10_STRINGIZE(__FILE__)               \
+        ":"                                   \
+        C10_STRINGIZE(__LINE__)               \
+        ", please report a bug to PyTorch. ", \
+        ::c10::str(__VA_ARGS__)               \
+    ));                                       \
+  }
+#endif
 
 // A utility macro to make it easier to test for error conditions from user
 // input.  Like TORCH_INTERNAL_ASSERT, it supports an arbitrary number of extra
@@ -301,12 +315,26 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK_WITH(error_t, cond, ...) \
   TORCH_CHECK_WITH_MSG(error_t, cond, "", __VA_ARGS__)
 
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
     C10_THROW_ERROR(Error,                              \
-          ::c10::error_value(__VA_ARGS__)               \
+        ::c10::error_value(__VA_ARGS__)                 \
     );                                                  \
   }
+#else
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    C10_THROW_ERROR(error_t,                                          \
+      ::c10::detail::if_empty_then(                                   \
+        ::c10::str(__VA_ARGS__),                                      \
+        "Expected " #cond " to be true, but got false.  "             \
+        "(Could this error message be improved?  If so, "             \
+        "please report an enhancement request to PyTorch.)"           \
+      )                                                               \
+    );                                                                \
+  }
+#endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,

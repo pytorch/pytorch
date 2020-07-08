@@ -87,10 +87,9 @@ inline std::ostream& _error_value(std::ostream& ss) {
 template <typename T>
 inline std::ostream& _error_value(std::ostream& ss, const T& t) {
   // ignore pure string literal
-  if (std::is_same<T, const char*>::value) {
-    // do nothing
-  } else {
+  if (!(std::is_same<T, const char*>::value)) {
     ss << t;
+    ss << ", ";
   }
 
   return ss;
@@ -98,17 +97,15 @@ inline std::ostream& _error_value(std::ostream& ss, const T& t) {
 
 template <typename T, typename... Args>
 inline std::ostream& _error_value(std::ostream& ss, const T& t, const Args&... args) {
-  return _str(_str(ss, t), args...);
+  return _error_value(_error_value(ss, t), args...);
 }
 
 template<typename... Args>
-struct _error_value_wrapper final {
-  static std::string call(const Args&... args) {
-    std::ostringstream ss;
-    _error_value(ss, args...);
-    return ss.str();
-  }
-};
+inline const std::string _error_value_wrapper(const Args&... args) {
+  std::ostringstream ss;
+  _error_value(ss, args...);
+  return ss.str();
+}
 } // namespace detail
 
 // Convert a list of string-like arguments into a single string.
@@ -119,12 +116,11 @@ inline decltype(auto) str(const Args&... args) {
 
 // Convert a list of error arguments into a single string by striping away string literal arguments, i.e.
 // if an argument is const char*, it will not show up in the returned message.
-// This is to optimize build size.
 //
-// The first augument is always a string literal containing metadata about the error message.
+// Note: CanonicalizeStrTypes converts char[] to char*.
 template <typename... Args>
 inline decltype(auto) error_value(const Args&... args) {
-  return detail::_error_value_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
+  return detail::_error_value_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>(args...);
 }
 
 template <class Container>
