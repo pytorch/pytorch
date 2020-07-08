@@ -144,6 +144,10 @@ graph(%list, %x):
     Node* x_list_node = x_list->node();
     Value* x = x_list_node->input(0);
 
+    if (!x->type()->isSubtypeOf(TensorType::get())) {
+      continue;
+    }
+
     result->replaceAllUsesWith(list);
     WithInsertPoint ins(list_add_node);
     Node* append_node = graph->create(Symbol::aten("append"), {list, x});

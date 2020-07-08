@@ -489,16 +489,11 @@ RegisterOperators reg(
          float,
          float),
      DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-     DEFINE_SCALAR_BINARY_OP(
+     DEFINE_SCALAR_SCALAR_BINARY_OP(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::pow.Scalar,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
-         Scalar),
      DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
