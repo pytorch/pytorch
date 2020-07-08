@@ -611,17 +611,15 @@ class DistributedDataParallel(Module):
         assert callable(hook), "Communication hook must be callable."
 
         sig = inspect.signature(hook)
-        assert (sig.parameters['state'].annotation != inspect._empty and
-                sig.parameters['bucket'].annotation != inspect._empty and
-                sig.return_annotation != inspect._empty), (
-                    "Communication hook is missing annotations."
-        )
-        assert sig.parameters['state'].annotation == object, (
+        assert (sig.parameters['state'].annotation == inspect._empty or
+                sig.parameters['state'].annotation == object), (
             "Communication hook: state annotation is not object."
         )
-        assert sig.parameters['bucket'].annotation == dist.GradBucket, (
+        assert (sig.parameters['bucket'].annotation == inspect._empty or
+                sig.parameters['bucket'].annotation == dist.GradBucket), (
             "Communication hook: bucket annotation is not dist.GradBucket."
         )
-        assert sig.return_annotation == torch.futures.Future, (
+        assert (sig.return_annotation == inspect._empty or
+                sig.return_annotation == torch.futures.Future), (
             "Communication hook: return annotation is not torch.futures.Future."
         )

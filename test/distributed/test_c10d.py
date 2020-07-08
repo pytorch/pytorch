@@ -1915,11 +1915,19 @@ class ConvNet(nn.Module):
 
 class Task(nn.Module):
     def __init__(self):
-        super(Task, self).__init__()
+        super().__init__()
         self.p = nn.Parameter(torch.ones(2, 2))
 
     def forward(self, x):
         return self.p + x
+
+class TestDdpCommHook(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.t0 = Task()
+
+    def forward(self, x, rank):
+        return self.t0(x + rank)
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
@@ -2990,42 +2998,60 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
 
     @requires_gloo()
-    def test_ddp_comm_hook_future_passing(self):
+    def test_ddp_comm_hook_future_passing_cpu(self):
         """
         This unit test verifies whether the Future object is passed properly.
         The callback function creates a Future object and sets a value to it.
         """
-        class test_ddp_comm_hook(nn.Module):
-            def __init__(self):
-                super(test_ddp_comm_hook, self).__init__()
-                self.t0 = Task()
-
-            def forward(self, x, rank):
-                return self.t0(x + rank)
-
-        def simple_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            fut = torch.futures.Future()
-            fut_result = []
-            # Outside then callback, set the result to all zeros.
-            fut.set_result([torch.zeros_like(t) for t in bucket.get_tensors()])
-
-            def fut_then(fut):
-                # Return all ones, something different from what fut has at its result.
-                return [torch.ones_like(t) for t in bucket.get_tensors()]
-
-            return fut.then(fut_then)
-
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         # Test on CPU
-        model = DistributedDataParallel(
-            test_ddp_comm_hook().cpu(),
+        cpu_model = DistributedDataParallel(
+            TestDdpCommHook().cpu(),
             process_group=process_group
         )
-        # Register DDP Communication Hook
-        model.register_comm_hook(None, simple_hook)
 
+        # Register DDP Communication Hook
+        cpu_model.register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(cpu_model)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu(self):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            TestDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        gpu_model.register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(gpu_model)
+
+    def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+        fut = torch.futures.Future()
+        fut_result = []
+        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
+
+        def fut_then(fut):
+            # Add ones to future's result.
+            return [t + torch.ones_like(t) for t in fut.wait()]
+
+        return fut.then(fut_then)
+
+    def _run_and_verify_simple_hook(self, model):
         # Run forward
         output = model(8, self.rank)
 
@@ -3033,8 +3059,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         output.mean().backward()
 
         # check whether the grads are equal to what then callback returns.
-        # without the comm_hook expected result would be 0.25 * torch.ones(2, 2).
-        [self.assertEqual(p.grad, torch.ones(2, 2)) for p in model.parameters()]
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
 
     @requires_gloo()
     def test_ddp_comm_hook_funtion_checks(self):
@@ -3061,20 +3087,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 raise e
         if not got_exception:
             raise Exception('Communication hook callable check is missing.')
-
-        try:
-            got_exception = False
-
-            def comm_hook(state: object, bucket) -> torch.futures.Future:
-                return torch.futures.Future()
-            model.register_comm_hook(state=None, hook=comm_hook)
-        except Exception as e:
-            if "Communication hook is missing annotations." in str(e):
-                got_exception = True
-            else:
-                raise e
-        if not got_exception:
-            raise Exception('Communication hook annotation check is missing.')
 
         try:
             got_exception = False
@@ -3117,6 +3129,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 raise e
         if not got_exception:
             raise Exception('Communication hook return type check is missing.')
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
