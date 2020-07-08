@@ -325,24 +325,17 @@ static IValue addInput(
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
 
-    auto dict_size = dict.size();
-    auto unpack_to_list = state->graph->insert(aten::values, {value});
-    auto list_unpack =
-        state->graph->createListUnpack(unpack_to_list, dict_size);
-    auto unpack_node = state->graph->insertNode(list_unpack);
-    auto elem_values = unpack_node->outputs();
-
-    AT_ASSERT(dict.size() == elem_values.size());
-
-    size_t i = 0;
+    // Unpack the list values statically
     for (const auto& entry : dict) {
+      IValue key = entry.key();
+      auto static_key = state->graph->insertConstant(key);
+      auto static_value =
+          state->graph->insert(aten::__getitem__, {value, static_key});
+      recordSourceLocation(static_value->node());
       dict.insert_or_assign(
           entry.key(),
           addInput(
-              state,
-              entry.value(),
-              dict_type->getValueType(),
-              elem_values[i++]));
+              state, entry.value(), dict_type->getValueType(), static_value));
     }
 
     return dict;
@@ -516,28 +509,10 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto dict = v.toGenericDict();
     TypePtr key_type = dict.keyType();
     TypePtr value_type = dict.valueType();
-    auto dict_size = dict.size();
-    auto handle_unpack = [&](Symbol opname) {
-      auto unpack_to_list = graph->insert(opname, {value});
-      auto list_unpack = graph->createListUnpack(unpack_to_list, dict_size);
-      auto unpack_node = graph->insertNode(list_unpack);
-      auto elem_values = unpack_node->outputs();
-      AT_ASSERT(dict.size() == elem_values.size());
-      size_t i = 0;
-      for (const auto& entry : dict) {
-        if (opname == aten::keys) {
-          setValue(entry.key(), elem_values[i]);
-        } else {
-          setValue(entry.value(), elem_values[i]);
-        }
-        ++i;
-      }
-    };
-    if (key_type->cast<TensorType>()) {
-      handle_unpack(aten::keys);
-    }
-    if (value_type->cast<TensorType>()) {
-      handle_unpack(aten::values);
+    for (const auto& entry : dict) {
+      auto static_key = graph->insertConstant(entry.key());
+      auto static_value = graph->insert(aten::__getitem__, {value, static_key});
+      setValue(entry.value(), static_value);
     }
   } else {
     std::ostringstream os;
@@ -774,6 +749,19 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   }
   n->addInput(
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::IntArrayRef>& opt_value) {
+  if (opt_value.has_value()) {
+    return addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {

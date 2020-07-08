@@ -9,7 +9,7 @@ class DistributedSampler(Sampler):
 
     It is especially useful in conjunction with
     :class:`torch.nn.parallel.DistributedDataParallel`. In such a case, each
-    process can pass a :class`~torch.utils.data.DistributedSampler` instance as a
+    process can pass a :class:`~torch.utils.data.DistributedSampler` instance as a
     :class:`~torch.utils.data.DataLoader` sampler, and load a subset of the
     original dataset that is exclusive to it.
 
@@ -31,7 +31,7 @@ class DistributedSampler(Sampler):
             processes in the distributed group. Default: ``0``.
 
     .. warning::
-        In distributed mode, calling the :meth`set_epoch(epoch) <set_epoch>` method at
+        In distributed mode, calling the :meth:`set_epoch` method at
         the beginning of each epoch **before** creating the :class:`DataLoader` iterator
         is necessary to make shuffling work properly across multiple epochs. Otherwise,
         the same ordering will be always used.

@@ -150,17 +150,17 @@ test_python_nn() {
 }
 
 test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_all_except_nn_and_cpp_extensions() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -204,12 +204,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
-test_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
-  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
-}
-
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
@@ -230,6 +224,23 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
+    assert_git_not_dirty
+  fi
+}
+
+test_custom_backend() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing custom backends"
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    pushd test/custom_backend
+    cp -a "$CUSTOM_BACKEND_BUILD" build
+    # Run tests Python-side and export a lowered module.
+    python test_custom_backend.py -v
+    python backend.py --export-module-to=model.pt
+    # Run tests C++-side and load the exported lowered module.
+    build/test_custom_backend ./model.pt
+    rm -f ./model.pt
+    popd
     assert_git_not_dirty
   fi
 }
@@ -319,7 +330,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
-  test_torchvision
+  install_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
@@ -332,25 +343,27 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_nn
   test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  test_torchvision
+  install_torchvision
   test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_custom_backend
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
-  # cpp extension can be built correctly under this old env 
+  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
+  # cpp extension can be built correctly under this old env
   test_cpp_extensions
 else
-  test_torchvision
+  install_torchvision
   test_python_nn
   test_python_all_except_nn_and_cpp_extensions
   test_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_custom_backend
   test_torch_function_benchmark
 fi

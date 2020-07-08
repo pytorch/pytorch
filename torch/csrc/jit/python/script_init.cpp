@@ -115,8 +115,9 @@ struct PythonResolver : public Resolver {
       return registerNamedTuple(obj, loc);
     }
 
-    auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-        py::module::import("torch.jit").attr("_qualified_name")(obj)));
+    auto qualifiedName = c10::QualifiedName(
+        py::cast<std::string>(py::module::import("torch._jit_internal")
+                                  .attr("_qualified_name")(obj)));
 
     return get_python_cu()->get_type(qualifiedName);
   }
@@ -536,7 +537,8 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       }
       visited.emplace(item.a.internalToPointer());
     }
-    if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
+    if (!unshapedType(item.b.type())
+             ->isSubtypeOf(unshapedType(item.b.type()))) {
       // Since named types are saved and loaded in the test suite, we cannot
       // expect them to be equal. We should still check their slots however.
       if (!item.a.type()->cast<c10::NamedType>()) {
