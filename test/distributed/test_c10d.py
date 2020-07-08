@@ -3013,7 +3013,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         # Register DDP Communication Hook
-        cpu_model.register_comm_hook(None, self._simple_hook)
+        cpu_model._register_comm_hook(None, self._simple_hook)
 
         self._run_and_verify_simple_hook(cpu_model)
 
@@ -3036,7 +3036,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         # Register DDP Communication Hook
-        gpu_model.register_comm_hook(None, self._simple_hook)
+        gpu_model._register_comm_hook(None, self._simple_hook)
 
         self._run_and_verify_simple_hook(gpu_model)
 
@@ -3079,7 +3079,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         try:
             got_exception = False
-            model.register_comm_hook(state=None, hook=1)
+            model._register_comm_hook(state=None, hook=1)
         except Exception as e:
             if "Communication hook must be callable." in str(e):
                 got_exception = True
@@ -3093,7 +3093,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             def comm_hook(state: int, bucket: dist.GradBucket) -> torch.futures.Future:
                 return torch.futures.Future()
-            model.register_comm_hook(state=None, hook=comm_hook)
+            model._register_comm_hook(state=None, hook=comm_hook)
         except Exception as e:
             if "Communication hook: state annotation is not object." in str(e):
                 got_exception = True
@@ -3107,7 +3107,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
-            model.register_comm_hook(state=None, hook=comm_hook)
+            model._register_comm_hook(state=None, hook=comm_hook)
         except Exception as e:
             if "Communication hook: bucket annotation is not dist.GradBucket." in str(e):
                 got_exception = True
@@ -3121,7 +3121,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
-            model.register_comm_hook(state=None, hook=comm_hook)
+            model._register_comm_hook(state=None, hook=comm_hook)
         except Exception as e:
             if "Communication hook: return annotation is not torch.futures.Future." in str(e):
                 got_exception = True

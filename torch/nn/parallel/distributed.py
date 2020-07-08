@@ -542,9 +542,56 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
-    # Communication hook is an enhancement that provides a hook which can be
-    # used to implement various Gradient Compression algorithms.
-    def register_comm_hook(self, state: object, hook: callable):
+    def _register_comm_hook(self, state: object, hook: callable):
+        r"""
+        Register a communication hook which is an enhancement that provides a
+        flexible hook to users where they can specify how DDP aggregates gradients
+        across multiple workers.
+
+        This hook would be very useful for researchers to try out new ideas. For
+        example, this hook can be used to implement several algorithms like GossipGrad
+        and gradient compression which involve different communication strategies for
+        parameter syncs while running Distributed DataParallel training.
+
+        Arguments:
+            state (object): state is passed to the hook and can be used to maintain
+                            and update any state information that users would like to
+                            maintain as part of the training process. Examples: error
+                            feedback in gradient compression, peers to communicate with
+                            next in GossipGrad etc.
+            hook (callable): is defined as:
+                             hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+
+                             This function is called once the bucket is ready. The
+                             hook can perform whatever processing is needed and return
+                             a Future indicating completion of any async work (ex: allreduce).
+                             If the hook doesn't perform any communication, it can also
+                             just return a completed Future. The Future should hold the
+                             new value of grad bucket's tensors. Once a bucket is ready,
+                             c10d reducer would call this hook and use the tensors returned
+                             by the Future and copy grads to individual parameters.
+
+        .. warning ::
+            DDP communication hook can only be registered once and should be registered
+            before calling backward.
+
+        Example::
+            Below is an example of a simple quantization baseed gradient compression:
+
+            >>> ddp.register_comm_hook(state = None, hook = fp16_compress)
+
+            >>> def fp16_compress(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>>     compressed_tensors = dist.GradBucket(bucket.get_tensors().to(torch.float16))
+            >>>     work = dist.allreduce(compressed_tensors)
+            >>>     allreduce_future = convert_dist_work_to_future(work)
+            >>>     # Define the then callback to decompress.
+            >>>     def decompress(fut):
+            >>>         decompressed_tensors = fut.wait().to(torch.float32)
+            >>>         return decompressed_tensors
+            >>>     return allreduce_future.then(decompress)
+
+            TODO (@sinannasir) an example that involves a use case of state object like GossipGrad.
+        """
         self._check_comm_hook(hook)
         self.reducer.register_comm_hook(state, hook)
 
