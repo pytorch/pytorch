@@ -3026,7 +3026,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         be used to infer new scales for the interpolation. This is the current
         default behavior when recompute_scale_factor is not specified.
         The default behavior for recompute_scale_factor will change to False
-        in 1.6.0, and scale_factor will be used in the interpolation
+        in 1.7.0, and scale_factor will be used in the interpolation
         calculation.
 
     Note:
@@ -3100,7 +3100,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
             if is_float_scale_factor:
                 warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "in 1.7.0 to align with other frameworks/libraries, and use scale_factor directly, "
                               "instead of relying on the computed output size. "
                               "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")
