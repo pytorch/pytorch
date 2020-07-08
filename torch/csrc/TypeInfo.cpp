@@ -119,13 +119,13 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
   unsigned int bits;
-  const unsigned int BITS_FLOAT_MULTIPLIER = 4;
-  const unsigned int BITS_COMPLEX_MULTIPLIER = 8;
+  const unsigned int BITS_COMPLEX_MULTIPLIER = 4;
+  const unsigned int BITS_FLOAT_MULTIPLIER = 8;
   if (at::isComplexType(self->type)) {
-    bits = elementSize(self->type) * BITS_FLOAT_MULTIPLIER;
+    bits = elementSize(self->type) * BITS_COMPLEX_MULTIPLIER;
   }
   else {
-    bits = elementSize(self->type) * BITS_COMPLEX_MULTIPLIER;
+    bits = elementSize(self->type) * BITS_FLOAT_MULTIPLIER;
   }
   return THPUtils_packInt64(bits);
 }
