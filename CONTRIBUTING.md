@@ -1,4 +1,4 @@
-# Table of contents
+# Table of Contents
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
@@ -37,19 +37,20 @@
 
 ## Contributing to PyTorch
 
-If you are interested in contributing to PyTorch, your contributions will fall
-into two categories:
+Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important 
+that you share your intention to contribute with the team, based on the type of contribution:
 
 1. You want to propose a new feature and implement it.
-    - Post about your intended feature, and we shall discuss the design and
-    implementation. Once we agree that the plan looks good, go ahead and implement it.
+    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues), 
+    and we shall discuss the design and implementation. Once we agree that the plan looks good, 
+    go ahead and implement it.
 2. You want to implement a feature or bug-fix for an outstanding issue.
-    - Search for your issue here: https://github.com/pytorch/pytorch/issues
-    - Pick an issue and comment on the task that you want to work on this feature.
+    - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
+    - Pick an issue and comment that you'd like to work on the feature or bug-fix.
     - If you need more context on a particular issue, please ask and we shall provide.
 
-Once you finish implementing a feature or bug-fix, please send a Pull Request to
-https://github.com/pytorch/pytorch
+Once you implement and test your feature or bug-fix, please submit a Pull Request to
+https://github.com/pytorch/pytorch.
 
 This document covers some of the more technical aspects of contributing
 to PyTorch.  For more non-technical guidance about how to contribute to
@@ -176,7 +177,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
   See [README](tools/README.md) of this directory for more details.
-* [test](tests) - Python unit tests for PyTorch Python frontend.
+* [test](test) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality.
   * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
@@ -665,8 +666,6 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
        size *=2
    ```
 
-
-Hope this helps, and thanks for considering to contribute.
 
 ## Windows development tips
 
