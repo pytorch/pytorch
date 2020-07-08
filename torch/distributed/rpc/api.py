@@ -161,7 +161,7 @@ def _wait_all_workers():
     is_leader_worker = leader_worker_name == self_worker_name
     # Set a long enough timeout for all shutdown messages to be processed.
     timeout = 5  # second
-s
+
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
     if is_leader_worker:
