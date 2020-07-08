@@ -380,6 +380,8 @@ class RNN(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. include:: ../cudnn_rnn_determinism.rst
+
     .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
@@ -507,22 +509,7 @@ class LSTM(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
-    .. warning::
-        There are known deterministic issues for LSTM using cuDNN 7.6.5, 8.0 on CUDA 10.1 or later.
-        If you encounter this and need deterministic behavior,
-        a temporary workaround is to set environment variables.
-        See `cuDNN 8 Release Notes`_.
-
-        On CUDA 10.1, set environment variable ``CUDA_LAUNCH_BLOCKING=1``.
-        This may affect performance.
-
-        On CUDA 10.2 or later, set environment variable
-        (note the leading colon symbol)
-        ``CUBLAS_WORKSPACE_CONFIG=:16:8``
-        or
-        ``CUBLAS_WORKSPACE_CONFIG=:4096:2``.
-
-    .. _cuDNN 8 Release Notes: https://docs.nvidia.com/deeplearning/sdk/cudnn-release-notes/rel_8.html
+    .. include:: ../cudnn_rnn_determinism.rst
 
     .. include:: ../cudnn_persistent_rnn.rst
 
