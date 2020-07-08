@@ -1037,30 +1037,30 @@ void testGPU_FusionParser() {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
   float T2[4];
-  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
     for(size_t i29 = 0; i29 < 4; ++i29 ) {
       T2[ i29 ]
          = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
          * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
     }
-  } else { 
+  } else {
     for(size_t i29 = 0; i29 < 4; ++i29 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
         T2[ i29 ]
            = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
            * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i29 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
       }
     }
   }
-  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
     for(size_t i30 = 0; i30 < 4; ++i30 ) {
       T3[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
          = T2[ i30 ]
          * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
     }
-  } else { 
+  } else {
     for(size_t i30 = 0; i30 < 4; ++i30 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) { 
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
         T3[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
            = T2[ i30 ]
            * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i30 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];

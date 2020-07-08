@@ -560,7 +560,7 @@ void IRPrinter::handle(const IfThenElse* ite) {
   // IF
   os << "if ( ";
   print_inline(ite->cond());
-  os << " ) { \n";
+  os << " ) {\n";
 
   indent_size++;
   for (auto& expr : ite->constBody().exprs()) {
@@ -571,7 +571,7 @@ void IRPrinter::handle(const IfThenElse* ite) {
   // ELSE
   if (ite->hasElse()) {
     indent();
-    os << "} else { \n";
+    os << "} else {\n";
     indent_size++;
     for (auto& expr : ite->constElseBody().exprs()) {
       handle(expr);
