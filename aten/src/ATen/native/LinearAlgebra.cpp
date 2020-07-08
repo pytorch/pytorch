@@ -564,7 +564,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1 || dim.size() == 0) {
-    return at::norm(self, 2, dim, keepdim, self.scalar_type());
+    return at::norm(self, 2, dim, keepdim);
   }
   if (self.is_complex()){
     return at::sqrt(at::sum(at::real(self.conj() * self), dim, keepdim));

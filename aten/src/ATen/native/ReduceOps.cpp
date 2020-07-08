@@ -457,7 +457,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
 
 static inline Tensor _norm(const Tensor &self, Scalar p) {
   if (self.is_sparse()) {
-    return at::native_norm(self, p);
+    return at::native_norm(self, p, IntArrayRef{}, false, c10::nullopt);
   } else {
     TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
                 "norm only supports CPU AND CUDA device type, got: ", self.device().type());
@@ -481,8 +481,12 @@ Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArra
 
 static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
-  Tensor result;
-  return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  if (self.is_sparse()) {
+    return at::native_norm(self, p, dim, keepdim, opt_dtype);
+  } else {
+    Tensor result;
+    return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  }
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
@@ -494,7 +498,11 @@ Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
-  return at::native::norm(self, p, dim, keepdim, c10::nullopt);
+  if (self.is_sparse()) {
+    return at::native_norm(self, p, dim, keepdim, c10::nullopt);
+  } else {
+    return at::native::norm(self, p, dim, keepdim, c10::nullopt);
+  }
 }
 
 // leave it so we support sparse tensors
