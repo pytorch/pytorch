@@ -687,20 +687,6 @@ void hashValue(Stack* stack) {
 
 RegisterOperators reg2({
 
-#define DEFINE_STRING_OP(op_name, string_op, result) \
-  Operator(                                          \
-      #op_name "(str a, str b) ->" #result,          \
-      [](Stack* stack) {                             \
-        auto b = pop(stack).toStringRef();           \
-        auto a = pop(stack).toStringRef();           \
-        push(stack, string_op);                      \
-      },                                             \
-      aliasAnalysisFromSchema())
-
-    DEFINE_STRING_OP(aten::eq, a == b, bool),
-    DEFINE_STRING_OP(aten::ne, a != b, bool),
-    DEFINE_STRING_OP(aten::add, a + b, str),
-#undef DEFINE_STRING_OP
     Operator(
         "aten::__getitem__.str(str s, int index) -> str",
         [](Stack* stack) {
