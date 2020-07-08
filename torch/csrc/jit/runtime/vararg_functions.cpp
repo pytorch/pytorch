@@ -1,5 +1,6 @@
+#include <ATen/ATen.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/api/include/torch/torch.h>
+
 
 namespace torch {
 namespace jit {
@@ -134,7 +135,7 @@ void dequantize(Stack& stack) {
     output_elems.reserve(elems.size());
     for (size_t i = 0; i < elems.size(); ++i) {
       if (elems[i].isTensor()) {
-        output_elems.emplace_back(at::dequantize(elems[i].toTensor()));
+        output_elems.emplace_back(at:dequantize(elems[i].toTensor()));
       } else {
         output_elems.emplace_back(elems[i]);
       }
