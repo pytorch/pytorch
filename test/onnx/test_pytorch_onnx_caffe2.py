@@ -148,7 +148,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         if use_gpu:
             model, input = self.convert_cuda(model, input)
 
-        onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=True,
+        onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
