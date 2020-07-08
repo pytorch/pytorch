@@ -83,28 +83,29 @@ To get an idea of the precision and speed, see the example code below:
   a_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
   b_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
   ab_full = a_full @ b_full
+  mean = ab_full.abs().mean()  # 80.7277
 
   a = a_full.float()
   b = b_full.float()
 
   # Do matmul at TF32 mode.
-  ab_tf32 = a @ b  # takes 0.018s on GA100
-  error = (ab_tf32 - ab_full).abs().max()  # 0.1713
+  ab_tf32 = a @ b  # takes 0.016s on GA100
+  error = (ab_tf32 - ab_full).abs().max()  # 0.1747
+  relative_error = error / mean  # 0.0022
 
   # Do matmul with TF32 disabled.
   torch.backends.cuda.matmul.allow_tf32 = False
-  ab_fp32 = a @ b  # takes 0.14s on GA100
-  error = (ab_fp32 - ab_full).abs().max()  # 0.0028
+  ab_fp32 = a @ b  # takes 0.11s on GA100
+  error = (ab_fp32 - ab_full).abs().max()  # 0.0031
+  relative_error = error / mean  # 0.000039
   
-From the above example, we can see that with TF32 enabled, the speed is ~8x faster, but the precision
-has ~2 digits less in the result.  For most AI applications, the default value `allow_tf32 = True` is
-the optimal choice because its precision is large enough and has better performance. For some scientific
-computing and some uncommon AI applications, full FP32 precision may be needed. In such a scenario,
-users can disable TF32 by:
+From the above example, we can see that with TF32 enabled, the speed is ~7x faster, but the precision
+has ~2 digits less in the result.  If the additional precision is needed, users can disable TF32 by:
 
 .. code:: python
 
   torch.backends.cuda.matmul.allow_tf32 = False
+  # disabling of TF32 for cuDNN is not implemented yet
 
 For more information about TF32, see:
 
