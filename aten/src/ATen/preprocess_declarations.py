@@ -36,20 +36,17 @@ def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
     # based on the backend and type attributes
     # if backend or type is not defined, it is assumed to be all of them
-    if 'backend_types' not in option:
-        backends = option.get('backends', default_backends)
-        if isinstance(option.get('type_method_definition_dispatch'), dict):
-            backends = option.get('type_method_definition_dispatch').keys()
-        backends = set(backends)
+    backends = option.get('backends', default_backends)
+    if isinstance(option.get('type_method_definition_dispatch'), dict):
+        backends = option.get('type_method_definition_dispatch').keys()
+    backends = set(backends)
 
-        backend_types = {}
-        for backend in backends:
-            if backend in ('QuantizedCPU', 'QuantizedCUDA'):
-                backend_types[backend] = type_map['quantized']
-            else:
-                backend_types[backend] = option.get('types', all_types)
-    else:
-        backend_types = option['backend_types']
+    backend_types = {}
+    for backend in backends:
+        if backend in ('QuantizedCPU', 'QuantizedCUDA'):
+            backend_types[backend] = type_map['quantized']
+        else:
+            backend_types[backend] = option.get('types', all_types)
 
     # expand type alias (integral, floating_point, all)
     def expand(types):
