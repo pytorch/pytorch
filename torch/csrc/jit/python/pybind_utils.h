@@ -429,7 +429,9 @@ inline bool isTraceableType(const TypePtr& type) {
     return std::all_of(
         tuple_type->elements().begin(),
         tuple_type->elements().end(),
-        [](const TypePtr& element_type) { return isTraceableType(element_type); });
+        [](const TypePtr& element_type) {
+          return isTraceableType(element_type);
+        });
   }
 
   if (auto dict_type = type->cast<DictType>()) {
@@ -1051,9 +1053,10 @@ inline py::object runAndInsertCall(
     c10::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
-    const std::function<Value*(Graph&, const MatchedSchema& match)>& callInserter) {
-  auto stack = createStackForSchema(
-      callee.getSchema(), args, kwargs, std::move(self));
+    const std::function<Value*(Graph&, const MatchedSchema& match)>&
+        callInserter) {
+  auto stack =
+      createStackForSchema(callee.getSchema(), args, kwargs, std::move(self));
   const auto& tracing_state = tracer::getTracingState();
   if (!tracing_state) {
     pybind11::gil_scoped_release no_gil_guard;
@@ -1141,8 +1144,7 @@ inline py::object invokeOperatorFromPython(
   if (operations.size() == 1) {
     const Operator& op = *operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
-    stack = createStackForSchema(
-        op.schema(), args, kwargs, c10::nullopt);
+    stack = createStackForSchema(op.schema(), args, kwargs, c10::nullopt);
     op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;

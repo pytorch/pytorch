@@ -227,7 +227,8 @@ struct Ident : public TreeView {
     return subtree(0)->stringValue();
   }
   static Ident create(const SourceRange& range, std::string name) {
-    return Ident(Compound::create(TK_IDENT, range, {String::create(std::move(name))}));
+    return Ident(
+        Compound::create(TK_IDENT, range, {String::create(std::move(name))}));
   }
 };
 
@@ -812,7 +813,8 @@ struct Const : public Expr {
   }
   int64_t asIntegral() const {
     try {
-      return c10::stoll(subtree(0)->stringValue(), /*__idx=*/nullptr, /*base=*/0);
+      return c10::stoll(
+          subtree(0)->stringValue(), /*__idx=*/nullptr, /*base=*/0);
     } catch (const std::out_of_range& e) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";

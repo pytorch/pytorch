@@ -171,7 +171,8 @@ struct Compound : public Tree {
 // tree pretty printer
 struct pretty_tree {
   constexpr static size_t kDefaultCol = 40;
-  pretty_tree(const TreeRef& tree, size_t col = kDefaultCol) : tree(tree), col(col) {}
+  pretty_tree(const TreeRef& tree, size_t col = kDefaultCol)
+      : tree(tree), col(col) {}
   const TreeRef& tree;
   size_t col;
   std::unordered_map<TreeRef, std::string> flat_strings;
