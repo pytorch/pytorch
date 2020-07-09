@@ -8193,7 +8193,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "'Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object for attribute 'invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -8215,6 +8215,17 @@ a")
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
             Foo3()
+
+        class Foo4(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo4, self).__init__()
+                self.invalid = np.int64(5)
+
+        # verify that we capture human understandable class name
+        with self.assertRaisesRegex(TypeError, "numpy.int64"):
+            Foo4()
 
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
