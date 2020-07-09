@@ -85,6 +85,7 @@ namespace jit {
   _(AutogradSymbols)                   \
   _(DefaultArgTypeHinting)             \
   _(Futures)                           \
+  _(TLSFutureCallbacks)                \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
