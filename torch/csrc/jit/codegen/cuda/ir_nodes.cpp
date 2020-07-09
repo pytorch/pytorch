@@ -355,6 +355,9 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       is_broadcast_domain_(src->is_broadcast_domain_) {}
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
+  if (other == this)
+    return true;
+
   bool is_same = isReduction() == other->isReduction() &&
       parallel_method() == other->parallel_method();
   is_same = is_same && ScalarCheck::sameAs(extent(), other->extent());

@@ -13,7 +13,8 @@ ComputeAtData::ComputeAtData(TensorView* tv)
     : tv_ref_(tv),
       original_has_compute_at_(tv->hasComputeAt()),
       original_compute_at_position(tv->getThisComputeAtAxis()),
-      original_domain_(tv->domain()) {}
+      original_domain_(tv->domain()),
+      new_compute_at_domain_(tv->domain()) {}
 
 // Clear pass based data
 void ComputeAtData::clearPass() {
@@ -187,16 +188,17 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_compute_at_axis) {
-  auto& entry = tv_data.at(producer);
+  auto& producer_entry = tv_data.at(producer);
 
   // Use TensorDomain interface so it doesn't set computeAt automatically
   auto replay = TransformReplay::replayPasC(
       producer, consumer, (int)consumer_compute_at_axis);
 
-  entry.setPassPosition(replay.second);
+  producer_entry.setPassPosition(replay.second);
 
-  if (entry.shouldSetComputeAt(replay.second)) {
+  if (producer_entry.shouldSetComputeAt(replay.second)) {
     producer->setComputeAt(consumer, (int)consumer_compute_at_axis);
+    producer_entry.setComputeAtDomain(producer->domain());
   }
 
   return replay.second;
@@ -213,9 +215,15 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   auto replay = TransformReplay::replayCasP(
       consumer, producer, (int)producer_compute_at_axis);
 
-  consumer_entry.setPassPosition(replay.second);
   if (producer_entry.shouldSetComputeAt(producer_compute_at_axis)) {
     producer->setComputeAt(consumer, replay.second);
+  }
+
+  consumer_entry.setPassPosition(replay.second);
+  if ((consumer_entry.shouldSetComputeAt(replay.second) &&
+       consumer != consumer_) ||
+      (consumer == consumer_ && replay.second >= consumer_position_)) {
+    consumer_entry.setComputeAtDomain(consumer->domain());
   }
 
   return replay.second;
@@ -359,9 +367,19 @@ void ComputeAt::runPass() {
 
   setupOutputs();
 
-  for (const auto entry : tv_data) {
+  for (const auto& entry : tv_data) {
+    entry.first->setDomain(entry.second.getComputeAtDomain());
     entry.second.validateNewComputeAt();
   }
+
+  TORCH_INTERNAL_ASSERT(
+      BestEffortReplay::findFirstMismatchedID(
+          consumer_->domain(), tv_data.at(consumer_).getOriginalDomain()) ==
+          consumer_->domain()->nDims(),
+      "ComputeAt logic changed the consumer domain which should not happen. Domain was ",
+      tv_data.at(consumer_).getOriginalDomain(),
+      " but is now: ",
+      consumer_->domain());
 }
 
 void ComputeAt::setupOutputs() {

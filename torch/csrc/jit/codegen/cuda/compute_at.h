@@ -29,7 +29,7 @@ class ComputeAtData {
   // an invalid compute_at that would require tensor replication.
   void setPassPosition(unsigned int pos);
 
-  // Returns if new postion is greater or equal to previous seen
+  // Returns if new postion is greater or equal to previous seen, if
   bool shouldSetComputeAt(unsigned int pos) const {
     return pos > original_compute_at_position &&
         pos > new_compute_at_position && pos >= current_traversal_position;
@@ -48,14 +48,23 @@ class ComputeAtData {
     return touched_;
   }
 
-  // Traversal domain, public as it can freely be set without impacting any
-  // other data. Just a convenience to have it included here.
-  TensorDomain* traversal_domain = nullptr;
+  TensorDomain* getOriginalDomain() const {
+    return original_domain_;
+  }
+
+  // If we set computeAt, save the domain so we can reset it after traversal.
+  // Traversal state can deviate from the domain we will want to save after the
+  // entire computeAt pass.
+  void setComputeAtDomain(TensorDomain* td) {
+    new_compute_at_domain_ = td;
+  }
+
+  // Return domain set in setComputeAtDomain
+  TensorDomain* getComputeAtDomain() const {
+    return new_compute_at_domain_;
+  }
 
  private:
-  // Position to update after a traversal
-  unsigned int new_compute_at_position = 0;
-
   // Was the position ever modified?
   bool touched_ = false;
 
@@ -76,6 +85,13 @@ class ComputeAtData {
 
   // Did this traversal set a position or not yet
   bool current_traversal_position_set = false;
+
+  // Position to update after a traversal
+  unsigned int new_compute_at_position = 0;
+
+  // Domain when we actually set computeAt, will set back to this after the
+  // pass.
+  TensorDomain* new_compute_at_domain_;
 };
 
 class ComputeAt {

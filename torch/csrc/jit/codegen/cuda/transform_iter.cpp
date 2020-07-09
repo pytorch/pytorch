@@ -369,16 +369,17 @@ int BestEffortReplay::findFirstMismatchedID(
     const TensorDomain* td2) {
   std::unordered_map<IterDomain*, IterDomain*> id_map;
   auto rd1 = td1->rootDomain();
+  auto rd2 = td2->rootDomain();
   std::unordered_set<IterDomain*> rd2_set(
       td2->rootDomain().begin(), td2->rootDomain().end());
 
   // Find matching root IterDomains, we could make this O(nlog(n)) if we could
   // sort IterDomains.
   for (auto rd1i : rd1) {
-    for (IterDomain* rd2_id : rd2_set) {
-      if (rd1i->sameAs(rd2_id)) {
-        id_map[rd1i] = rd2_id;
-        rd2_set.erase(rd2_id);
+    for (auto rd2i : rd2) {
+      if (rd1i->sameAs(rd2i) && rd2_set.find(rd2i) != rd2_set.end()) {
+        id_map[rd1i] = rd2i;
+        rd2_set.erase(rd2i);
         break;
       }
     }
@@ -387,8 +388,14 @@ int BestEffortReplay::findFirstMismatchedID(
   BestEffortReplay ber(td2->domain(), td1->domain(), id_map);
 
   for (size_t i = 0; i < td1->domain().size(); i++) {
-    if (ber.getReplay().find(td1->axis(i)) == ber.getReplay().end())
+    if (ber.getReplay().find(td1->axis(i)) == ber.getReplay().end()) {
       return i;
+    }
+    // Order is important.
+    auto td2_axis = ber.getReplay().at(td1->axis(i));
+    if (td2->axis(i) != td2_axis) {
+      return i;
+    }
   }
   return td1->nDims();
 }
