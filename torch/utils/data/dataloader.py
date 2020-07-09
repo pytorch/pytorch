@@ -109,10 +109,10 @@ class DataLoader(object):
 
     .. warning:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
                  When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-                 it instead reutrns an estimate based on ``len(dataset) / batch_size``, with proper
+                 it instead returns an estimate based on ``len(dataset) / batch_size``, with proper
                  rounding depending on :attr:`drop_last`, regardless of multi-process loading
                  configurations. This represents the best guess PyTorch can make because PyTorch
-                 trust user :attr:`dataset` code in correctly handling multi-process
+                 trusts user :attr:`dataset` code in correctly handling multi-process
                  loading to avoid duplicate data.
 
                  However, if sharding results in multiple workers having incomplete last batches,
