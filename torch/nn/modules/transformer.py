@@ -84,9 +84,9 @@ class Transformer(Module):
         Shape:
             - src: :math:`(S, N, E)`.
             - tgt: :math:`(T, N, E)`.
-            - src_mask: :math:`(S, S)`.
-            - tgt_mask: :math:`(T, T)`.
-            - memory_mask: :math:`(T, S)`.
+            - src_mask: :math:`(S, S)` or :math:`(N*nhead, S, S)`.
+            - tgt_mask: :math:`(T, T)` or :math:`(N*nhead, T, T)`.
+            - memory_mask: :math:`(T, S)` or :math:`(N*nhead, T, S)`.
             - src_key_padding_mask: :math:`(N, S)`.
             - tgt_key_padding_mask: :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(N, S)`.
