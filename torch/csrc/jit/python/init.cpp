@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -31,7 +32,6 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
-#include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
@@ -154,16 +154,6 @@ void initJITBindings(PyObject* module) {
                 graph->block(),
                 paramsDict,
                 opset_version); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "_jit_pass_onnx_eliminate_unused_items",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EliminateUnusedItemsONNX(
-                graph->block(),
-                paramsDict); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -759,7 +749,7 @@ void initJITBindings(PyObject* module) {
         auto res =
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
-          int i = PyInt_AsLong(res);
+          int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
           if (i > 0) {
             return i;
           }
