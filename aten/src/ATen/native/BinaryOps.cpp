@@ -831,9 +831,6 @@ Tensor logaddexp2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(isIntegralType(self.scalar_type(), /*includeBool=*/ true),
-              "GCD computation requires integral types; given type is ", 
-              self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
   gcd_stub(iter.device_type(), iter);
   return result;
@@ -849,10 +846,6 @@ Tensor& gcd_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(isIntegralType(self.scalar_type(), /*includeBool=*/ true),
-              "LCM computation requires integral types; given type is ", 
-              self.scalar_type());
-  
   auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
   lcm_stub(iter.device_type(), iter);
   return result;

@@ -2512,12 +2512,13 @@ Args:
 
 Example::
 
-    >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
-    tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1., 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
-
-
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.gcd(a, b)
+    tensor([1, 2, 5])
+    >>> c = torch.tensor([3])
+    >>> torch.gcd(a, c)
+    tensor([1, 1, 3])
 """.format(**common_args))
 
 add_docstr(torch.ge,
@@ -2989,6 +2990,30 @@ Example::
     >>> torch.kthvalue(x, 2, 0, True)
     torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """.format(**single_dim_common))
+
+add_docstr(torch.lcm,
+           r"""
+lcm(input, other, out=None) -> LongTensor
+
+Computes the element-wise least common multiple (LCM).
+
+The two tensors involved in the operation must be integral.
+
+Args:
+    input (LongTensor)
+    other (LongTensor)
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.lcm(a, b)
+    tensor([15, 20, 15])
+    >>> c = torch.tensor([3])
+    >>> torch.lcm(a, c)
+    tensor([15, 30, 15])
+""".format(**common_args))
 
 add_docstr(torch.le,
            r"""
