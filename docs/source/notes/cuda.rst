@@ -61,17 +61,18 @@ TensorFloat-32(TF32) on Ampere devices
 
 Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
-available on new NVIDIA GPUs since Ampere, internally to compute GEMMs and convolutions.
+available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
+and batched matrix multiplies) and convolutions.
 
-TF32 tensor cores are designed to achieve better performance on GEMMs and convolutions on
-`torch.float32` tensors by doing arithmetics at the precision of `torch.half` while still
-maintaining the dynamic range of `torch.float32`.
+TF32 tensor cores are designed to achieve better performance on matmul and convolutions on
+`torch.float32` tensors by truncating input data to have 10 bits of mantissa, and accumulating
+results with FP32 precision, maintaining FP32 dynamic range.
 
-GEMMs and convolutions are controlled separately, and their corresponding flag can be accessed at:
+matmul and convolutions are controlled separately, and their corresponding flag can be accessed at:
 
 .. code:: python
 
-  # The flag below controls whether to allow TF32 on GEMMs. This flag defaults to True.
+  # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
   torch.backends.cuda.matmul.allow_tf32 = True
 
   # The allow_tf32 flag for convolutions is not implemented yet
@@ -99,8 +100,9 @@ To get an idea of the precision and speed, see the example code below:
   error = (ab_fp32 - ab_full).abs().max()  # 0.0031
   relative_error = error / mean  # 0.000039
   
-From the above example, we can see that with TF32 enabled, the speed is ~7x faster, but the precision
-has ~2 digits less in the result.  If the additional precision is needed, users can disable TF32 by:
+From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
+compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
+is needed, users can disable TF32 by:
 
 .. code:: python
 
