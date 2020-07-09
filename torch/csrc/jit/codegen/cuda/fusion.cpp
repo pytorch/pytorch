@@ -17,9 +17,9 @@ FusionGuard::FusionGuard(Fusion* fusion) {
   ACTIVE_FUSION = fusion;
 }
 
-FusionGuard::FusionGuard(const cuda::CudaKernel* cuda_kernel) {
+FusionGuard::FusionGuard(cuda::CudaKernel* cuda_kernel) {
   prev_fusion = ACTIVE_FUSION;
-  ACTIVE_FUSION = cuda_kernel->fusion_.get();
+  ACTIVE_FUSION = cuda_kernel->fusion();
 }
 
 FusionGuard::~FusionGuard() {

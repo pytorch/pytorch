@@ -5,6 +5,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
 /*
  * The exposed APIs in this file is used by manager.h/cpp
@@ -24,61 +25,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-// TODO: given that KernelArgsReq is becoming complicated and not really
-//       hashable, I should throw this inside CudaKernel.
-// Interfacing object allows kernel to return whether a given input
-// configuration could/should be handled.
-struct KernelArgsReq {
-  virtual bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) = 0;
-  virtual ~KernelArgsReq() = default;
-};
-
-// naive P-wise kernel only requires same dimensionality for input tensors.
-struct NaivePWKernelArgsReq : KernelArgsReq {
-  bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) override;
-  std::vector<int> dims_;
-};
-
-class CudaKernel {
- public:
-  CudaKernel() {
-    fusion_ = std::make_unique<Fusion>();
-  }
-
-  CUmodule& getModule() {
-    return module_;
-  }
-
-  CUfunction& getFunction() {
-    return function_;
-  }
-
-  int16_t device_;
-  CUmodule module_;
-  CUfunction function_;
-  int max_blocks_;
-  int unroll_factor_ = 1;
-  // mark reduction axes;
-  std::vector<int> reduction_axes_;
-
-  // WARNING:
-  // Block and Grid dimension setting is here for testing purposes only
-  // These are not here for general use and only for use with
-  // the runTestKernel() function.
-  void block(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    block_ = dim3(x, y, z);
-  }
-  void grid(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    grid_ = dim3(x, y, z);
-  }
-
-  dim3 block_;
-  dim3 grid_;
-  bool has_random_;
-
-  std::unique_ptr<Fusion> fusion_;
-};
 
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;

@@ -349,8 +349,9 @@ void testGPU_FusionExprEvalPostLower() {
 
 void testGPU_FusionClear() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // 1. Create a dummy IR
 
@@ -358,13 +359,13 @@ void testGPU_FusionClear() {
     TensorView* tv0 = makeDummyTensor(2);
     TensorView* tv1 = makeDummyTensor(2);
 
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
 
     TensorView* tv2 = add(tv1, new Float(2.0));
     TensorView* tv3 = add(tv0, tv2);
 
-    fusion.addOutput(tv3);
+    fusion->addOutput(tv3);
 
     tv3->split(0, 4);
     tv0->computeAt(tv3, 1);
@@ -374,24 +375,24 @@ void testGPU_FusionClear() {
     tv2->axis(1)->parallelize(ParallelType::Unroll);
     tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-    fusion.setLaunchConfig(LaunchConfigType::Compatible, new Int(1));
+    fusion->setLaunchConfig(LaunchConfigType::Compatible, new Int(1));
   }
 
   // 2. Clear the IR
 
-  fusion.clear();
+  fusion->clear();
 
-  TORCH_CHECK(fusion.exprs().empty());
-  TORCH_CHECK(fusion.vals().empty());
+  TORCH_CHECK(fusion->exprs().empty());
+  TORCH_CHECK(fusion->vals().empty());
 
-  TORCH_CHECK(fusion.inputs().empty());
-  TORCH_CHECK(fusion.outputs().empty());
+  TORCH_CHECK(fusion->inputs().empty());
+  TORCH_CHECK(fusion->outputs().empty());
 
-  TORCH_CHECK(fusion.launch_configs().empty());
+  TORCH_CHECK(fusion->launch_configs().empty());
 
-  TORCH_CHECK(!fusion.hasReduction());
-  TORCH_CHECK(!fusion.hasBlockReduction());
-  TORCH_CHECK(!fusion.hasGridReduction());
+  TORCH_CHECK(!fusion->hasReduction());
+  TORCH_CHECK(!fusion->hasBlockReduction());
+  TORCH_CHECK(!fusion->hasGridReduction());
 
   // 3. Rebuild the IR
 
@@ -401,9 +402,9 @@ void testGPU_FusionClear() {
     TensorView* tv2 = add(tv1, new Float(2.0));
     TensorView* tv3 = add(tv0, tv2);
 
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
-    fusion.addOutput(tv3);
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
+    fusion->addOutput(tv3);
 
     // tv3 [i0, i1, i2]
     tv3->reorder({{0, 2}, {2, 0}});
@@ -417,7 +418,7 @@ void testGPU_FusionClear() {
     tv3->axis(1)->parallelize(ParallelType::BIDx);
   }
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(4);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -427,7 +428,7 @@ void testGPU_FusionClear() {
   at::Tensor output = at::empty_like(input1);
 
   torch::jit::fuser::cuda::compileKernel(&prog);
-  prog.device_ = 0;
+  prog.setDevice(0);
   torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
 
   at::Tensor tv2_ref = input2 + 2.0;
@@ -1021,18 +1022,19 @@ void testGPU_FusionParser() {
   }
 
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(fuser::cuda::parseJitIR(g));
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
   // These can be set to anything as there are no bindings!
   // All CTAS and threads execute the same thing.
   prog.grid(4);
   prog.block(32);
-  prog.device_ = 0;
-  fuser::cuda::parseJitIR(g, &prog);
+  prog.setDevice(0);
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input1 = at::randn({16}, options);
   at::Tensor input2 = at::randn({16}, options);
-  fuser::cuda::scheduleFusion(prog.fusion_.get(), {input1, input2});
+  fuser::cuda::scheduleFusion(prog.fusion(), {input1, input2});
+
   // CONSIDER:
   // 1. this can be moved to a dedicated "golden" file
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
@@ -1072,7 +1074,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
 }
 )";
 
-  GPULower gpulw(&fusion);
+  GPULower gpulw(fusion);
   std::stringstream actual_kernel;
   actual_kernel << "\n";
   gpulw.printKernel(actual_kernel);
@@ -1130,15 +1132,16 @@ void testGPU_FusionForLoop() {
 
 void testGPU_FusionCodeGen() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(3);
 
   new BinaryOp(BinaryOpType::Add, tv0, new Float(0.0), new Float(1.0));
   TensorView* tv1 = add(tv0, new Float(2.0));
   TensorView* tv2 = add(tv1, new Float(3.0));
-  fusion.addOutput(tv2);
+  fusion->addOutput(tv2);
 
   //[I0, I1, I2]
   tv2 = tv2->split(0, 4);
@@ -1152,7 +1155,7 @@ void testGPU_FusionCodeGen() {
 
   tv0->computeAt(tv2, -1);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   // These can be set to anything as there are no bindings!
   // All CTAS and threads execute the same thing.
   prog.grid(4);
@@ -1173,17 +1176,18 @@ void testGPU_FusionCodeGen() {
 
 void testGPU_FusionCodeGen2() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(3);
   TensorView* tv1 = makeDummyTensor(3);
   TensorView* tv2 = add(tv1, new Float(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  fusion.addOutput(tv3);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  fusion->addOutput(tv3);
 
   //[I0, I1, I2]
   tv3->reorder({{0, 2}, {2, 0}});
@@ -1199,7 +1203,7 @@ void testGPU_FusionCodeGen2() {
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(4);
   prog.block(8);
 
@@ -1221,8 +1225,9 @@ void testGPU_FusionCodeGen2() {
 
 void testGPU_FusionSimplePWise() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
   // dimensionality of the problem
   int nDims = 3;
 
@@ -1231,8 +1236,8 @@ void testGPU_FusionSimplePWise() {
   TensorView* tv1 = makeDummyTensor(nDims);
 
   // Register your inputs
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
@@ -1240,7 +1245,7 @@ void testGPU_FusionSimplePWise() {
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
-  fusion.addOutput(tv3);
+  fusion->addOutput(tv3);
 
   // Do transformations, remember, transformations are outputs to inputs
   // This doesn't have to be in this order
@@ -1261,7 +1266,7 @@ void testGPU_FusionSimplePWise() {
   tv3->axis(-2)->parallelize(ParallelType::TIDy);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(64); //   1 CTA
   prog.block(128, 2); // 256 Threads
 
@@ -1282,16 +1287,17 @@ void testGPU_FusionSimplePWise() {
 
 void testGPU_FusionExecKernel() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
   TensorView* tv1 = makeDummyTensor(2);
 
   // Register your inputs
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
@@ -1299,7 +1305,7 @@ void testGPU_FusionExecKernel() {
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
-  fusion.addOutput(tv3);
+  fusion->addOutput(tv3);
 
   tv3->merge(0);
   tv3->split(0, 128);
@@ -1317,7 +1323,7 @@ void testGPU_FusionExecKernel() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1); // 1 CTA
   prog.block(128); // 128 Threads
 
@@ -1353,11 +1359,12 @@ void testGPU_FusionAdvancedComputeAt() {
    */
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     TensorView* tv1 = mul(tv0, new Float(0.5));
     TensorView* tv2 = mul(tv1, new Float(-1.0));
@@ -1368,8 +1375,8 @@ void testGPU_FusionAdvancedComputeAt() {
     TensorView* tv6 = add(tv5, tv4);
     TensorView* tv7 = add(tv1, tv4);
 
-    fusion.addOutput(tv6);
-    fusion.addOutput(tv7);
+    fusion->addOutput(tv6);
+    fusion->addOutput(tv7);
 
     // Lets setup to actually run
     tv7->merge(0);
@@ -1388,8 +1395,8 @@ void testGPU_FusionAdvancedComputeAt() {
     TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
     TORCH_CHECK(!tv7->hasComputeAt());
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
+    for (Val* val : fusion->vals()) {
+      if (!fusion->hasInput(val) &&
           val->getValType().value() == ValType::TensorView) {
         TensorView* tv = static_cast<TensorView*>(val);
         tv->axis(1)->parallelize(ParallelType::Unroll);
@@ -1412,7 +1419,7 @@ void testGPU_FusionAdvancedComputeAt() {
     at::Tensor kernel_tv6 = at::empty_like(t0, options);
     at::Tensor kernel_tv7 = at::empty_like(t0, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
 
     int blocks = ceilDiv_(
         ceilDiv_(t0.numel(), 128), 4); // numel / unroll factor / threads
@@ -1437,11 +1444,12 @@ void testGPU_FusionAdvancedComputeAt() {
    */
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     TensorView* tv1 = mul(tv0, new Float(-1.0));
     TensorView* tv2 = add(tv0, new Float(3.0));
@@ -1451,8 +1459,8 @@ void testGPU_FusionAdvancedComputeAt() {
     TensorView* tv5 = add(tv4, tv3);
     TensorView* tv6 = add(tv5, tv3);
 
-    fusion.addOutput(tv5);
-    fusion.addOutput(tv6);
+    fusion->addOutput(tv5);
+    fusion->addOutput(tv6);
 
     // Lets setup to actually run
     tv6->merge(0);
@@ -1463,8 +1471,8 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv0->computeAt(tv6, 1);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
+    for (Val* val : fusion->vals()) {
+      if (!fusion->hasInput(val) &&
           val->getValType().value() == ValType::TensorView) {
         TensorView* tv = static_cast<TensorView*>(val);
 
@@ -1486,7 +1494,7 @@ void testGPU_FusionAdvancedComputeAt() {
     at::Tensor kernel_tv5 = at::empty_like(t0, options);
     at::Tensor kernel_tv6 = at::empty_like(t0, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
 
     int blocks = ceilDiv_(
         ceilDiv_(t0.numel(), 128), 4); // numel / unroll factor / threads
@@ -1496,7 +1504,7 @@ void testGPU_FusionAdvancedComputeAt() {
     torch::jit::fuser::cuda::runTestKernel(
         &prog, {t0}, {kernel_tv5, kernel_tv6});
 
-    GPULower gpulw(&fusion);
+    GPULower gpulw(fusion);
     std::stringstream actual_kernel;
     gpulw.printKernel(actual_kernel);
 
@@ -1509,19 +1517,20 @@ void testGPU_FusionAdvancedComputeAt() {
   // T3 = T2 * T0
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     TensorView* tv0 = makeDummyTensor(4);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     TensorView* tv1 = makeDummyTensor(4);
-    fusion.addInput(tv1);
+    fusion->addInput(tv1);
 
     TensorView* tv2 = mul(tv1, new Float(.979361));
     TensorView* tv3 = mul(tv2, tv0);
 
-    fusion.addOutput(tv3);
+    fusion->addOutput(tv3);
 
     // Lets setup to actually run
     while (tv3->nDims() > 1)
@@ -1534,8 +1543,8 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv3->axis(0)->parallelize(ParallelType::BIDx);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
+    for (Val* val : fusion->vals()) {
+      if (!fusion->hasInput(val) &&
           val->getValType().value() == ValType::TensorView) {
         TensorView* tv = static_cast<TensorView*>(val);
 
@@ -1553,7 +1562,7 @@ void testGPU_FusionAdvancedComputeAt() {
 
     at::Tensor kernel_tv3 = at::empty_like(t0, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
 
     int blocks = ceilDiv_(
         ceilDiv_(t0.numel(), 128), 4); // numel / unroll factor / threads
@@ -1563,7 +1572,7 @@ void testGPU_FusionAdvancedComputeAt() {
     torch::jit::fuser::cuda::compileKernel(&prog);
     torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {kernel_tv3});
 
-    GPULower gpulw(&fusion);
+    GPULower gpulw(fusion);
     std::stringstream actual_kernel;
     gpulw.printKernel(actual_kernel);
 
@@ -1576,26 +1585,27 @@ void testGPU_FusionAdvancedComputeAt() {
   // T6 = T5 - T0
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     TensorView* tv0 = makeDummyTensor(4);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     TensorView* tv1 = makeDummyTensor(4);
-    fusion.addInput(tv1);
+    fusion->addInput(tv1);
 
     TensorView* tv2 = makeDummyTensor(4);
-    fusion.addInput(tv2);
+    fusion->addInput(tv2);
 
     TensorView* tv3 = makeDummyTensor(4);
-    fusion.addInput(tv3);
+    fusion->addInput(tv3);
 
     TensorView* tv4 = sub(tv2, tv3);
     TensorView* tv5 = add(tv1, tv4);
     TensorView* tv6 = sub(tv5, tv0);
 
-    fusion.addOutput(tv6);
+    fusion->addOutput(tv6);
 
     // Lets setup to actually run
     while (tv6->nDims() > 1)
@@ -1610,8 +1620,8 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv6->axis(0)->parallelize(ParallelType::BIDx);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
+    for (Val* val : fusion->vals()) {
+      if (!fusion->hasInput(val) &&
           val->getValType().value() == ValType::TensorView) {
         TensorView* tv = static_cast<TensorView*>(val);
 
@@ -1632,7 +1642,7 @@ void testGPU_FusionAdvancedComputeAt() {
 
     at::Tensor kernel_tv6 = at::empty_like(t0, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
 
     int blocks = ceilDiv_(
         ceilDiv_(t0.numel(), 128), 4); // numel / unroll factor / threads
@@ -1643,7 +1653,7 @@ void testGPU_FusionAdvancedComputeAt() {
     torch::jit::fuser::cuda::runTestKernel(
         &prog, {t0, t1, t2, t3}, {kernel_tv6});
 
-    GPULower gpulw(&fusion);
+    GPULower gpulw(fusion);
     std::stringstream actual_kernel;
     gpulw.printKernel(actual_kernel);
 
@@ -1653,22 +1663,23 @@ void testGPU_FusionAdvancedComputeAt() {
 
 void testGPU_FusionScalarInputs() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
   TensorView* tv1 = makeDummyTensor(2);
-  fusion.addInput(tv1);
+  fusion->addInput(tv1);
 
   Float* f0 = new Float();
-  fusion.addInput(f0);
+  fusion->addInput(f0);
   Float* f1 = new Float();
-  fusion.addInput(f1);
+  fusion->addInput(f1);
   Float* f2 = new Float();
-  fusion.addInput(f2);
+  fusion->addInput(f2);
   Float* f3 = new Float();
-  fusion.addInput(f3);
+  fusion->addInput(f3);
   Val* f4 = mul(f0, f1);
   Val* f5 = sub(f2, f3);
 
@@ -1676,7 +1687,7 @@ void testGPU_FusionScalarInputs() {
   TensorView* tv3 = add(tv0, f5);
   TensorView* tv4 = mul(tv3, tv2);
 
-  fusion.addOutput(tv4);
+  fusion->addOutput(tv4);
 
   // Lets setup to actually run
   while (tv4->nDims() > 1)
@@ -1689,8 +1700,8 @@ void testGPU_FusionScalarInputs() {
 
   tv4->axis(0)->parallelize(ParallelType::BIDx);
 
-  for (Val* val : fusion.vals()) {
-    if (!fusion.hasInput(val) &&
+  for (Val* val : fusion->vals()) {
+    if (!fusion->hasInput(val) &&
         val->getValType().value() == ValType::TensorView) {
       TensorView* tv = static_cast<TensorView*>(val);
 
@@ -1723,7 +1734,7 @@ void testGPU_FusionScalarInputs() {
 
   at::Tensor kernel_tv4 = at::empty_like(t0, options);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
 
   int blocks =
       ceilDiv_(ceilDiv_(t0.numel(), 128), 4); // numel / unroll factor / threads
@@ -1743,7 +1754,7 @@ void testGPU_FusionScalarInputs() {
        at::Scalar(fl3)},
       {kernel_tv4});
 
-  GPULower gpulw(&fusion);
+  GPULower gpulw(fusion);
   std::stringstream actual_kernel;
   gpulw.printKernel(actual_kernel);
 
@@ -1752,16 +1763,17 @@ void testGPU_FusionScalarInputs() {
 
 void testGPU_FusionLoopUnroll() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(3);
   TensorView* tv1 = makeDummyTensor(3);
 
   // Register your inputs
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
@@ -1769,7 +1781,7 @@ void testGPU_FusionLoopUnroll() {
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
-  fusion.addOutput(tv3);
+  fusion->addOutput(tv3);
 
   int block_size = 16;
 
@@ -1793,7 +1805,7 @@ void testGPU_FusionLoopUnroll() {
 
   int inp_size = 129 * 13 * 3;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid((inp_size + 63) / 64);
   prog.block(block_size);
 
@@ -1899,19 +1911,20 @@ void test_op(
     InputTuple it,
     std::index_sequence<NumInputs...>) {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Generate Input JIT function Inputs and add them as Inputs to the Fusion
   // Graph
   std::array<Val*, sizeof...(NumInputs)> jit_inputs = {
       gen_jit_operand(std::get<NumInputs>(it))...};
-  std::for_each(jit_inputs.begin(), jit_inputs.end(), [&fusion](Val* v) {
-    fusion.addInput(v);
+  std::for_each(jit_inputs.begin(), jit_inputs.end(), [fusion](Val* v) {
+    fusion->addInput(v);
   });
   TensorView* out =
       static_cast<TensorView*>(jf(std::get<NumInputs>(jit_inputs)...));
-  fusion.addOutput(out);
+  fusion->addOutput(out);
 
   std::for_each(jit_inputs.begin(), jit_inputs.end(), [out](Val* v) {
     if (v->getValType() == ValType::TensorView)
@@ -1920,7 +1933,7 @@ void test_op(
   out->axis(0)->parallelize(ParallelType::BIDx);
   out->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(blocks);
   prog.block(threads);
   torch::jit::fuser::cuda::compileKernel(&prog);
@@ -1933,13 +1946,13 @@ void test_op(
       gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
   std::vector<at::Tensor> output_vect = {output};
   cudaDeviceSynchronize();
-  if (fusion.hasRNG())
+  if (fusion->hasRNG())
     at::manual_seed(0);
   torch::jit::fuser::cuda::runTestKernel(
       &prog, aten_inputs_ivalues, output_vect);
   cudaDeviceSynchronize();
 
-  if (fusion.hasRNG())
+  if (fusion->hasRNG())
     at::manual_seed(0);
   at::Tensor ref_output = af(aten_inputs);
   cudaDeviceSynchronize(); // This sync shouldn't be necessary;
@@ -2271,22 +2284,23 @@ void testGPU_FusionCompoundOps() {
 
 void testGPU_FusionCastOps() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(2, DataType::Half);
 
   TensorView* intrm1 = castOp(DataType::Float, tv0);
   TensorView* out = castOp(DataType::Half, intrm1);
 
-  fusion.addInput(tv0);
-  fusion.addOutput(out);
+  fusion->addInput(tv0);
+  fusion->addOutput(out);
   tv0->computeAt(out, -1);
 
   out->axis(0)->parallelize(ParallelType::BIDx);
   out->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1);
   prog.block(4);
 
@@ -2418,18 +2432,19 @@ void testGPU_FusionRFactorReplay() {
 // block stride + thread all reduce + unrolling on inner dim
 void testGPU_FusionReduction() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, 128);
   // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
@@ -2463,7 +2478,7 @@ void testGPU_FusionReduction() {
   int numel_x = 65000;
   int numel_y = 1025;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(numel_x);
   prog.block(128);
 
@@ -2481,17 +2496,18 @@ void testGPU_FusionReduction() {
 void testGPU_FusionReduction2() {
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     // tv1[I0, R1] = tv0[I0, I1]
     TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
-    fusion.addOutput(tv1);
+    fusion->addOutput(tv1);
 
     // switches to try some different scenarios. maybe we should iterate on all
     // permutations.
@@ -2540,7 +2556,7 @@ void testGPU_FusionReduction2() {
       tv1->axis(-1)->parallelize(ParallelType::TIDx);
     }
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(bind_bidx ? bidx : 1);
     prog.block(bind_tidx ? tidx : 1, bind_tidy ? tidy : 1);
 
@@ -2561,17 +2577,18 @@ void testGPU_FusionReduction2() {
   {
     // What if Z participates in the reduction with X?
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     // tv1[I0, R1] = tv0[I0, I1]
     TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
-    fusion.addOutput(tv1);
+    fusion->addOutput(tv1);
 
     int numel_x = 1025; // Cannot exceed block dim max size / tidy
     int numel_y = 129;
@@ -2597,7 +2614,7 @@ void testGPU_FusionReduction2() {
     tv2->axis(-2)->parallelize(ParallelType::TIDx);
     tv2->axis(-1)->parallelize(ParallelType::TIDz);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(numel_x);
     prog.block(tidx, 1, tidz);
 
@@ -2620,8 +2637,9 @@ void testGPU_FusionReduction2() {
 void testGPU_FusionReduction3() {
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
@@ -2630,18 +2648,18 @@ void testGPU_FusionReduction3() {
     TensorView* tv2 = add(tv0, tv1);
     // tv2[I0, I1] = tv0[I0, I1] + tv1[I0, I1]
 
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
 
     TensorView* tv3 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv2);
     // tv3[I0, R1] = tv2[I0, I1]
 
     TensorView* tv4 = makeDummyTensor(1);
-    fusion.addInput(tv4);
+    fusion->addInput(tv4);
 
     // tv5[I0] = tv3[I0, R1] * tv4[I0]
     TensorView* tv5 = mul(tv3, tv4);
-    fusion.addOutput(tv5);
+    fusion->addOutput(tv5);
 
     int tidx = 16;
 
@@ -2670,7 +2688,7 @@ void testGPU_FusionReduction3() {
     int numel_y = 129;
     int bidx = numel_x;
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(bidx);
     prog.block(tidx);
 
@@ -2697,17 +2715,18 @@ void testGPU_FusionReduction3() {
 
 void testGPU_FusionReduction4() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(3);
 
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
   int bidy = 2;
   int tidy = 4;
@@ -2723,7 +2742,7 @@ void testGPU_FusionReduction4() {
 
   tv1->axis(0)->parallelize(ParallelType::BIDy);
 
-  for (auto* val : fusion.vals()) {
+  for (auto* val : fusion->vals()) {
     if (val->getValType().value() == ValType::TensorView)
       val->as<TensorView>()->axis(-1)->parallelize(ParallelType::TIDx);
   }
@@ -2731,7 +2750,7 @@ void testGPU_FusionReduction4() {
   tv2->axis(-2)->parallelize(ParallelType::TIDy);
   tv1->axis(-2)->parallelize(ParallelType::TIDy);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1, bidy);
   prog.block(tidx, tidy);
   torch::jit::fuser::cuda::compileKernel(&prog);
@@ -2749,21 +2768,22 @@ void testGPU_FusionReduction4() {
 
 void testGPU_FusionReduction5() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int bdimx = 64;
   const int bdimy = 8;
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(3);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1, R2] = tv0[I0, I1, I2]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(2, bdimx);
   // tv1[I0, R1, R2o, R2i{128}] = tv0[I0, I1, I2]
@@ -2798,7 +2818,7 @@ void testGPU_FusionReduction5() {
   int numel_y = 1000;
   int numel_z = 1000;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(numel_x);
   prog.block(bdimx, bdimy);
 
@@ -2815,17 +2835,18 @@ void testGPU_FusionReduction5() {
 
 void testGPU_FusionReductionTFT() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
   int numel_x = 1025;
   int numel_y = 129;
@@ -2856,7 +2877,7 @@ void testGPU_FusionReductionTFT() {
   tv1->axis(-2)->parallelize(ParallelType::TIDz);
   tv2->axis(-2)->parallelize(ParallelType::TIDz);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1);
   prog.block(tidx, tidy, tidz);
 
@@ -2877,14 +2898,15 @@ void testGPU_FusionReductionTFT() {
 void testGPU_FusionSimpleBCast() {
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
     TensorView* tv1 = makeDummyTensor(2);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
 
     TensorView* tv2 = broadcast(tv0, {false, false, true});
     TensorView* tv3 = broadcast(tv1, {true, false, false});
@@ -2892,7 +2914,7 @@ void testGPU_FusionSimpleBCast() {
     TensorView* tv4 = add(tv2, tv3);
     tv4->split(-1, 4);
     tv4->split(0, 8);
-    fusion.addOutput(tv4);
+    fusion->addOutput(tv4);
 
     tv0->computeAt(tv4, -1);
     tv1->computeAt(tv4, -1);
@@ -2909,7 +2931,7 @@ void testGPU_FusionSimpleBCast() {
 
     at::Tensor cg_output = at::empty({x, y, z}, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(ceilDiv_(x, 8));
     prog.block(4);
     torch::jit::fuser::cuda::compileKernel(&prog);
@@ -2924,14 +2946,15 @@ void testGPU_FusionSimpleBCast() {
 
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
     TensorView* tv1 = makeDummyTensor(2);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
 
     // TODO add pointwise ops on the begining before the bcast.
 
@@ -2942,7 +2965,7 @@ void testGPU_FusionSimpleBCast() {
 
     tv4->merge(0, 1);
 
-    fusion.addOutput(tv4);
+    fusion->addOutput(tv4);
 
     tv0->computeAt(tv4, -1);
     tv1->computeAt(tv4, -1);
@@ -2958,7 +2981,7 @@ void testGPU_FusionSimpleBCast() {
 
     at::Tensor cg_output = at::empty({x, y, z}, options);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(x * y);
     prog.block(1);
     torch::jit::fuser::cuda::compileKernel(&prog);
@@ -2974,14 +2997,15 @@ void testGPU_FusionSimpleBCast() {
 
 void testGPU_FusionSimpleGemm() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2); // M, K
   TensorView* tv1 = makeDummyTensor(2); // K, N
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
   TensorView* tv2 = broadcast(tv0, {false, false, true});
   // tv2[I0, I1, B] = tv0[I0, I1]
@@ -2993,7 +3017,7 @@ void testGPU_FusionSimpleGemm() {
   TensorView* tv4 = mul(tv2, tv3);
   // tv5[I0, R1, I2] = tv4[I0, I1, I2]
   TensorView* tv5 = sum(tv4, {1});
-  fusion.addOutput(tv5);
+  fusion->addOutput(tv5);
 
   tv5->split(1, 32);
   // tv5[I0, R1o, R1i{32}, I2]
@@ -3041,7 +3065,7 @@ void testGPU_FusionSimpleGemm() {
 
   at::Tensor cg_output = at::empty({M, N}, options);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1, ceilDiv_(N, 4), ceilDiv_(M, 4));
 
   prog.block(32, 4, 4);
@@ -3058,15 +3082,16 @@ void testGPU_FusionSimpleGemm() {
 // Softmax with a 1D tensor. Parallelized only with a single thread block.
 void testGPU_FusionSoftmax1D() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int tidx = 128;
   const int dimx = 1000;
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(1);
-  fusion.addInput(input_tv0);
+  fusion->addInput(input_tv0);
 
   TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_tv0);
   TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
@@ -3078,7 +3103,7 @@ void testGPU_FusionSoftmax1D() {
 
   TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
 
-  fusion.addOutput(output_tv4);
+  fusion->addOutput(output_tv4);
 
   sum_exp_tv2->split(-1, tidx);
   TensorView* sum_exp_rf_tv5 = sum_exp_tv2->rFactor({-2});
@@ -3095,7 +3120,7 @@ void testGPU_FusionSoftmax1D() {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1, 1);
   prog.block(tidx);
 
@@ -3117,15 +3142,16 @@ void testGPU_FusionSoftmax1D() {
 // Softmax with a 1D tensor with input normalization.
 void testGPU_FusionSoftmax1DNormalized() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int tidx = 128;
   const int dimx = 1000;
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(1);
-  fusion.addInput(input_tv0);
+  fusion->addInput(input_tv0);
 
   // Normalize with the max value before computing exp.
   TensorView* max_val_tv1 =
@@ -3143,7 +3169,7 @@ void testGPU_FusionSoftmax1DNormalized() {
 
   TensorView* output_tv7 = div(exp_tv4_copy, bcast_sum_tv6);
 
-  fusion.addOutput(output_tv7);
+  fusion->addOutput(output_tv7);
 
   max_val_tv1->split(-1, tidx);
   TensorView* max_val_rf_tv8 = max_val_tv1->rFactor({-2});
@@ -3168,7 +3194,7 @@ void testGPU_FusionSoftmax1DNormalized() {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1, 1);
   prog.block(tidx);
 
@@ -3191,8 +3217,9 @@ void testGPU_FusionSoftmax1DNormalized() {
 // normalized. Pallelized with multiple thread blocks.
 void testGPU_FusionSoftmax3D() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int tidx = 32;
   const int dimx = 32;
@@ -3201,7 +3228,7 @@ void testGPU_FusionSoftmax3D() {
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(3);
-  fusion.addInput(input_tv0);
+  fusion->addInput(input_tv0);
 
   TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_tv0);
   TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
@@ -3213,7 +3240,7 @@ void testGPU_FusionSoftmax3D() {
 
   TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
 
-  fusion.addOutput(output_tv4);
+  fusion->addOutput(output_tv4);
 
   sum_exp_tv2->split(-1, tidx);
   TensorView* sum_exp_rf_tv5 = sum_exp_tv2->rFactor({-2});
@@ -3232,7 +3259,7 @@ void testGPU_FusionSoftmax3D() {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(dimx, dimy);
   prog.block(tidx);
 
@@ -3254,8 +3281,9 @@ void testGPU_FusionSoftmax3D() {
 // Softmax with a 3D tensor with input normalization.
 void testGPU_FusionSoftmax3DNormalized() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int tidx = 32;
   const int dimx = 32;
@@ -3264,7 +3292,7 @@ void testGPU_FusionSoftmax3DNormalized() {
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(3);
-  fusion.addInput(input_tv0);
+  fusion->addInput(input_tv0);
 
   // Normalize with the max value before computing exp.
   TensorView* max_val_tv1 =
@@ -3282,7 +3310,7 @@ void testGPU_FusionSoftmax3DNormalized() {
 
   TensorView* output_tv7 = div(exp_tv4_copy, bcast_sum_tv6);
 
-  fusion.addOutput(output_tv7);
+  fusion->addOutput(output_tv7);
 
   max_val_tv1->split(-1, tidx);
   TensorView* max_val_rf_tv8 = max_val_tv1->rFactor({-2});
@@ -3309,7 +3337,7 @@ void testGPU_FusionSoftmax3DNormalized() {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(dimx, dimy);
   prog.block(tidx);
 
@@ -3330,12 +3358,13 @@ void testGPU_FusionSoftmax3DNormalized() {
 
 void testGPU_FusionSoftmaxComputeAt() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   auto tv1 = sum(tv0, {1});
   auto tv2 = broadcast(tv1, {false, true});
@@ -3348,7 +3377,7 @@ void testGPU_FusionSoftmaxComputeAt() {
   auto tv6 = broadcast(tv5, {false, true});
 
   auto tv7 = sub(tv6, tv4);
-  fusion.addOutput(tv7);
+  fusion->addOutput(tv7);
 
   tv1->computeAt(tv7, 1);
   ASSERT_ANY_THROW(tv1->computeAt(tv7, -1));
@@ -3359,18 +3388,19 @@ void testGPU_FusionGridReduction1() {
   const int gdimx = 32;
   const int bdimx = 128;
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, bdimx);
   // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
@@ -3398,7 +3428,7 @@ void testGPU_FusionGridReduction1() {
   int numel_x = 10000;
   int numel_y = 65000;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(gdimx, numel_x);
   prog.block(bdimx);
 
@@ -3418,18 +3448,19 @@ void testGPU_FusionGridReduction2() {
   const int gdimy = 32;
   const int bdimx = 128;
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, bdimx);
   // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
@@ -3457,7 +3488,7 @@ void testGPU_FusionGridReduction2() {
   int numel_x = 10000;
   int numel_y = 65000;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(numel_x, gdimy);
   prog.block(bdimx);
 
@@ -3477,18 +3508,19 @@ void testGPU_FusionGridReduction3dim1() {
   const int gdimz = 32;
   const int gdimy = 128;
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, gdimy);
   // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
@@ -3516,7 +3548,7 @@ void testGPU_FusionGridReduction3dim1() {
   int numel_x = 100;
   int numel_y = 6500;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(numel_x, gdimy, gdimz);
   // This number should not affect the output as TIDx is not
   // used. All threads in a thread block redundantly computes the
@@ -3540,18 +3572,19 @@ void testGPU_FusionGridReduction3dim0() {
   const int gdimy = 128;
   const int gdimz = 32;
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[R0, I1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {rdim}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(rdim, gdimy);
   // tv1[R0o, R0i{128}, I1] = tv0[I0, I1]
@@ -3576,7 +3609,7 @@ void testGPU_FusionGridReduction3dim0() {
   int numel_x = 6500;
   int numel_y = 100;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(numel_y, gdimy, gdimz);
   // This number should not affect the output as TIDx is not
   // used. All threads in a thread block redundantly computes the
@@ -3597,21 +3630,22 @@ void testGPU_FusionGridReduction3dim0() {
 // This is similar to the FusionReduction, but swaps BIDx and TIDx
 void testGPU_FusionGridReduction4() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int bdimx = 128;
   const int gdimx = 1024;
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, gdimx);
   // tv1[I0, R1o, R1i{1024}] = tv0[I0, I1]
@@ -3645,7 +3679,7 @@ void testGPU_FusionGridReduction4() {
   int numel_x = bdimx;
   int numel_y = 65000;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(gdimx);
   prog.block(bdimx);
 
@@ -3664,8 +3698,9 @@ void testGPU_FusionGridReduction4() {
 // mapped to a reduction dim
 void testGPU_FusionGridReduction5() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int bdimx = 64;
   const int bdimy = 16;
@@ -3673,13 +3708,13 @@ void testGPU_FusionGridReduction5() {
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   tv1->split(1, bdimx);
   // tv1[I0, R1o, R1i{64}] = tv0[I0, I1]
@@ -3703,7 +3738,7 @@ void testGPU_FusionGridReduction5() {
   int numel_x = bdimy;
   int numel_y = 6500;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(gdimx);
   prog.block(bdimx, bdimy);
 
@@ -3721,18 +3756,19 @@ void testGPU_FusionGridReduction5() {
 // Similar to FusionGridReduction1 but with 3D tensors
 void testGPU_FusionGridReduction6() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(3);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // tv1[I0, R1, R2] = tv0[I0, I1, I2]
   TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  TORCH_CHECK(fusion->hasReduction(), "Could not detect reduction in fusion.");
 
   // Splitting for TID
   tv1->split(2, 128);
@@ -3769,7 +3805,7 @@ void testGPU_FusionGridReduction6() {
   int numel_y = 200;
   int numel_z = numel_y;
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(128, numel_x);
   prog.block(128);
 
@@ -3790,22 +3826,23 @@ void testGPU_FusionNonRedAxisBind() {
   int red_dim = 0;
 
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   TensorView* tv1 =
       reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
   tv1->split(-1, tid_x);
   tv1->axis(-2)->parallelize(ParallelType::BIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(bid_x);
   prog.block(tid_x);
 
@@ -3826,14 +3863,15 @@ void testGPU_FusionNonRedAxisBind() {
 
 void testGPU_FusionSplitBCast() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* input_tv0 = makeDummyTensor(3);
   TensorView* input_tv1 = makeDummyTensor(3);
-  fusion.addInput(input_tv0);
-  fusion.addInput(input_tv1);
+  fusion->addInput(input_tv0);
+  fusion->addInput(input_tv1);
 
   TensorView* sum_tv2 =
       reductionOp(BinaryOpType::Add, {2}, new Float(0), input_tv0);
@@ -3861,9 +3899,9 @@ void testGPU_FusionSplitBCast() {
   bcast_tv3->axis(-1)->parallelize(ParallelType::TIDx);
   output_tv4->axis(-1)->parallelize(ParallelType::TIDx);
 
-  fusion.addOutput(output_tv4);
+  fusion->addOutput(output_tv4);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(32, 32);
   prog.block(32);
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -3876,11 +3914,12 @@ void testGPU_FusionSplitBCast() {
 
 void testGPU_FusionBCastInnerDim() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   // reduce then broadcast
   auto tv1 = sum(tv0, {0});
@@ -3891,8 +3930,9 @@ void testGPU_FusionBCastInnerDim() {
 
 void testGPU_FusionBCastReduce() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
@@ -3908,15 +3948,16 @@ void testGPU_FusionBCastReduce() {
 // https://github.com/csarofeen/pytorch/issues/110
 void testGPU_FusionReductionMultiConsumer() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
   auto tv1 = unaryOp(UnaryOpType::Exp, tv0);
   auto tv2 = reductionOp(BinaryOpType::Max, {-1}, new Float(0), tv1);
   auto tv3 = reductionOp(BinaryOpType::Min, {-1}, new Float(0), tv1);
   auto tv4 = add(tv2, tv3);
-  fusion.addOutput(tv4);
+  fusion->addOutput(tv4);
   tv1->computeAt(tv2, -1);
 
   TORCH_CHECK(
@@ -3928,26 +3969,27 @@ void testGPU_FusionComputeAtExprOrder() {
   {
     for (int i = 0; i < 2; ++i) {
       torch::jit::fuser::cuda::CudaKernel prog;
-      Fusion& fusion = *prog.fusion_;
-      FusionGuard fg(&fusion);
+      prog.setFusionPtr(std::make_unique<Fusion>());
+      Fusion* fusion = prog.fusion();
+      FusionGuard fg(fusion);
 
       // Set up your input tensor views
       TensorView* tv0 = makeDummyTensor(1);
-      fusion.addInput(tv0);
+      fusion->addInput(tv0);
 
       auto tv1 = add(tv0, new Float(1));
       auto tv2 = add(tv0, new Float(1));
       TensorView* tv3 = add(tv1, tv2);
       if (i == 0) {
         tv1->computeAt(tv3, -1);
-        fusion.addOutput(tv2);
+        fusion->addOutput(tv2);
       } else {
         tv2->computeAt(tv3, -1);
-        fusion.addOutput(tv1);
+        fusion->addOutput(tv1);
       }
-      fusion.addOutput(tv3);
+      fusion->addOutput(tv3);
 
-      prog.device_ = 0;
+      prog.setDevice(0);
       prog.grid(1);
       prog.block(1);
 
@@ -3968,24 +4010,25 @@ void testGPU_FusionComputeAtExprOrder() {
   }
   {
     torch::jit::fuser::cuda::CudaKernel prog;
-    Fusion& fusion = *prog.fusion_;
-    FusionGuard fg(&fusion);
+    prog.setFusionPtr(std::make_unique<Fusion>());
+    Fusion* fusion = prog.fusion();
+    FusionGuard fg(fusion);
 
     // Set up your input tensor views
     TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+    fusion->addInput(tv0);
 
     auto tv1 = add(tv0, new Float(1));
     auto tv2 = add(tv0, new Float(1));
     TensorView* tv3 = add(tv1, tv2);
-    fusion.addOutput(tv3);
+    fusion->addOutput(tv3);
 
     tv3->split(-1, 32);
 
     tv1->computeAt(tv3, -1);
     tv2->computeAt(tv3, -2);
 
-    prog.device_ = 0;
+    prog.setDevice(0);
     prog.grid(1);
     prog.block(1);
 
@@ -4005,19 +4048,20 @@ void testGPU_FusionComputeAtExprOrder() {
 
 void testGPU_FusionZeroDimComputeAt() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(1);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   auto tv1 = sum(tv0, {0});
   auto tv2 = add(tv1, new Float(1));
-  fusion.addOutput(tv2);
+  fusion->addOutput(tv2);
   TORCH_CHECK(tv2->nDims() == 0);
   tv1->computeAt(tv2, 0);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1);
   prog.block(1);
 
@@ -4036,25 +4080,26 @@ void testGPU_FusionZeroDimComputeAt() {
 
 void testGPU_FusionZeroDimBroadcast() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   TensorView* tv0 = makeDummyTensor(0);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   auto tv1 = broadcast(tv0, {true, true});
   TORCH_CHECK(tv1->nDims() == 2);
 
   TensorView* tv2 = makeDummyTensor(2);
-  fusion.addInput(tv2);
+  fusion->addInput(tv2);
 
   auto tv3 = add(tv1, tv2);
   auto tv4 = sum(tv3, {0, 1});
-  fusion.addOutput(tv4);
+  fusion->addOutput(tv4);
 
   tv3->computeAt(tv4, -1);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(1);
   prog.block(1);
 
@@ -4075,17 +4120,18 @@ void testGPU_FusionZeroDimBroadcast() {
 
 void testGPU_FusionZeroDimReduction() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int bdimx = 32;
   const int gdimx = 32;
 
   TensorView* tv0 = makeDummyTensor(1);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   auto tv1 = sum(tv0, {0});
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
   tv1->split(0, bdimx);
   tv1->split(0, gdimx);
@@ -4096,7 +4142,7 @@ void testGPU_FusionZeroDimReduction() {
   tv1->axis(-2)->parallelize(ParallelType::BIDx);
   tv2->axis(-2)->parallelize(ParallelType::BIDx);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(gdimx);
   prog.block(bdimx);
 
@@ -4115,14 +4161,15 @@ void testGPU_FusionZeroDimReduction() {
 
 void testGPU_FusionBCastAfterReduce() {
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   const int tidx = 128;
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   auto tv1 = sum(tv0, {1});
   auto tv2 = broadcast(tv1, {false, true});
@@ -4131,10 +4178,10 @@ void testGPU_FusionBCastAfterReduce() {
   auto tv3 = tv1->rFactor({-2});
 
   TensorView* tv4 = makeDummyTensor(2);
-  fusion.addInput(tv4);
+  fusion->addInput(tv4);
 
   auto tv5 = add(tv2, tv4);
-  fusion.addOutput(tv5);
+  fusion->addOutput(tv5);
   tv5->split(1, tidx);
 
   tv3->computeAt(tv5, 1);
@@ -4155,7 +4202,7 @@ void testGPU_FusionBCastAfterReduce() {
 
   at::Tensor cg_output = at::empty({x, y}, options);
 
-  prog.device_ = 0;
+  prog.setDevice(0);
   prog.grid(x);
   prog.block(tidx);
   torch::jit::fuser::cuda::compileKernel(&prog);
@@ -4174,16 +4221,17 @@ void testGPU_FusionReductionScheduler() {
   constexpr int red_dim = 1;
 
   torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
+  fusion->addInput(tv0);
 
   TensorView* tv1 =
       reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
-  fusion.addOutput(tv1);
+  fusion->addOutput(tv1);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::rand({bid_x, tid_x}, options);
@@ -4193,10 +4241,10 @@ void testGPU_FusionReductionScheduler() {
   const at::ArrayRef<c10::IValue> inputs({input});
 
   TORCH_CHECK(
-      cuda::scheduleReduction(prog.fusion_.get(), inputs),
+      cuda::scheduleReduction(prog.fusion(), inputs),
       "Reduction schedule was not generated!");
 
-  prog.device_ = 0;
+  prog.setDevice(0);
 
   torch::jit::fuser::cuda::compileKernel(&prog);
   torch::jit::fuser::cuda::runKernel(&prog, {input}, {cg_output}, c10::nullopt);

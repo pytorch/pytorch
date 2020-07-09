@@ -87,8 +87,7 @@ class IrParser {
   };
 
  public:
-  IrParser(std::shared_ptr<Graph> graph, CudaKernel* cuda_kernel)
-      : graph_(std::move(graph)), cuda_kernel_(cuda_kernel) {
+  IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -96,8 +95,9 @@ class IrParser {
   }
 
   // Fuses pointwise ops with loop unrolling (factor = 4).
-  void parse() {
-    FusionGuard fg(cuda_kernel_->fusion_.get());
+  std::unique_ptr<Fusion> parse() {
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
     auto block = graph_->block();
 
     // [ Note - broadcast support in integration ]
@@ -139,7 +139,7 @@ class IrParser {
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
       TORCH_INTERNAL_ASSERT(registerValue(val, broadcast_dim));
-      cuda_kernel_->fusion_->addInput(value_map_[val->unique()]);
+      fusion->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
       // computation promotion, we cast fp16 inputs to fp32 and use promoted
@@ -178,8 +178,10 @@ class IrParser {
         // No need to update value_map_ after this point.
         out = static_cast<TensorView*>(castOp(DataType::Half, out));
       }
-      cuda_kernel_->fusion_->addOutput(out);
+      fusion->addOutput(out);
     }
+
+    return fusion;
   }
 
   static bool canParseNode(const Node* node) {
@@ -659,7 +661,6 @@ class IrParser {
   }
 
   std::shared_ptr<Graph> graph_;
-  CudaKernel* cuda_kernel_;
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
@@ -704,9 +705,9 @@ bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(std::shared_ptr<Graph>& graph, CudaKernel* cuda_kernel) {
-  IrParser parser(graph, cuda_kernel);
-  parser.parse();
+std::unique_ptr<Fusion> parseJitIR(std::shared_ptr<Graph>& graph) {
+  IrParser parser(graph);
+  return parser.parse();
 }
 
 } // namespace cuda

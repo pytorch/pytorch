@@ -68,11 +68,6 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
       // query if fastest changing dimension (FCD) is a reduction
       fcd_reduction = out->axis((int)out->nDims() - 1)->isReduction();
 
-      // TODO: could really use evaluation here. Launch configuration is
-      //       imposed by transformation and the information should be
-      //       embedded in codegen IR.
-      // cuda_kernel_->reduction_axes_ = reductionAxes(out);
-
       // We coalesc all reduction axes to the right;
       size_t num_reduction_axes = coalescReduction(out);
 
@@ -99,8 +94,6 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
         continue;
       TensorView* out_tv = static_cast<TensorView*>(output);
 
-      // fcd_reduction could be queried later via
-      // cuda_kernel_->reduction_axes_, which would ensure we have proper
       // launch configuratoin.
       TensorView* intermediate = nullptr;
       if (fcd_reduction) {
@@ -133,7 +126,8 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     }
     // Run through all values, unroll, and bind their axes
     for (auto val : fusion->vals()) {
-      if (val->getValType().value() != ValType::TensorView)
+      if (val->getValType().value() != ValType::TensorView ||
+          fusion->hasInput(val))
         continue;
       TensorView* tv = static_cast<TensorView*>(val);
       if (fcd_reduction) {
@@ -202,7 +196,8 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
 
     // Run through all values, unroll, and bind their axes
     for (auto val : fusion->vals()) {
-      if (val->getValType().value() != ValType::TensorView)
+      if (val->getValType().value() != ValType::TensorView ||
+          fusion->hasInput(val))
         continue;
       TensorView* tv = static_cast<TensorView*>(val);
 

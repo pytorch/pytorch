@@ -62,8 +62,8 @@ class TORCH_CUDA_API FusionGuard {
   Fusion* prev_fusion;
 
   // Set the active fusion so it can be manipulated.
-  FusionGuard(Fusion* fusion);
-  FusionGuard(const cuda::CudaKernel* cuda_kernel);
+  explicit FusionGuard(Fusion* fusion);
+  explicit FusionGuard(cuda::CudaKernel* cuda_kernel);
 
   ~FusionGuard();
 

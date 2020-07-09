@@ -18,15 +18,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-std::unique_ptr<KernelArgsReq> makePWKernelSupport(
-    const at::ArrayRef<IValue>& inputs) {
-  auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
-  for (const auto& input : inputs) {
-    req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
-  }
-  return req_ptr;
-}
-
 // CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
 // including compilation and execution.
 //
@@ -51,9 +42,9 @@ class CudaFusionManager {
     std::lock_guard<std::mutex> guard(mutex_);
 
     // prepare graph for lowering;
-    // TODO: this is needed. Otherwise caching on tensor size would not work, as
-    //       different tensor size would result in unique string representation.
-    EraseShapeInformation(graph);
+    // We should not call `EraseShapeInformation(graph);`, graph representation
+    // does not incorporate static sizes, but just rank of input tensors, which
+    // is exactly what we wanted.
     Canonicalize(graph, false);
     auto repr = graph->toString(false);
 
@@ -72,7 +63,6 @@ class CudaFusionManager {
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)
     }
-
     return graph_cache_[repr];
   };
 
@@ -86,26 +76,28 @@ class CudaFusionManager {
     TORCH_CHECK(
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
-    // TODO: temporary hack
-    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(inputs);
-    if (cuda_kernel) {
+    if (auto cuda_kernel_opt =
+            kernel_cache_[kernel_id].getKernelPtr(inputs, broadcasted_shape)) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
+      runKernel(*cuda_kernel_opt, inputs, outputs, broadcasted_shape);
     } else {
       // TODO: this should somehow be done after kernel compilation.
       //       we will want compileKernel to return a heuristic
-      cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(
-          makePWKernelSupport(inputs));
+      auto cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(inputs);
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
-      // we should propagate more information back:
-      //   1. device;
-      //   2. launch config;
-      parseJitIR(graph, cuda_kernel.value());
-      scheduleFusion(cuda_kernel.value()->fusion_.get(), inputs);
+      cuda_kernel->setFusionPtr(parseJitIR(graph));
+      TORCH_INTERNAL_ASSERT(
+          cuda_kernel->fusion() != nullptr,
+          "parser failed to construct a fusion from PyTorch JIT graph\n");
+
+      // TODO: update the API to let `scheduleFusion` consume & return a fusion
+      // magic scheduler updates fusion instance via transformation and setup
+      // launch configurations;
+      scheduleFusion(cuda_kernel->fusion(), inputs);
 
       // find device in inputs.
       for (const auto& input : inputs) {
@@ -113,15 +105,15 @@ class CudaFusionManager {
           const auto& device = input.toTensor().device();
           TORCH_INTERNAL_ASSERT(
               device.is_cuda(), "Could only fuser operations on cuda device");
-          cuda_kernel.value()->device_ = device.index();
+          cuda_kernel->setDevice(device.index());
           break;
         }
       }
 
       // NVRTC compile kernel
-      compileKernel(cuda_kernel.value());
+      compileKernel(cuda_kernel);
 
-      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
+      runKernel(cuda_kernel, inputs, outputs, broadcasted_shape);
     }
   }
 
