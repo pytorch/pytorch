@@ -22,6 +22,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   int64_t current_device() const override;
   bool hasPrimaryContext(int64_t device_index) const override;
   c10::optional<int64_t> getDevceIndexWithPrimaryContext() const override;
+  Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;
   bool compiledWithMIOpen() const override;
