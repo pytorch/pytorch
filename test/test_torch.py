@@ -10064,7 +10064,7 @@ class TestTorchDeviceType(TestCase):
             return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
                 input_size, p, keepdim, dim)
 
-        for keepdim in [True]:
+        for keepdim in [False, True]:
             # full reduction
             x = torch.randn(25, device=device)
             xn = x.cpu().numpy()
@@ -10078,7 +10078,7 @@ class TestTorchDeviceType(TestCase):
             xn = x.cpu().numpy()
             for p in [None, 0, 1, 2, 3, 4, inf, -inf, -1, -2, -3]:
                 dim = 1
-                res = x.norm(p, 1, keepdim=keepdim).cpu()
+                res = x.norm(p, dim, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, p, dim, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim, dim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
@@ -10086,6 +10086,25 @@ class TestTorchDeviceType(TestCase):
 
             # matrix norm
             for p in ['fro', 'nuc', 1, 2, inf, -inf, -1, -2]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            # TODO: add complex frobenius and vector 2-norm tests once those work properly
+            x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 3, inf, -1, -2, -3, -inf]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
+            xn = x.cpu().numpy()
+            for p in ['nuc', 1, 2, inf, -1, -2, -inf]:
                 res = x.norm(p, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
@@ -19326,7 +19345,8 @@ tensor_op_tests = [
     ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
-    ('norm', '2_norm', _small_2d, lambda t, d: [2], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
+    ('norm', '1_norm', _small_2d, lambda t, d: [1], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False,
+        [onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('norm', '3_norm_dim', _small_3d, lambda t, d: [3, 0], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
     ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
     ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
