@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
+import math
 import os
 import sys
 import time
@@ -14,6 +15,7 @@ from functools import reduce, wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
@@ -2207,6 +2209,62 @@ class _DistTestBase(object):
         res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
+
+    def test_DistributedSampler_padding(self):
+        # Tests padding of distributed sampler.
+        world_size = dist.get_world_size()
+        dataset_size = 100 + world_size + 1
+        dataset = [torch.ones(1) * i for i in range(dataset_size)]
+
+        # Specifying drop_last=True will cause the tail of the data to be dropped.
+        dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)
+        local_num_samples, local_dataset_size = (
+            dist_sampler.num_samples,
+            dist_sampler.total_size,
+        )
+        # The effective dataset size should be the greatest integer that is <=
+        # dataset_size that is divisible by the world_size. This is to ensure each
+        # rank processes the same nubmer of samples.
+        effective_dataset_size = (
+            math.ceil((dataset_size - world_size) / world_size)
+            if dataset_size % world_size != 0
+            else dataset_size / world_size
+        )
+        self.assertEqual(local_num_samples, effective_dataset_size)
+        self.assertEqual(local_dataset_size, local_num_samples * world_size)
+        indices_list = list(iter(dist_sampler))
+        self.assertEqual(len(indices_list), local_num_samples)
+
+        def validate_global_samples(local_num_samples):
+            # Ensure that each rank processes the same number of samples.
+            world_samples = [
+                torch.LongTensor([0]) for _ in range(world_size)
+            ]
+            dist.all_gather(world_samples, torch.tensor([local_num_samples]))
+            world_samples = [sample.item() for sample in world_samples]
+            self.assertEqual(len(set(world_samples)), 1)
+
+        validate_global_samples(local_num_samples)
+
+        # drop_last=False is the default and will add additional indices to be sampled,
+        # increasing the effective dataset size.
+        dist_sampler_added_samples = DistributedSampler(dataset=dataset)
+        local_num_samples, local_dataset_size = (
+            dist_sampler_added_samples.num_samples,
+            dist_sampler_added_samples.total_size,
+        )
+        # The effective dataset size is the smallest integer that is >= dataset_size
+        # and divisible by the world size.
+        self.assertEqual(
+            local_num_samples, math.ceil(dataset_size / world_size)
+        )
+        self.assertEqual(local_dataset_size, local_num_samples * world_size)
+        indices_list = list(iter(dist_sampler_added_samples))
+        self.assertEqual(len(indices_list), local_num_samples)
+
+        # Ensure that each rank processes the same nmber of samples.
+        validate_global_samples(local_num_samples)
+
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
