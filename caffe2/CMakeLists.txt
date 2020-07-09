@@ -897,6 +897,13 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
+  # can only be compiled with USE_TENSORPIPE is set.
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PRIVATE
+      USE_TENSORPIPE
+    )
+  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
