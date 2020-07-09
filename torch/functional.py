@@ -1495,7 +1495,8 @@ def clamp(input, min=None, max=None, out=None):
     # Overwriting reason:
     # This dispatches to different ATen functions depending on the type of
     # min and max.
-    if isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor):
+    if ((isinstance(min, torch.Tensor) and len(min.shape) > 0)
+            or (isinstance(max, torch.Tensor) and len(max.shape) > 0)):
         return torch._C._VariableFunctions.clamp_with_tensors(input, min, max, out=out)
     else:
         return torch._C._VariableFunctions.clamp(input, min, max, out=out)
@@ -1508,7 +1509,8 @@ def clamp_(input, min=None, max=None):
     # Overwriting reason:
     # This dispatches to different ATen functions depending on the type of
     # min and max.
-    if isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor):
+    if ((isinstance(min, torch.Tensor) and len(min.shape) > 0)
+            or (isinstance(max, torch.Tensor) and len(max.shape) > 0)):
         return torch._C._VariableFunctions.clamp_with_tensors_(input, min, max)
     else:
         return torch._C._VariableFunctions.clamp_(input, min, max)
