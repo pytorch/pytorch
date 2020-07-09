@@ -69,8 +69,70 @@ void fake_quantize_grad_tensor_kernel_cuda(
     });
 }
 
+void fake_quantize_grad_learnable_sc_tensor_kernel_cuda(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  // scalar type of this function is guaranteed to be float
+  float inv_scale = 1.0f / scale;
+  float grad_small = quant_min - zero_point;
+  float grad_big = quant_max - zero_point;
+
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(input_grad)
+    .add_input(output_grad)
+    .add_input(input)
+    .build();
+  gpu_kernel(iter,
+    [=] GPU_LAMBDA (float x, float dy) -> float {
+      int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+      xq = std::max(std::min(xq, quant_max), quant_min);
+      if (xq == quant_min) {
+        return dy * grad_small;
+      } else if (xq == quant_max) {
+        return dy * grad_big;
+      }
+      float x_fq = static_cast<float>((xq - zero_point) * scale);
+      return dy * (x_fq - x) * inv_scale;
+    });
+}
+
+void fake_quantize_grad_sc_learnable_z_point_kernel_cuda(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  // scalar type of this function is guaranteed to be float
+  float inv_scale = 1.0f / scale;
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(input_grad)
+    .add_input(output_grad)
+    .add_input(input)
+    .build();
+  gpu_kernel(iter,
+    [=] GPU_LAMBDA (float x, float dy) -> float {
+      int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+      xq = std::max(std::min(xq, quant_max), quant_min);
+      if (xq == quant_min || xq == quant_max) {
+        return dy * (-1) * scale;
+      }
+      return 0;
+    });
+}
+
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel_cuda);
+REGISTER_DISPATCH(fake_quant_grad_learnable_sc_tensor_stub, &fake_quantize_grad_learnable_sc_tensor_kernel_cuda);
+REGISTER_DISPATCH(fake_quant_grad_learnable_z_point_tensor_stub, &fake_quantize_grad_sc_learnable_z_point_kernel_cuda);
 
 // Fake quantize per channel
 
