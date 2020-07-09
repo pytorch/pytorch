@@ -122,6 +122,64 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     res[mask] = dY[mask]
     return res
 
+# Reference method for the gradients of the learnable fake quantize operator
+def _fake_quantize_learnable_per_channel_affine_grad_reference(
+        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
+    Xq = torch.zeros_like(X)
+    Xfq = torch.zeros_like(X)
+    for i in range(X.size()[0]):
+        X_i, scale_i, zero_point_i = X[i], per_channel_scale[i], per_channel_zero_point[i]
+        Xq[i] = torch.round(X_i * (1.0 / scale_i) + zero_point_i)
+        Xfq[i] = (Xq[i].clamp(quant_min, quant_max) - zero_point_i) * scale_i
+
+    grad_X = _fake_quantize_per_channel_affine_grad_reference(
+        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max)
+    grad_scale = torch.zeros([per_channel_scale.size(0)])
+    grad_zero_point = torch.zeros([per_channel_zero_point.size(0)])
+
+    Xfq_flattened = torch.unbind(Xfq, dim=axis)
+    X_flattened = torch.unbind(X, dim=axis)
+    grad_X_flattened = torch.unbind(grad_X, dim=axis)
+
+    for i, Xq_i in enumerate(torch.unbind(Xq, dim=axis), 0):
+        indicate_small_scale_i = (Xq_i == quant_min).float()
+        indicate_big_scale_i = (Xq_i == quant_max).float()
+        indicate_middle_scale_i = torch.ones(indicate_small_scale_i.shape) - \
+            indicate_small_scale_i - indicate_big_scale_i
+
+        indicate_saturate_zp_i = (Xq_i == quant_min).float() + \
+            (Xq_i == quant_max).float()
+        indicate_unsaturate_zp_i = torch.ones(indicate_saturate_zp_i.shape) - \
+            indicate_saturate_zp_i
+
+        scale_i = per_channel_scale[i]
+        zero_point_i = per_channel_zero_point[i]
+        Xfq_i = Xfq_flattened[i]
+        X_i = X_flattened[i]
+        grad_X_i = grad_X_flattened[i]
+
+        grad_small_scale_i = quant_min - zero_point_i
+        grad_big_scale_i = quant_max - zero_point_i
+        grad_middle_scale_i = (Xfq_i - X_i) / scale_i
+
+        grad_saturate_zp_i = -scale_i
+        grad_unsaturate_zp_i = 0
+
+        grad_scale_i = indicate_small_scale_i * grad_small_scale_i + \
+            indicate_middle_scale_i * grad_middle_scale_i + \
+            indicate_big_scale_i * grad_big_scale_i
+        grad_zp_i = indicate_saturate_zp_i * grad_saturate_zp_i + \
+            indicate_unsaturate_zp_i * grad_unsaturate_zp_i
+
+        grad_scale_i = (grad_scale_i * grad_X_i).sum().unsqueeze(dim=0)
+        grad_zp_i = (grad_zp_i * grad_X_i).sum().unsqueeze(dim=0)
+
+        grad_scale[i] = grad_scale_i
+        grad_zero_point[i] = grad_zp_i
+    return grad_X, grad_scale, grad_zero_point
+
+
+
 def to_tensor(X, device):
     return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
@@ -723,6 +781,30 @@ class TestFakeQuantizePerChannel(TestCase):
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_forward_per_channel(self, device, X):
+        r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, axis, _) = X
+        X_base = to_tensor(X, device)
+        scale_base = to_tensor(scale, device)
+        zero_point_base = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
+
+        for n_bits in (4, 8):
+            quant_min, quant_max = 0, 2 ** (n_bits) - 1
+            X_curr = X_base.clone()
+            scale_curr = scale_base.clone()
+            zero_point_curr = zero_point_base.clamp(quant_min, quant_max)
+
+            Y = _fake_quantize_per_channel_affine_reference(
+                X_curr.cpu(), scale_curr.cpu(), zero_point_curr.cpu(), axis, quant_min, quant_max)
+            Y_prime = torch.fake_quantize_learnable_per_channel_affine(
+                X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max)
+            np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
     def test_backward_per_channel(self, device, X):
         r"""Tests the backward method.
@@ -743,6 +825,47 @@ class TestFakeQuantizePerChannel(TestCase):
             dout, X, scale, zero_point, axis, quant_min, quant_max)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_backward_per_channel(self, device, X):
+        r"""Tests the backward path of the learnable FakeQuantizePerTensorAffine op.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, axis, _) = X
+        X_base = to_tensor(X, device)
+        scale_base = to_tensor(scale, device)
+        zero_point_base = to_tensor(zero_point, device)
+
+        for n_bits in (4, 8):
+            quant_min, quant_max = 0, 2 ** n_bits - 1
+
+            X_curr = X_base.clone()
+            X_curr.requires_grad_()
+            scale_curr = scale_base.clone()
+            scale_curr.requires_grad_()
+            zero_point_curr = zero_point_base.clamp(quant_min, quant_max)
+            zero_point_curr.requires_grad_()
+
+            Y_prime = torch.fake_quantize_learnable_per_channel_affine(
+                X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max)
+
+            dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
+            dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
+                dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max)
+            Y_prime.backward(dout)
+
+            dX_expected = dX.cpu().detach().numpy()
+            dX_actual = X_curr.grad.cpu().detach().numpy()
+            dScale_expected = dScale.cpu().detach().numpy()
+            dScale_actual = scale_curr.grad.cpu().detach().numpy()
+            dZeroPoint_expected = dZeroPoint.cpu().detach().numpy()
+            dZeroPoint_actual = zero_point_curr.grad.cpu().detach().numpy()
+
+            np.testing.assert_allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance)
+            np.testing.assert_allclose(dScale_expected, dScale_actual, rtol=tolerance, atol=tolerance)
+            np.testing.assert_allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
