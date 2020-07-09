@@ -59,12 +59,12 @@ void testLiteInterpreterAdd() {
   std::stringstream ss;
   std::stringstream ss2;
   m._save_for_mobile(ss);
+  m._save_for_mobile("/Users/annshan/models/add.bc");
   mobile::Module bc = _load_for_mobile(ss);
   // testing serializer ----------------------------------------------------------------------
   std::cerr << "parameter, orig: " << bc.parameters() << std::endl;
-  // run exportModule/writeArchive
-  // std::string filename = "/data/users/annshan/models/test_serial.bc";
-  torch::jit::mobile::ExportModule(bc, ss2, true);
+  // torch::jit::mobile::ExportModule(bc, ss2, true);
+  torch::jit::mobile::ExportModule(bc, "/Users/annshan/models/add2.bc", true);
   // load again
   mobile::Module bc2 = _load_for_mobile(ss2);
   std::cerr << "parameter, after: " << bc2.parameters() << std::endl;
