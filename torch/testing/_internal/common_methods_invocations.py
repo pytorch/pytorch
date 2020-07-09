@@ -238,8 +238,6 @@ def method_tests():
         ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
         ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
-        ('gcd', (S, S, S), ((S, S, S),), '', (False,)),
-        ('lcm', (S, S, S), ((S, S, S),), '', (False,)),
         ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log10', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
