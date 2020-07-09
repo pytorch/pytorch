@@ -15,6 +15,9 @@ namespace c10 {
 namespace impl {
 
 inline c10::optional<MemoryFormat> process_memory_format(const TensorOptions& options, c10::optional<MemoryFormat> memory_format) {
+    TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
+        "Operators taking TensorOptions cannot take a TensorOptions with "
+        "options.requires_grad set as ", options.requires_grad());
     TORCH_CHECK(
         !(options.has_memory_format() && memory_format.has_value()),
         "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
