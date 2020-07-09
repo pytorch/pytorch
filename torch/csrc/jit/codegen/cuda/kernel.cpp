@@ -297,7 +297,10 @@ size_t numberOfReductionSegments(
       (z_block ? 1 : grid_dim.z);
 }
 
-std::array<size_t, 2> gridReductionTempBufferSizes(CudaKernel* entry) {
+std::array<size_t, 2> gridReductionTempBufferSizes(
+    CudaKernel* entry,
+    const dim3& grid_dim,
+    const dim3& block_dim) {
   size_t buffer_size = 0;
   size_t sync_flag_size = 0;
   for (auto expr : entry->fusion()->exprs(true)) {
@@ -318,13 +321,13 @@ std::array<size_t, 2> gridReductionTempBufferSizes(CudaKernel* entry) {
     bool y_thread = domains.find(ParallelType::TIDy) == domains.end();
     bool z_thread = domains.find(ParallelType::TIDz) == domains.end();
     auto rb_size =
-        sizeOfReductionBlock(entry->block_, x_thread, y_thread, z_thread);
-    auto num_blocks = size(entry->grid_);
+        sizeOfReductionBlock(block_dim, x_thread, y_thread, z_thread);
+    auto num_blocks = size(grid_dim);
     auto element_size = dataTypeSize(*(rop->out()->getDataType()));
     auto required_temp_buffer_size = num_blocks * rb_size * element_size;
     buffer_size = std::max(buffer_size, required_temp_buffer_size);
     auto flag_size = sizeof(unsigned) *
-        numberOfReductionSegments(entry->grid_, x_block, y_block, z_block);
+        numberOfReductionSegments(grid_dim, x_block, y_block, z_block);
     sync_flag_size = std::max(sync_flag_size, flag_size);
   }
   return {{buffer_size, sync_flag_size}};
@@ -520,6 +523,9 @@ void runKernel(
   const auto nThreadz = expr_eval_fn(LaunchConfigType::TIDz);
   const auto shared_memory = expr_eval_fn(LaunchConfigType::SharedMemory);
 
+  dim3 grid_dim(nBlocks_x, nBlocks_y, nBlocks_z);
+  dim3 block_dim(nThreadx, nThready, nThreadz);
+
   // TODO: this probably won't work for us.
   if (entry->hasRNG()) {
     std::pair<uint64_t, uint64_t> philox_engine_inputs;
@@ -535,6 +541,23 @@ void runKernel(
     }
     kernel_args.push(philox_engine_inputs.first);
     kernel_args.push(philox_engine_inputs.second);
+  }
+
+  // When the kernel has global reductions, the kernel needs two
+  // additional temporary buffers, one for intermediate results and
+  // another for synchronization among thread blocks.
+  if (entry->fusion_->hasGridReduction()) {
+    auto temp_buf_type = at::kFloat;
+    auto temp_buf_sizes =
+        gridReductionTempBufferSizes(entry, grid_dim, block_dim);
+    auto options =
+        at::TensorOptions().dtype(temp_buf_type).device(at::kCUDA, 0);
+    at::Tensor reduction_work_buffer = at::empty(
+        {(long)(temp_buf_sizes[0] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(reduction_work_buffer);
+    at::Tensor sync_flags = at::zeros(
+        {(long)(temp_buf_sizes[1] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(sync_flags);
   }
 
   // launch kernel;
@@ -621,7 +644,8 @@ void runTestKernel(
   // another for synchronization among thread blocks.
   if (entry->fusion()->hasGridReduction()) {
     auto temp_buf_type = at::kFloat;
-    auto temp_buf_sizes = gridReductionTempBufferSizes(entry);
+    auto temp_buf_sizes =
+        gridReductionTempBufferSizes(entry, entry->grid_, entry->block_);
     auto options =
         at::TensorOptions().dtype(temp_buf_type).device(at::kCUDA, 0);
     at::Tensor reduction_work_buffer = at::empty(
