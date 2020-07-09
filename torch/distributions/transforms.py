@@ -30,7 +30,7 @@ __all__ = [
 
 class Transform(object):
     """
-    Abstract class for invertable transformations with computable log
+    Abstract class for invertible transformations with computable log
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 

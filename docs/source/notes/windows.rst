@@ -82,7 +82,7 @@ object to make it build on Windows.
        libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
 
-Second, here is a workground for "unresolved external symbol 
+Second, here is a workaround for "unresolved external symbol 
 state caused by ``extern THCState *state;``"
 
 Change the source code from C to C++. An example is listed below.

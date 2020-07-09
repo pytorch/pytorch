@@ -25,7 +25,7 @@ CPU and CUDA)::
 There are some PyTorch functions that use CUDA functions that can be a source
 of nondeterminism. One class of such CUDA functions are atomic operations,
 in particular :attr:`atomicAdd`, which can lead to the order of additions being
-nondetermnistic. Because floating-point addition is not perfectly associative
+nondeterministic. Because floating-point addition is not perfectly associative
 for floating-point operands, :attr:`atomicAdd` with floating-point operands can
 introduce different floating-point rounding errors on each evaluation, which
 introduces a source of nondeterministic variance (aka noise) in the result.

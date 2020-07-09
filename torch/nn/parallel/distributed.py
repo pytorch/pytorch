@@ -194,23 +194,23 @@ class DistributedDataParallel(Module):
         >>>     dist_optim.step()
 
     .. warning::
-        Using DistributedDataParallel in conjuction with the
+        Using DistributedDataParallel in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
                    only be provided when the input module resides on a single
-                   CUDA device. For single-device modules, the ``i``th
+                   CUDA device. For single-device modules, the ``i``\ th 
                    :attr:`module` replica is placed on ``device_ids[i]``. For
-                   multi-device modules and CPU modules, device_ids must be None
+                   multi-device modules and CPU modules, :attr:`device_ids` must be ``None``
                    or an empty list, and input data for the forward pass must be
                    placed on the correct device. (default: all devices for
                    single-device modules)
         output_device (int or torch.device): device location of output for
                       single-device CUDA modules. For multi-device modules and
-                      CPU modules, it must be None, and the module itself
-                      dictates the output location. (default: device_ids[0] for
+                      CPU modules, it must be ``None``, and the module itself
+                      dictates the output location. (default: ``device_ids[0]`` for
                       single-device modules)
         broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
                           the module at beginning of the forward function.

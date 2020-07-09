@@ -2270,7 +2270,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
-            :attr:`log_input`=``False``. Default: 1e-8
+            :attr:`log_input` is ``False``. Default: 1e-8
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -3412,7 +3412,7 @@ def affine_grid(theta, size, align_corners=None):
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are condsidered to be at ```0``
+        along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
     if not torch.jit.is_scripting():
