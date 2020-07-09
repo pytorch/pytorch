@@ -33,7 +33,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     '''
     _supported_types = [torch.nn.Conv2d, torch.nn.Linear]
     if type(module1) not in _supported_types or type(module2) not in _supported_types:
-        raise ValueError("module type not supported:", type(module1), " ",type(module2))
+        raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
     if module1.weight.size()[output_axis] != module2.weight.size()[input_axis]:
         raise TypeError("Incompatible tensors")
