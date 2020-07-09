@@ -3007,7 +3007,12 @@
 # When more variants get ported to native, this dispatch will get more
 # complicated
 
-- func: native_norm(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
+- func: native_norm(Tensor self, Scalar p=2) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU, SparseCUDA: norm_sparse
+
+- func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse

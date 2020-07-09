@@ -346,6 +346,10 @@ SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor
 // --------------------------------------------------------------------
 
 // Only supports floating point, FYI
+Tensor norm_sparse(const SparseTensor& self, Scalar p) {
+  return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
+}
+
 Tensor norm_sparse(const SparseTensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (dim.size() > 0) {
