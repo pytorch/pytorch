@@ -229,9 +229,10 @@ which compute the real and imaginary parts of the function:
             x, y = real(z), imag(z)
             return u(x, y) + v(x, y) * 1j
 
-where *1j* is a unit imaginary number.
+where :math:`1j` is a unit imaginary number.
 
-The JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
+We define the JVP for function :math:`F` at :math:`(x, y)` applied to a tangent
+vector :math:`c+dj \in C` as:
 
     .. code::
 
@@ -239,19 +240,24 @@ The JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
             c, d = real(tangent), imag(tangent)
             return [1, 1j]^T * J * [c, d]
 
+where
+
+    .. math::
+
+        J = \begin{bmatrix}
+            \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
+            \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
+
+This is similar to the definition of the JVP for a function defined from :math:`R^2 → R^2`, and the multiplication
+with :math:`[1, 1j]^T` is used to identify the result as a complex number.
+
+We define the VJP of :math:`F` at :math:`(x, y)` for a cotangent vector :math:`c+dj \in C` as:
+
     .. code::
 
         def VJP(cotangent):
             c, d = real(cotangent), imag(cotangent)
             return [c, -d]^T * J * [1, -1j]
-
-    where
-
-    .. math::
-
-        J = \begin{bmatrix}
-            \partial_0u(x, y) & \partial_1u(x, y)\\
-            \partial_0v(x, y) & \partial_1v(x, y) \end{bmatrix} \\
 
 In PyTorch, the VJP is mostly what we care about, as it is the computation performed when we do backward
 mode automatic differentiation. Notice that d and :math:`1j` are negated in the formula above.
@@ -263,11 +269,13 @@ For a function F: V → W, where are V and W are vector spaces. The output of
 the Vector-Jacobian Product :math:`VJP : V → (W^* → V^*)` is a linear map
 from :math:`W^* → V^*` (explained in `Chapter 4 of Dougal Maclaurin’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
-The negative signs in the above `VJP` computation are due to conjugation. The first
-vector in the output returned by `VJP` for a given cotangent is a covector (:math:`\in ℂ^*`),
-and the last vector in the output is used to get the result in :math:`ℂ`
-since the final result of reverse-mode differentiation of a function is a covector belonging
-to :math:`ℂ^*` (explained in `Chapter 4 of Dougal Maclaurin’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
+The negative signs in the above `VJP` computation are due to conjugation. :math:`c-dj`
+is the covector in dual space of :math:`C^` (:math:`\in ℂ^*`) corresponding to the
+cotangent vector :math:`c+dj`, and the multiplication by :math:`[1, -1j]`, whose net effect is
+to get a conjugate of the complex number we would have obtained by multiplcation with :math:`[1, 1j]` instead,
+is used to get the result in :math:`ℂ` since the final result of reverse-mode differentiation of a function
+is a covector belonging to :math:`ℂ^*` (explained in
+`Chapter 4 of Dougal Maclaurin’s thesis <https://dougalmaclaurin.com/phd-thesis.pdf>`_).
 
 **What happens if I call backward() on a complex scalar?**
 *******************************************************************************
