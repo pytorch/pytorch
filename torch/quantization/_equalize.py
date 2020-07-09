@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import copy
 
 def channel_range(input, axis=0):
@@ -32,6 +31,10 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     ranges of the second tensors' input channel
 
     '''
+    _supported_types = [torch.nn.Conv2d, torch.nn.Linear]
+    if type(module1) not in _supported_types or type(module2) not in _supported_types:
+        raise ValueError("module type not supported:", type(module1), " ",type(module2))
+
     if module1.weight.size()[output_axis] != module2.weight.size()[input_axis]:
         raise TypeError("Incompatible tensors")
 
@@ -52,9 +55,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
     # pads axis to (1D) tensors to then be broadcasted
     size1 = [1] * len(weight1.size())
-    size1[output_axis] = weight1.size()[output_axis]
+    size1[output_axis] = weight1.size(output_axis)
     size2 = [1] * len(weight2.size())
-    size2[input_axis] = weight2.size()[input_axis]
+    size2[input_axis] = weight2.size(input_axis)
 
     scaling_factors = torch.reshape(scaling_factors, size2)
     r_scaling_factors = torch.reshape(r_scaling_factors, size1)
@@ -62,11 +65,11 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight1 = weight1 * r_scaling_factors
     weight2 = weight2 * scaling_factors
 
-    module1.weight.data = weight1
-    module1.bias.data = bias
-    module2.weight.data = weight2
+    module1.weight = torch.nn.Parameter(weight1)
+    module1.bias = torch.nn.Parameter(bias)
+    module2.weight = torch.nn.Parameter(weight2)
 
-def equalize(model, paired_modules_list, threshold = 1e-4):
+def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     ''' Given a list of adjacent modules within a model, equalization will
     be applied between each pair, this will repeated until convergence is achieved
 
@@ -75,6 +78,9 @@ def equalize(model, paired_modules_list, threshold = 1e-4):
     then the modules have converged enough that further equalizing is not necessary
 
     '''
+    if not inplace:
+        model = copy.deepcopy(model)
+
     name_to_module = {}
     previous_name_to_module = {}
     name_set = {name for pair in paired_modules_list for name in pair}
@@ -90,7 +96,10 @@ def equalize(model, paired_modules_list, threshold = 1e-4):
 
             cross_layer_equalization(name_to_module[pair[0]], name_to_module[pair[1]])
 
-def converged(curr_modules, prev_modules, threshold):
+    if not inplace:
+        return model
+
+def converged(curr_modules, prev_modules, threshold=1e-4):
     ''' Tests for the summed norm of the differences between each set of modules
     being less than the given threshold
 

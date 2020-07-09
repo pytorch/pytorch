@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 import threading
 import itertools
 import warnings
+from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -15,19 +16,27 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import queue, string_classes
 
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
+from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
 
+T_co = TypeVar('T_co', covariant=True)
+T = TypeVar('T')
+_worker_init_fn_t = Callable[[int], None]
 
-get_worker_info = _utils.worker.get_worker_info
+# Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
+# type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
+# See https://github.com/python/mypy/issues/3737.
+_collate_fn_t = Callable[[List[T]], Any]
+
 
 # This function used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
-default_collate = _utils.collate.default_collate
+default_collate: _collate_fn_t = _utils.collate.default_collate
 
+get_worker_info = _utils.worker.get_worker_info
 
 class _DatasetKind(object):
     Map = 0
@@ -57,7 +66,7 @@ class _InfiniteConstantSampler(Sampler):
             yield None
 
 
-class DataLoader(object):
+class DataLoader(Generic[T_co]):
     r"""
     Data loader. Combines a dataset and a sampler, and provides an iterable over
     the given dataset.
@@ -116,15 +125,24 @@ class DataLoader(object):
               details on these two types of datasets and how
               :class:`~torch.utils.data.IterableDataset` interacts with `Multi-process data loading`_.
     """
+    dataset: Dataset[T_co]
+    batch_size: Optional[int]
+    num_workers: int
+    pin_memory: bool
+    drop_last: bool
+    timeout: float
+    sampler: Sampler
 
     __initialized = False
 
-    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 batch_sampler=None, num_workers=0, collate_fn=None,
-                 pin_memory=False, drop_last=False, timeout=0,
-                 worker_init_fn=None, multiprocessing_context=None,
-                 generator=None):
-        torch._C._log_api_usage_once("python.data_loader")
+    def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
+                 shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
+                 batch_sampler: Optional[Sampler[Sequence[int]]] = None,
+                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
+                 pin_memory: bool = False, drop_last: bool = False,
+                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 multiprocessing_context=None, generator=None):
+        torch._C._log_api_usage_once("python.data_loader")  # type: ignore
 
         if num_workers < 0:
             raise ValueError('num_workers option should be non-negative; '
@@ -146,7 +164,7 @@ class DataLoader(object):
         # after spending time fixing the custom sampler errors.
         if isinstance(dataset, IterableDataset):
             self._dataset_kind = _DatasetKind.Iterable
-            # NOTE [ Custom Samplers and `IterableDataset` ]
+            # NOTE [ Custom Samplers and IterableDataset ]
             #
             # `IterableDataset` does not support custom `batch_sampler` or
             # `sampler` since the key is irrelevant (unless we support
@@ -212,7 +230,9 @@ class DataLoader(object):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    sampler = RandomSampler(dataset, generator=generator)
+                    # Cannot statically verify that dataset is Sized
+                    # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
+                    sampler = RandomSampler(dataset, generator=generator)  # type: ignore
                 else:
                     sampler = SequentialSampler(dataset)
 
@@ -253,9 +273,10 @@ class DataLoader(object):
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
                             ('multiprocessing_context option '
-                             'should specify a valid start method in {}, but got '
-                             'multiprocessing_context={}').format(valid_start_methods, multiprocessing_context))
-                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
+                             'should specify a valid start method in {!r}, but got '
+                             'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
+                    # error: Argument 1 to "get_context" has incompatible type "Union[str, bytes]"; expected "str"  [arg-type]
+                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)  # type: ignore
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
                     raise TypeError(('multiprocessing_context option should be a valid context '
@@ -275,7 +296,9 @@ class DataLoader(object):
 
         super(DataLoader, self).__setattr__(attr, val)
 
-    def __iter__(self):
+    # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
+    # since '_BaseDataLoaderIter' references 'DataLoader'.
+    def __iter__(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -297,7 +320,7 @@ class DataLoader(object):
         else:
             return self.sampler
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self._dataset_kind == _DatasetKind.Iterable:
             # NOTE [ IterableDataset and __len__ ]
             #
@@ -313,7 +336,9 @@ class DataLoader(object):
             # To provide a further warning, we track if `__len__` was called on the
             # `DataLoader`, save the returned value in `self._len_called`, and warn
             # if the iterator ends up yielding more than this number of samples.
-            length = self._IterableDataset_len_called = len(self.dataset)
+
+            # Cannot statically verify that dataset is Sized
+            length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore
             if self.batch_size is not None:
                 from math import ceil
                 if self.drop_last:
@@ -326,7 +351,7 @@ class DataLoader(object):
 
 
 class _BaseDataLoaderIter(object):
-    def __init__(self, loader):
+    def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
@@ -341,7 +366,7 @@ class _BaseDataLoaderIter(object):
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._num_yielded = 0
 
-    def __iter__(self):
+    def __iter__(self) -> '_BaseDataLoaderIter':
         return self
 
     def _next_index(self):
@@ -350,7 +375,7 @@ class _BaseDataLoaderIter(object):
     def _next_data(self):
         raise NotImplementedError
 
-    def __next__(self):
+    def __next__(self) -> Any:
         data = self._next_data()
         self._num_yielded += 1
         if self._dataset_kind == _DatasetKind.Iterable and \
@@ -368,7 +393,7 @@ class _BaseDataLoaderIter(object):
 
     next = __next__  # Python 2 compatibility
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._index_sampler)
 
     def __getstate__(self):
@@ -690,7 +715,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         self._worker_init_fn = loader.worker_init_fn
         self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
-        self._worker_result_queue = multiprocessing_context.Queue()
+        # No certainty which module multiprocessing_context is
+        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore
         self._worker_pids_set = False
         self._shutdown = False
         self._send_idx = 0  # idx of the next task to be sent to workers
@@ -710,7 +736,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (i.e., if kind != Iterable).
         self._workers_status = []
         for i in range(self._num_workers):
-            index_queue = multiprocessing_context.Queue()
+            # No certainty which module multiprocessing_context is
+            index_queue = multiprocessing_context.Queue()  # type: ignore
             # index_queue.cancel_join_thread()
             w = multiprocessing_context.Process(
                 target=_utils.worker._worker_loop,
@@ -732,7 +759,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
-            self._data_queue = queue.Queue()
+
+            # Queue is not type-annotated
+            self._data_queue = queue.Queue()  # type: ignore
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,

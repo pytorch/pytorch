@@ -1,17 +1,18 @@
 import warnings
 
 import torch
-import torch.cuda.comm as comm
+from . import comm
 from torch.autograd import Function
-from torch.cuda._utils import _get_device_index
+from torch._utils import _get_device_index
 
 
 class Broadcast(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, *inputs):
-        if not all(input.is_cuda for input in inputs):
-            raise TypeError('Broadcast function not implemented for CPU tensors')
+        assert all(map(lambda i: i.device.type != 'cpu', inputs)), (
+            'Broadcast function not implemented for CPU tensors'
+        )
         target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
@@ -51,7 +52,9 @@ class Gather(Function):
 
     @staticmethod
     def forward(ctx, target_device, dim, *inputs):
-        assert all(map(lambda i: i.is_cuda, inputs))
+        assert all(map(lambda i: i.device.type != 'cpu', inputs)), (
+            'Gather function not implemented for CPU tensors'
+        )
         target_device = _get_device_index(target_device, True)
         ctx.target_device = target_device
         ctx.dim = dim
@@ -81,9 +84,9 @@ class Scatter(Function):
     def forward(ctx, target_gpus, chunk_sizes, dim, input):
         target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
         ctx.dim = dim
-        ctx.input_device = input.get_device() if input.is_cuda else -1
+        ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
-        if ctx.input_device == -1:
+        if torch.cuda.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(device) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
