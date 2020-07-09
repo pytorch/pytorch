@@ -466,7 +466,8 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        "returns multiple views. Inplace operators on such "
                        "views are being deprecated and will be forbidden "
                        "starting from version 1.8. Consider using `unsafe_` "
-                       "version of the function that produced this view.");
+                       "version of the function that produced this view or "
+                       "don't modify this view inplace.");
       } else {
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
