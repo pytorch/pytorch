@@ -477,9 +477,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
-                                                        output_names, operator_export_type,
-                                                        example_outputs, propagate, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size, training=training)
+                                                        output_names, operator_export_type, example_outputs,
+                                                        propagate, _retain_param_name, val_do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size, training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
