@@ -6,6 +6,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from warnings import warn
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -1062,6 +1063,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
+    warn(("Deprecation warning: The interface and functionality of `norm` will "
+          "be changed in the future, to be consistent with `numpy.linalg.norm`."
+          " This change is planned for PyTorch 1.7. Check our issue tracker for"
+          " details: https://github.com/pytorch/pytorch/issues/24802"),
+         stacklevel=2)
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
