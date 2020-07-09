@@ -1171,6 +1171,18 @@ if(USE_ROCM)
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
+if(BUILD_MOBILE_BENCHMARK)
+  foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
+    get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
+    add_executable(${benchmark_name} "${benchmark_src}")
+    target_link_libraries(${benchmark_name} torch_library benchmark)
+    target_include_directories(${benchmark_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${benchmark_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${benchmark_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_options(${benchmark_name} PRIVATE "LINKER:--allow-multiple-definition")
+  endforeach()
+endif()
+
 # ---[ Test binaries.
 if(BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
