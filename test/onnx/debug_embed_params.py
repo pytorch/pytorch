@@ -23,7 +23,6 @@ except ImportError:
 
 def check_params(onnx_model, caffe2_input):
     if (len(onnx_model.graph.input) != len(caffe2_input)):
-        print("skip test")
         return False
 
     return True
