@@ -18044,7 +18044,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         return x
 
-    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype, with_extremal=False, atol=None, rtol=None):
+    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
+                                            with_extremal=False, atol=None, rtol=None, exact_dtype=True):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
@@ -18057,13 +18058,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         if count_dim == ():
                             # Default `dims=None` case
                             self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None,
-                                                    atol=atol, rtol=rtol)
+                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
                         else:
                             # With `dims: tuple of ints` case
                             torch_func_partial = partial(torch_func, dim=count_dim)
                             np_func_partial = partial(np_func, axis=count_dim)
                             self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
-                                                    atol=atol, rtol=rtol)
+                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
@@ -18072,35 +18073,41 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
-    def test_nansum_vs_numpy(self, device, dtype):
+    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype):
+        def is_integral(dtype):
+            return dtype in torch.testing.get_all_int_dtypes()
+
+        # On Windows CI, the current version of `numpy` promotes all lower integers
+        # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
+        # the exact dtype.
+        # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
+        # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
+        exact_dtype = False if (IS_WINDOWS and is_integral(dtype)) else True
+
         if dtype == torch.uint8:
             with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch.nansum, np.nansum, device, dtype)
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype)
         else:
             # Investigate
             if dtype == torch.float16:
-                self._test_reduction_function_with_numpy(torch.nansum, np.nansum, device, dtype, atol=0.2, rtol=1e-2)
-            elif dtype == torch.float32 and self.device_type == 'cuda':
-                self._test_reduction_function_with_numpy(torch.nansum, np.nansum, device, dtype, atol=1e-05, rtol=1.7e-06)
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                         atol=0.2, rtol=1e-2, exact_dtype=exact_dtype)
+            elif dtype == torch.float32:
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                         atol=1e-05, rtol=3e-06, exact_dtype=exact_dtype)
             else:
-                self._test_reduction_function_with_numpy(torch.nansum, np.nansum, device, dtype)
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                         exact_dtype=exact_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
-        if dtype == torch.uint8:
-            with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch.sum, np.sum, device, dtype)
-        else:
-            # Investigate
-            if dtype == torch.float16:
-                self._test_reduction_function_with_numpy(torch.sum, np.sum, device, dtype, atol=0.2, rtol=1e-2)
-            elif dtype == torch.float32 and self.device_type == 'cuda':
-                self._test_reduction_function_with_numpy(torch.sum, np.sum, device, dtype, atol=1e-05, rtol=1.7e-06)
-            else:
-                self._test_reduction_function_with_numpy(torch.sum, np.sum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nansum_vs_numpy(self, device, dtype):
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
     def test_nansum_complex(self, device, dtype):

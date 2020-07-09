@@ -867,7 +867,7 @@ class TestCase(expecttest.TestCase):
     #   tensor (array). If the torch and/or NumPy function require additional
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None, atol=None, rtol=None):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None, atol=None, rtol=None, exact_dtype=True):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
@@ -892,7 +892,7 @@ class TestCase(expecttest.TestCase):
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
 
-        self.assertEqual(np_result, torch_result, atol=atol, rtol=rtol)
+        self.assertEqual(np_result, torch_result, atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
