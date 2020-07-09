@@ -462,7 +462,7 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
                        " version 1.6. You can remove this warning by cloning the output of the custom Function.");
       } else if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
-        msg = c10::str(msg, " This view is the output of a function that "
+        msg = c10::str(msg, " This view is an output of a function that "
                        "returns multiple views. Inplace operators on such "
                        "views are being deprecated and will be forbidden "
                        "starting from version 1.8. Consider using `unsafe_` "
