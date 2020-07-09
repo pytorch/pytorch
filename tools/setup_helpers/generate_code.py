@@ -68,7 +68,7 @@ def generate_code(ninja_global=None,
             selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
             force_schema_registration=force_schema_registration)
-    
+
     if subset == "python" or not subset:
         gen_annotated(
             declarations_path or DECLARATIONS_PATH,
