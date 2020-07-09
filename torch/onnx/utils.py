@@ -337,9 +337,9 @@ def _trace_and_get_graph_from_model(model, args):
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None, propagate=False, training=None,
+                    example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=True,
-                    _disable_torch_constant_prop=False, fixed_batch_size=False):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -412,7 +412,7 @@ def _model_to_graph(model, args, verbose=False,
     params_dict = dict(zip(param_names, params))
 
     if training is None or training == TrainingMode.EVAL:
-        params_dict = torch._C._jit_pass_onnx_initializer_based_peephole(graph, params_dict)
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
@@ -478,8 +478,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
-                                                        example_outputs, propagate, training, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size)
+                                                        example_outputs, propagate, _retain_param_name,
+                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size, training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
@@ -535,9 +535,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                                                              f)
             graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                             output_names, operator_export_type,
-                                                            example_outputs, propagate, training,
+                                                            example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size)
+                                                            fixed_batch_size=fixed_batch_size, training=training)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

@@ -34,7 +34,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
-#include <torch/csrc/jit/passes/onnx/initializer_based_peephole.h>
+#include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
@@ -143,10 +143,10 @@ void initJITBindings(PyObject* module) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
       .def(
-          "_jit_pass_onnx_initializer_based_peephole",
+          "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
-            InitializerPeepholeONNX(graph->block(), paramsDict);
+            EvalPeepholeONNX(graph->block(), paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)

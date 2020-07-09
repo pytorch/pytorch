@@ -319,7 +319,7 @@ class TestONNXRuntime(unittest.TestCase):
         class Fuse(torch.nn.Module):
             def __init__(self):
                 super(Fuse, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=True)
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
                 self.bn = torch.nn.BatchNorm2d(2)
 
             def forward(self, x):

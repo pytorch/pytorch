@@ -23,10 +23,9 @@ except ImportError:
 
 def check_params(onnx_model, caffe2_input):
     if (len(onnx_model.graph.input) != len(caffe2_input)):
+        print("skip test")
         return False
-    for k, l in zip(onnx_model.graph.input, caffe2_input.keys()):
-        if (k.name != l):
-            return False 
+
     return True
 
 def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):

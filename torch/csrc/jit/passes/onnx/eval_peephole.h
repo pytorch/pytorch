@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void InitializerPeepholeONNX(
+void EvalPeepholeONNX(
     Block* b,
     std::map<std::string, IValue>& paramDict);
 

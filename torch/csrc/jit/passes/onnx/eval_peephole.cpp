@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/onnx/initializer_based_peephole.h>
+#include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/torch.h>
 
@@ -34,6 +34,11 @@ std::vector<at::Tensor> getValues(
   return inputTensorValues;
 }
 
+// This pass fuses Conv and BatchNorm into Conv node
+// Conv and BatchNorm can be fused only if inputs for Batchnorm node:
+// scale, bias, mean and var are all tensors of same shape (C) and
+// if the size of the first dimension (dim 0) is the same between Conv
+// input weight and Batchnorm input scale
 static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -45,12 +50,20 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto origconvNode = *it;
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
+      TORCH_CHECK(
+        w_conv_value.size() >= 1,
+        "convolution node expected to have at least one initializer");
+
       auto bn_value = getValues(bnNode, valsToParamsMap);
-      auto bn_scale = bn_value[0];
-      auto bn_B = bn_value[1];
-      auto bn_mean = bn_value[2];
-      auto bn_var = bn_value[3];
-      auto w_conv = w_conv_value[0];
+      TORCH_CHECK(
+        bn_value.size() == 4,
+        "batchnorm node expected to have four initializers");
+
+      auto bn_scale = bn_value[0].clone();
+      auto bn_B = bn_value[1].clone();
+      auto bn_mean = bn_value[2].clone();
+      auto bn_var = bn_value[3].clone();
+      auto w_conv = w_conv_value[0].clone();
       at::Tensor b_conv;
 
       if (!bn_scale.is_floating_point() || !bn_B.is_floating_point() ||
@@ -64,32 +77,25 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
         continue;
       }
 
-      auto bn_var_helper = bn_var.toType(c10::kDouble);
-      auto bn_scale_helper = bn_scale.toType(c10::kDouble);
-      bn_var_helper = bn_var_helper.add(epsilon);
-      bn_var_helper = bn_var_helper.sqrt();
-      bn_scale_helper = bn_scale_helper.div(bn_var_helper);
+      bn_var = bn_var.add(epsilon);
+      bn_var = bn_var.sqrt();
+      bn_scale = bn_scale.div(bn_var);
 
       // Calculate weight
-      auto w_conv_helper = w_conv.toType(c10::kDouble);
-      for (size_t i = 0; i < w_conv_helper.size(0); i++) {
-        w_conv_helper[i] = w_conv_helper[i].mul(bn_scale_helper[i]);
+      for (size_t i = 0; i < w_conv.size(0); i++) {
+        w_conv[i] = w_conv[i].mul(bn_scale[i]);
       }
 
       // Calculate bias
-      auto b_conv_helper = b_conv;
-      auto bn_mean_helper = bn_mean.toType(c10::kDouble);
-      auto bn_B_helper = bn_B.toType(c10::kDouble);
       if (origconvNode->inputs().size() == 3) {
-        b_conv = w_conv_value[1];
-        b_conv_helper = b_conv.toType(c10::kDouble);
-        b_conv_helper = b_conv_helper.sub(bn_mean_helper);
-        b_conv_helper = b_conv_helper.mul(bn_scale_helper);
-        b_conv_helper = b_conv_helper.add(bn_B_helper);
+        b_conv = w_conv_value[1].clone();
+        b_conv = b_conv.sub(bn_mean);
+        b_conv = b_conv.mul(bn_scale);
+        b_conv = b_conv.add(bn_B);
       } else {
-        bn_mean_helper = bn_mean_helper.mul(bn_scale_helper);
-        bn_B_helper = bn_B_helper.sub(bn_mean_helper);
-        b_conv_helper = bn_B_helper;
+        bn_mean = bn_mean.mul(bn_scale);
+        bn_B = bn_B.sub(bn_mean);
+        b_conv = bn_B;
       }
 
       Node* convNode =
@@ -106,7 +112,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       valsToParamsMap.insert(
           {conv_W,
            std::make_pair(
-               conv_W->debugName(), w_conv_helper.toType(c10::kFloat))});
+               conv_W->debugName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
       convNode->addInput(conv_W);
 
@@ -114,7 +120,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       valsToParamsMap.insert(
           {conv_B,
            std::make_pair(
-               conv_B->debugName(), b_conv_helper.toType(c10::kFloat))});
+               conv_B->debugName(), b_conv)});
       conv_B->inferTypeFrom(bn_B);
       convNode->addInput(conv_B);
 
@@ -136,7 +142,7 @@ void buildParamsMapFromValueToParamsMap(
   }
 }
 
-void InitializerPeepholeONNX(Block* b, ParamMap& paramsDict) {
+void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
