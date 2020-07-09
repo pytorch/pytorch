@@ -6858,12 +6858,12 @@ a")
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.float):
-            del torch.jit._jit_caching_layer[foo]
+            del torch.jit._state._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
-            del torch.jit._jit_caching_layer[foo]
+            del torch.jit._state._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
@@ -8193,7 +8193,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "'Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object for attribute 'invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -8215,6 +8215,17 @@ a")
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
             Foo3()
+
+        class Foo4(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo4, self).__init__()
+                self.invalid = np.int64(5)
+
+        # verify that we capture human understandable class name
+        with self.assertRaisesRegex(TypeError, "numpy.int64"):
+            Foo4()
 
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
@@ -13381,8 +13392,8 @@ a")
         self.checkScript(invoke_function, ())
 
         # testing that the functions are cached
-        compiled_fns_1 = torch.jit._get_overloads(test_simple)
-        compiled_fns_2 = torch.jit._get_overloads(test_simple)
+        compiled_fns_1 = torch.jit._script._get_overloads(test_simple)
+        compiled_fns_2 = torch.jit._script._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
             self.assertIs(a.graph, b.graph)
 
