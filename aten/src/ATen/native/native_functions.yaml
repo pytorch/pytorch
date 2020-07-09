@@ -3213,7 +3213,7 @@
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: addmm_cpu_
+    CPU: legacy::cpu::_th_addmm_
     CUDA: addmm__cuda
     # Warning!  For whatever reason, the inplace sparse addmm is NON
     # broadcasting
@@ -4236,7 +4236,7 @@
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: addbmm_cpu_
+    CPU: legacy::cpu::_th_addbmm_
     CUDA: addbmm__cuda
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
