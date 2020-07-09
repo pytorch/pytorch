@@ -8,7 +8,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-const static std::unordered_map<ParallelType, int> pt_to_offset{
+const static std::unordered_map<ParallelType, int, TypeHash> pt_to_offset{
     {ParallelType::BIDx, 0},
     {ParallelType::BIDy, 1},
     {ParallelType::BIDz, 2},

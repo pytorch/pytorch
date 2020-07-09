@@ -14,6 +14,7 @@ Tensor _test_optional_intlist(
   if (!addends) {
     return values;
   }
+  TORCH_CHECK(values.dim() == 1);
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<int,1>();
   auto out = output.accessor<int,1>();
@@ -31,6 +32,7 @@ Tensor _test_optional_floatlist(
   if (!addends) {
     return values;
   }
+  TORCH_CHECK(values.dim() == 1);
   Tensor output = at::empty_like(values);
   auto inp = values.accessor<float,1>();
   auto out = output.accessor<float,1>();
