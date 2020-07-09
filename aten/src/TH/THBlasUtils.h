@@ -30,3 +30,41 @@ inline void THBlas_copy(int64_t n, T *x, int64_t incx, T *y, int64_t incy);
   }
 
 AT_FORALL_SCALAR_TYPES(COPY_SPECIALIZATION)
+
+template<typename T>
+inline void THBlas_gemm(
+    char transa,
+    char transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    T alpha,
+    T *a,
+    int64_t lda,
+    T *b,
+    int64_t ldb,
+    T beta,
+    T *c,
+    int64_t ldc);
+
+#define GEMM_SPECIALIZATION(ctype,name) \
+  template<> \
+  inline void THBlas_gemm<ctype>( \
+      char transa, \
+      char transb, \
+      int64_t m, \
+      int64_t n, \
+      int64_t k, \
+      ctype alpha, \
+      ctype *a, \
+      int64_t lda, \
+      ctype *b, \
+      int64_t ldb, \
+      ctype beta, \
+      ctype *c, \
+      int64_t ldc) { \
+    TH ## name ## Blas_gemm(\
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc); \
+  }
+
+AT_FORALL_SCALAR_TYPES(GEMM_SPECIALIZATION)
