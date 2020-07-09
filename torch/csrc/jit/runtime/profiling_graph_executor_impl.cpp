@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -89,6 +90,12 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
   InsertGuards(copy);
   LowerGradOf(*copy);
+  // WHC
+  UnrollLoops(copy);
+  RemoveListMutation(copy);
+  PeepholeOptimize(copy);
+  ConstantPropagation(copy);
+  // ---
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
@@ -97,7 +104,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   runRequiredPasses(copy);
   PeepholeOptimize(copy);
   ConstantPropagation(copy);
-  runOptimization(copy);
+  runOptimization(copy, false);
 
   if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
