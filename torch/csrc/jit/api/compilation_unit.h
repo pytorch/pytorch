@@ -203,10 +203,6 @@ struct TORCH_API CompilationUnit {
     return classes_[it->second];
   }
 
-  bool has_type(const c10::QualifiedName& name) const {
-    return classDict_.find(name) != classDict_.end();
-  }
-
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
   void _clear_python_cu() {

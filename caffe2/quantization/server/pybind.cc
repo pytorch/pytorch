@@ -432,6 +432,23 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("quantization_kind"),
       pybind11::arg("preserve_sparsity"));
   m.def(
+      "CreateInt8QuantParamsBlob",
+      [](std::string quant_params_blob_name, float scale, int zero_point) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_params_blob = gWorkspace->GetBlob(quant_params_blob_name);
+        if (quant_params_blob == nullptr) {
+          quant_params_blob = gWorkspace->CreateBlob(quant_params_blob_name);
+        }
+        auto* quant_params_blob_data =
+            quant_params_blob->GetMutable<unique_ptr<Int8QuantParamsBlob>>();
+        quant_params_blob_data->reset(
+            new Int8QuantParamsBlob(scale, zero_point));
+      },
+      pybind11::arg("quant_param_blob_name"),
+      pybind11::arg("scale"),
+      pybind11::arg("zero_point"));
+  m.def(
       "ObserveInt8QuantParamsBlob",
       [](std::string quant_params_blob_name) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();

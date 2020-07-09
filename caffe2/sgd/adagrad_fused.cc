@@ -62,6 +62,16 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
+// Match the GPU Approx op, here Approx and Exact are the same for
+// SparseAdagradFusedWithSparseLengthsSumGradient op
+REGISTER_CPU_OPERATOR(
+    SparseAdagradFusedWithSparseLengthsSumGradientApprox,
+    SparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        adagrad_update_prefetch_inlined>);
+
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradient)
     .NumInputs(7)
     .NumOutputs(3)

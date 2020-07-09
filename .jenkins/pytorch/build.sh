@@ -124,23 +124,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
-  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
-  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
-  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
-  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
-    # upgrade thunk to 3.5
-    mkdir rocm3.5-thunk
-    pushd rocm3.5-thunk
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
-    popd
-    rm -rf rocm3.5-thunk
-  fi
-
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
   if [ -n "${SCCACHE_BUCKET}" ]; then
@@ -167,11 +150,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
+  # Set ROCM_ARCH to gtx900 and gtx906
+  if [[ -n "$CIRCLECI" ]]; then
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
+
   python tools/amd_build/build_amd.py
   python setup.py install --user
-
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
 
   exit 0
 fi

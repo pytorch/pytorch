@@ -178,7 +178,7 @@ void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, sca
     at::NoNamesGuard guard;
     THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
   }
-  at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
+  at::namedinference::propagate_names_for_addmm_legacy(r_, m1, m2, t);
 }
 
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)

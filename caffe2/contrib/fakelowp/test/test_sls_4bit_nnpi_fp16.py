@@ -9,7 +9,7 @@ import unittest
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -113,27 +113,28 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
     @given(
         seed=st.integers(0, 65535),
         num_rows=st.integers(2, 20),
-        embedding_dim=st.sampled_from([8, 12, 16, 24, 32, 54, 64, 128]),
-        batch_size=st.integers(1, 5),
-        max_weight=st.integers(0, 100),
+        embedding_dim=st.sampled_from([8, 12, 16, 24, 32, 54, 64, 72, 128]),
+        batch_size=st.integers(1, 32),
+        max_weight=st.integers(0, 1),
     )
+    @settings(max_examples=100)
     def test_slws_fused_4bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         workspace.ResetWorkspace()
         np.random.seed(seed)
         data = np.random.rand(num_rows, embedding_dim).astype(np.float32)
-        lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
+        data = data * 1e-3
 
+        lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
         indices = []
         for length in lengths:
             indices.extend(np.random.choice(np.arange(1, num_rows), length))
         indices = np.asarray(indices).astype(np.int64)
 
         weights = np.random.uniform(
-            low=0, 
+            low=0,
             high=max_weight,
             size=[len(indices)]
-        ).astype(np.float32)
-
+        ).astype(np.float32) - max_weight / 2.0
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.extend(
@@ -173,7 +174,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=batch_size,
-            max_seq_size=batch_size * np.max(lengths),
+            max_seq_size=np.max(lengths),
             debug=True,
             adjust_batch=True,
             use_onnx=False
@@ -199,15 +200,18 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
         if not np.allclose(Y_c2, Y_glow):
             print_test_debug_info(
                 "slws_fused_4bit_rowwise",
-                {"seed": seed,
-                 "indices": indices,
-                 "data": data,
-                 "lengths": lengths,
-                 "weights": weights,
-                 "Y_c2": Y_c2,
-                 "Y_glow": Y_glow,
-                 "diff": Y_glow - Y_c2,
-                 "rowwise_diff": (Y_glow - Y_c2)[:, 0]})
+                {
+                    "seed": seed,
+                    "indices": indices,
+                    "data": data.shape,
+                    "lengths": lengths,
+                    "weights": weights,
+                    "Y_c2": Y_c2.shape,
+                    "Y_glow": Y_glow.shape,
+                    "diff": Y_glow - Y_c2,
+                    "rowwise_diff": (Y_glow - Y_c2)[:, 0]
+                }
+            )
             assert(0)
 
 if __name__ == '__main__':

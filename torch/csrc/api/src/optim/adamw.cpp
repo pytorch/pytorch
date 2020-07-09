@@ -20,8 +20,8 @@ bool operator==(const AdamWOptions& lhs, const AdamWOptions& rhs) {
          (std::get<0>(lhs.betas()) == std::get<0>(rhs.betas())) &&
          (std::get<1>(lhs.betas()) == std::get<1>(rhs.betas())) &&
          (lhs.eps() == rhs.eps()) &&
-         (lhs.weight_decay() == rhs.weight_decay() &&
-         (lhs.amsgrad() == rhs.amsgrad()));
+         (lhs.weight_decay() == rhs.weight_decay()) &&
+         (lhs.amsgrad() == rhs.amsgrad());
 }
 
 void AdamWOptions::serialize(torch::serialize::OutputArchive& archive) const {

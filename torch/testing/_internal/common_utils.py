@@ -718,7 +718,15 @@ class TestCase(expecttest.TestCase):
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
-    precision = 0
+    _precision: float = 0
+
+    @property
+    def precision(self) -> float:
+        return self._precision
+
+    @precision.setter
+    def precision(self, prec: float) -> None:
+        self._precision = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -1601,7 +1609,7 @@ def do_test_empty_full(self, dtypes, layout, device):
 
     default_dtype = torch.get_default_dtype()
     check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
-    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5.), default_dtype, torch.strided, -1, None, False)
     for dtype in dtypes:
         for rg in {dtype.is_floating_point, False}:
             int64_dtype = get_int64_dtype(dtype)

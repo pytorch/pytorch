@@ -486,26 +486,52 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
-    def test_named_tuple_as_attribute(self):
-        """
-        Test named tuples as attributes of modules.
-        """
-        global Params
-
-        class Params(NamedTuple):
-            p1: float
-            p2: int
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, params):
+    def test_module_inplace_construct(self):
+        class M(nn.Module):
+            def __init__(self, start: int):
                 super().__init__()
-                self.params = params
+                self.linear = nn.Linear(3, 3)
+                self.attribute = start
+                self.parameter = nn.Parameter(torch.tensor(3, dtype=torch.float))
 
-            def forward(self):
-                return self.params.p1
+            def method(self) -> int:
+                return self.attribute
 
-        params = Params(1.0, 2)
-        self.checkModule(MyModule(params), ())
+            @torch.jit.unused
+            def unused_method(self):
+                return self.attribute + self.attribute
+
+            def forward(self, x):
+                return self.linear(self.linear(x))
+
+
+        class N(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            @torch.jit.ignore
+            def ignored_method(self, x):
+                return x
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = torch.jit.script(M(3))
+        n = torch.jit.script(N())
+
+        n._reconstruct(m._c)
+
+        inp = torch.rand((3))
+
+        # Check that both modules produce the same output.
+        with torch.no_grad():
+            m_out = m(inp)
+            n_out = n(inp)
+            self.assertEqual(m_out, n_out)
+
+        # Check that ignored method is still intact.
+        self.assertEqual(inp, n.ignored_method(inp))
 
     def test_export_opnames_interface(self):
         global OneTwoModule

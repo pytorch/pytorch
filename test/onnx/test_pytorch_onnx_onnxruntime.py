@@ -16,7 +16,8 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
-                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack,
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -196,6 +197,27 @@ class TestONNXRuntime(unittest.TestCase):
         # Once that support is added, we can set ort_optim_on=True (default).
         self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5,
                                                ort_optim_on=False)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_attribute_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.ones(2, 1024)
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(LargeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    @unittest.skip("Enable this once large model with subgraph is supported in ORT")
+    def test_subgraph_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                for i in range(x.size(0)):
+                    x = x + torch.ones(2, 1024)
+                return x
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
 
     # Export Torchvision models
 
@@ -1874,7 +1896,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         num_layers = [1, 1, 2, 3]
         bidirectional = [True, False, True, False]
-        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)]
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
@@ -1939,7 +1961,7 @@ class TestONNXRuntime(unittest.TestCase):
         num_layers = [2, 3]
         batch_size = [3, 4]
         seq_len = [5, 7]
-        bidirectional = [True, False] 
+        bidirectional = [True, False]
         models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
                              for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
         for model, input in models_and_inputs:
@@ -2214,6 +2236,24 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
+
+    def test_view_dynamic(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view(other.shape)
+
+        x = torch.randn(2, 3, 4)
+        shape = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, shape))
+
+    def test_view_as(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view_as(other)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, y))
 
     def test_weight_norm(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
@@ -2663,8 +2703,28 @@ class TestONNXRuntime(unittest.TestCase):
             # add is used for exporting full
             def forward(self, x):
                 return torch.full((3, 4), x)
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         self.run_test(FullModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full_like(x, 4)
+
+        x = torch.tensor(12)
+        self.run_test(FullLikeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like_value(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x, y):
+                out = y + 2
+                return torch.full_like(x, out)
+
+        x = torch.tensor(12)
+        y = torch.tensor(2)
+        self.run_test(FullLikeModel(), (x, y))
 
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
@@ -2802,6 +2862,18 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_cumsum_with_cast(self):
+        class CumSum(torch.nn.Module):
+            def forward(self, input):
+                return torch.cumsum(input, dim=0, dtype=torch.float32)
+
+        model = CumSum()
+        x = torch.tensor([2, 3, 4], dtype=torch.int32)
+        self.run_test(model, x)
+        x = torch.tensor([False, True, True])
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
@@ -2877,6 +2949,27 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, y))
 
+    def test_cast_to_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.cat((input.to(other), other), 0)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.zeros([2, 3, 4], dtype=torch.bool)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ones_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input):
+                true = torch.ones(input.shape, dtype=torch.bool)
+                return input.to(true) & true
+
+        x = torch.randn(2, 3, 4)
+        model = MyModule()
+        self.run_test(model, x)
+
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
@@ -2925,6 +3018,26 @@ class TestONNXRuntime(unittest.TestCase):
 
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
+
+    @skipIfUnsupportedMaxOpsetVersion(10)
+    def test_unsupported_pad(self):
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        def run():
+            x = torch.randn(2, 2, 4, 4)
+            y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+            p = Pad()
+            f = io.BytesIO()
+            torch.onnx._export(p, (x, y), f)
+
+        with self.assertRaises(RuntimeError) as cm:
+            run()
+
+        the_exception = cm.exception
+        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
+                         'Please try opset version 11.', the_exception.args[0])
 
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
@@ -3623,10 +3736,6 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
-            # This is a hack to skip elman_rnn bidirectional tests for now
-            # TODO: Revert this once elman_rnn bidirectional issue is fixed
-            if base == 'elman' and bidirectional[1] == 'bidirectional':
-                continue
             make_test(name, base, layer, bidirectional, initial_state,
                       variable_length, dropout,
                       **extra_kwargs)
@@ -3637,10 +3746,8 @@ def setup_rnn_tests():
 
     # make sure no one accidentally disables all the tests without
     # noticing
-    # assert test_count == 192, test_count
-    # TODO: Revert this once elman_rnn bidirectional issue is fixed
-    if test_count != 144:
-        raise ValueError('Expected 144 tests but found {}'.format(test_count))
+    if test_count != 192:
+        raise ValueError('Expected 192 tests but found {}'.format(test_count))
 
 
 setup_rnn_tests()

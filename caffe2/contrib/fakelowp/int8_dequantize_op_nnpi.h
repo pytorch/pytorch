@@ -21,11 +21,9 @@ void Int8DequantizeNNPI(
     const int64_t N,
     const float X_scale,
     const int32_t X_offset) {
-  float X_scale_fp16 = 0;
-  fbgemm::RoundToFloat16(
-      &X_scale, &X_scale_fp16, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+  float X_scale_fp16 = 1.0f / X_scale;
   for (auto i = 0; i < N; ++i) {
-    out[i] = (static_cast<int32_t>(in[i]) - X_offset) * X_scale_fp16;
+    out[i] = (float)(static_cast<int32_t>(in[i]) + X_offset) / X_scale_fp16;
   }
   fbgemm::RoundToFloat16(out, out, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 } // namespace

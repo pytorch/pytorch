@@ -25,8 +25,8 @@ def get_arg_return_types_from_interface(module_interface):
     assert getattr(
         module_interface, "__torch_script_interface__", False
     ), "Expect a TorchScript class interface decorated by @torch.jit.interface."
-    qualified_name = torch.jit._qualified_name(module_interface)
-    cu = torch.jit._python_cu
+    qualified_name = torch._jit_internal._qualified_name(module_interface)
+    cu = torch.jit._state._python_cu
     module_interface_c = cu.get_interface(qualified_name)
     assert (
         "forward" in module_interface_c.getMethodNames()
@@ -70,10 +70,10 @@ def _write(out_path, text):
         old_text = None
     if old_text != text:
         with open(out_path, "w") as f:
-            print("Writing {}".format(out_path))
+            logger.info("Writing {}".format(out_path))
             f.write(text)
     else:
-        print("Skipped writing {}".format(out_path))
+        logger.info("Skipped writing {}".format(out_path))
 
 
 def _do_instantiate_remote_module_template(generated_module_name, str_dict):
@@ -101,7 +101,7 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
         )
 
     # Generate the template instance name.
-    module_interface_cls_name = torch.jit._qualified_name(module_interface_cls).replace(
+    module_interface_cls_name = torch._jit_internal._qualified_name(module_interface_cls).replace(
         ".", "_"
     )
     generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"

@@ -41,6 +41,23 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
+
+  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
+  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
+  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
+  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
+  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
+    # upgrade thunk to 3.5
+    mkdir rocm3.5-thunk
+    pushd rocm3.5-thunk
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
+    popd
+    rm -rf rocm3.5-thunk
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -133,17 +150,17 @@ test_python_nn() {
 }
 
 test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_all_except_nn_and_cpp_extensions() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -186,12 +203,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo mkdir -p /usr/include/tbb
   sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
-
-test_torchvision() {
-  # Check out torch/vision at Jun 11 2020 commit
-  # This hash must match one in .jenkins/caffe2/test.sh
-  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
-}
 
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -302,7 +313,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
-  test_torchvision
+  install_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
@@ -315,7 +326,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_python_nn
   test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  test_torchvision
+  install_torchvision
   test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
@@ -324,11 +335,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
-  # cpp extension can be built correctly under this old env 
+  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
+  # cpp extension can be built correctly under this old env
   test_cpp_extensions
 else
-  test_torchvision
+  install_torchvision
   test_python_nn
   test_python_all_except_nn_and_cpp_extensions
   test_cpp_extensions

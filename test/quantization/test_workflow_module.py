@@ -397,11 +397,13 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         qparams = myobs.calculate_qparams()
         self.assertEqual(qparams[1].item(), 0)
 
-    def test_histogram_observer_zero_inputs(self):
+    def test_histogram_observer_same_inputs(self):
         myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        w = torch.ones(4, requires_grad=True)
         x = torch.zeros(4, requires_grad=True)
         y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
         z = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(w)
         myobs(x)
         myobs(x)
         myobs(y)

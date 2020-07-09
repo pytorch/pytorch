@@ -142,7 +142,7 @@ struct cuda_scatter_gather_base_kernel {
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(self_restrided)
       .add_input(src_restrided)
       .add_input(index)
@@ -248,7 +248,7 @@ struct cuda_scatter_fill_base_kernel {
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(self_restrided)
       .add_input(index)
       .build();

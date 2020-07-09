@@ -40,7 +40,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indices,
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
     .add_output(indices)
