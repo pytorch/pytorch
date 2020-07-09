@@ -258,8 +258,9 @@ Tensor & detach_(Tensor & self) {
         TORCH_WARN("This view is an output of a function that "
                    "returns multiple views. Detaching such views inplace "
                    "is being deprecated and will be forbidden "
-                   "starting from version 1.8. Consider using `unsafe_` "
-                   "version of the function that produced this view.");
+                   "starting from version 1.8. Consider using detach() instead "
+                   "of detach_(). Alternatively, create this view with an "
+                   "`unsafe_` version of the function that produced it.");
     } else {
       AT_ERROR("Can't detach views in-place. Use detach() instead");
     }
