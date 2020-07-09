@@ -175,3 +175,8 @@ should write your code this way:
     :members:
 .. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
     :members:
+
+Stochastic Weight Averaging
+---------------------------
+
+:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA).
