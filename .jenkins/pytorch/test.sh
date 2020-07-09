@@ -228,23 +228,6 @@ test_libtorch() {
   fi
 }
 
-test_custom_backend() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
-    pushd test/custom_backend
-    cp -a "$CUSTOM_BACKEND_BUILD" build
-    # Run tests Python-side and export a lowered module.
-    python test_custom_backend.py -v
-    python backend.py --export-module-to=model.pt
-    # Run tests C++-side and load the exported lowered module.
-    build/test_custom_backend ./model.pt
-    rm -f ./model.pt
-    popd
-    assert_git_not_dirty
-  fi
-}
-
 test_custom_script_ops() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
@@ -348,7 +331,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
-  test_custom_backend
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
@@ -364,6 +346,5 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
-  test_custom_backend
   test_torch_function_benchmark
 fi
