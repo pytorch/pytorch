@@ -2,7 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 
-#include <ATen/native/CPUBlas.h>
+#include <TH/THBlasUtils.h>
+
 #include <ATen/native/vol2col.h>
 
 namespace at {
@@ -316,9 +317,9 @@ void slow_conv_transpose3d_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::Transpose,
+          THBlas_gemm<scalar_t>(
+              'n',
+              't',
               n,
               m,
               k,
@@ -365,9 +366,9 @@ void slow_conv_transpose3d_out_cpu_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           if (bias.defined()) {
-            cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+            THBlas_gemm<scalar_t>(
+                't',
+                'n',
                 n_,
                 m_,
                 k_,
@@ -564,9 +565,9 @@ void slow_conv_transpose3d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          cpublas::gemm(
-              cpublas::NoTranspose,
-              cpublas::NoTranspose,
+          THBlas_gemm<scalar_t>(
+              'n',
+              'n',
               n,
               m,
               k,
@@ -789,9 +790,9 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            cpublas::gemm(
-                cpublas::Transpose,
-                cpublas::NoTranspose,
+            THBlas_gemm<scalar_t>(
+                't',
+                'n',
                 n,
                 m,
                 k,
