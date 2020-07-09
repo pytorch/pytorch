@@ -18109,13 +18109,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
-        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
+        # Reference: https://dr.pytorch.org/api/view-log-full?build_id=122265220
+        # RuntimeError: Check failed: status.status() == ::tensorflow::Status::OK()
+        # (Invalid argument: Reshape operation has mismatched element counts: from=1 (s64[]) to=10 (s64[10,1]) vs. OK)
+        if self.device != 'xla':
+            self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
-        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
+        # Reference: https://dr.pytorch.org/api/view-log-full?build_id=122265220
+        # RuntimeError: Check failed: status.status() == ::tensorflow::Status::OK()
+        # (Invalid argument: Reshape operation has mismatched element counts: from=1 (s64[]) to=10 (s64[10,1]) vs. OK)
+        if self.device != 'xla':
+            self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
     def test_nansum_complex(self, device, dtype):
