@@ -993,23 +993,23 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Module& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             return pp.str();
           })
       .def_property_readonly(
           "code_with_constants",
           [](Module& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
-            std::map<std::string, at::Tensor> consts;
+            std::map<std::string, at::IValue> consts;
             int i = 0;
-            for (auto const& tensor : tensors) {
-              consts["c" + std::to_string(i)] = tensor;
+            for (auto const& constant : constants) {
+              consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
             return std::make_tuple(pp.str(), consts);
@@ -1156,10 +1156,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](const StrongFunctionPtr& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
 
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
             return pp.str();
           })
@@ -1201,21 +1201,21 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Method& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
-        std::vector<at::Tensor> tensors;
+        std::vector<at::IValue> constants;
         std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps);
+        PythonPrint pp(constants, deps);
         pp.printMethod(self.function());
-        std::map<std::string, at::Tensor> consts;
+        std::map<std::string, at::IValue> consts;
         int i = 0;
-        for (auto const& tensor : tensors) {
-          consts["c" + std::to_string(i)] = tensor;
+        for (auto const& constant : constants) {
+          consts["c" + std::to_string(i)] = constant;
           i += 1;
         }
         return std::make_tuple(pp.str(), consts);

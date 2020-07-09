@@ -331,7 +331,7 @@ class ScriptModuleSerializer {
   }
 
   caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::Tensor> constant_table_;
+  std::vector<at::IValue> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   std::vector<c10::NamedTypePtr> class_deps_;
   TypeNameUniquer type_name_uniquer_;
