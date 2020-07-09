@@ -3248,7 +3248,7 @@ GRID_SAMPLE_PADDING_MODES = {
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None, pixel_coords=False):
-    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
+    # type: (Tensor, Tensor, str, str, Optional[bool], bool) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -3268,14 +3268,27 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
     ``bilinear`` interpolation method to sample the input pixels.
 
-    :attr:`grid` specifies the sampling pixel locations normalized by the
-    :attr:`input` spatial dimensions. Therefore, it should have most values in
-    the range of ``[-1, 1]``. For example, values ``x = -1, y = -1`` is the
-    left-top pixel of :attr:`input`, and values  ``x = 1, y = 1`` is the
-    right-bottom pixel of :attr:`input`.
+    :attr:`grid` specifies the sampling pixel locations. When :attr:`pixel_coords`
+    is ``False``, its values are normalized coordinates, which are normalized
+    by the :attr:`input` spatial dimensions, so it should generally have values
+    in the range of ``[-1, 1]``.
+    A value of ``x = -1, y = -1`` then corresponds to the top-left pixel of
+    :attr:`input`, while ``x = 1, y = 1`` corresponds to the bottom-right pixel.
+    When :attr:`pixel_coords` is ``True``, its values are (possibly non-integral)
+    index locations into :attr:`input` (pixel coordinates). A value of
+    ``x = 0, y = 0`` then corresponds to the top-left pixel of :attr:`input`,
+    while ``x = W_in - 1, y = H_in - 1`` corresponds to the bottom-right pixel.
 
-    If :attr:`grid` has values outside the range of ``[-1, 1]``, the corresponding
-    outputs are handled as defined by :attr:`padding_mode`. Options are
+    Note that for compatibility reasons, the components of the grid are ordered
+    as x-then-y, which is opposite the indexing order of row-then-column. So,
+    setting asside the interpolation, a grid value of ``(a, b)`` (in pixel
+    coordinates) samples the :attr:`input` at ``input[..., b, a]``.
+    Likewise in the volumetric case, a grid value of ``(a, b, c)`` samples the
+    :attr:`input` at ``input[..., c, b, a]``.
+
+    If :attr:`grid` has values that are out of range for :attr:`input`, the
+    corresponding outputs are handled as defined by :attr:`padding_mode`.
+    Options are
 
         * ``padding_mode="zeros"``: use ``0`` for out-of-bound grid locations,
         * ``padding_mode="border"``: use border values for out-of-bound grid locations,
@@ -3304,15 +3317,31 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
             ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
-        align_corners (bool, optional): Geometrically, we consider the pixels of the
-            input  as squares rather than points.
-            If set to ``True``, the extrema (``-1`` and ``1``) are considered as referring
-            to the center points of the input's corner pixels. If set to ``False``, they
-            are instead considered as referring to the corner points of the input's corner
-            pixels, making the sampling more resolution agnostic.
+        align_corners (bool, optional): Geometrically, we may consider the pixels
+            of the input as points (``True``) or as square regions (``False``).
+            If set to ``True``, the extrema (``-1`` and ``1`` in the normalized
+            coordinates) are considered as referring to the center points of the
+            input's border pixels. If set to ``False``, they are instead considered
+            as referring to the far edge of the input's border pixels,
+            making the sampling of pixel images more resolution agnostic.
+            Moreover, when ``padding_mode`` is ``'reflection'``, this also
+            determines the line about which the reflection occurs: the center points of
+            the border pixels (``True``), or the far edges of the border pixels (``False``).
+            When ``pixel_coords`` is ``True`` there are no normalized coordinates
+            to interpret, so the only effect is on the line of reflection, if relevant.
             This option parallels the ``align_corners`` option in
             :func:`interpolate`, and so whichever option is used here
-            should also be used there to resize the input image before grid sampling.
+            should also be used there when resizing the input image before grid sampling.
+            Default: ``False``
+        pixel_coords (bool, optional): Specifies whether the ``grid`` input is given
+            in pixel coordinates (mimicking indices into the tensor) as opposed
+            to standard normalized coordinates (in the range ``[-1, 1]``).
+            If set to ``True``, grid values are understood to be (possibly non-integral)
+            indices into the input. That is, ``(0., 0.)`` corresponds to the top-left
+            pixel while ``(W_in - 1., H_in - 1.)`` corresponds to the bottom-right pixel.
+            If set to ``False``, grid values are understood to be normalized
+            coordinates in the range ``[-1, 1]``. That is, ``(-1., -1.)`` corresponds
+            to the top-left pixel while ``(1., 1.)`` corresponds to the bottom-right pixel.
             Default: ``False``
 
     Returns:
