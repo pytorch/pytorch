@@ -347,41 +347,6 @@
     - arg: int64_t dim
 ]]
 [[
-  name: _th_addmm
-  cname: addmm
-  cpu_bfloat16: True
-  variants:
-    - function
-  return: argument 0
-  backends: [CPU]
-  options:
-    - arguments:
-      - arg: THTensor* result
-        output: True
-      - THTensor* self
-      - THTensor* mat1
-      - THTensor* mat2
-      - real beta
-      - real alpha
-]]
-[[
-  name: _th_addmm_
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  variants: [function]
-  return: self
-  backends: [CPU]
-  options:
-    - cname: addmm
-      arguments:
-      - THTensor* self
-      - THTensor* self
-      - THTensor* mat1
-      - THTensor* mat2
-      - real beta
-      - real alpha
-]]
-[[
   name: _th_addr
   cname: addr
   cpu_bfloat16: True
@@ -430,36 +395,6 @@
     - THTensor* mat2
     - CONSTANT AS_REAL(0)
     - CONSTANT AS_REAL(1)
-]]
-[[
-  name: _th_addbmm
-  cname: addbmm
-  variants:
-    - function
-  backends: [CPU]
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* batch1
-    - THTensor* batch2
-    - real beta
-    - real alpha
-]]
-[[
-  name: _th_addbmm_
-  cname: addbmm
-  variants: function
-  return: self
-  backends: [CPU]
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - THTensor* batch1
-    - THTensor* batch2
-    - real beta
-    - real alpha
 ]]
 [[
   name: _th_baddbmm
