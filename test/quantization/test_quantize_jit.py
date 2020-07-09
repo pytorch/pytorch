@@ -2734,21 +2734,20 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         qconfig_dict = {'': default_dynamic_qconfig}
         eager_model = M().eval()
-        x = torch.rand(5, 5)
         for tracing in [True, False]:
+            x = torch.rand(5, 5)
             model = get_script_module(eager_model, tracing, x)
-            qconfig = script_qconfig(default_dynamic_qconfig)
             ref_qparams = []
-            wt_module = wrap_cpp_module(qconfig.weight)
             for wt in [model.fc.weight, model.fc2.weight]:
+                wt_module = default_dynamic_qconfig.weight()
                 wt_module(wt)
                 qparams = wt_module.calculate_qparams()
                 ref_qparams.append((qparams[0].item(), qparams[1].item()))
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
-            graph_params = []
+            graph_qparams = []
             for x, obs in model._modules._c.items():
-                graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
-            self.assertEqual(ref_qparams, graph_params)
+                graph_qparams.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+            self.assertEqual(ref_qparams, graph_qparams)
 
     def test_convert_dynamic_fp16(self):
         class M(torch.nn.Module):
