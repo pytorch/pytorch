@@ -43,11 +43,11 @@ class Int8ReluOp final : public Operator<CPUContext> {
 
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_clamp_nc_u8(
-        1 /* channels */,
-        X.zero_point /* output min */,
-        255 /* output max */,
-        0 /* flags */,
-        &qnnpackOperator_);
+          1 /* channels */,
+          X.zero_point /* output min */,
+          255 /* output max */,
+          0 /* flags */,
+          &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,
           "failed to create QNNPACK Clamp operator");

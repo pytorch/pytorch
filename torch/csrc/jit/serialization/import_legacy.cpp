@@ -132,13 +132,12 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
   }
   LEGACY_moduleStack_.push_back("__torch__");
   const auto& module_def = model_def.main_module();
-  auto module = LEGACY_convertModule(module_def);
 
   // Move tensors in constant table.
   for (auto& tensor : tensor_table_) {
     constant_table_.emplace_back(IValue(std::move(tensor)));
   }
-  return module;
+  return LEGACY_convertModule(module_def);
 }
 
 IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
@@ -296,7 +295,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
+    at::Tensor tensor = constant_table_.at(param_def.tensor_id()).toTensor();
     if (param_def.is_buffer()) {
       module.register_buffer(param_def.name(), tensor);
     } else {
