@@ -635,7 +635,7 @@ def onlyCUDA(fn):
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
-class expectedAlertNondeterministic(object):
+class expectedAlertNondeterministic:
     def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
         self.device_type = device_type
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
