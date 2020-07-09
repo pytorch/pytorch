@@ -229,7 +229,7 @@ which compute the real and imaginary parts of the function:
             x, y = real(z), imag(z)
             return u(x, y) + v(x, y) * 1j
 
-where *j* (:math:`\sqrt{-1}`) is the imaginary number.
+where *1j* is a unit imaginary number.
 
 The JVP and VJP for function :math:`F` at :math:`(x, y)` are defined as:
 
