@@ -3125,7 +3125,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
     # default value of recompute_scale_factor is False
     if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
-        if isinstance(scale_factor, list) or isinstance(scale_factor, tuple):
+        if isinstance(scale_factor, (list, tuple)):
             _scale_factor_repeated = scale_factor
         else:
             _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
