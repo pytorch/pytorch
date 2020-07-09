@@ -673,6 +673,10 @@ struct CAFFE2_API IValue final {
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
 
+  // Apply visitor to every subvalue.
+  // TODO: There are several places that recurse over IValue. This is fragile.
+  // This visitor should be used to recurse over ivalues.
+  void visit(const std::function<bool (const IValue &)>& visitor) const;
   IValue deepcopy() const;
   IValue deepcopy(
       HashAliasedIValueMap& memo) const;

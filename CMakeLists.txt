@@ -136,6 +136,7 @@ option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
+option(CLANG_CODE_COVERAGE "Compile C/C++ with clang code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -327,7 +328,7 @@ if(MSVC)
     endif()
   endforeach(flag_var)
 
-  foreach(flag_var 
+  foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
     if(${flag_var} MATCHES "/Z[iI7]")
@@ -587,6 +588,12 @@ endif()
 if(USE_ASAN)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
+
+# invoke clang code coverage flags
+if(CLANG_CODE_COVERAGE)
+  list(APPEND CMAKE_C_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
+  list(APPEND CMAKE_CXX_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 if(APPLE)
