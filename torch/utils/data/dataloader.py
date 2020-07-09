@@ -94,8 +94,8 @@ class DataLoader(Generic[T_co]):
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
         prefetch_factor (int, optional): Number of sample loaded in advance by each worker.
-            ``2`` means there will be ``2 * num_workers`` get prefetched. 
-            (default: ``2``)
+            ``2`` means there will be a total of 2 * num_workers samples prefetched 
+            across all workers. (default: ``2``)
         collate_fn (callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
