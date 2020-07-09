@@ -239,10 +239,10 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 
   if(DISABLE_NNPACK_AND_FAMILY)
-    set(USE_NNPACK OFF)
-    set(USE_QNNPACK OFF)
-    set(USE_PYTORCH_QNNPACK OFF)
-    set(USE_XNNPACK OFF)
+    caffe2_update_option(USE_NNPACK OFF)
+    caffe2_update_option(USE_QNNPACK OFF)
+    caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
+    caffe2_update_option(USE_XNNPACK OFF)
   else()
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 
@@ -261,10 +261,6 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
-
-    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-    set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-    set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
   endif()
 else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
@@ -283,42 +279,45 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-if(NOT USE_SYSTEM_PTHREADPOOL AND (INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY))
+# Only add a dependency on pthreadpool if we are on a mobile build
+# or are building any of the libraries in the {Q/X}NNPACK family.
+if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
-  # Opt for custom Caffe2 implementation on MSVC.  Windows support seems to have
-  # been added to pthreadpool recently but the current third party revision we are
-  # using right now does not suppor it.  Should unify later after updating pthreadpool.
-  if(MSVC)
-    set(USE_INTERNAL_PTHREADPOOL_IMPL ON CACHE BOOL "" FORCE)
-    # XNNPACK cannot link against a custom implementation of pthreadpool
-    caffe2_update_option(USE_XNNPACK OFF)
-  else()
-    # We would like to maintain the ability to build against the internal C2
-    # pthreadpool implementation for now, hence this flag.  This flag is not
-    # exposed as a build option to the user and is purly internal.
-    set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
+  # Always use third_party/pthreadpool.
+  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
 
-    if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-      set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-    endif()
+  if(NOT TARGET pthreadpool)
+    if(USE_SYSTEM_PTHREADPOOL)
+      add_library(pthreadpool SHARED IMPORTED)
+      find_library(PTHREADPOOL_LIBRARY pthreadpool)
+      set_property(TARGET pthreadpool PROPERTY IMPORTED_LOCATION "${PTHREADPOOL_LIBRARY}")
+      if(NOT PTHREADPOOL_LIBRARY)
+        message(FATAL_ERROR "Cannot find pthreadpool")
+      endif()
+      message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
+    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+      if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+        set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+        set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+      endif()
 
-    if(NOT TARGET pthreadpool)
       set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
       set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_ALLOW_DEPRECATED_API ON CACHE BOOL "")
       add_subdirectory(
         "${PTHREADPOOL_SOURCE_DIR}"
         "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
-    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
-  endif()
-
-  if(USE_INTERNAL_PTHREADPOOL_IMPL)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
+    if(USE_INTERNAL_PTHREADPOOL_IMPL)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
+    else()
+      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
+    endif()
   endif()
 else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
@@ -385,6 +384,28 @@ if(USE_QNNPACK)
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+    if(QNNPACK_CUSTOM_THREADPOOL)
+      target_compile_definitions(
+        qnnpack PRIVATE
+        pthreadpool_t=legacy_pthreadpool_t
+        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
+        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
+        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
+        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
+        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
+        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
+        pthreadpool_create=legacy_pthreadpool_create
+        pthreadpool_destroy=legacy_pthreadpool_destroy
+        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
+        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
+        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
+        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
+        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
+        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
+        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
+        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
+    endif()
   endif()
 
   list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
@@ -418,6 +439,28 @@ if(USE_PYTORCH_QNNPACK)
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
+        target_compile_definitions(
+          pytorch_qnnpack PRIVATE
+          pthreadpool_t=legacy_pthreadpool_t
+          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
+          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
+          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
+          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
+          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
+          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
+          pthreadpool_create=legacy_pthreadpool_create
+          pthreadpool_destroy=legacy_pthreadpool_destroy
+          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
+          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
+          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
+          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
+          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
+          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
+          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
+          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
+      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
