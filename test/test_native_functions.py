@@ -1,6 +1,6 @@
 from typing import Optional, List
 import torch
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 # End-to-end tests of features in native_functions.yaml
 
@@ -115,3 +115,7 @@ class TestNativeFunctions(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
             torch.jit.script(IntListWrapperModule())(torch.zeros(1), torch.zeros(1))
+
+
+if __name__ == '__main__':
+    run_tests()

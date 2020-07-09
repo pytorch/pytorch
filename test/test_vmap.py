@@ -273,5 +273,165 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(IndexError, msg):
             vmap(lambda x: x, out_dims=-4)(x)
 
+    def test_non_zero_in_dims(self):
+        tensor = torch.randn(2, 3, 5)
+
+        # Implicit out_dims = 0; vmap will move the batch dim to the front.
+        output = vmap(lambda x: x, (1,))(tensor)
+        self.assertEqual(output, tensor.permute(1, 0, 2))
+        self.assertEqual(output.data_ptr(), tensor.data_ptr())
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 2)
+        output = vmap(torch.mul, (0, 1))(x, y)
+        self.assertEqual(output, x * y.t())
+        output = vmap(torch.mul, (1, 0))(x, y)
+        self.assertEqual(output, x.t() * y)
+
+    def test_none_in_dims(self):
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        # None in_dim for a Tensor means we don't map over it
+        output = vmap(torch.mul, (0, None))(x, y)
+        self.assertEqual(output.shape, (2, 2, 3))
+        self.assertEqual(output, x.view(2, 1, 3) * y)
+
+        # None in_dim for non-tensor arguments
+        output = vmap(torch.mul, (0, None))(x, 2)
+        self.assertEqual(output, x * 2)
+
+    def test_nested_non_default_in_dims(self):
+        x = torch.rand(5, 2, 3)
+        y = torch.rand(3, 5, 2)
+        result = vmap(vmap(vmap(torch.mul), (1, 0)), (1, 2))(x, y)
+        self.assertEqual(result, x.permute(1, 2, 0) * y.permute(2, 0, 1))
+
+    def test_non_default_in_dims_out_dims(self):
+        x = torch.randn(2, 3, 5)
+
+        # Same in_dim as out_dim, vmap over identity
+        result = vmap(lambda x: x, in_dims=1, out_dims=1)(x)
+        self.assertEqual(result, x)
+        self.assertEqual(result.data_ptr(), x.data_ptr())
+
+        # Different in_dim from out_dim, vmap over identity
+        result = vmap(lambda x: x, in_dims=2, out_dims=1)(x)
+        self.assertEqual(result.shape, (2, 5, 3))
+        self.assertEqual(result, x.transpose(1, 2))
+        self.assertEqual(result.data_ptr(), x.data_ptr())
+
+        def foo(x):
+            return x * 2
+
+        # Same in_dim as out_dim, vmap over operation
+        result = vmap(foo, in_dims=1, out_dims=1)(x)
+        self.assertEqual(result, x * 2)
+
+        # Different in_dim as out_dim, vmap over operation
+        result = vmap(foo, in_dims=2, out_dims=1)(x)
+        self.assertEqual(result.shape, (2, 5, 3))
+        self.assertEqual(result, (x * 2).transpose(1, 2))
+
+        # Basic nested test.
+        result = vmap(vmap(foo, 1, 1), 1, 1)(x)
+        self.assertEqual(result, x * 2)
+
+    def test_in_dims_wrong_type_err_msg(self):
+        x = torch.randn(3)
+        y = torch.randn(3)
+        msg = 'expected `in_dims` to be int or tuple'
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.mul, [0, 0])(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.mul, set({0, 0}))(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.mul, 'lol')(x, y)
+        # The following should not throw
+        vmap(torch.mul, (0, 0))(x, y)
+
+    def test_not_enough_in_dims_err_msg(self):
+        x = torch.randn(3)
+        y = torch.randn(3)
+        msg = r'expected one `in_dim` per input \(got \w+ inputs\)'
+
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.mul, (0,))(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.mul, (0, 0, 0))(x, y)
+        # The following should not throw
+        vmap(torch.mul, (0, 0))(x, y)
+
+    def test_in_dims_must_be_flat_tuple_err_msg(self):
+        msg = 'in_dims must be a flat tuple containing ints and/or Nones'
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+
+        def foo(xy):
+            return xy[0] * xy[1]
+
+        def bar(x, yz):
+            return x * yz[0] * yz[1]
+
+        # NB: jax supports all of the following, we don't yet.
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, ((0, 0),))((x, y))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(bar, (0, (0, 0)))(x, (y, z))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, ({0: 0, 1: 0},))({0: x, 1: y})
+
+    def test_integer_in_dim_but_not_tensor_input_err_msg(self):
+        def foo(xy):
+            return xy[0] * xy[1]
+
+        def bar(x, yz):
+            return x * yz[0] * yz[1]
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        # jax supports these, we too can in the future.
+        msg = 'Got in_dim=0 for input 0, but input 0 is not a Tensor'
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo)((x, y))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, (0,))((x, y))
+
+        # jax supports these as well, we too can in the future.
+        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo)(x, (x, y))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, (0, 0))(x, (x, y))
+
+        # the following are errors in jax (and will always be errors)
+        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.sum)(x, 0)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(torch.sum, (0, 0))(x, 0)
+        # The following should not throw
+        vmap(torch.sum, (0, None))(x, 0)
+
+    def test_in_dim_not_in_tensor_err_msg(self):
+        def foo(x):
+            return x * x
+
+        msg = r'Got in_dim=-?\w for input 0, but input 0 is a Tensor of dimensionality \w'
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo)(torch.randn([]))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, in_dims=(0,))(torch.randn([]))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, in_dims=(-1,))(torch.randn(2, 3))
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(foo, in_dims=(2,))(torch.randn(2, 3))
+        # the following should not throw
+        vmap(foo, in_dims=(0,))(torch.randn(2, 3))
+        vmap(foo, in_dims=(1,))(torch.randn(2, 3))
+
 if __name__ == '__main__':
     run_tests()

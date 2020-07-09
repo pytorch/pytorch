@@ -532,7 +532,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         # (builtin, script, python)
         if qualified_name is None:
             func_name = (
-                torch.jit._qualified_name(func)
+                torch._jit_internal._qualified_name(func)
                 if isinstance(func, torch.jit.ScriptFunction)
                 else func.__qualname__
             )
@@ -607,7 +607,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         # (builtin, script, python)
         if qualified_name is None:
             func_name = (
-                torch.jit._qualified_name(func)
+                torch._jit_internal._qualified_name(func)
                 if isinstance(func, torch.jit.ScriptFunction)
                 else func.__qualname__
             )
@@ -645,7 +645,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
                 dst_worker_info.name,
-                torch.jit._qualified_name(func),
+                torch._jit_internal._qualified_name(func),
                 args,
                 kwargs,
                 rpc_timeout,
