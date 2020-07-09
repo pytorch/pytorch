@@ -62,6 +62,20 @@ TEST(VulkanTest, add) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, add_not4dim) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_in0 = at::rand({1, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::add(t_in0, t_in1, 2);
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+  auto tv_out = at::add(tv_in0, tv_in1, 2);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
 TEST(VulkanTest, conv2d) {
   if (!at::vulkan::is_available())
     return;
@@ -134,6 +148,21 @@ TEST(VulkanTest, addmm) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, mm) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_m1 = at::rand({10, 20}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_m2 = at::rand({20, 30}, at::device(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = t_m1.mm(t_m2);
+
+  auto tv_m1 = t_m1.vulkan();
+  auto tv_m2 = t_m2.vulkan();
+  auto tv_out = tv_m1.mm(tv_m2);
+  auto t_out = tv_out.cpu();
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
 TEST(VulkanTest, clamp) {
   if (!at::vulkan::is_available())
     return;
@@ -175,11 +204,12 @@ TEST(VulkanTest, mean) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
-enum class OpType { conv2d, hardtanh_, mean, addmm };
+enum class OpType { conv2d, hardtanh_, mean, addmm, mm, adaptive_avg_pool2d, reshape, add };
 
 class BaseOp {
  public:
   BaseOp(OpType t) : type(t) {}
+  virtual ~BaseOp() = default;
   virtual at::Tensor run(at::Tensor&) = 0;
   virtual std::string toString() = 0;
   OpType type;
@@ -236,6 +266,80 @@ class Addmm : public BaseOp {
   at::Tensor bv;
   float beta;
   float alpha;
+};
+
+class Mm : public BaseOp {
+ public:
+  Mm(c10::IntArrayRef m2Sizes)
+      : BaseOp(OpType::mm) {
+    m2 = at::rand(m2Sizes, at::device(at::kCPU).dtype(at::kFloat));
+    m2v = m2.vulkan();
+  }
+
+  at::Tensor run(at::Tensor& t) override {
+    if (t.is_vulkan()) {
+      return t.mm(m2v);
+    }
+    return t.mm(m2);
+  }
+
+  std::string toString() override {
+    return "mm";
+  }
+
+  at::Tensor m2;
+  at::Tensor m2v;
+};
+
+class AdaptiveAvgPool2d : public BaseOp {
+ public:
+  AdaptiveAvgPool2d(std::vector<int64_t> outputSizes)
+      : BaseOp(OpType::adaptive_avg_pool2d),
+      outputSizes_(std::move(outputSizes)) {}
+
+  at::Tensor run(at::Tensor& t) override {
+    return at::adaptive_avg_pool2d(t, outputSizes_);
+  }
+
+  std::string toString() override {
+    return "adaptive_avg_pool2d";
+  }
+
+  std::vector<int64_t> outputSizes_;
+};
+
+class Reshape : public BaseOp {
+ public:
+  Reshape(std::vector<int64_t> shape)
+      : BaseOp(OpType::reshape),
+      shape_(std::move(shape)) {}
+
+  at::Tensor run(at::Tensor& t) override {
+    return at::reshape(t, shape_);
+  }
+
+  std::string toString() override {
+    return "reshape";
+  }
+
+  std::vector<int64_t> shape_;
+};
+
+class Add : public BaseOp {
+ public:
+  Add(c10::IntArrayRef lhSizes) : BaseOp(OpType::add) {
+    lh = at::rand(lhSizes, at::device(at::kCPU).dtype(at::kFloat));
+  }
+
+  at::Tensor run(at::Tensor& t) override {
+    return at::add(lh, t);
+  }
+
+  std::string toString() override {
+    return "add";
+  }
+
+  at::Tensor lh;
 };
 
 class Conv2d : public BaseOp {
@@ -395,7 +499,7 @@ class MobileNetV2 : public OpsList {
   }
 };
 
-TEST(VulkanTest, DISABLED_mobilenetv2) {
+TEST(VulkanTest, mobilenetv2) {
   if (!at::vulkan::is_available())
     return;
 
@@ -428,6 +532,31 @@ TEST(VulkanTest, OpsList) {
   OpsList opsList(ops);
   auto t_in =
       at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = opsList.run(t_in);
+
+  auto tv_in = t_in.vulkan();
+
+  auto tv_out = opsList.run(t_in);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, OpsList2) {
+  if (!at::vulkan::is_available())
+    return;
+
+  std::vector<std::unique_ptr<BaseOp>> ops;
+  ops.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
+  ops.emplace_back(new Hardtanh_());
+  ops.emplace_back(new AdaptiveAvgPool2d({1, 1}));
+  ops.emplace_back(new Reshape({1, 1280}));
+  ops.emplace_back(new Mm({1280, 1000}));
+  std::vector<int64_t> lhs = {1000};
+  ops.emplace_back(new Add(lhs));
+  OpsList opsList(ops);
+  auto t_in =
+      at::rand({1, 320, 7, 7}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = opsList.run(t_in);
 
   auto tv_in = t_in.vulkan();
@@ -516,4 +645,83 @@ TEST(VulkanTest, conv2dPrepack) {
     std::cout << "got:\n" << t_out_prepack << std::endl;
   }
   ASSERT_TRUE(prepack_check);
+}
+
+TEST(VulkanTest, adaptive_avg_pool2d) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 2, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::adaptive_avg_pool2d(t_in, {3, 3});
+  auto tv_in = t_in.vulkan();
+
+  auto tv_out = at::adaptive_avg_pool2d(tv_in, {3, 3});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, adaptive_avg_pool2d_2) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 1280, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::adaptive_avg_pool2d(t_in, {1, 1});
+  auto tv_in = t_in.vulkan();
+
+  auto tv_out = at::adaptive_avg_pool2d(tv_in, {1, 1});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, reshape) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 8, 1, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {1, 8});
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {1, 8});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, reshape2) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 3, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {2, 3, 1, 2});
+
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {2, 3, 1, 2});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }

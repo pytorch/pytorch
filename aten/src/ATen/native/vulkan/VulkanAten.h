@@ -30,5 +30,11 @@ at::Tensor vulkan_convolution_prepacked(
     const float output_min,
     const float output_max);
 
+at::Tensor vulkan_adaptive_avg_pool2d(
+    at::Tensor const& input,
+    IntArrayRef output_size);
+
+at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape);
+
 } // namespace native
 } // namespace at
