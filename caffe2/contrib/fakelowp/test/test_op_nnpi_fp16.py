@@ -120,7 +120,7 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 class UnaryOpTest(serial.SerializedTestCase):
     @settings(max_examples=1)
-    def _test_unary_op(self, opname, value):
+    def _test_unary_op(self, opname, value, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
         n = 1
         m = 10001
@@ -167,7 +167,9 @@ class UnaryOpTest(serial.SerializedTestCase):
         workspace.RunNet(ref_net.name)
         Y_c2 = workspace.FetchBlob('Y')
 
-        if not np.allclose(Y_c2, Y_glow):
+
+
+        if not np.allclose(Y_c2, Y_glow, rtol=atol, atol=atol):
             diff = np.abs(Y_c2 - Y_glow)
             np.save('/tmp/' + opname + 'diff', diff)
             np.save('/tmp/' + opname + 'result', Y_c2)
@@ -185,8 +187,9 @@ class UnaryOpTest(serial.SerializedTestCase):
     def test_tanh(self):
         self._test_unary_op("Tanh", value=20)
 
-    def _test_swish(self):
-        self._test_unary_op("Swish", value=20)
+    # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
+    def test_swish(self):
+        self._test_unary_op("Swish", value=20, atol=0.008)
 
     def _test_logit(self):
         self._test_unary_op("Logit", value=1)
