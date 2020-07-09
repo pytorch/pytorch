@@ -2,7 +2,7 @@ name: jit-triage
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
 
 jobs:
   welcome:
@@ -20,27 +20,33 @@ jobs:
 
             // Check if issue has a JIT label.
             const kJitLabel = "jit";
-            const hasJitLabel = context.issue.labels.filter(label => label.name == kJitLabel).length > 0;
+
+            issue = await github.issues.get({
+              owner: context.issue.owner,
+              repo: context.issue.repo,
+              issue_number: context.issue.number,
+            })
+
+            const hasJitLabel = issue.data.labels.filter(label => label.name == kJitLabel).length > 0;
 
             if (!hasJitLabel) {
-              core.info("Issue " + context.issue.title + " does not have JIT label");
+              core.debug("Issue " + issue.data.title + " does not have JIT label");
               return;
             }
 
             // Get project column ID.
             const kProjectName = "JIT Triage";
             const kColumnName = "Need triage";
-            const kPyTorch = "pytorch";
 
             // Query all projects in the repository.
             // TODO: Support pagination once there are > 30 projects.
             const projects = await github.projects.listForRepo({
-              owner: kPyTorch,
-              repo: kPyTorch,
+              owner: context.issue.owner,
+              repo: context.issue.repo,
             });
 
             // Filter out unwanted projects and get the ID for the JIT Triage project.
-            const filteredProjects = projects.filter(project => project.name == kProjectName);
+            const filteredProjects = projects.data.filter(project => project.name == kProjectName);
 
             if (filteredProjects.length != 1) {
               core.setFailed("Unable to find a project named " + kProjectName);
@@ -48,7 +54,6 @@ jobs:
             }
 
             const projectId = filteredProjects[0].id;
-
             // First, query all columns in the project.
             // TODO: Support pagination once there are > 30 columns.
             const columns = await github.projects.listColumns({
@@ -56,9 +61,9 @@ jobs:
             });
 
             // Filter out unwanted projects and get the ID for the Need triage column.
-            const filteredColumns = columns.filter(column => column.name == kColumnName);
+            const filteredColumns = columns.data.filter(column => column.name == kColumnName);
 
-            if (filteredColumns != 1) {
+            if (filteredColumns.length != 1) {
               core.setFailed("Unable to find a column named " + kColumnName);
               return;
             }
@@ -66,8 +71,8 @@ jobs:
             const columnId = filteredColumns[0].id;
 
             // Create a project card for this new issue.
-            await octokit.projects.createCard({
+            await github.projects.createCard({
               column_id: columnId,
-              content_id: context.issue.id,
+              content_id: issue.data.id,
               content_type: "Issue",
             })
