@@ -878,7 +878,7 @@ struct PythonPrintImpl {
           throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
-              << "Did you forget add @script or @script_method annotation? "
+              << "Did you forget to add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
         std::stringstream scalars_stream;

@@ -153,6 +153,7 @@ struct PythonArgs {
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline c10::OptionalArray<int64_t> intlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
@@ -181,8 +182,8 @@ struct PythonArgs {
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
-  inline std::complex<double> toComplex(int i);
-  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
+  inline c10::complex<double> toComplex(int i);
+  inline c10::complex<double> toComplexWithDefault(int i, c10::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
@@ -331,6 +332,13 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     }
   }
   return res;
+}
+
+inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return intlist(i);
 }
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
@@ -509,14 +517,14 @@ inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   return toDouble(i);
 }
 
-inline std::complex<double> PythonArgs::toComplex(int i) {
-  std::complex<double> default_value = *const_cast<std::complex<double> *>(
-    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+inline c10::complex<double> PythonArgs::toComplex(int i) {
+  c10::complex<double> default_value = *const_cast<c10::complex<double> *>(
+    reinterpret_cast<const c10::complex<double> *>(signature.params[i].default_complex));
   if (!args[i]) return default_value;
   return THPUtils_unpackComplexDouble(args[i]);
 }
 
-inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+inline c10::complex<double> PythonArgs::toComplexWithDefault(int i, c10::complex<double> default_value) {
   if (!args[i]) return default_value;
   return toDouble(i);
 }
