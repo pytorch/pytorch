@@ -18044,7 +18044,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         return x
 
     def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
-                                            with_extremal=False, atol=None, rtol=None, exact_dtype=True):
+                                            with_extremal=False, atol=None, rtol=None,
+                                            exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
@@ -18060,8 +18061,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype)
                         else:
                             # With `dims: tuple of ints` case
-                            torch_func_partial = partial(torch_func, dim=count_dim)
-                            np_func_partial = partial(np_func, axis=count_dim)
+                            if with_keepdim:
+                                torch_func_partial = partial(torch_func, keepdim=True, dim=count_dim)
+                                np_func_partial = partial(np_func, keepdims=True, axis=count_dim)
+                            else:
+                                torch_func_partial = partial(torch_func, dim=count_dim)
+                                np_func_partial = partial(np_func, axis=count_dim)
                             self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
@@ -18072,7 +18077,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
-    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype):
+    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False):
         def is_integral(dtype):
             return dtype in torch.testing.get_all_int_dtypes()
 
@@ -18090,23 +18095,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Investigate
             if dtype == torch.float16:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         atol=0.2, rtol=1e-2, exact_dtype=exact_dtype)
+                                                         atol=0.2, rtol=1e-2, exact_dtype=exact_dtype,
+                                                         with_keepdim=with_keepdim)
             elif dtype == torch.float32:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         atol=1e-05, rtol=3e-06, exact_dtype=exact_dtype)
+                                                         atol=7e-05, rtol=3e-06, exact_dtype=exact_dtype,
+                                                         with_keepdim=with_keepdim)
             else:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         exact_dtype=exact_dtype)
+                                                         exact_dtype=exact_dtype, with_keepdim=with_keepdim)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
     def test_nansum_complex(self, device, dtype):
