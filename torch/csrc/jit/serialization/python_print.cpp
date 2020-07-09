@@ -295,19 +295,25 @@ struct PythonPrintImpl {
     }
   }
 
-  size_t getOrAddTensorConstant(at::Tensor t) {
+  size_t getOrAddConstant(at::IValue val) {
     // XXX - N^2 warning. This code does the exact same thing as
     // ConstantPool, which is also N^2 in the size of the constants,
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
-    for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.options().type_equal(tensor_table_[i].options()) &&
-          t.equal(tensor_table_[i])) {
-        return i;
+    if (val.isTensor()) {
+      auto t = val.toTensor();
+      for (size_t i = 0; i < constant_table_.size(); ++i) {
+        if (!constant_table_[i].isTensor()) {
+          continue;
+        }
+        auto t2 = constant_table_[i].toTensor();
+        if (t.options().type_equal(t2.options()) && t.equal(t2)) {
+          return i;
+        }
       }
     }
-    tensor_table_.emplace_back(std::move(t));
-    return tensor_table_.size() - 1;
+    constant_table_.emplace_back(std::move(val));
+    return constant_table_.size() - 1;
   }
 
   std::unordered_set<Node*> seen_constants;
@@ -827,12 +833,37 @@ struct PythonPrintImpl {
     }
   }
 
+  static bool containsNonASCIIString(const IValue& val) {
+    // TODO: This change breaks forward compatibility.
+    // Temporarily turning off serialization (torch.save only) of non ASCII
+    // string literals. We will turn it on a week.
+    return false;
+
+    bool hasNonASCII = false;
+    auto checkSubvalue = [&hasNonASCII](const IValue& val) {
+      if (val.isString()) {
+        const auto maxASCII = 0x7fu;
+        for (auto& c : val.toStringRef()) {
+          if (c > maxASCII) {
+            hasNonASCII = true;
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    val.visit(checkSubvalue);
+    return hasNonASCII;
+  }
+
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor()) {
-        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+      if (v.isTensor() || containsNonASCIIString(v)) {
+        ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
+
       if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
@@ -1229,12 +1260,12 @@ struct PythonPrintImpl {
   }
 
   PythonPrintImpl(
-      std::vector<at::Tensor>& tensor_table,
+      std::vector<at::IValue>& constant_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
-        tensor_table_(tensor_table),
+        constant_table_(constant_table),
         deps_table_(deps_table),
         type_printer_(type_printer),
         enforce_importable_(enforce_importable) {}
@@ -1411,7 +1442,7 @@ struct PythonPrintImpl {
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
-  std::vector<at::Tensor>& tensor_table_;
+  std::vector<at::IValue>& constant_table_;
 
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
@@ -1430,12 +1461,12 @@ struct PythonPrintImpl {
 };
 
 PythonPrint::PythonPrint(
-    std::vector<at::Tensor>& tensor_table,
+    std::vector<at::IValue>& constant_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(
-          tensor_table,
+          constant_table,
           deps_table,
           type_printer,
           enforce_importable)) {}
