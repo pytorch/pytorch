@@ -2807,8 +2807,7 @@ class AbstractTestCases:
                         src = torch.randn(num_copy - 1)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            # Only 16 (not 25) here as the warnings in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 16)
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -2841,8 +2840,8 @@ class AbstractTestCases:
                         dst.masked_fill_((dst > 0).to(dtype), val)
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
-                # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
-                self.assertEqual(len(w), 33)
+
+                self.assertEqual(len(w), 34)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
@@ -14184,7 +14183,7 @@ class TestTorchDeviceType(TestCase):
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
         # TODO: update this once torch.addmm is supported for complex
-        if dtype.is_complex and device != 'cpu':
+        if dtype.is_complex:
             return
 
         # torch.addmm
@@ -16438,9 +16437,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 1e-1,
-            torch.half: 1e-1,
-            torch.cfloat: 1e-4,
-            torch.cdouble: 1e-8
         }
         for dtype, prec in dtypes.items():
             M = torch.randn(10, 25).to(device=device, dtype=dtype)
@@ -16902,7 +16898,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @slowTest
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):

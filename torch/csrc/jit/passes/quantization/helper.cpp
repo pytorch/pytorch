@@ -317,10 +317,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
-    bool all_tensors = true;
-    for (auto* v : n->inputs()) {
-      if (v->type()->isSubtypeOf(TensorType::get())) {
-        inputs.push_back(v);
+    for (auto* input : n->inputs()) {
+      if (input->type()->isSubtypeOf(TensorType::get())) {
+        inputs.push_back(input);
       }
     }
     return inputs;
