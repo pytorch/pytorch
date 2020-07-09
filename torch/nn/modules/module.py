@@ -332,8 +332,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-        if isinstance(param, _UninitializedParameter):
-            self._needs_initialization = True
+        self._needs_initialization = self.has_uninitialized_params()
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
@@ -984,10 +983,10 @@ class Module:
                     if not isinstance(param, _UninitializedParameter):
                         raise ValueError('Can\'t load an uninitialized Buffer {} into an initialized one'.format(name))
                 if isinstance(param, _UninitializedParameter): 
-                    # The current parameter is not initialized but the being loaded one is
-                    # create a new parameter based on the existing one
+                    # The current parameter is not initialized but the one being loaded one is
+                    # create a new parameter based on the uninitialized one
                     with torch.no_grad():
-                        param = Parameter(torch.empty_like(input_param), param.requires_grad)
+                        param = param.materialize(input_param.shape)
                     self.register_parameter(name, param)
                 elif isinstance(param, _UninitializedBuffer): 
                     # The current buffer is not initialized but the being loaded one is
@@ -1443,11 +1442,15 @@ class Module:
 
     def infer_parameters(self, *args, **kwargs):
         r"""Infers the size and initializes the parameters according to the
-        provided input batch
+        provided input batch.
+
+        Given a module that contains parameters that were declared inferrable
+        using :class:`torch.nn.parameter.ParameterMode.Infer`, runs a forward pass
+        in the complete module using the provided input to initialize all the parameters
+        as needed.
         """
         def initialize_hook(module, input):
             module.initialize_parameters(*input) 
-            module._needs_initialization = False
             if module.has_uninitialized_params():
                 raise RuntimeError('module {} has not been fully initialized'.format(module._get_name()))
 
@@ -1457,11 +1460,12 @@ class Module:
             if module._needs_initialization:
                 hook = module.register_forward_pre_hook(initialize_hook)
                 initialize_hooks.append(hook)
+
         previous_mode = self.training
         self.train(False)
         self.apply(set_hooks) 
         self(*args, **kwargs)
-        # Delete the hooks
+
         for hook in initialize_hooks:
             hook.remove()
         self.train(previous_mode)

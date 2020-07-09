@@ -32,6 +32,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
+from torch.nn.parameter import _UninitializedParameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
@@ -11529,16 +11530,13 @@ class TestNNDeviceType(NNTestCase):
 class TestLazyModules(TestCase):
     def test_lazy_module(self):
         module = torch.nn.Module()
-        module.register_parameter('test_param', torch.nn.parameter._UninitializedParameter())
+        module.register_parameter('test_param', _UninitializedParameter())
 
         with self.assertRaisesRegex(ValueError, 'uninitialized'):
             list(module.parameters())
 
-        with self.assertRaisesRegex(ValueError, 'uninitialized'):
-            module._apply(lambda x: x)
-
         state_dict = module.state_dict()
-        self.assertIsInstance(state_dict['test_param'], nn.parameter._UninitializedParameter)
+        self.assertIsInstance(state_dict['test_param'], _UninitializedParameter)
         new_module = torch.nn.Module()
         # An error is raised when there is an attempt to replace an existing parameter
         # with an uninitialized one
@@ -11553,17 +11551,17 @@ class TestLazyModules(TestCase):
 
     def test_linear(self):
         module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)
-        self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
+        self.assertIsInstance(module.weight, _UninitializedParameter)
         input = torch.ones(5, 5)
-        module.initialize_parameters(input)
+        module.infer_parameters(input)
         self.assertTrue(module.weight.shape == (10, 5))
         y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
     def test_conv(self):
         def conv_check(module, input, shape, check_fn):
-            self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
-            module.initialize_parameters(input)
+            self.assertIsInstance(module.weight, _UninitializedParameter)
+            module.infer_parameters(input)
             self.assertTrue(module.weight.shape == shape)
             y = module(input)
             self.assertTrue(torch.equal(check_fn(input, module.weight, module.bias), y))
@@ -11576,6 +11574,41 @@ class TestLazyModules(TestCase):
         module = nn.Conv2d(nn.parameter.ParameterMode.Infer, 4, 2)
         input = torch.ones(4, 4, 4, 3)
         conv_check(module, input, (4, 4, 2, 2), torch.nn.functional.conv2d)
+
+    def test_materialize_dtype(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', _UninitializedParameter())
+        self.assertTrue(module.test_param.materialize(10).dtype == torch.float64)
+        module.half()
+        self.assertTrue(module.test_param.materialize(10).dtype == torch.float16)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_materialize_device(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', _UninitializedParameter())
+        self.assertTrue(module.test_param.materialize(10).device.type == 'cpu')
+        module.cuda()
+        self.assertTrue(module.test_param.materialize(10).device.type == 'cuda')
+
+    def test_chained_initialization(self):
+        class MyNetwork(torch.nn.Module):
+            def __init__(self):
+                super(MyNetwork, self).__init__()
+                self.conv_1 = torch.nn.Conv2d(torch.nn.parameter.ParameterMode.Infer, 4, 2)
+                self.conv_2 = torch.nn.Conv2d(torch.nn.parameter.ParameterMode.Infer, 4, 2)
+                self.linear = torch.nn.Linear(torch.nn.parameter.ParameterMode.Infer, 10)
+
+            def forward(self, x):
+                y = self.conv_1(x).clamp(min=0)
+                z = self.conv_2(y).clamp(min=0)
+                return self.linear(z)
+
+        net = MyNetwork()
+        net.infer_parameters(torch.ones(5, 5, 5, 10))
+        net(torch.ones(5, 5, 5, 10))
+        self.assertTrue(net.conv_1.weight.shape == (4, 5, 2, 2))
+        self.assertTrue(net.conv_2.weight.shape == (4, 4, 2, 2))
+        self.assertTrue(net.linear.weight.shape == (10, 8))
 
 class TestModuleGlobalHooks(TestCase):
 

@@ -50,14 +50,29 @@ class Parameter(torch.Tensor):
 
 class _UninitializedParameter(Parameter):
     r"""A parameter that is not yet initialized for shape inference support.
+
+    Uninitialized Parameters holds empty tensors that can be moved
+    to different devices and change their type so when they are materialized,
+    they do it directly with the right configuration.
     """
     def __new__(cls, requires_grad=True):
         data = torch.Tensor()
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def materialize(self, shape, device=None, dtype=None):
-        r"""Given a shape, it materializes a parameter in the same device
-        as the current one"""
+        r"""Create a Parameter with the same properties of the uninitialized one.
+
+        Given a shape, it materializes a parameter in the same device
+        and with the same `dtype` as the current one or the specified ones in the 
+        arguments
+
+        Args:
+            shape : (tuple): the shape for the materialized tensor.
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module. Optional.
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module. Optional.
+        """
         if device is None:
             device = self.data.device
         if dtype is None:

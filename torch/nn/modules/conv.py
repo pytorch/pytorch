@@ -129,7 +129,7 @@ class _ConvNd(Module):
                 else:
                     shape = (self.out_channels, self.in_channels // self.groups,
                              *self.kernel_size)
-                self.weight = torch.nn.Parameter(self.weight.new_empty(*shape))
+                self.weight = self.weight.materialize(shape)
                 self.reset_parameters()
 
 

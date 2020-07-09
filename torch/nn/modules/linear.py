@@ -99,9 +99,7 @@ class Linear(Module):
         if self.in_features is None:
             with torch.no_grad():
                 self.in_features = input.shape[-1]
-                # self.weight = self.weight.materialize((self.out_features, self.in_features))
-                self.register_parameter('weight', Parameter(torch.Tensor(self.out_features, self.in_features)))
-                # self.weight = Parameter(torch.Tensor(self.out_features, self.in_features))
+                self.weight = self.weight.materialize((self.out_features, self.in_features))
                 self.reset_parameters()
 
     def forward(self, input: Tensor) -> Tensor:
