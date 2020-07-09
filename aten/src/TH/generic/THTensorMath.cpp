@@ -25,6 +25,162 @@
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
+static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
+{
+  char transpose_r, transpose_m1, transpose_m2;
+  THTensor *r__, *m1_, *m2_;
+  int free_m1 = 0;
+  int free_m2 = 0;
+
+  if( (m1->dim() != 2) || (m2->dim() != 2))
+    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
+
+  if(m1->size(1) != m2->size(0)) {
+    THDescBuff bm1 = THTensor_(sizeDesc)(m1);
+    THDescBuff bm2 = THTensor_(sizeDesc)(m2);
+    THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
+  }
+
+  if( t->dim() != 2 )
+    THError("matrix expected, got %dD tensor for t", t->dim());
+
+  if( (t->size(0) != m1->size(0)) || (t->size(1) != m2->size(1)) ) {
+    THDescBuff bt  = THTensor_(sizeDesc)(t);
+    THDescBuff bm1 = THTensor_(sizeDesc)(m1);
+    THDescBuff bm2 = THTensor_(sizeDesc)(m2);
+    THError("size mismatch, t: %s, m1: %s, m2: %s", bt.str, bm1.str, bm2.str);
+  }
+
+  if(t != r_)
+  {
+    THTensor_(resizeAs)(r_, t);
+    if (beta != 0.0) {
+      at::Tensor r__wrap = THTensor_wrap(r_);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::copy_(r__wrap, t_wrap);
+    }
+  }
+
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
+  }
+
+  // n == 1 || ldc >= max(1, m)
+  #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
+
+  /* r_ */
+  if(r_->stride(0) == 1 &&
+     LDC_COND(r_->size(0), r_->size(1), r_->stride(1)))
+  {
+    transpose_r = 'n';
+    r__ = r_;
+  }
+  else if(r_->stride(1) == 1 &&
+          LDC_COND(r_->size(1), r_->size(0), r_->stride(0)))
+  {
+    THTensor *swap = m2;
+    m2 = m1;
+    m1 = swap;
+    transpose_r = 't';
+    r__ = r_;
+  }
+  else
+  {
+    transpose_r = 'n';
+    // make r__ FORTRAN contiguous
+    THTensor *transp_r_ = THTensor_(newTranspose)(r_, 0, 1);
+    r__ = THTensor_(newClone)(transp_r_);
+    c10::raw::intrusive_ptr::decref(transp_r_);
+    THTensor_(transpose)(r__, NULL, 0, 1);
+  }
+
+  #undef LDC_COND
+
+  int64_t m = r__->size((transpose_r == 'n' ? 0 : 1));
+  int64_t n = r__->size((transpose_r == 'n' ? 1 : 0));
+  int64_t k = m1->size((transpose_r == 'n' ? 1 : 0));
+  int64_t ldr__ = r__->stride((transpose_r == 'n' ? 1 : 0));
+
+  /* m1 */
+  /* Need ldm1_ >= max(1, (transpose_m1 == 'n' ? m : k)) */
+  if(m1->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
+     m1->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, m))
+  {
+    transpose_m1 = 'n';
+    m1_ = m1;
+  }
+  else if(m1->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
+          m1->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, k))
+  {
+    transpose_m1 = 't';
+    m1_ = m1;
+  }
+  else
+  {
+    transpose_m1 = (transpose_r == 'n' ? 't' : 'n');
+    m1_ = THTensor_(newContiguous)(m1);
+    free_m1 = 1;
+  }
+
+  /* m2 */
+  /* Need ldm2_ >= max(1, (transpose_m2 == 'n' ? k : n)) */
+  if(m2->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
+     m2->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, k))
+  {
+    transpose_m2 = 'n';
+    m2_ = m2;
+  }
+  else if(m2->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
+          m2->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, n))
+  {
+    transpose_m2 = 't';
+    m2_ = m2;
+  }
+  else
+  {
+    transpose_m2 = (transpose_r == 'n' ? 't' : 'n');
+    m2_ = THTensor_(newContiguous)(m2);
+    free_m2 = 1;
+  }
+
+  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
+  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
+
+  /* do the operation */
+  THBlas_(gemm)(transpose_m1,
+                transpose_m2,
+                m,
+                n,
+                k,
+                alpha,
+                m1_->data<scalar_t>(),
+                ldm1_,
+                m2_->data<scalar_t>(),
+                ldm2_,
+                beta,
+                r__->data<scalar_t>(),
+                ldr__);
+
+  /* free intermediate variables */
+  if(free_m1)
+    c10::raw::intrusive_ptr::decref(m1_);
+
+  if(free_m2)
+    c10::raw::intrusive_ptr::decref(m2_);
+
+  if(r__ != r_)
+    THTensor_(freeCopyTo)(r__, r_);
+}
+
+void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha) {
+  {
+    at::NoNamesGuard guard;
+    THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
+  }
+  at::namedinference::propagate_names_for_addmm_legacy(r_, m1, m2, t);
+}
+
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
 {
   if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
@@ -92,6 +248,53 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   #undef LDA_COND
 }
 
+#ifndef TH_REAL_IS_BFLOAT16 /* non bfloat16 only part */
+
+void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
+{
+  int64_t batch;
+
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor");
+  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+             "equal number of batches expected, got %d, %d",
+             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
+  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
+             THTensor_(size)(batch1, 1), THTensor_(size)(batch1,2),
+             THTensor_(size)(batch2, 1), THTensor_(size)(batch2,2));
+
+  int64_t dim1 = THTensor_(size)(batch1, 1);
+  int64_t dim2 = THTensor_(size)(batch2, 2);
+  THArgCheck(THTensor_(size)(t, 0) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 1) == dim2, 1, "output tensor of incorrect size");
+
+  if (t != result) {
+    THTensor_(resizeAs)(result, t);
+    if (beta != 0.0) {
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::copy_(result_wrap, t_wrap);
+    }
+  }
+
+  THTensor *matrix1 = THTensor_(new)();
+  THTensor *matrix2 = THTensor_(new)();
+
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor_(select)(matrix1, batch1, 0, batch);
+    THTensor_(select)(matrix2, batch2, 0, batch);
+
+    THTensor_(addmm)(result, result, matrix1, matrix2, beta, alpha);
+    beta = 1; // accumulate output once
+  }
+
+  c10::raw::intrusive_ptr::decref(matrix1);
+  c10::raw::intrusive_ptr::decref(matrix2);
+}
+
 #endif /* !defined(TH_REAL_IS_BOOL) */
+
+#endif /* !defined(TH_REAL_IS_BFLOAT16) */
 
 #endif /* TH_GENERIC_FILE */
