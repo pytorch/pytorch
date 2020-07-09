@@ -315,18 +315,18 @@ struct NormTwoOps {
 #endif
 };
 
-template <typename acc_t>
+template <typename acc_t, typename data_t>
 struct NanSumOps {
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
-    return a + (at::_isnan(b) ? acc_t{0} : b);
+  inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
+    return a + (at::_isnan(b) ? acc_t{0.} : acc_t{b});
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
     return  a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
+  inline C10_DEVICE data_t project(acc_t a) const {
+    return data_t{a};
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
