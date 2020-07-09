@@ -3,6 +3,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
+#include <curand_kernel.h>
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
@@ -14,23 +15,59 @@
 #define SEGREDUCE_MINBLOCKS 16
 #endif
 
+
 namespace caffe2 {
 
-template <typename srcType, typename dstType>
-inline __device__ dstType convertPrecisionToPrecision(srcType param) {
-  return param;
+enum roundOption : int { NEAREST = 0, STOCHASTIC = 1 };
+
+template <typename srcType, typename dstType, roundOption roundOpt>
+class randFactor {
+ public:
+  curandStatePhilox4_32_10_t state;
+  inline __device__ randFactor(ulong2 seed, int thread_id) {}
+  inline __device__ dstType convertTypeFromSrcToDest(srcType param) {
+    return param;
+  }
+  inline __device__ srcType convertTypeFromDestToSrc(dstType param) {
+    return param;
+  }
+};
+
+template <>
+inline __device__ randFactor<float, at::Half, STOCHASTIC>::randFactor(
+    ulong2 seed,
+    int thread_id) {
+  curand_init(seed.x, thread_id, seed.y, &state);
 }
 
 template <>
-inline __device__ float convertPrecisionToPrecision<at::Half, float>(at::Half param) {
+inline __device__ at::Half
+randFactor<float, at::Half, NEAREST>::convertTypeFromSrcToDest(float param) {
+  return __float2half(param);
+}
+
+template <>
+inline __device__ at::Half
+randFactor<float, at::Half, STOCHASTIC>::convertTypeFromSrcToDest(float param) {
+  uint8_t rand = curand(&state) >> 24;
+  unsigned w_int = __float_as_uint(param);
+  unsigned assmebles = (w_int & 0xff800000) | (rand << 5);
+  unsigned subtract = (w_int & 0xff800000);
+  float assmeble_float = __uint_as_float(assmebles) - __uint_as_float(subtract);
+  return __float2half_rz(param + assmeble_float);
+}
+
+template <>
+inline __device__ float
+randFactor<float, at::Half, STOCHASTIC>::convertTypeFromDestToSrc(at::Half param) {
   return __half2float(param);
 }
 
 template <>
-inline __device__ at::Half convertPrecisionToPrecision<float, at::Half>(float param) {
-  return __float2half(param);
+inline __device__ float
+randFactor<float, at::Half, NEAREST>::convertTypeFromDestToSrc(at::Half param) {
+  return __half2float(param);
 }
-
 
 static inline __device__ void gpuAtomicAdd(float* address, float val) {
   atomicAdd(address, val);
@@ -59,7 +96,7 @@ static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {
 #endif
 }
 
-template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
+template <typename SIndex, typename TParam, typename T, bool ExactBlock = false, roundOption roundOpt = NEAREST>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -76,6 +113,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     const SIndex* indices,
     const T* __restrict__ grad,
     const float* lr,
+    ulong2 seed,
     float weight_decay = 0.f) {
   const float LR = lr[0];
   // len_length blocks, each block process one segment
@@ -86,6 +124,11 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
   int end = prefix_sum_length_data[group]; // end offset of the segment
   CUDA_KERNEL_ASSERT(start <= N);
   CUDA_KERNEL_ASSERT(end <= N);
+
+  class randFactor<TParam, T, roundOpt> rand_factor(
+      seed,
+      blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x +
+          threadIdx.x);
 
   if (ExactBlock) {
     // Specialize WarpReduce for type float
@@ -104,7 +147,8 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       // post == blockDim.x
       const size_t paramIdx = index * post + threadIdx.x; // index for param
-      const float x_ij = grad[gradIdx] + weight_decay * convertPrecisionToPrecision<TParam, float>(param[paramIdx]);
+      const float x_ij = grad[gradIdx] +
+          weight_decay * rand_factor.convertTypeFromSrcToDest(param[paramIdx]);
       sum_squares += x_ij * x_ij;
 
       // Return the warp-wide sums to each lane0 (threads 0, 32, 64, 96, ...)
@@ -121,7 +165,8 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       // update param
       float step = LR / (sqrtf(param_mom[index]) + epsilon);
-      param[paramIdx] = convertPrecisionToPrecision<float, TParam>(convertPrecisionToPrecision<TParam, float>(param[paramIdx]) + x_ij * step);
+      param[paramIdx] = rand_factor.convertTypeFromDestToSrc(
+          rand_factor.convertTypeFromSrcToDest(param[paramIdx]) + x_ij * step);
     }
   } else {
     // TODO: Tuning NumThreads for sum_squares
@@ -137,8 +182,9 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       for (int i = threadIdx.x; i < post; i += blockDim.x) {
         // i: index in the embedding dimension
-        const float x_ij =
-            grad[group * post + i] + weight_decay * convertPrecisionToPrecision<TParam, float>(param[index * post + i]);
+        const float x_ij = grad[group * post + i] +
+            weight_decay *
+                rand_factor.convertTypeFromSrcToDest(param[index * post + i]);
         sum_squares += x_ij * x_ij;
       }
       float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
@@ -154,11 +200,14 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       float step = LR / (sqrtf(param_mom[index]) + epsilon);
       for (int i = threadIdx.x; i < post; i += blockDim.x) {
         size_t paramIdx = index * post + i; // index for param
-        float x_ij = grad[group * post + i] + weight_decay * param[paramIdx];
-        float param_new = convertPrecisionToPrecision<TParam, float>(param[paramIdx]) + x_ij * step;
+        float x_ij = grad[group * post + i] +
+            weight_decay *
+                rand_factor.convertTypeFromSrcToDest(param[paramIdx]);
+        float param_new =
+            rand_factor.convertTypeFromSrcToDest(param[paramIdx]) + x_ij * step;
         // float param_new1 = param[paramIdx];
         // printf("step %f, x_ij %f", step, x_ij);
-        param[paramIdx] = convertPrecisionToPrecision<float, TParam>(param_new);
+        param[paramIdx] = rand_factor.convertTypeFromDestToSrc(param_new);
       }
     }
   }
