@@ -330,21 +330,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 2, 2, requires_grad=True)
         self.run_test(model, (x,))
 
-    def test_fuse_conv_bn3d(self):
-        class Fuse(torch.nn.Module):
-            def __init__(self):
-                super(Fuse, self).__init__()
-                self.conv = torch.nn.Conv3d(3, 2, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
-                self.bn = torch.nn.BatchNorm3d(2)
-
-            def forward(self, x):
-                out = self.conv(x)
-                return self.bn(out)
-
-        model = Fuse()
-        x = torch.randn(2, 3, 10, 50, 100, requires_grad=True)
-        self.run_test(model, (x,))
-
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
             def __init__(self, ):
