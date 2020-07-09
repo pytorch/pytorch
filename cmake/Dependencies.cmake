@@ -557,7 +557,7 @@ endif()
 
 
 # ---[ Googletest and benchmark
-if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK)
+if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
@@ -636,6 +636,15 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK)
       RESULT_VARIABLE _exitcode)
     if(NOT ${_exitcode} EQUAL 0)
       message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
+
+  # Cacheing variables to enable incremental build.
+  # Without this is cross compiling we end up having to blow build directory
+  # and rebuild from scratch.
+  if(CMAKE_CROSSCOMPILING)
+    if(COMPILE_HAVE_STD_REGEX)
+      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
     endif()
   endif()
 endif()

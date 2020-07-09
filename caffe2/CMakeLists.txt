@@ -1183,6 +1183,18 @@ if(BUILD_MOBILE_BENCHMARK)
   endforeach()
 endif()
 
+if(BUILD_MOBILE_TEST)
+  foreach(test_src ${ATen_MOBILE_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} torch_library gtest_main)
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+  endforeach()
+endif()
+
 # ---[ Test binaries.
 if(BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
