@@ -860,6 +860,14 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
@@ -896,6 +904,14 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
