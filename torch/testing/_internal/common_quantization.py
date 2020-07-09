@@ -136,13 +136,22 @@ class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.calib_data = [[torch.rand(2, 5, dtype=torch.float)] for _ in range(2)]
-        self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
+        self.train_data = [[torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)] for _ in range(2)]
         self.img_data_1d = [[torch.rand(2, 3, 10, dtype=torch.float)]
                             for _ in range(2)]
         self.img_data_2d = [[torch.rand(1, 3, 10, 10, dtype=torch.float)]
                             for _ in range(2)]
         self.img_data_3d = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float)]
                             for _ in range(2)]
+        self.img_data_1d_train = [[torch.rand(2, 3, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_2d_train = [[torch.rand(1, 3, 10, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_3d_train = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
 
         self.img_data_dict = {1 : self.img_data_1d,
                               2 : self.img_data_2d,
@@ -280,9 +289,9 @@ class QuantizationTestCase(TestCase):
             self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
-        for (inp, _) in calib_data:
-            ref_output = orig_mod(inp)
-            scripted_output = test_mod(inp)
+        for inp in calib_data:
+            ref_output = orig_mod(*inp)
+            scripted_output = test_mod(*inp)
             self.assertEqual(scripted_output, ref_output)
 
 
