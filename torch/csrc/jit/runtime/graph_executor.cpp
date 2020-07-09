@@ -805,6 +805,13 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
     RemoveListMutation(graph);
     PeepholeOptimize(graph);
     ConstantPropagation(graph);
+  } else {
+    // only unroll const loops, bail after that
+    UnrollLoops(graph, true);
+    // run again with unrolled loops
+    RemoveListMutation(graph);
+    PeepholeOptimize(graph);
+    ConstantPropagation(graph);
   }
 
   EliminateCommonSubexpression(graph);

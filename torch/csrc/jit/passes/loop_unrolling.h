@@ -5,7 +5,9 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void UnrollLoops(std::shared_ptr<Graph>& graph);
+TORCH_API void UnrollLoops(
+    std::shared_ptr<Graph>& graph,
+    bool only_const = false);
 
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 

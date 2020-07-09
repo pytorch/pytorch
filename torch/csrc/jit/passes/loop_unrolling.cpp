@@ -159,7 +159,7 @@ void replaceLoopCounter(Node* loop) {
   body->insertOutput(1, result);
 }
 
-void unroll(Node* loop) {
+void unroll(Node* loop, bool only_const) {
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
   if (!isSmallBlock(body))
@@ -181,6 +181,9 @@ void unroll(Node* loop) {
     repeatBody(body, *const_len, dest);
     loop->eraseBlock(0);
     inlineBody(loop);
+    return;
+  }
+  if (only_const) {
     return;
   }
 
@@ -212,17 +215,17 @@ void unroll(Node* loop) {
            graph->insert(aten::mul, {unrolled_iter_count, kUnrollFactor})}));
 }
 
-void UnrollLoops(Block* block) {
+void UnrollLoops(Block* block, bool only_const) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     // XXX: unroll might destroy the current node, so we need to pre-increment
     // the iterator
     Node* node = *it;
     ++it;
     for (Block* subblock : node->blocks()) {
-      UnrollLoops(subblock);
+      UnrollLoops(subblock, only_const);
     }
     if (isForLoop(node)) {
-      unroll(node);
+      unroll(node, only_const);
     }
   }
 }
@@ -358,8 +361,8 @@ Node* PeelLoop(Node* n, size_t times) {
   return peeled_copy;
 }
 
-void UnrollLoops(std::shared_ptr<Graph>& graph) {
-  UnrollLoops(graph->block());
+void UnrollLoops(std::shared_ptr<Graph>& graph, bool only_const) {
+  UnrollLoops(graph->block(), only_const);
   EliminateDeadCode(graph);
 }
 
