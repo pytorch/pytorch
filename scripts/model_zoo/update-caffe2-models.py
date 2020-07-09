@@ -6,17 +6,18 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import os
-import subprocess
 import sys
 import tarfile
 import tempfile
+import subprocess
+
 
 from six.moves.urllib.request import urlretrieve
 
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
 class SomeClass:
-    # largely copied from
+    # largely copied from:
     # https://github.com/onnx/onnx-caffe2/blob/master/tests/caffe2_ref_test.py
     def _download(self, model):
         model_dir = self._caffe2_model_dir(model)

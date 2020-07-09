@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import math
+
 import torch
 import torch.nn as nn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
@@ -91,8 +92,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.freeze_bn = True
         return self
 
+
     def _forward(self, input):
-        # exponential_average_factor is self.momentum set to
+        # Exponential_average_factor is self.momentum set to
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -101,7 +103,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
             exponential_average_factor = self.momentum
 
         if self.training and not self.freeze_bn and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            # TODO: if statement is only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
                 self.num_batches_tracked += 1
                 if self.momentum is None:  # use cumulative moving average
@@ -109,7 +111,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
-        # we use running statistics from the previous batch, so this is an
+        # We use running statistics from the previous batch, so this is an
         # approximation of the approach mentioned in the whitepaper, but we only
         # need to do one convolution in this case instead of two
         running_std = torch.sqrt(self.running_var + self.eps)
