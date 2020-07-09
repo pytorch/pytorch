@@ -38,7 +38,7 @@ def generate_code(ninja_global=None,
 
     # Build ATen based Variable classes
     install_dir = install_dir or 'torch/csrc'
-    python_install_dir = python_install_dir or 'torch/testing/_internal'
+    python_install_dir = python_install_dir or 'torch/testing/_internal/generated'
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
     for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
