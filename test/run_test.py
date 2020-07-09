@@ -440,6 +440,10 @@ def parse_args():
         '--determine-from',
         help='File of affected source filenames to determine which tests to run.')
     parser.add_argument(
+        '--continue-through-error',
+        action='store_true',
+        help='Runs the full test suite despite one of the tests failing')
+    parser.add_argument(
         'additional_unittest_args',
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
@@ -701,6 +705,8 @@ def main():
         ]
         sys.path.remove('test')
 
+    has_failed = False
+    failure_messages = []
     for test in selected_tests:
 
         test_module = parse_test_module(test)
@@ -712,17 +718,27 @@ def main():
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
+            has_failed = True
             message = '{} failed!'.format(test)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
-            raise RuntimeError(message)
+            err = RuntimeError(message)
+            failure_messages.append(err)
+            if options.continue_through_error:
+                print_to_stderr(err)
+            else:
+                raise RuntimeError(err)
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])
 
+    if options.continue_through_error and has_failed:
+        for err in failure_messages:
+            print_to_stderr(message)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
