@@ -59,14 +59,14 @@ def _get_valid_constant(attr, v):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
-    constants = ", ".join(typ.__name__ for typ in _constant_types)
+    constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
         '{}' object for attribute '{}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
         2. a value of type {{{}}}
         3. a list or tuple of (2)
-        """.format(type(v).__name__, attr, constants)))
+        """.format(torch.typename(type(v)), attr, constants)))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -236,7 +236,7 @@ def infer_concrete_type_builder(nn_module):
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(type(value).__name__)
+                    "to a TorchScript type.)").format(torch.typename(type(value)))
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # Add @property methods as failed attributes, to give a better error message.
@@ -496,7 +496,7 @@ def check_module_initialized(mod):
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(mod).__name__))
+                           .format(torch.typename(type(mod))))
 
 def infer_methods_to_compile(nn_module):
     """
