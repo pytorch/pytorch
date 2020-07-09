@@ -51,13 +51,13 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
       TORCH_CHECK(
-        w_conv_value.size() >= 1,
-        "convolution node expected to have at least one initializer");
+          w_conv_value.size() >= 1,
+          "convolution node expected to have at least one initializer");
 
       auto bn_value = getValues(bnNode, valsToParamsMap);
       TORCH_CHECK(
-        bn_value.size() == 4,
-        "batchnorm node expected to have four initializers");
+          bn_value.size() == 4,
+          "batchnorm node expected to have four initializers");
 
       auto bn_scale = bn_value[0].clone();
       auto bn_B = bn_value[1].clone();
@@ -110,17 +110,13 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
 
       auto conv_W = b->addInput();
       valsToParamsMap.insert(
-          {conv_W,
-           std::make_pair(
-               conv_W->debugName(), w_conv)});
+          {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
       convNode->addInput(conv_W);
 
       auto conv_B = b->addInput();
       valsToParamsMap.insert(
-          {conv_B,
-           std::make_pair(
-               conv_B->debugName(), b_conv)});
+          {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
       conv_B->inferTypeFrom(bn_B);
       convNode->addInput(conv_B);
 
