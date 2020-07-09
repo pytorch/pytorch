@@ -19345,7 +19345,7 @@ tensor_op_tests = [
     ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
-    ('norm', '1_norm', _small_2d, lambda t, d: [1], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False,
+    ('norm', '2_norm', _small_2d, lambda t, d: [2], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False,
         [onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     ('norm', '3_norm_dim', _small_3d, lambda t, d: [3, 0], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
     ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),

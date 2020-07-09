@@ -321,7 +321,9 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro_default',
     'test_norm_fro_cpu',
     'test_norm_nuc',
+    'test_norm_nuc_keepdim',
     'test_norm_fro',
+    'test_norm_fro_keepdim',
     'test_norm_nuc_batched',
     'test_norm_matrix_2',
     'test_norm_matrix_1',
@@ -329,6 +331,8 @@ EXCLUDE_SCRIPT = {
     'test_norm_matrix_neg_2',
     'test_norm_matrix_neg_1',
     'test_norm_matrix_neg_inf',
+    'test_norm_matrix_keepdim_2_dim',
+    'test_norm_matrix_keepdim_1_dim',
 
     # aten op has additional cudnn argument
     'test_nn_unfold',
