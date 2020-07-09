@@ -255,9 +255,9 @@ Tensor & detach_(Tensor & self) {
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
-        TORCH_WARN("This view is the output of a function that "
-                   "returns multiple views. Inplace operators on such "
-                   "views are being deprecated and will be forbidden "
+        TORCH_WARN("This view is an output of a function that "
+                   "returns multiple views. Detaching such views inplace "
+                   "is being deprecated and will be forbidden "
                    "starting from version 1.8. Consider using `unsafe_` "
                    "version of the function that produced this view.");
     } else {
