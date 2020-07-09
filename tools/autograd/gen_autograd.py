@@ -85,7 +85,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 # may return a view of its inputs; however they may sometimes return a copy.
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
+    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow',
 })
 
