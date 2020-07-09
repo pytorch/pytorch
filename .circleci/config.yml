@@ -493,7 +493,7 @@ jobs:
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find /var/lib/jenkins/workspace -type f -name "*.a" -exec rm {} \; && find /var/lib/jenkins/workspace -type f -name "*.o" -exec rm {} \;") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -525,6 +525,7 @@ jobs:
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
+            echo "COMMIT_DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             time docker push ${COMMIT_DOCKER_IMAGE}
           fi
