@@ -20,7 +20,6 @@ from torch.quantization import (
     quantize_dynamic,
     default_weight_observer,
     default_histogram_observer,
-    default_eval_fn,
     fuse_modules,
     quantize_jit,
     quantize_dynamic_jit,
