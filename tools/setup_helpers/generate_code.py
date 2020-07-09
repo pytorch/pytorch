@@ -23,6 +23,7 @@ def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
                   install_dir=None,
+                  python_install_dir=None,
                   subset=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
@@ -32,13 +33,15 @@ def generate_code(ninja_global=None,
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
+    from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
     install_dir = install_dir or 'torch/csrc'
+    python_install_dir = python_install_dir or 'torch/testing/_internal'
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
-    for d in (autograd_gen_dir, jit_gen_dir):
+    for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
@@ -65,6 +68,12 @@ def generate_code(ninja_global=None,
             selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
             force_schema_registration=force_schema_registration)
+    
+    if subset == "python" or not subset:
+        gen_annotated(
+            declarations_path or DECLARATIONS_PATH,
+            python_install_dir,
+            autograd_dir)
 
 
 def main():
@@ -73,6 +82,7 @@ def main():
     parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
+    parser.add_argument('--python_install_dir')
     parser.add_argument(
         '--subset',
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.'
@@ -106,6 +116,7 @@ def main():
         options.declarations_path,
         options.nn_path,
         options.install_dir,
+        options.python_install_dir,
         options.subset,
         options.disable_autograd,
         options.selected_op_list_path,

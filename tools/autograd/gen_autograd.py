@@ -287,10 +287,6 @@ def gen_autograd_python(aten_path, out, autograd_dir):
     gen_python_functions.gen_py_nn_functions(
         out, aten_decls, template_path)
 
-    # Generate annotations for override tests.
-    from . import gen_annotated_fn_args
-    gen_annotated_fn_args.gen_all(out, aten_decls + deprecated, template_path)
-
 
 def main():
     parser = argparse.ArgumentParser(

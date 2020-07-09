@@ -462,7 +462,7 @@ class TestTorchFunctionOverride(TestCase):
             quux(t1)
 
 def generate_tensor_like_override_tests(cls):
-    from torch.csrc.autograd.generated._annotated_fn_args import annotated_args
+    from torch.testing._internal.generated.annotated_fn_args import annotated_args
 
     def test_generator(func, override):
         func_args = []
