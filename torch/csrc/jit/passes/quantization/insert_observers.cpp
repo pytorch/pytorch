@@ -1125,6 +1125,10 @@ graph(%list, %x):
     auto append_node = match.values_map.at(append_vmap.at("ignore"))->node();
     Value* list_val = append_node->input(0);
     Value* x = append_node->input(1);
+    if (!list_val->type()->isSubtypeOf(ListType::ofTensors()) ||
+        !x->type()->isSubtypeOf(TensorType::get())) {
+      continue;
+    }
     WithInsertPoint ins(append_node);
     Node* x_list_node = graph->createList(TensorType::get(), {x});
     graph->insertNode(x_list_node);

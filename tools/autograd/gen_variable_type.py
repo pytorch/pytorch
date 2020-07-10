@@ -302,7 +302,6 @@ op_name = jit::Symbol::fromQualString("aten::${trace_name}");
 """)
 
 PRE_RECORD_TRACE = CodeTemplate("""\
-#if !defined(PYTORCH_DISABLE_TRACING)
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
@@ -316,7 +315,6 @@ if (jit::tracer::isTracing()) {
   ${inplace_guard}
   jit::tracer::setTracingState(nullptr);
 }
-#endif
 """)
 
 INPLACE_GUARD = CodeTemplate("""\
@@ -326,12 +324,10 @@ jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-#if !defined(PYTORCH_DISABLE_TRACING)
 if (tracer_state) {
   jit::tracer::setTracingState(std::move(tracer_state));
   ${add_trace_outputs}
 }
-#endif
 """)
 
 RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
