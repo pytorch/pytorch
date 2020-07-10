@@ -100,7 +100,9 @@ def get_ignored_functions():
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
+        torch.empty_meta,
         torch.empty_strided,
+        torch.empty_quantized,
         torch.eye,
         torch.from_file,
         torch.full,
@@ -140,6 +142,8 @@ def get_ignored_functions():
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
+        torch.is_deterministic,
+        torch.set_deterministic
     )
 
 def get_testing_overrides():
@@ -167,6 +171,7 @@ def get_testing_overrides():
         torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.acos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
+        torch.add_relu: lambda input, other, out=None: -1,
         torch.add: lambda input, other, out=None: -1,
         torch.addbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.addcdiv: lambda input, tensor1, tensor2, value=1, out=None: -1,
@@ -242,6 +247,7 @@ def get_testing_overrides():
         torch.cosine_embedding_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,
         torch.cosh: lambda input, out=None: -1,
         torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8: -1,
+        torch.count_nonzero: lambda input: -1,
         torch.cross: lambda input, other, dim=-1, out=None: -1,
         torch.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean',
                          zero_infinity=False: -1),
@@ -294,6 +300,8 @@ def get_testing_overrides():
         torch.fft: lambda input, signal_ndim, normalized=False: -1,
         torch.flatten: lambda input, start_dim=0, end_dim=-1: -1,
         torch.flip: lambda input, dims: -1,
+        torch.fliplr: lambda input: -1,
+        torch.flipud: lambda input: -1,
         torch.frobenius_norm: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.floor: lambda input, out=None: -1,
         torch.floor_divide: lambda input, other: -1,
@@ -561,10 +569,6 @@ def get_testing_overrides():
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
-        torch.quantized_group_norm: lambda input, num_groups, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_instance_norm: lambda input, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_layer_norm: lambda input, normalized_shape, weight, bias, eps, output_scale, output_zero_point: -1,
-
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
 
@@ -580,6 +584,8 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
+        torch.view_as_real: lambda input: -1,
+        torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,

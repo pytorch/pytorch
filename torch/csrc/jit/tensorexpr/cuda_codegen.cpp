@@ -724,6 +724,9 @@ void CudaCodeGen::Initialize() {
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
   // TODO: merge HasRand with CudaAnalysis.
+  GenericIntrinsicsExpander intrinsics_expander;
+  apply_mutator(&intrinsics_expander);
+
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
   cuda_analysis_ = std::make_unique<CudaAnalysis>();

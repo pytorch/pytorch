@@ -432,6 +432,14 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on python object to allow torch.tensor to be constructed with arbitrarily nested
 // python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -493,6 +501,8 @@ static PyMethodDef torch_functions[] = {
   {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_sparse_coo_tensor_unsafe", (PyCFunction)(void(*)(void))THPVariable__sparse_coo_tensor_unsafe, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_validate_sparse_coo_tensor_args", (PyCFunction)(void(*)(void))THPVariable__validate_sparse_coo_tensor_args, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

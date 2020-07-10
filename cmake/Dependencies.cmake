@@ -41,18 +41,25 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CA
 endif()
 
 # For MSVC,
-# 1. Replace /Zi and /ZI with /Z7
+# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
 # 2. Switch off incremental linking in debug builds
+# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
+#    for Debug and RelWithDebInfo builds
 if(MSVC)
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
+        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/Z[iI]")
+      endif()
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
@@ -232,10 +239,10 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 
   if(DISABLE_NNPACK_AND_FAMILY)
-    set(USE_NNPACK OFF)
-    set(USE_QNNPACK OFF)
-    set(USE_PYTORCH_QNNPACK OFF)
-    set(USE_XNNPACK OFF)
+    caffe2_update_option(USE_NNPACK OFF)
+    caffe2_update_option(USE_QNNPACK OFF)
+    caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
+    caffe2_update_option(USE_XNNPACK OFF)
   else()
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 
@@ -254,11 +261,9 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
-
-    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-    set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-    set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
   endif()
+else()
+  set(DISABLE_NNPACK_AND_FAMILY ON)
 endif()
 
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
@@ -274,45 +279,48 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-# QNNPACK and NNPACK both depend on pthreadpool, but when building with libtorch
-# they should use the pthreadpool implementation under caffe2/utils/threadpool
-# instead of the default implementation. To avoid confusion, add pthreadpool
-# subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
-# does so, which will prevent it from installing the default pthreadpool library.
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK OR USE_XNNPACK))
-  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-  endif()
+# Only add a dependency on pthreadpool if we are on a mobile build
+# or are building any of the libraries in the {Q/X}NNPACK family.
+if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
+  set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
+
+  # Always use third_party/pthreadpool.
+  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
 
   if(NOT TARGET pthreadpool)
-    set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-    set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    add_subdirectory(
-      "${PTHREADPOOL_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
-      EXCLUDE_FROM_ALL)
-  endif()
-endif()
+    if(USE_SYSTEM_PTHREADPOOL)
+      add_library(pthreadpool SHARED IMPORTED)
+      find_library(PTHREADPOOL_LIBRARY pthreadpool)
+      set_property(TARGET pthreadpool PROPERTY IMPORTED_LOCATION "${PTHREADPOOL_LIBRARY}")
+      if(NOT PTHREADPOOL_LIBRARY)
+        message(FATAL_ERROR "Cannot find pthreadpool")
+      endif()
+      message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
+    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+      if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+        set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+        set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+      endif()
 
-# XNNPACK has not option of like QNNPACK_CUSTOM_THREADPOOL
-# that allows us to hijack pthreadpool interface.
-# Thus not doing this ends up building pthreadpool as well as
-# the internal implemenation of pthreadpool which results in symbol conflicts.
-if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
-  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-  endif()
+      set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+      set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_ALLOW_DEPRECATED_API ON CACHE BOOL "")
+      add_subdirectory(
+        "${PTHREADPOOL_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool")
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
 
-  if(NOT TARGET pthreadpool)
-    set(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-    set(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    add_subdirectory(
-      "${PTHREADPOOL_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
-      EXCLUDE_FROM_ALL)
+    if(USE_INTERNAL_PTHREADPOOL_IMPL)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
+    else()
+      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
+    endif()
   endif()
+else()
+  set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
@@ -362,9 +370,12 @@ if(USE_QNNPACK)
   endif()
 
   if(NOT TARGET qnnpack)
+    if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
+      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    endif()
+
     set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
     set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory(
       "${QNNPACK_SOURCE_DIR}"
@@ -372,8 +383,29 @@ if(USE_QNNPACK)
     # We build static versions of QNNPACK and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+    if(QNNPACK_CUSTOM_THREADPOOL)
+      target_compile_definitions(
+        qnnpack PRIVATE
+        pthreadpool_t=legacy_pthreadpool_t
+        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
+        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
+        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
+        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
+        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
+        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
+        pthreadpool_create=legacy_pthreadpool_create
+        pthreadpool_destroy=legacy_pthreadpool_destroy
+        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
+        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
+        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
+        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
+        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
+        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
+        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
+        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
+    endif()
   endif()
 
   list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
@@ -393,9 +425,12 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
+      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
+        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      endif()
+
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-      set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
       add_subdirectory(
         "${PYTORCH_QNNPACK_SOURCE_DIR}"
@@ -403,10 +438,29 @@ if(USE_PYTORCH_QNNPACK)
       # We build static versions of QNNPACK and pthreadpool but link
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-      if(NOT USE_SYSTEM_PTHREADPOOL)
-        set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
-      endif()
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
+        target_compile_definitions(
+          pytorch_qnnpack PRIVATE
+          pthreadpool_t=legacy_pthreadpool_t
+          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
+          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
+          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
+          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
+          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
+          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
+          pthreadpool_create=legacy_pthreadpool_create
+          pthreadpool_destroy=legacy_pthreadpool_destroy
+          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
+          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
+          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
+          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
+          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
+          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
+          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
+          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
+      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -440,7 +494,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   endif()
 
   if(NOT TARGET XNNPACK)
-    set(XNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
     set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
@@ -450,15 +503,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
-    # Context: pthreadpool_get_threads_count implementation that is built in pytorch, uses
-    # implementation defined in caffe2/utils/threadpool/pthreadpool_impl.cc. This implementation
-    # assumes the the pthreadpool* passed is of type caffe2::ThradPool and thus does reinterpret cast.
-    # This is not valid when we create pthreadpool via caffe2::xnnpack_threadpool, which is of type
-    # compatible with new pthreadpool interface and is used in PT's XNNPACK integration.
-    # Thus all the calls for pthreadpool_get_threads_count originating from XNNPACK must be routed
-    # appropriately to pthreadpool_get_threads_count_xnnpack, which does not do the aforementioned
-    # casting to caffe2::ThradPool. Once the threadpools are unified, we will not need this.
-    target_compile_definitions(XNNPACK PRIVATE -Dpthreadpool_get_threads_count=pthreadpool_get_threads_count_xnnpack)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -513,7 +557,7 @@ endif()
 
 
 # ---[ Googletest and benchmark
-if(BUILD_TEST)
+if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
@@ -592,6 +636,15 @@ if(BUILD_TEST)
       RESULT_VARIABLE _exitcode)
     if(NOT ${_exitcode} EQUAL 0)
       message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
+
+  # Cacheing variables to enable incremental build.
+  # Without this is cross compiling we end up having to blow build directory
+  # and rebuild from scratch.
+  if(CMAKE_CROSSCOMPILING)
+    if(COMPILE_HAVE_STD_REGEX)
+      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
     endif()
   endif()
 endif()
@@ -1206,6 +1259,9 @@ if(USE_GLOO)
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
     set(BUILD_TEST OFF)
     set(BUILD_BENCHMARK OFF)
+    if(USE_ROCM)
+      set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
+    endif()
     if(NOT USE_SYSTEM_GLOO)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
@@ -1228,7 +1284,7 @@ if(USE_GLOO)
     # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(USE_NCCL AND NOT USE_ROCM)
+    if(NOT USE_SYSTEM_NCCL AND USE_NCCL AND NOT USE_ROCM)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA

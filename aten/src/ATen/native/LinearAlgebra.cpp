@@ -195,6 +195,16 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
   return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
 }
 
+Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
+  Tensor result = at::empty({0}, self.options());
+  return mm_cpu_out(result, self, mat2);
+}
+
+Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
+  result.resize_({ self.size(0), mat2.size(1) });
+  return legacy::cpu::_th_addmm_out(result, result, self, mat2, 0, 1);
+}
+
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);

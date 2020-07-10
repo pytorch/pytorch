@@ -312,14 +312,15 @@ class BuildExtension(build_ext, object):
     @classmethod
     def with_options(cls, **options):
         r'''
-        Returns an alternative constructor that extends any original keyword
+        Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        def init_with_options(*args, **kwargs):
-            kwargs = kwargs.copy()
-            kwargs.update(options)
-            return cls(*args, **kwargs)
-        return init_with_options
+        class cls_with_options(cls):
+            def __init__(self, *args, **kwargs):
+                kwargs.update(options)
+                super().__init__(*args, **kwargs)
+
+        return cls_with_options
 
     def __init__(self, *args, **kwargs):
         super(BuildExtension, self).__init__(*args, **kwargs)
@@ -330,9 +331,14 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if not _is_ninja_available():
+            if not is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
+
+    def finalize_options(self):
+        super().finalize_options()
+        if self.use_ninja:
+            self.force = True
 
     def build_extensions(self):
         self._check_abi()
@@ -1273,7 +1279,11 @@ def _write_ninja_file_and_build_library(
         error_prefix="Error building extension '{}'".format(name))
 
 
-def _is_ninja_available():
+def is_ninja_available():
+    r'''
+    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
+    available on the system, ``False`` otherwise.
+    '''
     with open(os.devnull, 'wb') as devnull:
         try:
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
@@ -1285,10 +1295,10 @@ def _is_ninja_available():
 
 def verify_ninja_availability():
     r'''
-    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
-    available on the system.
+    Raises ``RuntimeError`` if `ninja <https://ninja-build.org/>`_ build system is not
+    available on the system, does nothing otherwise.
     '''
-    if not _is_ninja_available():
+    if not is_ninja_available():
         raise RuntimeError("Ninja is required to load C++ extensions")
 
 

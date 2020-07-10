@@ -156,6 +156,7 @@ set(PYTORCH_QNNPACK_INIT_SRCS
 
 set(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
+  src/deconv-run.cc
   src/fc-run.cc
   src/fc-dynamic-run.cc
   src/indirection.c
@@ -434,7 +435,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(deconvolution-test PRIVATE src test)
-  target_link_libraries(deconvolution-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(deconvolution-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
   add_test(deconvolution-test deconvolution-test)
 
   add_executable(fully-connected-test test/fully-connected.cc)

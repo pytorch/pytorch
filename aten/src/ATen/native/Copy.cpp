@@ -135,13 +135,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 #endif
 
-  auto iter = TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(self);
-  iter.add_input(src);
-  iter.dont_resize_outputs();
-  iter.dont_compute_common_dtype();
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(self)
+    .add_input(src)
+    .resize_outputs(false)
+    .check_all_same_dtype(false)
+    .check_all_same_device(false)
+    .build();
 
   if (iter.numel() == 0) {
     return self;
@@ -158,6 +159,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
+  }
+
+  if(!self.is_complex() && src.is_complex()) {
+    TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
 
   copy_stub(device_type, iter, non_blocking);

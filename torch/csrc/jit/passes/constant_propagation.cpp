@@ -57,7 +57,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
     default: {
       auto op = n->getOperation();
       try {
-        op(stack);
+        op(&stack);
       } catch (...) {
         return c10::nullopt;
       }
@@ -85,6 +85,8 @@ std::unordered_set<Symbol> skip_list = {
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
+    prim::Guard,
+    prim::profile,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.

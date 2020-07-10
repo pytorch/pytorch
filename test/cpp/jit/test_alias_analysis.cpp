@@ -339,6 +339,7 @@ void testAliasAnalysis() {
 
     graph->lint();
   }
+
   {
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -358,6 +359,43 @@ void testAliasAnalysis() {
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
   }
+
+  {
+    // Test moves across side effectful nodes
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto print1 = graph->insertNode(graph->create(prim::Print, {a}, 0));
+    WithInsertPoint guard(print1);
+    auto print2 = graph->insertNode(graph->create(prim::Print, {a, a}, 0));
+    AliasDb aliasDb(graph);
+
+    // def foo(a):
+    //  print2(a, a)
+    //  print1(a)
+
+    // test moving across each other
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb.moveBeforeTopologicallyValid(print1, print2));
+
+    // test moving where they already are
+    AT_ASSERT(aliasDb.moveBeforeTopologicallyValid(print2, print1));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(print1, print2));
+
+    graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
+    AliasDb aliasDb2(graph);
+
+    // def foo(a):
+    //  print2(a, a)
+    //  non_side_effectful = makeTestTensor()
+    //  print1(a)
+
+    // test moving with a side effectful node between
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print1, print2));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print1, print2));
+  }
+
   {
     // Test moves across inner blocks
 
@@ -457,7 +495,7 @@ void testAliasAnalysis() {
 void testWriteTracking() {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](Stack& s) { return 0; },
+      [](Stack* s) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   {
@@ -882,11 +920,11 @@ graph():
 void testWildcards() {
   RegisterOperators reg({Operator(
                              "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema()),
                          Operator(
                              "prim::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");

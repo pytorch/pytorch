@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -106,5 +107,137 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   return triu_tril_cuda_template<true>(result, self, k, "triu");
 }
 
-}  // namespace native
-}  // namespace at
+// Copy the kth diagonal of a matrix B to a vector A.
+template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
+__global__ void copy_from_diagonal_kernel(
+    scalar_t* a,
+    scalar_t* b,
+    std::ptrdiff_t start,
+    std::ptrdiff_t size,
+    std::ptrdiff_t strideSum,
+    std::ptrdiff_t strideA) {
+  for (std::ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < size;
+       linearIndex += gridDim.x * blockDim.x) {
+    const std::ptrdiff_t bOffset = start + strideSum * linearIndex;
+    a[strideA * linearIndex] = b[bOffset];
+  }
+}
+
+// Copy vector B to the kth diagonal of a matrix A
+template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
+__global__ void copy_to_diagonal_kernel(
+    scalar_t* a,
+    scalar_t* b,
+    std::ptrdiff_t start,
+    std::ptrdiff_t size,
+    std::ptrdiff_t strideSum,
+    std::ptrdiff_t strideB) {
+  for (std::ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < size;
+       linearIndex += gridDim.x * blockDim.x) {
+    const std::ptrdiff_t aOffset = start + strideSum * linearIndex;
+    a[aOffset] = b[strideB * linearIndex];
+  }
+}
+
+template <typename scalar_t>
+Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
+  TORCH_CHECK(
+      self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
+
+  TensorArg result_arg{result, "result", 1};
+  TensorArg self_arg{self, "self", 2};
+  checkAllSameGPU("diag", {result_arg, self_arg});
+  checkSameType("diag", result_arg, self_arg);
+
+  int nDimension = self.dim();
+  if (nDimension == 2) {
+    auto self_stride_0 = self.stride(0);
+    auto self_stride_1 = self.stride(1);
+
+    int sz;
+    if (dimension > 0) {
+      sz = std::min(self.size(0), self.size(1) - dimension);
+    } else {
+      sz = std::min(self.size(0) + dimension, self.size(1));
+    }
+
+    result.resize_({sz});
+    if (sz > 0) {
+      at::assert_no_internal_overlap(result);
+      auto result_stride = result.stride(0);
+      const dim3 threads(std::min(
+          int(sz),
+          int(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock)));
+      const dim3 grid(
+          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+      auto start =
+          (dimension >= 0 ? dimension * self_stride_1
+                          : -dimension * self_stride_0);
+
+      // Kernel Launch
+      copy_from_diagonal_kernel<scalar_t>
+          <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+              result.data_ptr<scalar_t>(),
+              self.data_ptr<scalar_t>(),
+              start,
+              sz,
+              self_stride_0 + self_stride_1,
+              result_stride);
+    }
+  } else {
+    auto n_elems = self.numel();
+    auto sz = (dimension > 0) ? n_elems + dimension : n_elems - dimension;
+    auto self_stride = self.stride(0);
+    result.resize_({sz, sz});
+    result.zero_();
+    if (sz > 0) {
+      at::assert_no_internal_overlap(result);
+      auto result_stride_0 = result.stride(0);
+      auto result_stride_1 = result.stride(1);
+      const dim3 threads(std::min(
+          int(sz), at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock));
+      const dim3 grid(
+          std::min(int(1024), cuda::ATenCeilDiv(int(sz), int(threads.x))));
+      auto start =
+          (dimension >= 0 ? dimension * result_stride_1
+                          : -dimension * result_stride_0);
+
+      // Kernel Launch
+      copy_to_diagonal_kernel<scalar_t>
+          <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+              result.data_ptr<scalar_t>(),
+              self.data_ptr<scalar_t>(),
+              start,
+              n_elems,
+              result_stride_0 + result_stride_1,
+              self_stride);
+    }
+  }
+
+  return result;
+}
+
+Tensor& diag_cuda_out(Tensor& result, const Tensor& self, int64_t dimension) {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, self.scalar_type(), "diag_cuda", [&] {
+    apply_diag<scalar_t>(result, self, dimension);
+  });
+  return result;
+}
+
+Tensor trace_cuda(const Tensor& self) {
+  TORCH_CHECK(self.dim() == 2, "expected a matrix");
+  int dimension = 0;
+  auto result = at::diag(self, dimension);
+  return result.sum();
+}
+
+} // namespace native
+} // namespace at

@@ -14,7 +14,7 @@ Names can also be used to rearrange dimensions, for example, to support
 "broadcasting by name" rather than "broadcasting by position".
 
 .. warning::
-    The named tensor API is experimental and subject to change.
+    The named tensor API is a prototype feature and subject to change.
 
 Creating named tensors
 ----------------------

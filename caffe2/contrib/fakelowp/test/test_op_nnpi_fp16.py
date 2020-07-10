@@ -9,7 +9,7 @@ import os
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 
@@ -35,6 +35,8 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
         dims = np.concatenate((np.array([1]), np.random.randint(1, 20, size=3)))
         A = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
         B = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
+        # Avoid dividing by 0
+        B[np.abs(B) < 1e-3] = 1e-3
         print(A.shape, B.shape)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -79,6 +81,9 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
         for _ in range(num_iterations):
             A = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
             B = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
+            # Avoid dividing by 0
+            B[np.abs(B) < 1e-3] = 1e-3
+
             workspace.FeedBlob("A", A)
             workspace.FeedBlob("B", B)
             # Run caffe2 net
@@ -89,11 +94,14 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
             workspace.RunNet(pred_net_onnxified.name)
             Y_glow = workspace.FetchBlob("C")
 
+            Y_glow[Y_glow == np.Inf] = np.finfo(np.float16).max
+            Y_glow[Y_glow == np.NINF] = np.finfo(np.float16).min
+
             # Results should be identical since we are comparing with the C2 emulation
             if not np.allclose(Y_c2, Y_glow):
                 diff = np.abs((Y_glow - Y_c2) / (Y_c2 + kEpsilon))
                 print_test_debug_info(name, {
-                    "dims": dims, "A": A, "B": B,
+                    "dims": dims, "iter": _, "seed": seed, "A": A, "B": B,
                     "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff})
                 assert(0)
 
@@ -111,13 +119,12 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    @given(seed=st.integers(0, 65534))
-    def _test_unary_op(self, opname, seed):
-        np.random.seed(seed)
+    @settings(max_examples=1)
+    def _test_unary_op(self, opname, value, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
         n = 1
-        m = 10000
-        X = np.linspace(-20, 20, num=m, dtype=np.float32)
+        m = 10001
+        X = np.linspace(-value, value, num=m, dtype=np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
@@ -138,6 +145,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 ['X'],
                 ['Y'])
         )
+        print("REF NET = {}".format(ref_net))
 
         shape_hints = {"X": (n, m)}
         pred_net_onnxified = onnxifi_caffe2_net(pred_net,
@@ -145,7 +153,6 @@ class UnaryOpTest(serial.SerializedTestCase):
                                                 debug=True,
                                                 adjust_batch=False,
                                                 use_onnx=False)
-        print(pred_net_onnxified)
         num_onnxified_ops = sum(
             1 if o.type == "Onnxifi" else 0 for o in pred_net_onnxified.op)
         np.testing.assert_equal(num_onnxified_ops, 1)
@@ -160,22 +167,32 @@ class UnaryOpTest(serial.SerializedTestCase):
         workspace.RunNet(ref_net.name)
         Y_c2 = workspace.FetchBlob('Y')
 
-        if not np.allclose(Y_c2, Y_glow):
+
+
+        if not np.allclose(Y_c2, Y_glow, rtol=atol, atol=atol):
             diff = np.abs(Y_c2 - Y_glow)
             np.save('/tmp/' + opname + 'diff', diff)
-            print_test_debug_info(opname,
-                {"X": X,
+            np.save('/tmp/' + opname + 'result', Y_c2)
+            print_test_debug_info(opname, {
+                "X": X,
                 "Y_c2": Y_c2,
                 "Y_glow": Y_glow,
-                "diff": diff,
-                "maxdiff": np.max(diff)})
+                "diff": diff
+            })
             assert(0)
 
     def test_sigmoid(self):
-        self._test_unary_op("Sigmoid")
+        self._test_unary_op("Sigmoid", value=20)
 
     def test_tanh(self):
-        self._test_unary_op("Tanh")
+        self._test_unary_op("Tanh", value=20)
+
+    # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
+    def test_swish(self):
+        self._test_unary_op("Swish", value=20, atol=0.008)
+
+    def _test_logit(self):
+        self._test_unary_op("Logit", value=1)
 
 
 class ReluTest(serial.SerializedTestCase):
