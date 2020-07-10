@@ -4,7 +4,7 @@ import itertools
 import warnings
 
 import torch
-from ..parameter import Parameter, _UninitializedParameter, _UninitializedBuffer
+from ..parameter import Parameter, UninitializedParameter, UninitializedBuffer
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -293,6 +293,8 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
+        self._needs_initialization = self.has_uninitialized_params_or_buffers()
+
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
@@ -332,7 +334,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-        self._needs_initialization = self.has_uninitialized_params()
+        self._needs_initialization = self.has_uninitialized_params_or_buffers()
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
@@ -403,7 +405,10 @@ class Module:
 
         for key, buf in self._buffers.items():
             if buf is not None:
-                self._buffers[key] = fn(buf)
+                if isinstance(buf, UninitializedBuffer):
+                    self._buffers[key].data = fn(buf)
+                else:
+                    self._buffers[key] = fn(buf)
 
         return self
 
@@ -866,13 +871,13 @@ class Module:
         """
         for name, param in self._parameters.items():
             if param is not None:
-                if isinstance(param, _UninitializedParameter):
+                if isinstance(param, UninitializedParameter):
                     destination[prefix + name] = param
                 else:
                     destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                if isinstance(buf, _UninitializedBuffer):
+                if isinstance(buf, UninitializedBuffer):
                     destination[prefix + name] = buf if keep_vars else buf
                 else:
                     destination[prefix + name] = buf if keep_vars else buf.detach()
@@ -976,23 +981,23 @@ class Module:
             if key in state_dict:
                 input_param = state_dict[key]
                 # Detect Unitialized parameters or buffers
-                if isinstance(input_param, _UninitializedParameter):
-                    if not isinstance(param, _UninitializedParameter):
+                if isinstance(input_param, UninitializedParameter):
+                    if not isinstance(param, UninitializedParameter):
                         raise ValueError('Can\'t load an uninitialized Parameter {} into an initialized one'.format(name))
-                elif isinstance(input_param, _UninitializedBuffer):
-                    if not isinstance(param, _UninitializedParameter):
+                elif isinstance(input_param, UninitializedBuffer):
+                    if not isinstance(param, UninitializedParameter):
                         raise ValueError('Can\'t load an uninitialized Buffer {} into an initialized one'.format(name))
-                if isinstance(param, _UninitializedParameter): 
+                if isinstance(param, UninitializedParameter): 
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
                     with torch.no_grad():
                         param = param.materialize(input_param.shape)
                     self.register_parameter(name, param)
-                elif isinstance(param, _UninitializedBuffer): 
+                elif isinstance(param, UninitializedBuffer): 
                     # The current buffer is not initialized but the being loaded one is
                     # create a new buffer based on the existing one
                     with torch.no_grad():
-                        param = torch.empty_like(input_param)
+                        param = param.materialize(input_param.shape)
                     self.register_buffer(name, param)
 
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
@@ -1115,8 +1120,8 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        if self.has_uninitialized_params():
-            raise ValueError('Can\'t retrieve an uninitialized parameter {}'.format(self._get_name()))
+        if self.has_uninitialized_params_or_buffers():
+            raise ValueError('Module {} has uninitialized parameters or buffers'.format(self._get_name()))
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
@@ -1165,6 +1170,8 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
+        if self.has_uninitialized_params_or_buffers():
+            raise ValueError('Module {} has uninitialized parameters or buffers'.format(self._get_name()))
         for name, buf in self.named_buffers(recurse=recurse):
             yield buf
 
@@ -1432,11 +1439,13 @@ class Module:
 
         return replica
 
-    def has_uninitialized_params(self):
+    def has_uninitialized_params_or_buffers(self):
         r"""Check if a module has parameters that hasn't been initialized
         """
-        for name, param in self.named_parameters(recurse=False):
-            if isinstance(param, _UninitializedParameter):
+        params_and_buffers = dict(self.named_parameters(recurse=False))
+        params_and_buffers.update(self.named_buffers(recurse=False))
+        for name, param in params_and_buffers.items():
+            if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
                 return True
         return False
 
@@ -1448,10 +1457,13 @@ class Module:
         using :class:`torch.nn.parameter.ParameterMode.Infer`, runs a forward pass
         in the complete module using the provided input to initialize all the parameters
         as needed.
+
+        The module is set into evaluation mode before running the forward pass in order
+        to avoid saving statistics or calculating gradients
         """
         def initialize_hook(module, input):
             module.initialize_parameters(*input) 
-            if module.has_uninitialized_params():
+            if module.has_uninitialized_params_or_buffers():
                 raise RuntimeError('module {} has not been fully initialized'.format(module._get_name()))
 
         initialize_hooks = []
@@ -1464,7 +1476,8 @@ class Module:
         previous_mode = self.training
         self.train(False)
         self.apply(set_hooks) 
-        self(*args, **kwargs)
+        with torch.no_grad():
+            self(*args, **kwargs)
 
         for hook in initialize_hooks:
             hook.remove()

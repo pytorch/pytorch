@@ -32,7 +32,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
-from torch.nn.parameter import _UninitializedParameter
+from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
@@ -11528,15 +11528,18 @@ class TestNNDeviceType(NNTestCase):
 
 
 class TestLazyModules(TestCase):
-    def test_lazy_module(self):
-        module = torch.nn.Module()
-        module.register_parameter('test_param', _UninitializedParameter())
 
+    def test_lazy_module_parameter(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
         with self.assertRaisesRegex(ValueError, 'uninitialized'):
             list(module.parameters())
 
         state_dict = module.state_dict()
-        self.assertIsInstance(state_dict['test_param'], _UninitializedParameter)
+        self.assertIsInstance(state_dict['test_param'], UninitializedParameter)
         new_module = torch.nn.Module()
         # An error is raised when there is an attempt to replace an existing parameter
         # with an uninitialized one
@@ -11549,19 +11552,44 @@ class TestLazyModules(TestCase):
         module.load_state_dict(new_module.state_dict())
         self.assertEqual(module.test_param, torch.ones((5, 5))) 
 
+    def test_lazy_module_buffer(self):
+        module = torch.nn.Module()
+        module.register_buffer('test_buffer', UninitializedBuffer())
+
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized'):
+            list(module.buffers())
+
+        state_dict = module.state_dict()
+        self.assertIsInstance(state_dict['test_buffer'], UninitializedBuffer)
+        new_module = torch.nn.Module()
+        # An error is raised when there is an attempt to replace an existing parameter
+        # with an uninitialized one
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
+        with self.assertRaisesRegex(ValueError, 'uninitialized'):
+            new_module.load_state_dict(state_dict)
+        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        new_module = torch.nn.Module()
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
+        module.load_state_dict(new_module.state_dict())
+        self.assertEqual(module.test_buffer, torch.ones((5, 5))) 
+
     def test_linear(self):
         module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)
-        self.assertIsInstance(module.weight, _UninitializedParameter)
+        self.assertIsInstance(module.weight, UninitializedParameter)
         input = torch.ones(5, 5)
         module.infer_parameters(input)
+        self.assertFalse(module.has_uninitialized_params_or_buffers())
         self.assertTrue(module.weight.shape == (10, 5))
         y = module(input)
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
 
     def test_conv(self):
         def conv_check(module, input, shape, check_fn):
-            self.assertIsInstance(module.weight, _UninitializedParameter)
+            self.assertIsInstance(module.weight, UninitializedParameter)
             module.infer_parameters(input)
+            self.assertFalse(module.has_uninitialized_params_or_buffers())
             self.assertTrue(module.weight.shape == shape)
             y = module(input)
             self.assertTrue(torch.equal(check_fn(input, module.weight, module.bias), y))
@@ -11577,18 +11605,24 @@ class TestLazyModules(TestCase):
 
     def test_materialize_dtype(self):
         module = torch.nn.Module()
-        module.register_parameter('test_param', _UninitializedParameter())
+        module.register_parameter('test_param', UninitializedParameter())
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.test_param.materialize(10).dtype == torch.float64)
+        self.assertTrue(module.test_buffer.materialize(10).dtype == torch.float64)
         module.half()
         self.assertTrue(module.test_param.materialize(10).dtype == torch.float16)
+        self.assertTrue(module.test_buffer.materialize(10).dtype == torch.float16)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_materialize_device(self):
         module = torch.nn.Module()
-        module.register_parameter('test_param', _UninitializedParameter())
+        module.register_parameter('test_param', UninitializedParameter())
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.test_param.materialize(10).device.type == 'cpu')
+        self.assertTrue(module.test_buffer.materialize(10).device.type == 'cpu')
         module.cuda()
         self.assertTrue(module.test_param.materialize(10).device.type == 'cuda')
+        self.assertTrue(module.test_buffer.materialize(10).device.type == 'cuda')
 
     def test_chained_initialization(self):
         class MyNetwork(torch.nn.Module):
@@ -11605,6 +11639,7 @@ class TestLazyModules(TestCase):
 
         net = MyNetwork()
         net.infer_parameters(torch.ones(5, 5, 5, 10))
+        self.assertFalse(net.has_uninitialized_params_or_buffers())
         net(torch.ones(5, 5, 5, 10))
         self.assertTrue(net.conv_1.weight.shape == (4, 5, 2, 2))
         self.assertTrue(net.conv_2.weight.shape == (4, 4, 2, 2))

@@ -4,7 +4,7 @@ import warnings
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter, ParameterMode, _UninitializedParameter
+from torch.nn.parameter import Parameter, ParameterMode, UninitializedParameter
 from .. import functional as F
 from .. import init
 from .module import Module
@@ -70,7 +70,7 @@ class _ConvNd(Module):
         self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
         if in_channels == ParameterMode.Infer:
             self.in_channels = None
-            self.weight = _UninitializedParameter()
+            self.weight = UninitializedParameter()
         else:
             if in_channels is not None:
                 if in_channels % groups != 0:
@@ -199,6 +199,10 @@ class Conv1d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -350,6 +354,10 @@ class Conv2d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -504,6 +512,10 @@ class Conv3d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -699,6 +711,11 @@ class ConvTranspose1d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -838,6 +855,10 @@ class ConvTranspose2d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -1003,6 +1024,10 @@ class ConvTranspose3d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_channels (int): Number of channels in the input image

@@ -48,7 +48,7 @@ class Parameter(torch.Tensor):
         )
 
 
-class _UninitializedParameter(Parameter):
+class UninitializedParameter(Parameter):
     r"""A parameter that is not yet initialized for shape inference support.
 
     Uninitialized Parameters holds empty tensors that can be moved
@@ -77,19 +77,39 @@ class _UninitializedParameter(Parameter):
             device = self.data.device
         if dtype is None:
             dtype = self.data.dtype
-        return Parameter(torch.empty(shape, device=device, dtype=dtype))
+        return Parameter(torch.empty(shape, device=device, dtype=dtype), requires_grad=self.requires_grad)
 
     def __repr__(self):
         return 'Uninitialized parameter'
 
 
-class _UninitializedBuffer(torch.Tensor):
+class UninitializedBuffer(torch.Tensor):
     r"""A buffer that is not yet initialized for shape inference support.
     """
     def __new__(cls):
         data = torch.Tensor()
         requires_grad = False
         return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+    def materialize(self, shape, device=None, dtype=None):
+        r"""Create a Buffer with the same properties of the uninitialized one.
+
+        Given a shape, it materializes a buffer in the same device
+        and with the same `dtype` as the current one or the specified ones in the 
+        arguments
+
+        Args:
+            shape : (tuple): the shape for the materialized tensor.
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module. Optional.
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module. Optional.
+        """
+        if device is None:
+            device = self.data.device
+        if dtype is None:
+            dtype = self.data.dtype
+        return torch.empty(shape, device=device, dtype=dtype)
 
     def __repr__(self):
         return 'Uninitialized buffer'

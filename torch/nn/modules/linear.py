@@ -2,7 +2,7 @@ import math
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter, _UninitializedParameter, ParameterMode
+from torch.nn.parameter import Parameter, UninitializedParameter, ParameterMode
 from .. import functional as F
 from .. import init
 from .module import Module
@@ -33,6 +33,11 @@ class Identity(Module):
 
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
+
+    Note:
+        `in_channels` can be inferred from the input size by passing a
+        `torch.nn.parameter.ParameterMode.Infer` value and calling
+        :func:`torch.nn.Module.infer_parameters` before the forward pass
 
     Args:
         in_features: size of each input sample
@@ -76,7 +81,7 @@ class Linear(Module):
 
         if self.in_features == ParameterMode.Infer:
             self.in_features = None
-            self.weight = _UninitializedParameter()
+            self.weight = UninitializedParameter()
         else:
             self.weight = Parameter(torch.Tensor(out_features, in_features))
 
