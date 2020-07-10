@@ -109,8 +109,6 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.floor_`,None
    ":meth:`Tensor.frac`, :func:`torch.frac`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.frac_`,None
-   ":meth:`Tensor.gcd`, :func:`torch.gcd`",:ref:`keeps_input_names-doc`
-   :meth:`Tensor.gcd_`,None
    ":meth:`Tensor.ge`, :func:`torch.ge`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.get_device`, :func:`torch.get_device`",None
    :attr:`Tensor.grad`,None
@@ -131,8 +129,6 @@ If you don't see an operation listed here, but it would help your use case, plea
    :func:`torch.is_tensor`,None
    :meth:`Tensor.item`,None
    ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`
-   ":meth:`Tensor.lcm`, :func:`torch.gcd`",:ref:`keeps_input_names-doc`
-   :meth:`Tensor.lcm_`,None
    ":meth:`Tensor.le`, :func:`torch.le`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.log`, :func:`torch.log`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.log10`, :func:`torch.log10`",:ref:`keeps_input_names-doc`

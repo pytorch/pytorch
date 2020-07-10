@@ -1322,14 +1322,14 @@ See :func:`torch.gather`
 
 add_docstr_all('gcd',
                r"""
-gcd(value) -> Tensor
+gcd(other) -> Tensor
 
 See :func:`torch.gcd`
 """)
 
 add_docstr_all('gcd_',
                r"""
-gcd_(value) -> Tensor
+gcd_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gcd`
 """)
@@ -1722,14 +1722,14 @@ See :func:`torch.kthvalue`
 
 add_docstr_all('lcm',
                r"""
-lcm(value) -> Tensor
+lcm(other) -> Tensor
 
 See :func:`torch.lcm`
 """)
 
 add_docstr_all('lcm_',
                r"""
-lcm_(value) -> Tensor
+lcm_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lcm`
 """)

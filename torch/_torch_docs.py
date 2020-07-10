@@ -2499,15 +2499,19 @@ Example::
 
 add_docstr(torch.gcd,
            r"""
-gcd(input, other, out=None) -> LongTensor
+gcd(input, other, out=None) -> Tensor
 
-Computes the element-wise greatest common divisor (GCD).
+Computes the element-wise greatest common divisor (GCD) of :attr:`input` and :attr:`other`.
 
-The two tensors involved in the operation must be integral.
+Both :attr:`input` and :attr:`other` must have integer types.
+
+Note that we define the GCD(0, 0) to be 0.
 
 Args:
-    input (LongTensor)
-    other (LongTensor)
+    input (Tensor)
+    other (Tensor)
+
+Keyword arguments:
     {out}
 
 Example::
@@ -2993,15 +2997,17 @@ Example::
 
 add_docstr(torch.lcm,
            r"""
-lcm(input, other, out=None) -> LongTensor
+lcm(input, other, out=None) -> Tensor
 
-Computes the element-wise least common multiple (LCM).
+Computes the element-wise least common multiple (LCM) of :attr:`input` and :attr:`other`.
 
-The two tensors involved in the operation must be integral.
+Both :attr:`input` and :attr:`other` must have integer types.
 
 Args:
-    input (LongTensor)
-    other (LongTensor)
+    input (Tensor)
+    other (Tensor)
+
+Keyword arguments:
     {out}
 
 Example::
