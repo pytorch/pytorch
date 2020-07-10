@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -240,6 +241,9 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("preservedAttrs") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def(
+          "_jit_pass_fuse_add_relu",
+          [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def(

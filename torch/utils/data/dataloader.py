@@ -116,14 +116,23 @@ class DataLoader(Generic[T_co]):
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
-    .. note:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
-              When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-              ``len(dataset)`` (if implemented) is returned instead, regardless
-              of multi-process loading configurations, because PyTorch trust
-              user :attr:`dataset` code in correctly handling multi-process
-              loading to avoid duplicate data. See `Dataset Types`_ for more
-              details on these two types of datasets and how
-              :class:`~torch.utils.data.IterableDataset` interacts with `Multi-process data loading`_.
+    .. warning:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
+                 When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
+                 it instead returns an estimate based on ``len(dataset) / batch_size``, with proper
+                 rounding depending on :attr:`drop_last`, regardless of multi-process loading
+                 configurations. This represents the best guess PyTorch can make because PyTorch
+                 trusts user :attr:`dataset` code in correctly handling multi-process
+                 loading to avoid duplicate data.
+
+                 However, if sharding results in multiple workers having incomplete last batches,
+                 this estimate can still be inaccurate, because (1) an otherwise complete batch can
+                 be broken into multiple ones and (2) more than one batch worth of samples can be
+                 dropped when :attr:`drop_last` is set. Unfortunately, PyTorch can not detect such
+                 cases in general.
+
+                 See `Dataset Types`_ for more details on these two types of datasets and how
+                 :class:`~torch.utils.data.IterableDataset` interacts with
+                 `Multi-process data loading`_.
     """
     dataset: Dataset[T_co]
     batch_size: Optional[int]
@@ -339,7 +348,7 @@ class DataLoader(Generic[T_co]):
 
             # Cannot statically verify that dataset is Sized
             length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore
-            if self.batch_size is not None:
+            if self.batch_size is not None:  # IterableDataset doesn't allow custom sampler or batch_sampler
                 from math import ceil
                 if self.drop_last:
                     length = length // self.batch_size

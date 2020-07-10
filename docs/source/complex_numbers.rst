@@ -34,6 +34,8 @@ We support two complex dtypes: `torch.cfloat` and `torch.cdouble`
 The default dtype for complex tensors is updated based on the current default tensor type.
 cdouble if double else float.
 
+<add code>
+
 The following factory functions can be used to create complex tensors:
 
 - :func:`torch.tensor`
@@ -72,6 +74,9 @@ can easily to switch using the complex tensors in their code using :func:`torch.
 
 Accessing real and imag
 -----------------------
+
+<1 line description>
+
 ::
 
      >>> y.real
@@ -81,6 +86,9 @@ Accessing real and imag
 
 Angle and abs
 -------------
+
+<1 line description>
+
 ::
 
      >>> x1=torch.tensor([3j, 4+4j])
@@ -92,15 +100,29 @@ Angle and abs
 Serialization
 -------------
 
+<1 line description>
+
 ::
 
      >>> torch.save(y, 'complex_tensor.pt')
      >>> torch.load('complex_tensor.pt')
      tensor([ 0.6125-0.1681j, -0.3773+1.3487j, -0.0861-0.7981j])
 
-Autograd Support (with and without view_as_real, view_as_complex)
------------------------------------------------------------------
+Autograd
+--------
 
+PyTorch supports Autograd for Complex Numbers.
+
+1. :func:`torch.functional.backward` can be used for holomorphic :math:`C -> C` functions.
+   For non-holomorphic functions, the gradient is evaluated as if it were holomorphic.
+2. :func:`torch.functional.backward` can be used to optimize :math:`C -> R` functions, like
+   real-values loss functions of complex parameters :math:`x` by taking steps in the direction
+   of conjugate of :math:`x.grad`.
+3. mention the current behavior of backward for spectral ops?
+
+For more details, check out the Autograd note. <add the doc link when PR is merged>
+
+> do we need this code or is it better to add it in tutorial?
 
 ::
 
@@ -143,13 +165,10 @@ We also do not support the following subsystems:
 Quantization
 
 JIT
-distributions
 
-multiprocessing
+Sparse Tensors
 
-distributed
-
-ONNX
+distributions, multiprocessing, distributed, ONNX??
 
 If any of these would help your use case, please search if an issue has already been filed (https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22)
 and if not, file one(https://github.com/pytorch/pytorch/issues/new/choose).
