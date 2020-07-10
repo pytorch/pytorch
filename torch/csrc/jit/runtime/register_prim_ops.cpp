@@ -425,6 +425,14 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
+         [](Stack* stack) {
+           at::Tensor qtensor;
+           pop(stack, qtensor);
+           push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::dequantize.any(Any tensors) -> Any",
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
