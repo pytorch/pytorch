@@ -340,14 +340,14 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 fuse_modules(model, fuse_list, inplace=True)
                 model = prepare(model)
                 self.checkObservers(model)
-                test_only_eval_fn(model, self.img_data)
+                test_only_eval_fn(model, self.img_data_2d)
                 model = convert(model)
 
                 def checkQuantized(model):
                     self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
-                    test_only_eval_fn(model, self.img_data)
+                    test_only_eval_fn(model, self.img_data_2d)
 
                 checkQuantized(model)
 
@@ -687,7 +687,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         # Smoke test extra reprs
         self.assertTrue('DynamicQuantizedLSTM' in str(model_quantized))
         self.checkDynamicQuantizedModule(model_quantized.mod, torch.nn.quantized.dynamic.LSTM, dtype)
-        self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
+        self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
         class ScriptWrapperPacked(torch.nn.Module):
             def __init__(self, cell):
@@ -704,7 +704,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model_with_packed_input = ScriptWrapperPacked(model_quantized.mod)
         scripted = torch.jit.script(model_with_packed_input)
         # We cannot trace with input dtype being a packed sequence
-        self._checkScriptable(model_with_packed_input, scripted, [(packed_input, x)], True)
+        self._checkScriptable(model_with_packed_input, scripted, [[packed_input]], True)
 
 
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
@@ -749,7 +749,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
             # Smoke test extra reprs
             checkQuantized(model_quantized, module_type)
-            self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
+            self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
@@ -797,20 +797,20 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = prepare_qat(model)
                 self.checkObservers(model)
 
-                test_only_train_fn(model, self.img_data)
+                test_only_train_fn(model, self.img_data_2d_train)
                 model = convert(model)
 
                 def checkQuantized(model):
                     self.assertEqual(type(model.conv), nnq.Conv2d)
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
-                    test_only_eval_fn(model, self.img_data)
-                    self.checkScriptable(model, self.img_data)
+                    test_only_eval_fn(model, self.img_data_2d)
+                    self.checkScriptable(model, self.img_data_2d)
 
                 checkQuantized(model)
 
                 model = ManualConvLinearQATModel()
-                model = quantize_qat(model, test_only_train_fn, self.img_data)
+                model = quantize_qat(model, test_only_train_fn, self.img_data_2d_train)
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):
@@ -872,7 +872,7 @@ class TestFunctionalModule(QuantizationTestCase):
         model = ModelWithFunctionals()
         x = torch.rand(10, 1, dtype=torch.float)
         xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
-        self.checkScriptable(model, [(x, x)], check_save_load=True)
+        self.checkScriptable(model, [[x]], check_save_load=True)
         if train_mode:
             model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
             model = prepare_qat(model)
@@ -893,7 +893,7 @@ class TestFunctionalModule(QuantizationTestCase):
             self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
 
         checkQuantized(model)
-        self.checkScriptable(model, [(xq, xq)], check_save_load=True)
+        self.checkScriptable(model, [[xq]], check_save_load=True)
 
 @skipIfNoFBGEMM
 class TestFusion(QuantizationTestCase):
@@ -930,7 +930,7 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
 
         checkQAT(model)
-        test_only_train_fn(model, self.img_data_1d)
+        test_only_train_fn(model, self.img_data_1d_train)
         model = convert(model)
 
         def checkQuantized(model):
@@ -948,7 +948,7 @@ class TestFusion(QuantizationTestCase):
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        model = quantize_qat(model, test_only_train_fn, self.img_data_1d)
+        model = quantize_qat(model, test_only_train_fn, self.img_data_1d_train)
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
@@ -1059,7 +1059,7 @@ class TestFusion(QuantizationTestCase):
                 model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
                 prepare_qat(model, inplace=True)
                 self.checkObservers(model)
-                model(self.img_data[0][0])
+                model(self.img_data_2d[0][0])
 
 
                 def checkQAT(model):
@@ -1076,9 +1076,9 @@ class TestFusion(QuantizationTestCase):
                 self.assertEqual(type(model.classifier[1]), nn.Identity)
 
                 checkQAT(model)
-                model(self.img_data[1][0])
+                model(self.img_data_2d[1][0])
                 convert(model, inplace=True)
-                model(self.img_data[1][0])
+                model(self.img_data_2d[1][0])
                 self.checkModelWithSequentialQuantized(model)
 
     def test_fusion_sequential_model_eval(self):
@@ -1111,9 +1111,9 @@ class TestFusion(QuantizationTestCase):
                 model.qconfig = torch.quantization.get_default_qconfig(qengine)
                 prepare(model, inplace=True)
                 self.checkObservers(model)
-                model(self.img_data[0][0])
+                model(self.img_data_2d[0][0])
                 convert(model, inplace=True)
-                model(self.img_data[1][0])
+                model(self.img_data_2d[1][0])
                 self.checkModelWithSequentialQuantized(model)
 
     def checkModelWithSequentialQuantized(self, model):
@@ -1131,7 +1131,7 @@ class TestFusion(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 model = ModelForFusionWithBias().train()
                 # output with no fusion.
-                out_ref = model(self.img_data[0][0])
+                out_ref = model(self.img_data_2d[0][0])
 
                 model.qconfig = QConfig(activation=torch.nn.Identity,
                                         weight=torch.nn.Identity)
@@ -1139,13 +1139,13 @@ class TestFusion(QuantizationTestCase):
                                              ["conv2", "bn2"]])
                 prep_model = prepare_qat(model, inplace=False)
                 # output with fusion but no observers.
-                out_fused = prep_model(self.img_data[0][0])
+                out_fused = prep_model(self.img_data_2d[0][0])
                 self.assertEqual(out_ref, out_fused)
 
                 model.qconfig = torch.quantization.get_default_qconfig(qengine)
                 prepare_qat(model, inplace=True)
 
-                model(self.img_data[0][0])
+                model(self.img_data_2d[0][0])
 
                 def checkQAT(model):
                     self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)

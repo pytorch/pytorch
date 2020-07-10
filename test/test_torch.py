@@ -2807,8 +2807,7 @@ class AbstractTestCases:
                         src = torch.randn(num_copy - 1)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            # Only 16 (not 25) here as the warnings in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 16)
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -2841,8 +2840,8 @@ class AbstractTestCases:
                         dst.masked_fill_((dst > 0).to(dtype), val)
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
-                # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
-                self.assertEqual(len(w), 33)
+
+                self.assertEqual(len(w), 34)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
@@ -14738,7 +14737,6 @@ class TestTorchDeviceType(TestCase):
         expected_val = torch.ones(2, 2, 2, 2, device=device)
         expected_val[:, 0, :, :] *= 2.
         expected_val[:, 1, :, :] *= 1.5
-        print(val, ind)
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
@@ -16577,6 +16575,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         inputTensorCpy = inputTensor.clone().detach()
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
+                         atol=precision_4dps, rtol=0)
+
+    @dtypes(torch.float, torch.double)
+    def test_silu(self, device, dtype):
+        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
+        expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]
+        precision_4dps = 0.0002
+
+        input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+                         expected_output_tensor,
+                         atol=precision_4dps, rtol=0)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+                         expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
     @onlyCPU
