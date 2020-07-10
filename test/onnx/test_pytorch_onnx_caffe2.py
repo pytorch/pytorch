@@ -54,6 +54,13 @@ def skipIfEmbed(func):
         return func(self)
     return wrapper
 
+def skipIfNoEmbed(func):
+    def wrapper(self):
+        if not self.embed_params:
+            raise unittest.SkipTest("Skip debug embed_params test")
+        return func(self)
+    return wrapper
+
 # def import_model(proto, input, workspace=None, use_gpu=True):
 #    model_def = onnx.ModelProto.FromString(proto)
 #    onnx.checker.check_model(model_def)
@@ -158,10 +165,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
-        caffe2_out, check_param = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        if check_param:
-            for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
-                np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
+        caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
+        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+            np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -505,6 +511,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(inception_v3(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, input=x)
 
+    @skipIfNoEmbed
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
