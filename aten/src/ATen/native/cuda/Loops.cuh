@@ -106,7 +106,6 @@ struct BUnaryFunctor {
 
 template <typename func_t>
 void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   using traits = function_traits<func_t>;
