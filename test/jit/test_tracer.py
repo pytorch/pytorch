@@ -755,7 +755,7 @@ class TestTracer(JitTestCase):
         x = torch.randn(4, 4, requires_grad=True)
 
         def f(x):
-            out = Variable(torch.zeros(x.size()))
+            out = torch.zeros(x.size())
             out.copy_(x)
             return out
 
@@ -764,6 +764,22 @@ class TestTracer(JitTestCase):
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(g, (x,))
+
+    def test_inplace_copy_force_outplace(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def f(x):
+            out = torch.zeros(x.size())
+            out.copy_(x)
+            return out
+
+        g, outputs, inputs = torch.jit._get_trace_graph(
+            f, (x, ), return_inputs=True, _force_outplace=True)
+        self.run_pass('dce', g)
+        m = self.createFunctionFromGraph(g)
+        self.assertEqual(outputs, m(*inputs))
+        self.assertExportImport(g, (x,))
+        FileCheck().check("expand_as").run(str(g))
 
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
@@ -1015,6 +1031,19 @@ class TestTracer(JitTestCase):
         self.assertFalse(traced_result.requires_grad)
         self.assertIsNone(traced_result.grad_fn)
 
+    def test_trace_detach_redispatch(self):
+        def foo(x, w):
+            y = torch.matmul(x, w)
+            assert y.requires_grad
+            y = y.detach()
+            # Make sure trace kernel redispatches to the right lower kernel.
+            assert not y.requires_grad
+            return y
+
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
+        # With `check_trace=True` it will run with `@torch.no_grad()` and break assert.
+        torch.jit.trace(foo, (x, w), check_trace=False)
+
     def test_trace_detach_inplace(self):
         def foo(x, w):
             y = torch.matmul(x, w)
@@ -1024,11 +1053,24 @@ class TestTracer(JitTestCase):
         traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
         FileCheck().check("matmul").check("detach(").run(str(traced.graph))
-        x, w = torch.rand(3, 4), torch.rand(4, 5)
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
         traced_result = traced(x, w)
         self.assertEqual(foo(x, w), traced_result)
         self.assertFalse(traced_result.requires_grad)
         self.assertIsNone(traced_result.grad_fn)
+
+    def test_trace_detach_inplace_redispatch(self):
+        def foo(x, w):
+            y = torch.matmul(x, w)
+            assert y.requires_grad
+            y.detach_()
+            # Make sure trace kernel redispatches to the right lower kernel.
+            assert not y.requires_grad
+            return y
+
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
+        # With `check_trace=True` it will run with `@torch.no_grad()` and break assert.
+        torch.jit.trace(foo, (x, w), check_trace=False)
 
     def test_trace_detach_onnx_erase(self):
         class Mod(torch.nn.Module):
