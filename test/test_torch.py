@@ -18077,7 +18077,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
-    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False):
+    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in torch.testing.get_all_int_dtypes()
 
@@ -18090,17 +18090,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         if dtype == torch.uint8:
             with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype)
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal)
         else:
             # TODO: Investigate why the output is not close to numpy.
             if dtype == torch.float16:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                          atol=0.4, rtol=1e-2, exact_dtype=exact_dtype,
-                                                         with_keepdim=with_keepdim)
+                                                         with_keepdim=with_keepdim, with_extremal=with_extremal)
             elif dtype == torch.float32:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                          atol=7e-05, rtol=3e-06, exact_dtype=exact_dtype,
-                                                         with_keepdim=with_keepdim)
+                                                         with_keepdim=with_keepdim, with_extremal=with_extremal)
             else:
                 self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                          exact_dtype=exact_dtype, with_keepdim=with_keepdim)
@@ -18109,6 +18109,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         # Reference: https://dr.pytorch.org/api/view-log-full?build_id=122265220
         # RuntimeError: Check failed: status.status() == ::tensorflow::Status::OK()
         # (Invalid argument: Reshape operation has mismatched element counts: from=1 (s64[]) to=10 (s64[10,1]) vs. OK)
@@ -18119,6 +18120,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         # Reference: https://dr.pytorch.org/api/view-log-full?build_id=122265220
         # RuntimeError: Check failed: status.status() == ::tensorflow::Status::OK()
         # (Invalid argument: Reshape operation has mismatched element counts: from=1 (s64[]) to=10 (s64[10,1]) vs. OK)
