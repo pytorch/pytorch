@@ -108,6 +108,9 @@ def make_tensors(device, dtype, *, vals=None, generator=None, low=None, high=Non
     if vals is None:
         if dtype.is_floating_point:
             vals = _float_finites + _float_nonfinites if include_nonfinites else _float_finites
+            # TODO: update once https://github.com/pytorch/pytorch/pull/40488 is in
+            if dtype is not torch.bfloat16:
+                vals = vals + [torch.finfo(dtype).min, torch.finfo(dtype).max]
         elif dtype.is_complex:
             vals = _complex_finites + _complex_nonfinites if include_nonfinites else _complex_finites
         elif dtype is torch.uint8:
@@ -372,6 +375,7 @@ class TestUnaryUfuncs(TestCase):
                                ref=special.erf, exact_dtype=(dtype is not torch.float16))
 
     # Note: SciPy promotes half->float32 when running erfc
+    # See https://github.com/pytorch/pytorch/issues/41247
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @precisionOverride({torch.bfloat16: 1e-01,
                         torch.half: 1e-02})
@@ -506,12 +510,14 @@ class TestUnaryUfuncs(TestCase):
     def test_square(self, device, dtype):
         self._test_unary_ufunc('square', device, dtype, has_out_kwarg=False)
 
+    # Note: reciprocal(complex) on CPU does not handle nonfinites properly
     @precisionOverride({torch.float16: 1e-02})
-    @dtypesIfCUDA(*_float_types_plus_half)
-    @dtypes(*_float_types)
+    @dtypesIfCUDA(*_float_and_complex_types_plus_half)
+    @dtypes(*_float_and_complex_types)
     def test_reciprocal(self, device, dtype):
+        include_nonfinites = (not dtype.is_complex or self.device_type == 'cuda')
         self._test_unary_ufunc('reciprocal', device, dtype,
-                               ref=np.reciprocal)
+                               ref=np.reciprocal, include_nonfinites=include_nonfinites)
 
     @precisionOverride({torch.float16: 1e-02})
     @dtypesIfCUDA(*_float_types_plus_half)
