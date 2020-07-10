@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 import time
-from typing import Dict, List, Tuple
-=======
 import io
-from typing import Dict, Tuple
->>>>>>> 0b0c787539... Expose private APIs to enable/disable pickling ScriptModules without RPC
+from typing import Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
