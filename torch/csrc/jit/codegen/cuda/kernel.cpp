@@ -472,8 +472,7 @@ void runKernel(
   at::cuda::set_device(entry->device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // TODO: Proper API to establish reasonable launch configurations;
-  // Naive launch config;
+  TORCH_INTERNAL_ASSERT(!outputs.empty(), "No outputs set for test kernel.");
   const size_t numel = outputs[0].numel();
 
   KernelArgumentHolder kernel_args;
@@ -523,9 +522,6 @@ void runKernel(
   const auto nThreadz = expr_eval_fn(LaunchConfigType::TIDz);
   const auto shared_memory = expr_eval_fn(LaunchConfigType::SharedMemory);
 
-  dim3 grid_dim(nBlocks_x, nBlocks_y, nBlocks_z);
-  dim3 block_dim(nThreadx, nThready, nThreadz);
-
   // TODO: this probably won't work for us.
   if (entry->hasRNG()) {
     std::pair<uint64_t, uint64_t> philox_engine_inputs;
@@ -543,10 +539,12 @@ void runKernel(
     kernel_args.push(philox_engine_inputs.second);
   }
 
+  dim3 grid_dim(nBlocks_x, nBlocks_y, nBlocks_z);
+  dim3 block_dim(nThreadx, nThready, nThreadz);
   // When the kernel has global reductions, the kernel needs two
   // additional temporary buffers, one for intermediate results and
   // another for synchronization among thread blocks.
-  if (entry->fusion_->hasGridReduction()) {
+  if (entry->fusion()->hasGridReduction()) {
     auto temp_buf_type = at::kFloat;
     auto temp_buf_sizes =
         gridReductionTempBufferSizes(entry, grid_dim, block_dim);
@@ -570,102 +568,6 @@ void runKernel(
       nThready,
       nThreadz,
       shared_memory,
-      stream,
-      kernel_args.getBuffer(),
-      nullptr));
-
-  // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device);
-}
-
-// WARNING:
-// This function is here for testing purposes only
-void runTestKernel(
-    CudaKernel* entry,
-    const at::ArrayRef<IValue> inputs,
-    const std::vector<at::Tensor>& outputs) {
-  validateKernelArgs(entry, inputs, outputs);
-
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(entry->device());
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // TODO: Proper API to establish reasonable launch configurations;
-  // Naive launch config;
-  TORCH_INTERNAL_ASSERT(!outputs.empty(), "No outputs set for test kernel.");
-  size_t numel = outputs[0].numel();
-
-  // TODO: we can't randomly clap down this until we got striding.
-  const auto nBlocks = ceilDiv(numel, 128);
-
-  KernelArgumentHolder kernel_args;
-
-  auto exprs = entry->fusion()->exprs(true);
-
-  // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
-  // allocated here from the subgraph could be, and very likely are, different
-  // from I/O expected by the generated CUDA kernel.
-  for (auto& input : inputs) {
-    if (input.isTensor()) {
-      TORCH_INTERNAL_ASSERT(
-          input.toTensor().device().index() == entry->device(),
-          "input to kernel on device that is not compiled for");
-      TORCH_INTERNAL_ASSERT(
-          !entry->fusion()->outputs().empty(),
-          "No output found for this kernel, aborting.");
-      kernel_args.push(input.toTensor());
-    } else {
-      kernel_args.push(input);
-    }
-  }
-
-  for (auto& output : outputs) {
-    kernel_args.push(output);
-  }
-
-  // TODO: this probably won't work for us.
-  if (entry->hasRNG()) {
-    std::pair<uint64_t, uint64_t> philox_engine_inputs;
-    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * 128 * nBlocks)) + 1);
-    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen.mutex());
-      philox_engine_inputs =
-          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
-              rand_offset);
-    }
-    kernel_args.push(philox_engine_inputs.first);
-    kernel_args.push(philox_engine_inputs.second);
-  }
-
-  // When the kernel has global reductions, the kernel needs two
-  // additional temporary buffers, one for intermediate results and
-  // another for synchronization among thread blocks.
-  if (entry->fusion()->hasGridReduction()) {
-    auto temp_buf_type = at::kFloat;
-    auto temp_buf_sizes =
-        gridReductionTempBufferSizes(entry, entry->grid_, entry->block_);
-    auto options =
-        at::TensorOptions().dtype(temp_buf_type).device(at::kCUDA, 0);
-    at::Tensor reduction_work_buffer = at::empty(
-        {(long)(temp_buf_sizes[0] / c10::elementSize(temp_buf_type))}, options);
-    kernel_args.push(reduction_work_buffer);
-    at::Tensor sync_flags = at::zeros(
-        {(long)(temp_buf_sizes[1] / c10::elementSize(temp_buf_type))}, options);
-    kernel_args.push(sync_flags);
-  }
-
-  // launch kernel;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
-      *entry->function(),
-      entry->grid_.x,
-      entry->grid_.y,
-      entry->grid_.z,
-      entry->block_.x,
-      entry->block_.y,
-      entry->block_.z,
-      0,
       stream,
       kernel_args.getBuffer(),
       nullptr));

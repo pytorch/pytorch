@@ -100,20 +100,6 @@ class CudaKernel {
   CUmodule module_;
   CUfunction function_;
   std::unique_ptr<Fusion> fusion_;
-
-  // WARNING:
-  // Block and Grid dimension setting is here for testing purposes only
-  // These are not here for general use and only for use with
-  // the runTestKernel() function.
- public:
-  void block(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    block_ = dim3(x, y, z);
-  }
-  void grid(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    grid_ = dim3(x, y, z);
-  }
-  dim3 block_;
-  dim3 grid_;
 };
 
 class CudaKernelCache {
