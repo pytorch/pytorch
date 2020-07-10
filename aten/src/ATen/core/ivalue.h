@@ -39,6 +39,36 @@ struct Object;
 struct PyObjectHolder;
 }
 
+// This is an owning wrapper for a c10::optional<std::vector<T>>
+// that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
+// Its purpose is to be used in generated code to keep the vector alive
+// either until the end of a statement (as a temporary), or as a saved arg
+// in autograd.
+template<typename T>
+struct OptionalArray {
+  c10::optional<std::vector<T>> list;
+
+  OptionalArray() {};
+  OptionalArray(std::vector<T> val) : list(std::move(val)) {}
+
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::optional<ArrayRef<T>> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
+  operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+};
+
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
 // It is a 16-byte object with an 8-byte payload and an 8-byte tag.
@@ -571,6 +601,10 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   /// @private [doxygen private]
+  /// Only for use in generated code.
+  OptionalArray<int64_t> toOptionalIntArray();
+
+  /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
@@ -639,6 +673,10 @@ struct CAFFE2_API IValue final {
   // Inserts all subvalues of this in subValues.
   void getSubValues(HashAliasedIValues& subValues) const;
 
+  // Apply visitor to every subvalue.
+  // TODO: There are several places that recurse over IValue. This is fragile.
+  // This visitor should be used to recurse over ivalues.
+  void visit(const std::function<bool (const IValue &)>& visitor) const;
   IValue deepcopy() const;
   IValue deepcopy(
       HashAliasedIValueMap& memo) const;
