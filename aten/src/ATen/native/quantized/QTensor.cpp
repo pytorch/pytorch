@@ -69,7 +69,7 @@ int64_t q_zero_point_quant(const Tensor& self) {
   return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
 }
 
-Tensor q_per_channel_scales_quantized_cpu(const Tensor& self) {
+Tensor q_per_channel_scales(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
@@ -77,7 +77,7 @@ Tensor q_per_channel_scales_quantized_cpu(const Tensor& self) {
       .to(kDouble);
 }
 
-Tensor q_per_channel_zero_points_quantized_cpu(const Tensor& self) {
+Tensor q_per_channel_zero_points(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())
@@ -85,7 +85,7 @@ Tensor q_per_channel_zero_points_quantized_cpu(const Tensor& self) {
       .to(kLong);
 }
 
-int64_t q_per_channel_axis_quantized_cpu(const Tensor& self) {
+int64_t q_per_channel_axis(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
