@@ -60,6 +60,7 @@ TESTS = [
     'test_type_info',
     'test_type_hints',
     'test_utils',
+    'test_unary_ufunc',
     'test_namedtuple_return_api',
     'test_jit_profiling',
     'test_jit_legacy',
