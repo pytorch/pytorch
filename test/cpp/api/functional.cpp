@@ -507,6 +507,28 @@ TEST_F(FunctionalTest, GridSample) {
   expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, reflection, align_corners=true, pixel_coords=True
+  options = F::GridSampleFuncOptions()
+                .mode(torch::kBilinear)
+                .padding_mode(torch::kReflection)
+                .align_corners(true)
+                .pixel_coords(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{5., 4., 3.}, {1., 0., 1.}, {3., 4., 5.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, reflection, align_corners=false, pixel_coords=True
+  options = F::GridSampleFuncOptions()
+                .mode(torch::kBilinear)
+                .padding_mode(torch::kReflection)
+                .align_corners(false)
+                .pixel_coords(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{1., 0., 0.}, {0., 0., 1.}, {3., 4., 5.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, AffineGrid) {
