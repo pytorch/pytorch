@@ -425,6 +425,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(copyMetadata)
       .VS(isCompleteTensor)
       .VS(requires_grad)
+      .def(
+          "requiresGrad",
+          [](Value& n) { n.type()->expect<TensorType>()->requiresGrad(); })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -656,6 +659,14 @@ void initPythonIRBindings(PyObject* module_) {
             auto vshape = t.shared_from_this()->expect<TensorType>()->sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
+          })
+      .def(
+          "undefined",
+          [](Type& t) {
+            auto undef =
+                t.shared_from_this()->expect<TensorType>()->undefined();
+            return undef.has_value() ? py::cast(*undef)
+                                     : py::cast<py::none>(Py_None);
           })
       .def(
           "sizes",

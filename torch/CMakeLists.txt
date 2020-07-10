@@ -111,18 +111,9 @@ else()
 endif()
 
 if(USE_CUDA)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
-      ${GENERATED_THNN_CXX_CUDA}
-      )
+    append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
+
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
@@ -141,18 +132,8 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
-      ${GENERATED_THNN_CXX_CUDA}
-      )
+    append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
@@ -267,6 +248,12 @@ set_source_files_properties(
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+endif()
+
+# Preserve CUDA_GENCODE flags
+if(USE_CUDA)
+  torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")

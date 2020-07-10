@@ -32,6 +32,9 @@ SparseLengthsSumGradient operator.
         "Non negative vector with sum of elements equal to indices length")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment", "Updated moment")
+    .Arg(
+        "round_option",
+        "rounding option: 0 for nearest rounding, 1 for stochastic rounding")
     .Arg("epsilon", "Default 1e-5");
 
 REGISTER_CPU_OPERATOR(
