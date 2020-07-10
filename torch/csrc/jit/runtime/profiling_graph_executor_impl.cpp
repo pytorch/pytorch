@@ -79,6 +79,22 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+static void removeProfileNodes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+      if (it->outputs().size() == 1) {
+        it->input(0)->setType(it->output()->type());
+        it->output()->replaceAllUsesWith(it->input(0));
+      }
+      it.destroyCurrent();
+    } else {
+      for (auto ib : it->blocks()) {
+        removeProfileNodes(ib);
+      }
+    }
+  }
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   if (!getGraphExecutorOptimize()) {
@@ -87,10 +103,11 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     return;
   }
 
-  InsertGuards(copy);
+  removeProfileNodes(copy->block());
+  // InsertGuards(copy);
   LowerGradOf(*copy);
-  EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
+  // EliminateRedundantGuards(copy);
+  // InsertBailOuts(copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   specializeAutogradZero(*copy);
 
@@ -99,7 +116,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   ConstantPropagation(copy);
   runOptimization(copy);
 
-  if (needsGradientInProfilingMode(copy->block())) {
+  if (false && needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);

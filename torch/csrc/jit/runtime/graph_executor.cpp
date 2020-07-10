@@ -49,6 +49,9 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "ATen/core/interned_strings.h"
+#include "jit/passes/bailout_graph.h"
+#include "jit/passes/insert_guards.h"
 
 namespace torch {
 namespace jit {
@@ -753,6 +756,17 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
+void addProfileNodesToInputs(std::shared_ptr<Graph> graph) {
+  for (auto gi : graph->inputs()) {
+    if (gi->type()->cast<TensorType>()) {
+      auto pn = new ProfileOp(graph.get(), nullptr);
+      pn->addInput(gi);
+      auto pno = pn->addOutput();
+      pno->setType(gi->type());
+    }
+  }
+}
+
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
@@ -776,7 +790,14 @@ void runNondiffOptimization(
 
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
+      auto fusion_group_list = FuseTensorExprs(graph);
+      for (auto n : fusion_group_list) {
+        auto fg = n->g(attr::Subgraph);
+        addProfileNodesToInputs(fg);
+        InsertGuards(fg);
+        // note, no EliminateRedundantGuards
+        InsertBailOuts(fg);
+      }
     }
   } else {
     FuseGraph(graph, strict_fuser_check);

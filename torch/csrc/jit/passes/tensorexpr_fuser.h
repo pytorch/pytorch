@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <memory>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -10,7 +11,7 @@ namespace jit {
 struct Graph;
 
 // Run TensorExpressions-based fuser.
-TORCH_API void FuseTensorExprs(std::shared_ptr<Graph>& graph);
+TORCH_API std::vector<Node*> FuseTensorExprs(std::shared_ptr<Graph>& graph);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();

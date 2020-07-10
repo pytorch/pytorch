@@ -316,7 +316,19 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void findFusionGroups(Block* b, std::vector<Node*>& fusion_groups) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == getTensorExprSymbol()) {
+      fusion_groups.push_back(n);
+
+      for (auto ib : n->blocks()) {
+        findFusionGroups(ib, fusion_groups);
+      }
+    }
+  }
+}
+
+std::vector<Node*> FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -365,8 +377,10 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
 
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
-
+  std::vector<Node*> fusion_group_list;
+  findFusionGroups(graph->block(), fusion_group_list);
   GRAPH_DUMP("After TExprFuser: ", graph);
+  return fusion_group_list;
 }
 
 Operation createTensorExprOp(const Node* node) {
