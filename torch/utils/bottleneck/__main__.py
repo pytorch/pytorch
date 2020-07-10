@@ -1,3 +1,4 @@
+"""modify torch profile"""
 import argparse
 import cProfile
 import pstats
@@ -124,7 +125,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
         warn = ('WARNING: invalid sorting option for autograd profiler results: {}\n'
                 'Expected `cpu_time`, `cpu_time_total`, or `count`. '
                 'Defaulting to `cpu_time`.')
-        print(warn.format(autograd_prof_sortby))
+        print(warn.format(sortby))
         sortby = 'cpu_time'
 
     if mode == 'CUDA':
@@ -183,9 +184,9 @@ def main():
     scriptfile = args.scriptfile
     scriptargs = [] if args.args is None else args.args
     scriptargs.insert(0, scriptfile)
-    cprofile_sortby = 'tottime'
+    cprofile_sortby = os.environ.get("CPROFILE_SORTBY", 'tottime')
     cprofile_topk = 15
-    autograd_prof_sortby = 'cpu_time_total'
+    autograd_prof_sortby = os.environ.get("AUTOGRAD_PROF_SORTBY", 'cpu_time_total')
     autograd_prof_topk = 15
 
     redirect_argv(scriptargs)
@@ -226,6 +227,7 @@ def main():
             print_autograd_prof_summary(autograd_prof_cpu, 'CPU', autograd_prof_sortby, autograd_prof_topk)
 
     print_autograd_prof_summary(autograd_prof_cuda, 'CUDA', autograd_prof_sortby, autograd_prof_topk)
+
 
 if __name__ == '__main__':
     main()
