@@ -22,14 +22,14 @@ class TestComplexTensor(TestCase):
         x = torch.tensor([3., 3. + 5.j], device=device)
         torch.set_default_dtype(default_dtype)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
-    
+
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex(self, device, dtype):
         real = torch.tensor([1, 2], device=device, dtype=torch.int32)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
         complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-        self.assertEqual(torch.tensor([1.0+3.0j, 2.0+4.0j], dtype=complex_dtype), z)
+        self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_polar(self, device, dtype):
