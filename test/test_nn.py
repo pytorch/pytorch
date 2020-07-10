@@ -9989,7 +9989,7 @@ class TestNNDeviceType(NNTestCase):
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
             coords = torch.tensor([[-10059144, 67680944], [67680944, 67680944]], dtype=torch.float, device=device)
             coords = coords.unsqueeze(0).unsqueeze(0).repeat(1, 1, 1, 1)
-            result = torch.nn.functional.grid_sample(input_tensor, coords)
+            result = torch.nn.functional.grid_sample(input_tensor, coords, align_corners=False)
             self.assertEqual(result, torch.tensor([[[[0., 0.]]]], dtype=torch.float, device=device))
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
@@ -10000,9 +10000,9 @@ class TestNNDeviceType(NNTestCase):
             image.requires_grad_()
             grid = torch.nn.functional.affine_grid(
                 torch.tensor([[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]], dtype=dtype, device=device),
-                (1, 1, 3, 3, 3))
+                (1, 1, 3, 3, 3), align_corners=False)
             grid[:, 1, 1, 1, 0] = float('inf')
-            result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
+            result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros', align_corners=False)
             self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
                                                      [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
                                                      [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]],
@@ -10018,8 +10018,8 @@ class TestNNDeviceType(NNTestCase):
         def issue_24823_2():
             param = torch.tensor([[[-1.0e+20, 0.0, 0.0], [0.0, -1.0e+20, 0.0]]], dtype=torch.float, device=device)
             img = torch.zeros((1, 1, 4, 4), dtype=torch.float, device=device, requires_grad=True)
-            grid = torch.nn.functional.affine_grid(param, img.size())
-            result = torch.nn.functional.grid_sample(img, grid)
+            grid = torch.nn.functional.affine_grid(param, img.size(), align_corners=False)
+            result = torch.nn.functional.grid_sample(img, grid, align_corners=False)
             self.assertEqual(result, torch.zeros(1, 1, 4, 4, device=device, dtype=torch.float))
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
