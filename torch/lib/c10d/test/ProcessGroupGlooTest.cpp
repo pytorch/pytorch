@@ -105,7 +105,7 @@ class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
   std::shared_ptr<::c10d::ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
-      int tag) {
+      int tag) override {
     std::this_thread::sleep_for(kSendDelay);
     return ::c10d::ProcessGroupGloo::send(tensors, dstRank, tag);
   }
