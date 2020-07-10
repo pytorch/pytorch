@@ -268,12 +268,13 @@ static inline float calc_digamma(float x) {
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
 
-template <typename scalar_t>
-static inline scalar_t calc_gcd(scalar_t a, scalar_t b) {
+template <typename T>
+static inline typename std::enable_if<std::is_integral<T>::value, T>::type
+calc_gcd(T a, T b) {
   a = std::abs(a);
   b = std::abs(b);
   while (a != 0) {
-    scalar_t c = a;
+    T c = a;
     a = b % a;
     b = c; 
   }
