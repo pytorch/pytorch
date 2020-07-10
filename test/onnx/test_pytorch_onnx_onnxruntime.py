@@ -2879,7 +2879,7 @@ class TestONNXRuntime(unittest.TestCase):
         class EmbeddingModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.embedd = torch.nn.EmbeddingBag(50, 12, mode='sum')
+                self.embedd = torch.nn.EmbeddingBag(40, 12, mode='sum')
 
             def forward(self, x_user):
                 user = self.embedd(x_user)
@@ -2895,6 +2895,7 @@ class TestONNXRuntime(unittest.TestCase):
                                     'output': [0]
                                     })
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode='mean', sparse=True)
         input = torch.randint(10, (7,))

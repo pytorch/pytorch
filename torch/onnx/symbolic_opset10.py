@@ -197,9 +197,7 @@ def embedding_bag(g,
         return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
 
     if offsets.type().sizes() is not None:
-        if indices.type().sizes() is not None and embedding_matrix.type().sizes() is not None \
-                    and (indices.type().sizes()[0] == embedding_matrix.type().sizes()[0]):
-
+        if indices.node().kind() != 'prim::Param':
             embeddings = g.op("Gather", embedding_matrix, indices)
             dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
             dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))),
