@@ -179,4 +179,8 @@ should write your code this way:
 Stochastic Weight Averaging
 ---------------------------
 
-:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA).
+:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particulat, 
+:class:`torch.optim.swa_utils.AveragedModel` class implements SWA models, 
+:class:`torch.optim.swa_utils.SWALR` implements thes SWA learning rate scheduler and 
+:func:`torch.optim.swa_utils.update_bn` is utility function to update SWA batch normalization 
+statistics at the end of training. 
