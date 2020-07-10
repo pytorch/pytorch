@@ -184,3 +184,31 @@ Stochastic Weight Averaging
 :class:`torch.optim.swa_utils.SWALR` implements thes SWA learning rate scheduler and 
 :func:`torch.optim.swa_utils.update_bn` is utility function to update SWA batch normalization 
 statistics at the end of training. 
+
+Constructing averaged models
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+`AveragedModel` class serves to compute the weights of the SWA model. You can create an 
+averaged model by running:
+
+>>> swa_model = AveragedModel(model)
+
+Here the model can be an arbitrary :class:`torch.nn.Module` object. ``swa_model`` will keep
+track of the running averages of the parameters of the ``model``. To update these averages,
+you should use the :func:`update_parameters` function:
+
+>>> swa_model.update_parameters(model)
+
+Custom averaging strategies
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, :class:`torch.optim.swa_utils.AveragedModel` computes a running equal average of 
+the parameters that you provide, but you can also use custom averaging functions with the 
+``avg_fn`` parameter. In the following example ``ema_model`` computes an exponential moving average.
+
+Example:
+
+>>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
+>>>         0.1 * averaged_model_parameter + 0.9 * model_parameter
+>>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
