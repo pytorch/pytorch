@@ -112,7 +112,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup', default='10', type=int)
     parser.add_argument('--nloops', default='100', type=int)
     parser.add_argument('--use_timer', default=True, type=bool)
-    parser.add_argument('--timer_min_run_time', default=30, type=int)
+    parser.add_argument('--timer_min_run_time', default=120, type=int)
 
     args = parser.parse_args()
 
