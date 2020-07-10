@@ -327,6 +327,53 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_inline_jit_compile_custom_op_cuda(self):
+        cuda_source = """
+        __global__ void cos_add_kernel(
+            const float* __restrict__ x,
+            const float* __restrict__ y,
+            float* __restrict__ output,
+            const int size) {
+          const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+          if (index < size) {
+            output[index] = __cosf(x[index]) + __cosf(y[index]);
+          }
+        }
+
+        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
+          auto output = torch::zeros_like(x);
+          const int threads = 1024;
+          const int blocks = (output.numel() + threads - 1) / threads;
+          cos_add_kernel<<<blocks, threads>>>(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());
+          return output;
+        }
+        """
+
+        # Here, the C++ source need only declare the function signature.
+        cpp_source = """
+           #include <torch/library.h>
+           torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);
+
+           TORCH_LIBRARY(inline_jit_extension_custom_op_cuda, m) {
+             m.def("cos_add", cos_add);
+           }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="inline_jit_extension_custom_op_cuda",
+            cpp_sources=cpp_source,
+            cuda_sources=cuda_source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        x = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+        y = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+
+        z = torch.ops.inline_jit_extension_custom_op_cuda.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
     def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(

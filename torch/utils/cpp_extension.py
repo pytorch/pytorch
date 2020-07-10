@@ -785,6 +785,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('torch_cpu')
     libraries.append('torch_python')
     if IS_HIP_EXTENSION:
+        libraries.append('amdhip64')
         libraries.append('c10_hip')
         libraries.append('torch_hip')
     else:
@@ -1349,7 +1350,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
                 extra_ldflags.append('-L{}'.format(os.path.join(CUDNN_HOME, 'lib64')))
-
+        elif IS_HIP_EXTENSION:
+            extra_ldflags.append('-L{}'.format(_join_rocm_home('lib')))
+            extra_ldflags.append('-lamdhip64')
     return extra_ldflags
 
 
