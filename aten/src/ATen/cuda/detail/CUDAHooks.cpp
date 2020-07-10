@@ -181,10 +181,6 @@ Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
 }
 
-Allocator* CUDAHooks::getCUDADeviceAllocator() const {
-  return at::cuda::getCUDADeviceAllocator();
-}
-
 bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }

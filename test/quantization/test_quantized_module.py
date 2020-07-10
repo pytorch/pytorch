@@ -157,7 +157,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
 
         # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
@@ -295,7 +295,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # JIT testing
         self.checkScriptable(
-            qconv_module, [[X_q]],
+            qconv_module, list(zip([X_q], [Y_exp])),
             check_save_load=True)
 
         # Test from_float
@@ -533,7 +533,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, [[X]])
+        self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
     def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
@@ -777,7 +777,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, [[X]], check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
 
         # Test from_float
         float_linear = torch.nn.Linear(in_features, out_features).float()

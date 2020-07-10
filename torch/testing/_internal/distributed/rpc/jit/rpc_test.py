@@ -1,5 +1,4 @@
 import time
-import io
 from typing import Dict, List, Tuple
 
 import torch
@@ -835,12 +834,6 @@ def async_wrong_type() -> Tensor:
     return torch.zeros(2)
 
 
-def load_script_module_with_pickled_rref(pickled_script_module):
-    f = io.BytesIO(pickled_script_module)
-    m = torch.jit.load(f)
-    return m()
-
-
 class JitRpcTest(
     RRefAPITest,
     RRefTypingTest,
@@ -936,26 +929,6 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
-
-    @dist_init
-    def test_load_script_module_with_pickled_rref(self):
-        dst_name = worker_name((self.rank + 1) % self.world_size)
-        m1 = MyScriptModuleWithRRefs(dst_name)
-        m2 = MyScriptModuleWithRRefs(dst_name)
-
-        f = io.BytesIO()
-
-        rpc._enable_jit_rref_pickle()
-        torch.jit.save(m1, f)
-        rpc._disable_jit_rref_pickle()
-
-        out1 = rpc.rpc_sync(
-            dst_name,
-            load_script_module_with_pickled_rref,
-            args=(f.getvalue(),)
-        )
-        out2 = m2()
-        self.assertEqual(out1, out2)
 
     @dist_init
     def test_rref_jit_pickle_not_supported(self):
@@ -1060,7 +1033,7 @@ class JitRpcTest(
             with torch.autograd.profiler.profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch._jit_internal._qualified_name(one_arg),
+                    torch.jit._qualified_name(one_arg),
                     "worker0",
                     "worker1",
                 )
@@ -1072,7 +1045,7 @@ class JitRpcTest(
             # After that, this test should be modified to validate the function time.
             events = prof.function_events
             function_event = get_function_event(events, prof_key)
-            self.assertTrue(torch._jit_internal._qualified_name(one_arg) in function_event.name)
+            self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
 
     @dist_init
     def test_rpc_async_jit_profiled(self):
@@ -1090,7 +1063,7 @@ class JitRpcTest(
 
             # Ensure rpc_async call is profiled
             function_events = prof.function_events
-            qual_name = torch._jit_internal._qualified_name(two_args_two_kwargs)
+            qual_name = torch.jit._qualified_name(two_args_two_kwargs)
             rpc_async_jit_event = [
                 event
                 for event in function_events

@@ -124,10 +124,7 @@ class UnaryOpTest(serial.SerializedTestCase):
         workspace.ResetWorkspace()
         n = 1
         m = 10001
-        if opname == "Logit":
-            X = np.linspace(0, value, num=m, dtype=np.float32)
-        else:
-            X = np.linspace(-value, value, num=m, dtype=np.float32)
+        X = np.linspace(-value, value, num=m, dtype=np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
