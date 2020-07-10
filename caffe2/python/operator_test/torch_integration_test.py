@@ -822,6 +822,22 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
+    @given(X=hu.tensor(),
+           eps=st.floats(min_value=1e-4, max_value=1e-2),
+           )
+    def test_logit(self, X, eps):
+        def ref(X, eps):
+            ref_op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+        expected_output = ref(X, eps)
+        actual_output = torch.ops._caffe2.Logit(
+            torch.tensor(X), eps
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+
 
 if __name__ == '__main__':
     unittest.main()

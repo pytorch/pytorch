@@ -71,13 +71,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-pynightly)
-    TRAVIS_PYTHON_VERSION=nightly
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
     CUDA_VERSION=9.2
     CUDNN_VERSION=7
@@ -230,6 +223,22 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=3.3
+    ;;
+  pytorch-linux-xenial-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
     ;;
 esac
 

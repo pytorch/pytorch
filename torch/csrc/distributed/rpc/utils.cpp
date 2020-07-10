@@ -21,6 +21,10 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#ifdef USE_TENSORPIPE
+#include <tensorpipe/core/message.h>
+#endif
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -448,6 +452,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
   return {std::move(payload), std::move(tensors)};
 }
 
+#ifdef USE_TENSORPIPE
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -607,6 +612,7 @@ Message tensorpipeDeserialize(
       *buffers.type,
       *buffers.id);
 }
+#endif /* USE_TENSORPIPE */
 
 void writeWrappedPayload(
     std::vector<char>& originalPayload,
@@ -616,7 +622,7 @@ void writeWrappedPayload(
       additionalPayload.begin(),
       additionalPayload.end());
 
-  // Add size of the additional pyaload
+  // Add size of the additional payload
   int64_t indexToWrite = originalPayload.size();
   originalPayload.resize(originalPayload.size() + sizeof(int64_t));
   const int64_t additionalPayloadSize = additionalPayload.size();
