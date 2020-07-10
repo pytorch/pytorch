@@ -799,9 +799,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   check_gpu_tensors(tensors);
 
+  const NCCLBroadcastOptions& ncclOpts =
+      static_cast<const NCCLBroadcastOptions&>(opts);
+
   return collective(
       tensors,
       tensors,
+      ncclOpts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
@@ -822,9 +826,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     const ReduceOptions& opts) {
   check_gpu_tensors(tensors);
 
+  const NCCLReduceOptions& ncclOpts =
+      static_cast<const NCCLReduceOptions&>(opts);
+
   return collective(
       tensors,
       tensors,
+      ncclOpts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
@@ -848,6 +856,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     const AllgatherOptions& opts) {
   check_gpu_tensors(inputTensors);
 
+  const NCCLAllgatherOptions& ncclOpts =
+      static_cast<const NCCLAllgatherOptions&>(opts);
+
   auto outputFlattened =
       flatten_for_scatter_gather(outputTensors, inputTensors, size_);
   check_gpu_tensors(outputFlattened);
@@ -855,6 +866,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return collective(
       inputTensors,
       outputFlattened,
+      ncclOpts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
@@ -899,6 +911,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     const ReduceScatterOptions& opts) {
   check_gpu_tensors(outputTensors);
 
+  const NCCLReduceScatterOptions& ncclOpts =
+      static_cast<const NCCLReduceScatterOptions&>(opts);
+
   auto inputFlattened =
       flatten_for_scatter_gather(inputTensors, outputTensors, size_);
   check_gpu_tensors(inputFlattened);
@@ -906,6 +921,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
   return collective(
       inputFlattened,
       outputTensors,
+      ncclOpts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
