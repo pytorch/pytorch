@@ -334,39 +334,26 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_graph(model, args, verbose=False,
-                    input_names=None, output_names=None,
-                    operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None, propagate=False,
-                    _retain_param_name=False, do_constant_folding=True,
-                    _disable_torch_constant_prop=False, fixed_batch_size=False):
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
-    # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
-        args = (args, )
-
-    if isinstance(example_outputs, torch.Tensor):
-        example_outputs = [example_outputs]
-
-    torch_out = None
+def _get_module_graph(model, args, example_outputs, propagate, retain_param_name, training):
 
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            graph = model.forward.graph
-            torch._C._jit_pass_onnx_function_substitution(graph)
+            if training is not None and training == TrainingMode.EVAL:
+                freezed_m = torch._C._freeze_module(model._c)
+                method_graph = freezed_m._get_method('forward').graph
+                params = []
+                method_graph.eraseInput(0)
 
-            freezed_m = torch._C._freeze_module(model._c)
-            method_graph = freezed_m._get_method('forward').graph
-            params = []
-
-            # method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
-
-            method_graph.eraseInput(0)
+            else:
+                graph = model.forward.graph
+                torch._C._jit_pass_onnx_function_substitution(graph)
+                method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
+
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.ScriptFunction):
@@ -382,7 +369,7 @@ def _model_to_graph(model, args, verbose=False,
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
-        if _retain_param_name:
+        if retain_param_name:
             graph_inputs = list(graph.inputs())
             user_input_num = len(graph_inputs) - len(state_dict)
             param_names = list(state_dict.keys())
@@ -390,6 +377,26 @@ def _model_to_graph(model, args, verbose=False,
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
         torch._C._jit_pass_onnx_function_substitution(graph)
+
+    return graph, params
+
+
+def _model_to_graph(model, args, verbose=False,
+                    input_names=None, output_names=None,
+                    operator_export_type=OperatorExportTypes.ONNX,
+                    example_outputs=None, propagate=False,
+                    _retain_param_name=False, do_constant_folding=True,
+                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None):
+    from torch.onnx.symbolic_helper import _export_onnx_opset_version
+    # Special case for common case of passing a single Tensor
+    if isinstance(args, torch.Tensor):
+        args = (args, )
+
+    if isinstance(example_outputs, torch.Tensor):
+        example_outputs = [example_outputs]
+
+    torch_out = None
+    graph, params = _get_module_graph(model, args, example_outputs, propagate,_retain_param_name, training)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
@@ -543,7 +550,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             output_names, operator_export_type,
                                                             example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size)
+                                                            fixed_batch_size=fixed_batch_size, training=training)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
