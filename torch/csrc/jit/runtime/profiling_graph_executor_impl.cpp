@@ -92,9 +92,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   LowerGradOf(*copy);
   // WHC
   UnrollLoops(copy);
-  RemoveListMutation(copy);
-  PeepholeOptimize(copy);
-  ConstantPropagation(copy);
+  // RemoveListMutation(copy);
+  // PeepholeOptimize(copy);
+  // ConstantPropagation(copy);
   // ---
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
