@@ -277,5 +277,7 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> 
 >>> # Update bn statistics for the swa_model at the end
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
+>>> # Use swa_model to make predictions on test data 
+>>> preds = swa_model(test_input)
 
 
