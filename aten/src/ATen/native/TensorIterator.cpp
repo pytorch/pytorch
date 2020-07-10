@@ -706,8 +706,9 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     .set_check_mem_overlap(check_mem_overlap)
     .add_output(out)
     .add_input(a)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
+    .cast_common_dtype_to_outputs(false)
+    .enforce_safe_casting_to_output(false)
+    .check_all_same_dtype(true)
     .build();
 }
 

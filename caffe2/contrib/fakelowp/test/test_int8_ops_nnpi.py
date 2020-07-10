@@ -216,3 +216,95 @@ class Int8OpsTest(serial.SerializedTestCase):
                 },
             )
             assert 0
+
+    @given(
+        n=st.integers(1, 4),
+        rand_seed=st.integers(0, 65534)
+    )
+    @settings(max_examples=1)
+    def test_int8_small_input(self, n, rand_seed):
+        print("n={}, rand_seed={}".format(n, rand_seed))
+        np.random.seed(rand_seed)
+        workspace.ResetWorkspace()
+
+        X_fp32 = np.random.uniform(0.001, 0.003, size=(n, n)).astype(np.float16).astype(np.float32)
+        W_fp32 = np.identity(n, dtype=np.float32)
+        b_fp32 = np.zeros((n,), dtype=np.float32)
+
+        X_scale, X_zero_point = self._get_scale_zp(X_fp32)
+
+        workspace.FeedBlob("X", X_fp32)
+        workspace.FeedBlob("W", W_fp32)
+        workspace.FeedBlob("b", b_fp32)
+
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "Int8FCPackWeight",
+                ["W"],
+                ["W_int8"],
+                engine="DNNLOWP",
+                save_unpacked_weights=True,
+                in_scale=X_scale,
+            )
+        )
+
+        ref_net = core.Net("net")
+        ref_net.Int8QuantizeNNPI(
+            ["X"],
+            ["X_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point
+        )
+        ref_net.Int8FCFakeAcc32NNPI(
+            ["X_int8", "W_int8", "b"],
+            ["Y_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point,
+        )
+        ref_net.Int8DequantizeNNPI(
+            ["Y_int8"],
+            ["Y"]
+        )
+        ref_net.Proto().external_output.append("Y")
+
+        # run ref_net
+        workspace.RunNetOnce(ref_net)
+        Y_fbgemm = workspace.FetchBlob("Y")
+
+        # run onnxifi net
+        ref_net.Proto().op[0].type = "Int8Quantize"
+        ref_net.Proto().op[1].type = "Int8FC"
+        ref_net.Proto().op[2].type = "Int8Dequantize"
+        net_onnxified = onnxifi_caffe2_net(
+            ref_net.Proto(),
+            {},
+            debug=True,
+            adjust_batch=False,
+            use_onnx=False,
+            weight_names=["W_int8", "b"],
+        )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in net_onnxified.op
+        )
+        np.testing.assert_equal(num_onnxified_ops, 1)
+        workspace.CreateNet(net_onnxified)
+        workspace.RunNet(net_onnxified.name)
+        Y_glow = workspace.FetchBlob("Y")
+
+        if not np.allclose(Y_glow, Y_fbgemm):
+            diff_Y = np.abs(Y_glow - Y_fbgemm)
+            print_test_debug_info(
+                "int8_fc",
+                {
+                    "seed": rand_seed,
+                    "n": n,
+                    "X": X_fp32,
+                    "W": W_fp32,
+                    "b": b_fp32,
+                    "Y_fbgemm": Y_fbgemm,
+                    "Y_glow": Y_glow,
+                    "diff": diff_Y,
+                    "maxdiff": diff_Y.max(axis=1),
+                },
+            )
+            assert 0

@@ -276,9 +276,9 @@ std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
   return vec_domain;
 }
 
-std::unordered_map<ParallelType, IterDomain*> ReductionOp::
+std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
     getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*> parallel_domains;
+  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
   for (auto d : getReductionDomains()) {
     if (d->isThread()) {
       parallel_domains.insert(std::make_pair(d->parallel_method(), d));
