@@ -90,6 +90,19 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  poison_fork();
+#ifdef CUDA_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THCPModule_isInBadFork(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(in_bad_fork);
@@ -502,6 +515,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getArchFlags", (PyCFunction)THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},

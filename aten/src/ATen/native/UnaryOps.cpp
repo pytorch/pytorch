@@ -67,7 +67,7 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
 
       // Copies the complex result to the actual result and returns it
       result.resize_(complex_result.sizes());
-      result.copy_(complex_result);
+      result.copy_(at::real(complex_result));
       return result;
     }
 
