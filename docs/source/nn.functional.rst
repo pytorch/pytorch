@@ -278,11 +278,6 @@ Non-linear activation functions
 
 .. autofunction:: hardsigmoid
 
-:hidden:`silu`
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: silu
-
 
 Normalization functions
 -----------------------

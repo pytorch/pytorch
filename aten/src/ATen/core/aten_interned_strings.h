@@ -607,7 +607,6 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
-_(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
