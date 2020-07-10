@@ -18133,6 +18133,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with self.assertRaises(RuntimeError):
             torch.nansum(x)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def _test_sum_out_dtype(self, torch_fn, np_fn, device):
+        dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        for inp_dtype, out_dtype in combinations(dtypes, 2):
+            shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
+            x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
+            torch_fn = partial(torch.nansum, dtype=out_dtype)
+            np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
+            np_fn = partial(np.nansum, dtype=np_out_dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_sum_out_dtype(self, device):
+        self._test_sum_out_dtype(np.sum, torch.sum, device)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_nansum_out_dtype(self, device):
+        self._test_sum_out_dtype(np.nansum, torch.nansum, device)
+
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
         start = torch.iinfo(dtype).min
