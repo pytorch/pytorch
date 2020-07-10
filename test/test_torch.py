@@ -7562,6 +7562,12 @@ class TestTorchDeviceType(TestCase):
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')
+        # Testing bug in #34061 (https://github.com/pytorch/pytorch/issues/34061)
+        for n in range(250, 551, 100):
+            mat = torch.randn(n, n, dtype=dtype, device=device)
+            q, _ = torch.qr(mat)
+            ref_det, ref_logabsdet = reference_slogdet(q)
+            test_single_det(q, ref_det, ref_logabsdet, 'orthogonal')
 
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
