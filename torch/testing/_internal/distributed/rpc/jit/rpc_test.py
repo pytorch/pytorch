@@ -943,8 +943,6 @@ class JitRpcTest(
         m1 = MyScriptModuleWithRRefs(dst_name)
         m2 = MyScriptModuleWithRRefs(dst_name)
 
-        import pickle
-
         f = io.BytesIO()
 
         rpc._enable_jit_rref_pickle()
