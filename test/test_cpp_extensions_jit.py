@@ -86,7 +86,7 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
         module = torch.utils.cpp_extension.load(
@@ -285,7 +285,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -327,7 +327,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_custom_op_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -401,7 +401,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """
         Checks for an issue with operator< ambiguity for half when certain
@@ -612,7 +612,7 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
