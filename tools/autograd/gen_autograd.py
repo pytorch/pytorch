@@ -117,7 +117,7 @@ def process_schema_order_arg(schema_order_arg):
     elif schema_order_arg == 'pin_memory':
         return 'options.pinned_memory_opt()'
     elif schema_order_arg == 'memory_format':
-        return 'c10::impl::process_memory_format(options, memory_format)'
+        return 'c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format)'
     else:
         return schema_order_arg
 
