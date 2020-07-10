@@ -99,8 +99,10 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     // Throws if requires_grad is set in TensorOptions
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
-    ASSERT_THROW(
-        tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
+
+    // Doesn't throw if requires_grad is not set
+    tensor.to(at::TensorOptions());
+    tensor.to(at::TensorOptions().requires_grad(false));
   }
   {
     auto tensor = torch::empty({3, 4});
@@ -113,8 +115,10 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     // Throws if requires_grad is set in TensorOptions
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
-    ASSERT_THROW(
-        tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
+
+    // Doesn't throw if requires_grad is not set
+    tensor.to(at::TensorOptions());
+    tensor.to(at::TensorOptions().requires_grad(false));
   }
 }
 
