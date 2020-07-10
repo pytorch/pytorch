@@ -228,10 +228,10 @@ on a given dataloader ``loader`` at the end of training:
 statistics for each batch normalization layer in the model.
 
 .. warning::
-:func:`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of 
-tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
-If your dataloader has a different structure, you can update the batch normalization statistics of the
-``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
+    :func:`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of 
+    tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
+    If your dataloader has a different structure, you can update the batch normalization statistics of the
+    ``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
 
 
 Custom averaging strategies
@@ -246,3 +246,32 @@ Example:
 >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
 >>>         0.1 * averaged_model_parameter + 0.9 * model_parameter
 >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
+
+
+Putting it all together
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the example below, ``swa_model`` is the SWA model that accumulates the averages of the weights.
+We train the model for a total of ``300`` epochs and we switch to the SWA learning rate schedule 
+and start to collect SWA averages of the parameters at epoch ``160``: 
+
+>>> loader, optimizer, model, loss_fn = ...
+>>> swa_model = torch.optim.swa_utils.AveragedModel(model)
+>>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=300)
+>>> swa_start = 160
+>>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+>>> for epoch in range(300):
+>>>       for input, target in loader:
+>>>           optimizer.zero_grad()
+>>>           loss_fn(model(input), target).backward()
+>>>           optimizer.step()
+>>>       if i > swa_start:
+>>>           swa_model.update_parameters(model)
+>>>           swa_scheduler.step()
+>>>       else:
+>>>           scheduler.step()
+>>> 
+>>> # Update bn statistics for the swa_model at the end
+>>> torch.optim.swa_utils.update_bn(loader, swa_model)
+
+
