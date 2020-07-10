@@ -39,10 +39,10 @@ def num_non_tensor_nodes(block, non_tensor_ops=[], top_level=True):
         num_non_tensor += int(not tensor_out)
         if not tensor_out:
             non_tensor_ops.append(node.kind())
-    if top_level:
-        print("non_tensor_ops")
-        for node in non_tensor_ops:
-            print(node)
+    # if top_level:
+        # print("non_tensor_ops")
+        # for node in non_tensor_ops:
+            # print(node)
     return num_non_tensor
 
 class TestComplexity(JitTestCase):
@@ -61,6 +61,8 @@ class TestComplexity(JitTestCase):
             stats = [("Name", "Ifs/Loops", "non-tensor ops")]
             for test in nn_functional_tests:
                 test_name = test[0]
+                # if test_name != 'upsample':
+                    # continue
 
                 fn, inputs = get_nn_functional_compiled_fn_and_inputs(*test)
                 for _ in range(6):
@@ -68,6 +70,11 @@ class TestComplexity(JitTestCase):
 
                 g = torch.jit.last_executed_optimized_graph()
                 stats.append((test_name, num_ifs_loops(g), num_non_tensor_nodes(g)))
+
+                # if test_name == 'upsample':
+                    # with open('upsample.graph', 'w') as f:
+                        # f.write(repr(g))
+                    # break
         for line in stats:
             print(line)
 
