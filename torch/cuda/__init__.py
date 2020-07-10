@@ -14,7 +14,7 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
@@ -103,6 +103,27 @@ def _check_capability():
             elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
                 warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
+def _check_cubins():
+    incompatible_device_warn = """
+{} with CUDA capability sm_{} is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities {}.
+If you want to use the {} GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+"""
+    if torch.version.cuda is None:  # on ROCm we don't want this check
+        return
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return
+    supported_sm = [int(arch.split('_')[1]) for arch in arch_list if 'sm_' in arch]
+    for idx in range(device_count()):
+        cap_major, cap_minor = get_device_capability(idx)
+        capability = cap_major * 10 + cap_minor
+        # NVIDIA GPU compute architectures are backward compatible within 5 minor revisions versions
+        supported = any([capability >= sm and capability - (sm // 5) * 5 < 5 for sm in supported_sm])
+        if not supported:
+            device_name = get_device_name(idx)
+            warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
+
 
 def is_initialized():
     r"""Returns whether PyTorch's CUDA state has been initialized."""
@@ -117,6 +138,7 @@ def _lazy_call(callable):
         _queued_calls.append((callable, traceback.format_stack()))
 
 _lazy_call(_check_capability)
+_lazy_call(_check_cubins)
 
 
 class DeferredCudaCallError(Exception):
@@ -337,6 +359,24 @@ def device_count() -> int:
         return torch._C._cuda_getDeviceCount()
     else:
         return 0
+
+def get_arch_list() -> List[str]:
+    r"""Returns list CUDA architecutres this library was compiled for."""
+    if not is_available():
+        return []
+    arch_flags = torch._C._cuda_getArchFlags()
+    if arch_flags is None:
+        return []
+    return arch_flags.split()
+
+def get_gencode_flags() -> str:
+    r"""Returns NVCC gencode flags this library were compiled with."""
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return ""
+    arch_list = [arch.split("_") for arch in arch_list]
+    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list])
+
 
 
 def current_device() -> int:
