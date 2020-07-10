@@ -575,25 +575,22 @@ class DistributedDataParallel(Module):
             DDP communication hook can only be registered once and should be registered
             before calling backward.
 
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
         Example::
-            Below is an example of a simple quantization baseed gradient compression:
+            Below is an example of a noop hook that returns back the same tensors:
 
-            >>> ddp.register_comm_hook(state = None, hook = fp16_compress)
+            >>> ddp.register_comm_hook(state = None, hook = noop)
 
-            >>> def fp16_compress(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     compressed_tensors = dist.GradBucket(bucket.get_tensors().to(torch.float16))
-            >>>     work = dist.allreduce(compressed_tensors)
-            >>>     allreduce_future = convert_dist_work_to_future(work)
-            >>>     # Define the then callback to decompress.
-            >>>     def decompress(fut):
-            >>>         decompressed_tensors = fut.wait().to(torch.float32)
-            >>>         return decompressed_tensors
-            >>>     return allreduce_future.then(decompress)
+            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>>     fut = torch.futures.Future()
+            >>>     fut.set_result(bucket.get_tensors())
+            >>>     return fut
 
-            TODO (@sinannasir) an example that involves a use case of state object like GossipGrad.
         """
         self._check_comm_hook(hook)
-        self.reducer.register_comm_hook(state, hook)
+        dist.PythonHookBinder.register_comm_hook(self.reducer, state, hook)
 
     def _distributed_broadcast_coalesced(self, tensors, buffer_size):
         dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
@@ -655,18 +652,14 @@ class DistributedDataParallel(Module):
                         len(self.device_ids) if self.device_ids else 1)
 
     def _check_comm_hook(self, hook):
-        assert callable(hook), "Communication hook must be callable."
+        if not callable(hook):
+            raise TypeError("Communication hook must be callable.")
 
         sig = inspect.signature(hook)
-        assert (sig.parameters['state'].annotation == inspect._empty or
-                sig.parameters['state'].annotation == object), (
-            "Communication hook: state annotation is not object."
-        )
-        assert (sig.parameters['bucket'].annotation == inspect._empty or
-                sig.parameters['bucket'].annotation == dist.GradBucket), (
-            "Communication hook: bucket annotation is not dist.GradBucket."
-        )
-        assert (sig.return_annotation == inspect._empty or
-                sig.return_annotation == torch.futures.Future), (
-            "Communication hook: return annotation is not torch.futures.Future."
-        )
+        if (sig.parameters['bucket'].annotation != inspect._empty and
+                sig.parameters['bucket'].annotation != dist.GradBucket):
+            raise ValueError("Communication hook: bucket annotation is not dist.GradBucket.")
+
+        if (sig.return_annotation != inspect._empty and
+                sig.return_annotation != torch.futures.Future):
+            raise ValueError("Communication hook: return annotation is not torch.futures.Future.")

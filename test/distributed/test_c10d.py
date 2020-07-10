@@ -3063,11 +3063,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
 
     @requires_gloo()
-    def test_ddp_comm_hook_funtion_checks(self):
+    def test_ddp_invalid_comm_hook(self):
         """
         This unit test makes sure that register_comm_hook properly checks the format
-        of hook defined by user. The Python hook must be callable and defined with
-        annotations. This test also checks whether type of annotations checked properly.
+        of hook defined by user. The Python hook must be callable. This test also
+        checks whether type of annotations checked properly.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -3077,58 +3077,18 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             process_group=process_group
         )
 
-        try:
-            got_exception = False
+        with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
             model._register_comm_hook(state=None, hook=1)
-        except Exception as e:
-            if "Communication hook must be callable." in str(e):
-                got_exception = True
-            else:
-                raise e
-        if not got_exception:
-            raise Exception('Communication hook callable check is missing.')
 
-        try:
-            got_exception = False
-
-            def comm_hook(state: int, bucket: dist.GradBucket) -> torch.futures.Future:
-                return torch.futures.Future()
-            model._register_comm_hook(state=None, hook=comm_hook)
-        except Exception as e:
-            if "Communication hook: state annotation is not object." in str(e):
-                got_exception = True
-            else:
-                raise e
-        if not got_exception:
-            raise Exception('Communication hook object type check is missing.')
-
-        try:
-            got_exception = False
-
+        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
             model._register_comm_hook(state=None, hook=comm_hook)
-        except Exception as e:
-            if "Communication hook: bucket annotation is not dist.GradBucket." in str(e):
-                got_exception = True
-            else:
-                raise e
-        if not got_exception:
-            raise Exception('Communication hook bucket type check is missing.')
 
-        try:
-            got_exception = False
-
+        with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
             model._register_comm_hook(state=None, hook=comm_hook)
-        except Exception as e:
-            if "Communication hook: return annotation is not torch.futures.Future." in str(e):
-                got_exception = True
-            else:
-                raise e
-        if not got_exception:
-            raise Exception('Communication hook return type check is missing.')
 
 
 class ReducerModule(nn.Module):
@@ -3278,15 +3238,11 @@ class ReducerTest(TestCase):
             fut = torch.futures.Future()
             fut.set_result(bucket.get_tensors())
             return fut.then()
-        reducer.register_comm_hook(None, dummy_hook)
-        try:
-            reducer.register_comm_hook(None, dummy_hook)
-        except Exception as e:
-            if "register_comm_hook can only be called once" in str(e):
-                return
-            else:
-                raise e
-        raise Exception('Communication hook multiple register check is missing in reducer.')
+
+        dist.PythonHookBinder.register_comm_hook(reducer, None, dummy_hook)
+
+        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
+            dist.PythonHookBinder.register_comm_hook(reducer, None, dummy_hook)
 
 
 

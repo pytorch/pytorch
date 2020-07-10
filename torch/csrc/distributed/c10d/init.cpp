@@ -106,6 +106,17 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
+class PythonHookBinder {
+ public:
+  static void register_comm_hook(
+      ::c10d::Reducer& reducer,
+      py::object state,
+      py::object comm_hook) {
+    reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
+        std::move(state), std::move(comm_hook)));
+  }
+};
+
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -119,8 +130,16 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
       .def(
           "get_tensors",
-          &::c10d::GradBucket::get_tensors,
+          &::c10d::GradBucket::getTensors,
           py::call_guard<py::gil_scoped_release>());
+
+  shared_ptr_class_<PythonHookBinder>(module, "PythonHookBinder")
+      .def_static(
+          "register_comm_hook",
+          &PythonHookBinder::register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"));
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -137,12 +156,6 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "register_comm_hook",
-          &::c10d::Reducer::register_comm_hook,
-          py::arg("state"),
-          py::arg("hook"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
