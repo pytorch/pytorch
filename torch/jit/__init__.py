@@ -1,12 +1,9 @@
 import torch._C
 import torch._jit_internal as _jit_internal
 
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
 from torch._jit_internal import Future
 from torch.nn import Module
-from torch.serialization import validate_cuda_device
-from torch._six import string_classes
 from torch.utils import set_module
 from torch.autograd.grad_mode import _DecoratorContextManager
 from typing import Optional, List
@@ -24,10 +21,14 @@ from torch.jit._script import script, Attribute, ScriptModule, is_scripting, scr
     RecursiveScriptModule, ScriptWarning, interface
 from torch.jit._trace import trace, trace_module, TracedModule, TracerWarning, TracingCheckError, \
     is_tracing, ONNXTracedModule, _unique_state_dict, _flatten, TopLevelTracedModule
+from torch.jit._async import fork, wait
+from torch.jit._serialization import save, load
 
 set_module(Future, "torch.jit")
-_fork = torch._C.fork
-_wait = torch._C.wait
+
+# For backwards compatibility
+_fork = fork
+_wait = wait
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
@@ -88,168 +89,6 @@ def fuser(name):
         torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)
         torch._C._jit_set_nvfuser_enabled(old_nvfuser_state)
 
-DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
-
-
-def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
-    r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
-    attributes of this module. It can be loaded into the C++ API using
-    ``torch::jit::load(filename)`` or into the Python API with
-    :func:`torch.jit.load <torch.jit.load>`.
-
-    To be able to save a module, it must not make any calls to native Python
-    functions.  This means that all submodules must be subclasses of
-    :class:`ScriptModule` as well.
-
-    .. DANGER::
-        All modules, no matter their device, are always loaded onto the CPU
-        during loading.  This is different from :func:`torch.load`'s semantics
-        and may change in the future.
-
-    Arguments:
-        m: A :class:`ScriptModule` to save.
-        f: A file-like object (has to implement write and flush) or a string
-           containing a file name.
-        _extra_files: Map from filename to contents which will be stored as part of `f`.
-
-    .. note::
-        torch.jit.save attempts to preserve the behavior of some operators
-        across versions. For example, dividing two integer tensors in
-        PyTorch 1.5 performed floor division, and if the module
-        containing that code is saved in PyTorch 1.5 and loaded in PyTorch 1.6
-        its division behavior will be preserved. The same module saved in
-        PyTorch 1.6 will fail to load in PyTorch 1.5, however, since the
-        behavior of division changed in 1.6, and 1.5 does not know how to
-        replicate the 1.6 behavior.
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import io
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        m = torch.jit.script(MyModule())
-
-        # Save to file
-        torch.jit.save(m, 'scriptmodule.pt')
-        # This line is equivalent to the previous
-        m.save("scriptmodule.pt")
-
-        # Save to io.BytesIO buffer
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-
-        # Save with extra files
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
-        torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
-    """
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        m.save(f, _extra_files=_extra_files)
-    else:
-        ret = m.save_to_buffer(_extra_files=_extra_files)
-        f.write(ret)
-
-def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
-    r"""
-    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
-    saved with :func:`torch.jit.save <torch.jit.save>`
-
-    All previously saved modules, no matter their device, are first loaded onto CPU,
-    and then are moved to the devices they were saved from. If this fails (e.g.
-    because the run time system doesn't have certain devices), an exception is
-    raised.
-
-    Arguments:
-        f: a file-like object (has to implement read, readline, tell, and seek),
-            or a string containing a file name
-        map_location (string or torch.device): A simplified version of
-            ``map_location`` in `torch.jit.save` used to dynamically remap
-            storages to an alternative set of devices.
-        _extra_files (dictionary of filename to content): The extra
-            filenames given in the map would be loaded and their content
-            would be stored in the provided map.
-
-    Returns:
-        A :class:`ScriptModule` object.
-
-    Example:
-
-    .. testcode::
-
-        import torch
-        import io
-
-        torch.jit.load('scriptmodule.pt')
-
-        # Load ScriptModule from io.BytesIO object
-        with open('scriptmodule.pt', 'rb') as f:
-            buffer = io.BytesIO(f.read())
-
-        # Load all tensors to the original device
-        torch.jit.load(buffer)
-
-        # Load all tensors onto CPU, using a device
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location=torch.device('cpu'))
-
-        # Load all tensors onto CPU, using a string
-        buffer.seek(0)
-        torch.jit.load(buffer, map_location='cpu')
-
-        # Load with extra files.
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
-        torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
-        print(extra_files['foo.txt'])
-
-    .. testoutput::
-        :hide:
-
-        ...
-
-    .. testcleanup::
-
-        import os
-        os.remove("scriptmodule.pt")
-    """
-    if isinstance(f, string_classes):
-        if not os.path.exists(f):
-            raise ValueError("The provided filename {} does not exist".format(f))
-        if os.path.isdir(f):
-            raise ValueError("The provided filename {} is a directory".format(f))
-
-    map_location = validate_map_location(map_location)
-
-    cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
-    else:
-        cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
-
-    # TODO: Pretty sure this approach loses ConstSequential status and such
-    return wrap_cpp_module(cpp_module)
-
-def validate_map_location(map_location=None):
-    if isinstance(map_location, str):
-        map_location = torch.device(map_location)
-    elif not (map_location is None or
-              isinstance(map_location, torch.device)):
-        raise ValueError("map_location should be either None, string or torch.device, "
-                         "but got type: " + str(type(map_location)))
-
-    if (str(map_location).startswith('cuda')):
-        validate_cuda_device(map_location)
-
-    return map_location
-
 def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules
@@ -295,81 +134,6 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
         args = (args,)
     outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
     return outs
-
-
-def fork(func, *args, **kwargs):
-    """
-    Creates an asynchronous task executing `func` and a reference to the value
-    of the result of this execution. `fork` will return immediately,
-    so the return value of `func` may not have been computed yet. To force completion
-    of the task and access the return value invoke `torch.jit.wait` on the Future. `fork` invoked
-    with a `func` which returns `T` is typed as `torch.jit.Future[T]`. `fork` calls can be arbitrarily
-    nested, and may be invoked with positional and keyword arguments.
-    Asynchronous execution will only occur when run in TorchScript. If run in pure python,
-    `fork` will not execute in parallel. `fork` will also not execute in parallel when invoked
-    while tracing, however the `fork` and `wait` calls will be captured in the exported IR Graph.
-    Warning:
-        `fork` tasks will execute non-deterministicly. We recommend only spawning
-        parallel fork tasks for pure functions that do not modify their inputs,
-        module attributes, or global state.
-    Arguments:
-        func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
-            that will be invoked. If executed in TorchScript, it will execute asynchronously,
-            otherwise it will not. Traced invocations of fork will be captured in the IR.
-        ``*args``, ``**kwargs``: arguments to invoke `func` with.
-    Returns:
-        `torch.jit.Future[T]`: a reference to the execution of `func`. The value `T`
-        can only be accessed by forcing completion of `func` through `torch.jit.wait`.
-    Example (fork a free function):
-
-    .. testcode::
-        import torch
-        from torch import Tensor
-        def foo(a : Tensor, b : int) -> Tensor:
-            return a + b
-        def bar(a):
-            fut : torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
-            return torch.jit.wait(fut)
-        script_bar = torch.jit.script(bar)
-        input = torch.tensor(2)
-        # only the scripted version executes asynchronously
-        assert script_bar(input) == bar(input)
-        # trace is not run asynchronously, but fork is captured in IR
-        graph = torch.jit.trace(bar, (input,)).graph
-        assert "fork" in str(graph)
-
-    Example (fork a module method):
-
-    .. testcode::
-        import torch
-        from torch import Tensor
-        class SubMod(torch.nn.Module):
-            def forward(self, a: Tensor, b : int):
-                return a + b
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super(self).__init__()
-                self.mod = SubMod()
-            def forward(self, input):
-                fut = torch.jit.fork(self.mod, a, b=2)
-                return torch.jit.wait(fut)
-        input = torch.tensor(2)
-        mod = Mod()
-        assert mod(input) == torch.jit.script(mod).forward(input)
-    """
-    return torch._C.fork(func, *args, **kwargs)
-
-
-def wait(future):
-    """
-    Forces completion of a `torch.jit.Future[T]` asynchronous task, returning the
-    result of the task. See :func:`~fork` for docs and examples.
-    Arguments:
-        func (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
-    Returns:
-        `T`: the return value of the the completed task
-    """
-    return torch._C.wait(future)
 
 
 def freeze(mod, preserved_attrs : Optional[List[str]] = None):
