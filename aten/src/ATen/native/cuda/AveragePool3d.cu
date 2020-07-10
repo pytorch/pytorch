@@ -700,6 +700,7 @@ Tensor& avg_pool3d_backward_out_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
+  // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("avg_pool3d_backward_out_cuda");
   avg_pool3d_backward_out_cuda_template(
     gradInput,
@@ -724,6 +725,7 @@ Tensor avg_pool3d_backward_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
+  // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("avg_pool3d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   avg_pool3d_backward_out_cuda_template(

@@ -757,6 +757,7 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_out_cuda");
     gradInput.resize_as_(input);
     adaptive_avg_pool2d_backward_out_cuda_template(
@@ -768,6 +769,7 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // Nondeterministic because of atomicAdd usage
     globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_cuda");
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     adaptive_avg_pool2d_backward_out_cuda_template(
