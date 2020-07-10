@@ -95,9 +95,22 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
   c10::intrusive_ptr<torch::jit::Future> fut;
 
   py::gil_scoped_acquire acquire;
-  return hook_(state_, bucket)
-      .cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()
-      ->fut;
+
+  py::object py_fut = hook_(state_, bucket);
+
+  try {
+    return py_fut.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
+  } catch (const py::cast_error& e) {
+    auto type = py_fut.get_type();
+    auto errMsg = c10::str(
+        e.what(),
+        ". DDP communcation hook's callback must return a "
+        "torch.futures.Future object, but got ",
+        type.attr("__module__").cast<std::string>(),
+        ".",
+        type.attr("__qualname__").cast<std::string>());
+    throw std::runtime_error(errMsg);
+  }
 }
 
 std::vector<at::Tensor> PythonCommHook::processFuture(

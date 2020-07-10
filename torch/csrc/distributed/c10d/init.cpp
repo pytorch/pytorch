@@ -106,8 +106,17 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
+// PythonhookBinder has a static function called register_comm_hook
+// that enables registering a c10d PythonCommHook object to c10d
+// reducer from Python.
 class PythonHookBinder {
  public:
+  // This static method is called from DDP's Python API. Its inputs are
+  // a c10d reducer object, state, and callable comm_hook. State and
+  // comm_hook inputs are Python objects and this function creates a
+  // c10d PythonCommHook object using these inputs. It later calls
+  // register_comm_hook function of the reducer input to register that
+  // PythonCommHook object.
   static void register_comm_hook(
       ::c10d::Reducer& reducer,
       py::object state,

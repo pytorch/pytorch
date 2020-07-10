@@ -54,6 +54,9 @@ class Reducer {
     return backward_stats_;
   }
 
+  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // type to allow both Python and CPP hooks. This function can only
+  // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
  protected:
@@ -182,6 +185,15 @@ class Reducer {
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
   };
+
+  // This function is called inside `initialize_buckets` and
+  // `finalize_backward`. The function call in `initialize_bucket` creates views
+  // into the contents tensor for each variable's grad. Views serve as entry
+  // points to copy_ each grad's data in/out of the flat contents tensor. The
+  // function call in `finalize_backward` happens only if DDP communication hook
+  // was registered to recrate views with the result of `future_work`. Before
+  // `finalize_backward` call, views must be cleared.
+  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //

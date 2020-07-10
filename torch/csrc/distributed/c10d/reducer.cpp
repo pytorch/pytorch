@@ -180,7 +180,7 @@ Reducer::Reducer(
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
 // registered from Python API using `register_comm_hook`. `PythonCommHook`
-// enables registering a python hook and is a sub class of `CommHookInterface`.
+// enables registering a Python hook and is a sub class of `CommHookInterface`.
 // `CommHookInterface` can be used to implement CPP hooks in the future.
 
 Reducer::~Reducer() noexcept(false) {
@@ -589,6 +589,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       tensors.push_back(replica.contents);
     }
     // See Note [DDP Communication Hook]
+    // TODO(@sinannasir): merge `work` and `future_work`. Related to GH Issue
+    // #41266.
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
@@ -721,24 +723,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        for (size_t i = 0; i < replica.variables.size(); i++) {
-          const auto& v = replica.variables[i];
-          const auto offset = replica.offsets[i];
-          const auto length = replica.lengths[i];
-          if (v.is_non_overlapping_and_dense()) {
-            // If the param's memory is dense, match its layout, anticipating
-            // the autograd engine (AccumulateGrad) will also create gradients
-            // matching its layout.
-            replica.bucket_views.push_back(
-                replica.contents.as_strided(v.sizes(), v.strides(), offset));
-          } else {
-            // Fall back to a C-style contiguous view, again anticipating
-            // AccumulateGrad will do the same when stashing grads for non-dense
-            // params.
-            replica.bucket_views.push_back(
-                replica.contents.narrow(0, offset, length).view(v.sizes()));
-          }
-        }
+        initialize_bucketviews(replica, replica.contents);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -760,6 +745,30 @@ void Reducer::initialize_buckets(
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
     buckets_.push_back(std::move(bucket));
+  }
+}
+
+// (see Note:  "Gradient Layout Contract" in initialize_buckets).
+void Reducer::initialize_bucketviews(
+    Reducer::BucketReplica& replica,
+    at::Tensor& contents) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
+    const auto& v = replica.variables[i];
+    const auto offset = replica.offsets[i];
+    const auto length = replica.lengths[i];
+    if (v.is_non_overlapping_and_dense()) {
+      // If the param's memory is dense, match its layout, anticipating
+      // the autograd engine (AccumulateGrad) will also create gradients
+      // matching its layout.
+      replica.bucket_views.push_back(
+          contents.as_strided(v.sizes(), v.strides(), offset));
+    } else {
+      // Fall back to a C-style contiguous view, again anticipating
+      // AccumulateGrad will do the same when stashing grads for non-dense
+      // params.
+      replica.bucket_views.push_back(
+          contents.narrow(0, offset, length).view(v.sizes()));
+    }
   }
 }
 
@@ -944,10 +953,16 @@ void Reducer::finalize_backward() {
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
     if (comm_hook_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(bucket.work);
+      TORCH_INTERNAL_ASSERT(
+          bucket.work,
+          "Expected bucket.work not to be null. "
+          "This may indicate that allreduce hooks were not properly installed.");
       bucket.work->wait();
     } else {
-      TORCH_INTERNAL_ASSERT(bucket.future_work);
+      TORCH_INTERNAL_ASSERT(
+          bucket.future_work,
+          "Expected bucket.future_work not to be null. "
+          "This may indicate that communication hook was not properly installed.");
       bucket.future_work->wait();
 
       auto future_result =
@@ -958,18 +973,7 @@ void Reducer::finalize_backward() {
       for (size_t i = 0; i < future_result.size(); i++) {
         bucket.replicas[i].bucket_views.clear();
 
-        for (size_t j = 0; j < bucket.replicas[i].variables.size(); j++) {
-          const auto& v = bucket.replicas[i].variables[j];
-          const auto offset = bucket.replicas[i].offsets[j];
-          const auto length = bucket.replicas[i].lengths[j];
-          if (v.is_non_overlapping_and_dense()) {
-            bucket.replicas[i].bucket_views.push_back(
-                future_result[i].as_strided(v.sizes(), v.strides(), offset));
-          } else {
-            bucket.replicas[i].bucket_views.push_back(
-                future_result[i].narrow(0, offset, length).view(v.sizes()));
-          }
-        }
+        initialize_bucketviews(bucket.replicas[i], future_result[i]);
       }
     }
     if (!bucket.expect_sparse_gradient) {
@@ -1125,6 +1129,7 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   return rebuilt_bucket_indices;
 }
 
+// See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr, "register_comm_hook can only be called once.");

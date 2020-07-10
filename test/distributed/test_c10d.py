@@ -3017,15 +3017,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         self._run_and_verify_simple_hook(cpu_model)
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_future_passing_gpu(self):
+    def _test_ddp_comm_hook_future_passing_gpu(self, c10d_process_group):
         """
         This unit test verifies whether the Future object is passed properly.
         The callback function creates a Future object and sets a value to it.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = c10d_process_group(store, self.rank, self.world_size)
 
         # Test on GPU
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
@@ -3063,17 +3061,35 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
 
     @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_gloo(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using gloo backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupGloo)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_nccl(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using nccl backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupNCCL)
+
+    @requires_gloo()
     def test_ddp_invalid_comm_hook(self):
         """
         This unit test makes sure that register_comm_hook properly checks the format
         of hook defined by user. The Python hook must be callable. This test also
-        checks whether type of annotations checked properly.
+        checks whether type of annotations checked properly. Finally, it checks
+        whether an internal error is thrown if return type is incorrect and user hasn't
+        specified any return type annotation.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         model = DistributedDataParallel(
-            torch.nn.Linear(10, 5),
+            TestDdpCommHook(),
             process_group=process_group
         )
 
@@ -3089,6 +3105,17 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
             model._register_comm_hook(state=None, hook=comm_hook)
+
+        with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
+            def comm_hook(state: object, bucket: dist.GradBucket):
+                return 1
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+            # Run forward
+            output = model(8, self.rank)
+
+            # Run backward
+            output.mean().backward()
 
 
 class ReducerModule(nn.Module):

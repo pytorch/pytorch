@@ -2046,5 +2046,44 @@ void testFutures() {
   }
 }
 
+void testTLSFutureCallbacks() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  // test running callbacks with propagation of TLS state.
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
+    t.join();
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+          profilerEnabledCb();
+          return at::IValue(1);
+        }),
+        IntType::get());
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    t.join();
+    s2->wait();
+    torch::autograd::profiler::disableProfiler();
+  }
+}
+
 } // namespace jit
 } // namespace torch
