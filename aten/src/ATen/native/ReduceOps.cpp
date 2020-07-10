@@ -773,7 +773,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     }
     at::add_out(result1, real_out_var, imag_out_var);
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
@@ -952,6 +952,19 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
 
 Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
   return at::norm(self - other, p);
+}
+
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
+  auto mask = (self != 0);
+  return mask.sum(dims);
+}
+
+Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
+  if (dim){
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    return at::count_nonzero(self, IntArrayRef{wrap_dim});
+  }
+  return at::count_nonzero(self, IntArrayRef{});
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

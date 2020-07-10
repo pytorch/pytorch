@@ -1,5 +1,5 @@
-import torch.cuda.comm as comm
-from torch.cuda._utils import _get_device_index
+from . import comm
+from torch._utils import _get_device_index
 from torch.nn.modules.container import ParameterList, ParameterDict
 
 from collections import OrderedDict
@@ -22,7 +22,7 @@ def _init_script_module():
 
 def _is_jit_enabled():
     import torch.jit
-    return torch.jit._enabled
+    return torch.jit._state._enabled
 
 
 # Check if we can safely replicate the module.
@@ -131,6 +131,7 @@ def replicate(network, devices, detach=False):
                 # `parameters()` API from exposing the replicated parameters.
                 # Hence, we add a `_former_parameters` dict here to support DDP.
                 replica._former_parameters = OrderedDict()
+
             module_copies[j].append(replica)
             module_parent_indices[j].append(None)
 
