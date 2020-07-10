@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/serializer.h>
+#include <torch/csrc/jit/mobile/deserializer.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -58,28 +59,27 @@ void testLiteInterpreterAdd() {
   auto ref = m.run_method("add_it", minput);
 
   std::stringstream ss;
-  std::stringstream ss2;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   // testing serializer ----------------------------------------------------------------------
+  std::stringstream ss2;
   std::cerr << "parameter, orig: " << bc.parameters() << std::endl;
-  // run exportModule/writeArchive
+  torch::jit::mobile::ExportModule(bc, "/Users/annshan/models/add2.bc", true);
+  std::vector<at::Tensor> params = torch::jit::_load_mobile_data("/Users/annshan/models/add2.bc");
+  std::cerr << "parameters, after (using file): " << params << std::endl;
   torch::jit::mobile::ExportModule(bc, ss2, true);
-  // torch::jit::mobile::ExportModule(bc, "/Users/annshan/models/add2.bc", true);
-  // load again
-  mobile::Module bc2 = _load_for_mobile(ss2);
-  // mobile::Module bc2 = _load_for_mobile("/Users/annshan/models/add2.bc");
-  std::cerr << "parameter, after: " << bc2.parameters() << std::endl;
+  params = torch::jit::_load_mobile_data(ss2);
+  std::cerr << "parameters, after (using stream): " << params << std::endl;
   // end testing serializer ------------------------------------------------------------------
-  // IValue res;
-  // for (int i = 0; i < 3; ++i) {
-  //   auto bcinputs = inputs;
-  //   res = bc.run_method("add_it", bcinputs);
-  // }
+   IValue res;
+   for (int i = 0; i < 3; ++i) {
+     auto bcinputs = inputs;
+     res = bc.run_method("add_it", bcinputs);
+   }
 
-  // auto resd = res.toTensor().item<float>();
-  // auto refd = ref.toTensor().item<float>();
-  // AT_ASSERT(resd == refd);
+   auto resd = res.toTensor().item<float>();
+   auto refd = ref.toTensor().item<float>();
+   AT_ASSERT(resd == refd);
 }
 
 void testLiteInterpreterConv() {

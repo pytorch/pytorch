@@ -28,15 +28,6 @@ TORCH_API void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     bool bytecode_format = false);
 
-// Write the bytes of a pickle archive and the tensors referenced inside that
-// archive
-TORCH_API void writeArchiveAndTensors(
-    const std::string& archive_name,
-    const char* pickle_bytes,
-    size_t size,
-    const std::vector<at::Tensor>& tensors,
-    caffe2::serialize::PyTorchStreamWriter& out);
-
 } // namespace mobile
 } // namespace jit
 } // namespace torch

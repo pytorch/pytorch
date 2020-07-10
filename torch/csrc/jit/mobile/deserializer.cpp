@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/mobile/deserializer.h>
+
 #include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
@@ -44,133 +46,7 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-OpCode parseOpCode(const char* str);
-
-IValue expect_field(
-    IValue tup,
-    const std::string& expected_name,
-    size_t entry) {
-  auto row = tup.toTuple()->elements().at(entry).toTuple();
-  TORCH_INTERNAL_ASSERT(
-      row->elements().at(0).toStringRef() == expected_name,
-      "Expected ",
-      expected_name,
-      " found ",
-      row->elements().at(0).toStringRef());
-  return row->elements().at(1);
-}
-
-std::string operator_str(
-    const std::string& name,
-    const std::string& overloadname) {
-  std::string result = name;
-  if (!overloadname.empty()) {
-    result += "." + overloadname;
-  }
-  return result;
-}
-
 namespace {
-void print_unsupported_ops_and_throw(
-    const std::unordered_set<std::string>& unsupported_ops) {
-  std::string error_message("{");
-  for (const auto& op_name : unsupported_ops) {
-    error_message += op_name + ", ";
-  }
-  error_message += "}";
-  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
-}
-
-void parseMethods(
-    const std::vector<IValue>& vals,
-    mobile::CompilationUnit& mcu) {
-  TORCH_CHECK(
-      vals.size() > 0,
-      "Bytecode has no elements. ");
-  // Initialized with the version number when kProducedBytecodeVersion was
-  // introduced. The old models (some of them already in production) without
-  // version number don't have to be re-generated.
-  int64_t model_version = 0x3L;
-  size_t method_i_start = 0;
-  if (vals[0].isInt()) {
-    model_version = vals[0].toInt();
-    method_i_start = 1;
-  }
-  TORCH_CHECK(
-      model_version == caffe2::serialize::kProducedBytecodeVersion,
-      "Lite Interpreter verson number does not match. ",
-      "The code version is ",
-      caffe2::serialize::kProducedBytecodeVersion,
-      " but the model version is ",
-      model_version);
-
-  for (size_t i = method_i_start; i < vals.size(); ++i) {
-    const auto& element = vals[i];
-    const auto& m_tuple = element.toTuple()->elements();
-    const std::string& function_name = m_tuple[0].toStringRef();
-    IValue table = m_tuple[1];
-
-    auto function = std::unique_ptr<mobile::Function>(
-        new mobile::Function(c10::QualifiedName(function_name)));
-
-    const auto& ins_list =
-        expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
-            .toTuple()
-            ->elements();
-    const auto& ops_list =
-        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
-            .toTuple()
-            ->elements();
-    const auto& consts_list =
-        expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
-            .toTuple()
-            ->elements();
-    const auto& types_list =
-        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
-    const auto& register_size = expect_field(table, "register_size", 4).toInt();
-
-    for (const auto& ins : ins_list) {
-      auto ins_item = ins.toTuple()->elements();
-      TORCH_CHECK(
-          ins_item.size() == 3,
-          "There should be three parts in an instruction. The function name is ",
-          function_name);
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      int X = ins_item[1].toInt();
-      int N = ins_item[2].toInt();
-      function->append_instruction(op_code, X, N);
-    }
-
-    std::unordered_set<std::string> unsupported_op_names;
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(
-          op_item[0].toString()->string(), op_item[1].toString()->string());
-      if (!op_found) {
-        unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string()));
-      }
-    }
-    if (!unsupported_op_names.empty()) {
-      print_unsupported_ops_and_throw(unsupported_op_names);
-    };
-
-    for (const auto& constant : consts_list) {
-      function->append_constant(constant);
-    }
-
-    for (const auto& t : types_list) {
-      function->append_type(c10::parseType(t.toStringRef()));
-    }
-
-    function->set_register_size(register_size);
-
-    mcu.register_function(std::move(function));
-  }
-}
 
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
@@ -197,8 +73,8 @@ mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
-  parseMethods(bvals, *mcu);
+  // auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
+  // parseMethods(bvals, *mcu);
 
   return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
@@ -300,23 +176,21 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
-mobile::Module _load_for_mobile(
+std::vector<at::Tensor> _load_mobile_data(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device);
-  return module;
+  return _load_mobile_data(std::move(rai), device);
 }
 
-mobile::Module _load_for_mobile(
+std::vector<at::Tensor> _load_mobile_data(
     const std::string& filename,
     c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device);
-  return module;
+  return _load_mobile_data(std::move(rai), device);
 }
 
-mobile::Module _load_for_mobile(
+std::vector<at::Tensor> _load_mobile_data(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
@@ -331,7 +205,7 @@ mobile::Module _load_for_mobile(
     if (observer) {
       observer->onExitLoadModel(name);
     }
-    return result;
+    return result.parameters();
   } catch (const std::exception& ex) {
     if (observer) {
       observer->onFailLoadModel(

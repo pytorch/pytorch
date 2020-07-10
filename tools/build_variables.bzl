@@ -315,6 +315,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/serializer.cpp",
+    "torch/csrc/jit/mobile/deserializer.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
     "torch/csrc/jit/serialization/export.cpp",
