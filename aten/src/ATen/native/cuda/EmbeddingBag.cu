@@ -250,6 +250,25 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
+                   const Tensor &offsets, const bool scale_grad_by_freq,
+                   const int64_t mode, bool sparse,
+                   const Tensor& per_sample_weights,
+                   bool include_last_offset) {
+  return _embedding_bag_cuda(
+      weight,
+      indices,
+      offsets,
+      scale_grad_by_freq,
+      mode,
+      sparse,
+      per_sample_weights,
+      include_last_offset);
+}
+
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse,

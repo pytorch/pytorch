@@ -8,10 +8,10 @@
 #include <exception>
 #include <functional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <typeinfo>
 #include <vector>
-#include <sstream>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
@@ -32,8 +32,8 @@
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/TensorBody.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -240,10 +240,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor = caffe2::Tensor(output);
-    if (!tensor.defined() || tensor.GetDeviceType() != type) {
+    if (!output.defined() || caffe2::Tensor(output).GetDeviceType() != type) {
       // Fix tensor type
-      tensor = Tensor(type);
+      Tensor tensor = Tensor(type);
       output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
     output_tensors_[idx] = caffe2::Tensor(output);
@@ -301,8 +300,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor =
-        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
+    Tensor tensor = output.defined()
+        ? GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options)
+        : caffe2::empty(dims, options);
     // assign it back in case it changed
     output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 

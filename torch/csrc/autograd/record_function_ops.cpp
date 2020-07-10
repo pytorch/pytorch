@@ -53,18 +53,16 @@ void record_function_exit(const at::Tensor& handle) {
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
-  // Save and pass thread local state into the callback
-  at::ThreadLocalState tls_state;
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
   std::function<c10::IValue(void)> futureProfilingFunc =
-      [fut, handle, tls_state = std::move(tls_state)]() {
+      [fut, handle]() {
         TORCH_INTERNAL_ASSERT(
             handle.defined(),
             "Undefined RecordFunction handle. This can happen if the handle is "
             "not correctly persisted and is destroyed before the future is "
             "realized.");
-        at::ThreadLocalStateGuard g(tls_state);
+
         auto& rec = getRecordFunctionFromTensor(handle);
         rec.end();
         // Note: this future is returned to the user to ensure that a call to wait()
@@ -74,7 +72,10 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         return fut->constValue();
       };
   // Define a future that completes after the profiling callbacks are run.
-  auto profiledFut = fut->then(futureProfilingFunc, fut->elementType());
+  auto profiledFut = fut->then(at::wrapPropagateTLSState<c10::IValue>(
+      futureProfilingFunc),
+      fut->elementType()
+      );
   return profiledFut;
 }
 
