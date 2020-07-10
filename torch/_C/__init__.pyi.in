@@ -243,7 +243,7 @@ class _TensorBase(object):
     real: Tensor
     imag: Tensor
     T: Tensor
-    _version: _bool
+    _version: _int
     _base: Optional[Tensor]
     grad_fn: Any
     ${tensor_method_hints}

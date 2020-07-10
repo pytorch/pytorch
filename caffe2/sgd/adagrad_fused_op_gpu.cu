@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+#include <c10/core/GeneratorImpl.h>
 #include <algorithm>
 
 #include "caffe2/sgd/adagrad_fused_op_gpu.cuh"
@@ -635,6 +637,9 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        round_option_((roundOption)this->template GetSingleArgument<int>(
+            "round_option",
+            NEAREST)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
     VLOG(1) << "gradient optimization operator in use: "
@@ -720,50 +725,107 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
     auto maxThreads =
         GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
+    ulong2 seed;
 
+    // 0: nearest rounding
+    // 1: stochastic rounding
+    if (round_option_) {
+      seed.x = default_rng_seed_val;
+      seed.y = maxThreads * post;
+    }
     if (post <= maxThreads / 2 && post % 32 == 0) {
       // Fast path when the embedding dimension is a multiple of 32, using
       // WarpReduce.
       int multiple = std::min(maxThreads / post, SEGREDUCE_MINBLOCKS);
       dim3 block(post, multiple);
+      if (round_option_) {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            true,
+            STOCHASTIC><<<len_length, block, 0, context_.cuda_stream()>>>(
+            prefix_sum_length_data,
+            N,
+            post,
+            len_length,
+            epsilon_,
+            paramOut,
+            momentOut,
+            indices,
+            grad,
+            lr,
+            seed,
+            weight_decay_);
+      } else {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            true,
+            NEAREST><<<len_length, block, 0, context_.cuda_stream()>>>(
+            prefix_sum_length_data,
+            N,
+            post,
+            len_length,
+            epsilon_,
+            paramOut,
+            momentOut,
+            indices,
+            grad,
+            lr,
+            seed,
+            weight_decay_);
+      }
 
-      rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
-          IndexType,
-          TParam,
-          T,
-          true><<<len_length, block, 0, context_.cuda_stream()>>>(
-          prefix_sum_length_data,
-          N,
-          post,
-          len_length,
-          epsilon_,
-          paramOut,
-          momentOut,
-          indices,
-          grad,
-          lr,
-          weight_decay_);
     } else {
-      rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
-          IndexType,
-          TParam,
-          T,
-          false>
-          <<<len_length,
-             std::min(maxThreads, post),
-             0,
-             context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              post,
-              len_length,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              grad,
-              lr,
-              weight_decay_);
+      if (round_option_) {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            STOCHASTIC>
+            <<<len_length,
+               std::min(maxThreads, post),
+               0,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                post,
+                len_length,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                grad,
+                lr,
+                seed,
+                weight_decay_);
+      } else {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            NEAREST>
+            <<<len_length,
+               std::min(maxThreads, post),
+               0,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                post,
+                len_length,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                grad,
+                lr,
+                seed,
+                weight_decay_);
+      }
     }
 
     return true;
@@ -776,6 +838,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
  protected:
   T epsilon_;
+  roundOption round_option_;
   T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
