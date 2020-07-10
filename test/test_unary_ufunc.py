@@ -32,7 +32,8 @@ if TEST_SCIPY:
 _bool_finites = [True, False]
 _unsigned_int_finites = [0, 1, 55, 127]
 _int_finites = [0, -1, 1, -55, 55, -127, 127]
-_float_finites = [0., -.001, .001, -.25, .25, -1., 1., -math.pi, math.pi]
+_float_finites = [0., -.001, .001, -.25, .25, -1., 1.,
+                  -math.pi + .00001, math.pi - .00001, -math.pi, math.pi]
 _float_nonfinites = [float('inf'), float('-inf'), float('nan')]
 _complex_finites = list(complex(x, y) for x, y in product(_float_finites, _float_finites))
 _complex_nonfinites = list(complex(x, y) for x, y in (product(_float_nonfinites + [0], _float_nonfinites + [0])))
@@ -289,13 +290,15 @@ class TestUnaryUfuncs(TestCase):
     def test_asinh(self, device, dtype):
         self._test_unary_ufunc('asinh', device, dtype, ref=np.arcsinh)
 
-    # Note: tan(bfloat16) is implemented on the CPU but incredibly innacurate
-    #   near the limits of the domain, so it is not tested
-    # See https://github.com/pytorch/pytorch/issues/41237
+    # TODO: write a bfloat16-specific test
+    # Note: tan(bfloat16) has a very high tolerance since it's being
+    #   compared with np.float32 and can't represent values in the codomain
+    #   of this test well.
     # Note: CUDAtan(complex) doesn't handle nonfinite values properly
     # See https://github.com/pytorch/pytorch/issues/41244
+    @precisionOverride({torch.bfloat16: 4})
     @dtypesIfCUDA(*_float_and_complex_types_plus_half)
-    @dtypes(*_float_and_complex_types)
+    @dtypes(*_float_and_complex_types_plus_bfloat16)
     def test_tan(self, device, dtype):
         self._test_unary_ufunc('tan', device, dtype,
                                low=(-math.pi / 2), high=(math.pi / 2),

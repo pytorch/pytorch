@@ -362,6 +362,7 @@ if TEST_NUMPY:
 
     # Dict of torch dtype -> NumPy dtype
     torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+    torch_to_numpy_dtype_dict[torch.bfloat16] = np.float32
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
