@@ -1,9 +1,12 @@
 #pragma once
 
-#include <tensorpipe/core/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
+
+namespace tensorpipe {
+class Message;
+} // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
