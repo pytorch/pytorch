@@ -496,7 +496,7 @@ graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
-  std::string cat_quantized_cpu = R"(
+  std::string quantized_cat = R"(
 graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
          %r_quant = quantized::cat(%input_quant, %dim, %r_scale, %r_zero_point)
          return (%r_quant) )";
@@ -923,7 +923,7 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
        quantized_add_scalar_relu_out_replacement},
       {"quantized::add", add, quantized_add, {aten_add_alpha_is_one}},
       {"quantized::add", inplace_add, quantized_add, {aten_add_alpha_is_one}},
-      {"quantized::cat", cat, cat_quantized_cpu},
+      {"quantized::cat", cat, quantized_cat},
       {"quantized::batch_norm", batch_norm, quantized_batch_norm},
       {"quantized::batch_norm_relu",
        batch_norm_relu,
