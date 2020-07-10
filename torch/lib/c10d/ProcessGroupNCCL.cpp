@@ -661,7 +661,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
-  std::vector<at::cuda::CUDAStream&>& streams = cudaStreams.has_value() ? cudaStreams.value() : ncclStreams_[key];
+  auto& streams = cudaStreams.has_value() ? cudaStreams.value() : ncclStreams_[key];
 
   // Check the size of the streams vector (this is necessary when we're using
   // the user-supplied CUDA streams).
