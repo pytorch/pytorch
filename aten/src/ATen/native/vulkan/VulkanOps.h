@@ -29,6 +29,10 @@ void adaptive_avg_pool2d(
     int64_t _N,
     int64_t _C);
 
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape);
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
