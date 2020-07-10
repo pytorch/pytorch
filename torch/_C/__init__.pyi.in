@@ -59,6 +59,7 @@ class iinfo:
     bits: _int
     min: _int
     max: _int
+    dtype: str
 
     def __init__(self, dtype: _dtype) -> None: ...
 
@@ -68,6 +69,8 @@ class finfo:
     max: _float
     eps: _float
     tiny: _float
+    resolution: _float
+    dtype: str
 
     @overload
     def __init__(self, dtype: _dtype) -> None: ...
