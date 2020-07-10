@@ -2874,6 +2874,37 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
+    @unittest.skip("Enable once jit trace Tensor.numel as constant is fixed.")
+    def test_embedding_bag_dynamic(self):
+        class EmbeddingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedd = torch.nn.EmbeddingBag(50, 12, mode='sum')
+
+            def forward(self, x_user):
+                user = self.embedd(x_user)
+                return user
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (10, 5))
+        y = torch.randint(10, (20, 5))
+        self.run_test(model, x, test_with_inputs=[y],
+                      input_names=['input'],
+                      output_names=['output'],
+                      dynamic_axes={'input': [0],
+                                    'output': [0]
+                                    })
+
+    def test_embedding_bag(self):
+        model = torch.nn.EmbeddingBag(10, 5, mode='mean', sparse=True)
+        input = torch.randint(10, (7,))
+        offset = torch.tensor([0, 2, 5])
+        self.run_test(model, (input, offset))
+
+        model = torch.nn.EmbeddingBag(10, 5, mode='max')
+        input = torch.randint(10, (7, 5))
+        self.run_test(model, (input))
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):

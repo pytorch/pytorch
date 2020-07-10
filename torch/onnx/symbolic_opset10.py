@@ -6,6 +6,7 @@ import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
+from sys import maxsize
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
@@ -178,3 +179,69 @@ def flip(g, input, dims):
 
 def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
+
+
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse,
+                  per_sample_weights,
+                  include_last_offset):
+    from torch.onnx.symbolic_opset9 import size, div
+
+    if not sym_help._is_none(per_sample_weights):
+        return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
+
+    if offsets.type().sizes() is not None:
+        if indices.type().sizes() is not None and embedding_matrix.type().sizes() is not None \
+                    and (indices.type().sizes()[0] == embedding_matrix.type().sizes()[0]):
+
+            embeddings = g.op("Gather", embedding_matrix, indices)
+            dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
+            dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))),
+                       size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0]))))
+            dim_2 = size(g, embedding_matrix, g.op("Constant", value_t=torch.LongTensor([1])))
+
+            shape = [dim_0, dim_1, dim_2]
+            shape = g.op("Concat", *shape, axis_i=0)
+
+            embeddings = g.op("Reshape", embeddings, shape)
+            if mode == 0:
+                embeddings = g.op("ReduceSum", embeddings, axes_i=[1], keepdims_i=0)
+            elif mode == 1:
+                embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
+            else:
+                embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
+            return embeddings, None, None, None
+        else:
+            from torch.onnx.symbolic_opset9 import select
+
+            offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
+            offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
+
+            list_ = []
+            for i in range(offsets.type().sizes()[0]):
+                start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
+                end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i+1)), axes_i=[0])
+                axes_ = g.op("Constant", value_t=torch.tensor([0]))
+                indices_row = g.op("Slice", indices, start_, end_, axes_)
+
+                embeddings = g.op("Gather", embedding_matrix, indices_row)
+                if mode == 0:
+                    embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+                elif mode == 1:
+                    embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+                else:
+                    embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+
+                embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
+                list_.append(embeddings)
+
+        output = g.op("Concat", *list_, axis_i=0)
+        return output, None, None, None
+    else:
+        return sym_help._onnx_unsupported('embedding_bag')
