@@ -328,7 +328,7 @@ void findFusionGroups(Block* b, std::vector<Node*>& fusion_groups) {
   }
 }
 
-std::vector<Node*> FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -378,9 +378,7 @@ std::vector<Node*> FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
   std::vector<Node*> fusion_group_list;
-  findFusionGroups(graph->block(), fusion_group_list);
   GRAPH_DUMP("After TExprFuser: ", graph);
-  return fusion_group_list;
 }
 
 Operation createTensorExprOp(const Node* node) {

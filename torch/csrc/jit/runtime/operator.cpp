@@ -225,6 +225,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
+      Symbol::fromQualString("tensorexpr::wrapper"), // optimization pass adds it,
       prim::FunctionalGraph, // optimization pass adds it,
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
@@ -264,6 +265,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      Symbol::fromQualString("tensorexpr::wrapper"),
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,

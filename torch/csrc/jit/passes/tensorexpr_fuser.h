@@ -11,7 +11,7 @@ namespace jit {
 struct Graph;
 
 // Run TensorExpressions-based fuser.
-TORCH_API std::vector<Node*> FuseTensorExprs(std::shared_ptr<Graph>& graph);
+TORCH_API void FuseTensorExprs(std::shared_ptr<Graph>& graph);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();

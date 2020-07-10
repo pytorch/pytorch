@@ -548,6 +548,9 @@ void AliasDb::analyzeImpl(Node* node) {
       // These ops do nothing
       return;
     default:
+      if (node->kind() == Symbol::fromQualString("tensorexpr::wrapper")) {
+        return analyzeSubgraph(node);
+      }
       if (tryRegisteredAnalysis(node)) {
         return;
       }
