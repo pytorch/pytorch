@@ -185,7 +185,7 @@ Stochastic Weight Averaging
 :func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA batch 
 normalization statistics at the end of training.
 
-SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_
+SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
 .. _`Averaging Weights Leads to Wider Optima and Better Generalization` https://arxiv.org/abs/1803.05407
 
