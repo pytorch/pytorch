@@ -239,7 +239,6 @@ vector :math:`c+dj \in C` as:
 where
 
     .. math::
-
         J = \begin{bmatrix}
             \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
             \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
