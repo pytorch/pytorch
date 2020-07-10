@@ -5,10 +5,7 @@ torch.utils.mobile_optimizer
     This API is in beta and may change in the near future.
 
 Torch mobile supports ``torch.mobile_optimizer.optimize_for_mobile`` utility to run a list of optimization pass with modules in eval mode.
-The method takes the following parameters:
-    - A torch.jit.ScriptModule object
-    - A blacklisted optimization set
-    - A preserved method list
+The method takes the following parameters: a torch.jit.ScriptModule object, a blacklisted optimization set and a preserved method list
 
 By default, if optimization blacklist is None or empty, ``optimize_for_mobile`` will run the following optimizations:
     - **MobileOptimizerType::CONV_BN_FUSION**:  This optimization pass folds ``Conv2d-BatchNorm2d`` into ``Conv2d`` in ``forward`` method of this module and all its submodules. The weight and bias of the ``Conv2d`` are correspondingly updated.
