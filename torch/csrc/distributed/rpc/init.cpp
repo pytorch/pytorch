@@ -733,6 +733,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
         inst.setCurrentKey(key);
       });
 
+  module.def(
+      "_enable_jit_rref_pickle",
+      &enableJitRRefPickle,
+      R"(
+        Allows ``torch.jit.save`` to save a ``torch.jit.ScriptModule`` with
+        pickled RRefs out of RPC contexts.
+
+
+        .. warning::
+            This is dangerous. If the module contains RRefs, the pickled
+            result must be sent over RPC and get unpickled on the receiving side
+            to restore the module. Otherwise, there will be RRef leaks, which
+            can potentially lead to program hang. When using this API, it is
+            applications responsibility to make sure that the above assumption
+            always holds.
+      )");
+  module.def(
+      "_disable_jit_rref_pickle",
+      &disableJitRRefPickle);
+
   Py_RETURN_TRUE;
 }
 

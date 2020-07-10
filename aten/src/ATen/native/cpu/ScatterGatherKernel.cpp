@@ -3,7 +3,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
-#include <unordered_map>
 
 namespace at { namespace native {
 

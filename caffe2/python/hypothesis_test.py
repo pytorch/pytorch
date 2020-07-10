@@ -778,7 +778,7 @@ class TestOperators(hu.HypothesisTestCase):
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs)
+           **hu.gcs_no_hip)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
