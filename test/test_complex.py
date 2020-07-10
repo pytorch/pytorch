@@ -37,7 +37,7 @@ class TestComplexTensor(TestCase):
         angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], device=device, dtype=dtype)
         z = torch.complex_polar(abs, angle)
         complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-        self.assertEqual(torch.tensor([0+1.0j, -1.41421356237-1.41421356237j],
+        self.assertEqual(torch.tensor([0 + 1.0j, -1.41421356237 - 1.41421356237j],
                                       dtype=complex_dtype),
                          z, atol=1e-5, rtol=1e-5)
 
@@ -50,7 +50,7 @@ class TestComplexTensor(TestCase):
         else:
             error = r"\"complex_polar_cpu\" not implemented for '[A-Za-z]+'"
         with self.assertRaisesRegex(RuntimeError, error):
-            z = torch.complex_polar(abs, angle)
+            torch.complex_polar(abs, angle)
 
 instantiate_device_type_tests(TestComplexTensor, globals())
 
