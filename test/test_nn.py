@@ -1203,7 +1203,7 @@ class TestNN(NNTestCase):
             'fc4': nn.Linear(5, 5),
             'act3': nn.Sigmoid()
         }
-        modules.update(sorted(next_modules.items()))
+        modules.update(next_modules.items())
         module_dict.update(next_modules)
         check()
 
@@ -8714,6 +8714,21 @@ class TestFusionEval(TestCase):
         Y_hat = conv_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
+
+
+class TestAddRelu(TestCase):
+    def test_add_relu(self):
+        a = torch.rand((7, 11))
+        b = torch.rand((7, 11))
+        a = a.float()
+        b = b.float()
+        a = a * -10
+        a = a + 5
+        add_res = a + b
+        relu_res = torch.relu(add_res)
+        add_relu_res = torch.add_relu(a, b)
+
+        self.assertTrue(torch.allclose(add_relu_res, relu_res))
 
 
 def add_test(test, decorator=None):
