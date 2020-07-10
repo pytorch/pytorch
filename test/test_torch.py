@@ -16915,7 +16915,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = 1.0 if dtype == torch.int64 else 1
         r = a.remainder(b)
         self.assertEqual(r.dtype, a.dtype)
-    
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -16925,7 +16925,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         actual = torch.gcd(t1, t2)
         expected = np.gcd([0, 10, 0], [0, 0, 10])
         self.assertEqual(actual, expected)
-    
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
