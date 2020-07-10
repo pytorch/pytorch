@@ -204,7 +204,16 @@ TEST(VulkanTest, mean) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
-enum class OpType { conv2d, hardtanh_, mean, addmm, mm, adaptive_avg_pool2d, reshape, add };
+enum class OpType {
+  conv2d,
+  hardtanh_,
+  mean,
+  addmm,
+  mm,
+  adaptive_avg_pool2d,
+  reshape,
+  add
+};
 
 class BaseOp {
  public:
@@ -270,8 +279,7 @@ class Addmm : public BaseOp {
 
 class Mm : public BaseOp {
  public:
-  Mm(c10::IntArrayRef m2Sizes)
-      : BaseOp(OpType::mm) {
+  Mm(c10::IntArrayRef m2Sizes) : BaseOp(OpType::mm) {
     m2 = at::rand(m2Sizes, at::device(at::kCPU).dtype(at::kFloat));
     m2v = m2.vulkan();
   }
@@ -295,7 +303,7 @@ class AdaptiveAvgPool2d : public BaseOp {
  public:
   AdaptiveAvgPool2d(std::vector<int64_t> outputSizes)
       : BaseOp(OpType::adaptive_avg_pool2d),
-      outputSizes_(std::move(outputSizes)) {}
+        outputSizes_(std::move(outputSizes)) {}
 
   at::Tensor run(at::Tensor& t) override {
     return at::adaptive_avg_pool2d(t, outputSizes_);
@@ -311,8 +319,7 @@ class AdaptiveAvgPool2d : public BaseOp {
 class Reshape : public BaseOp {
  public:
   Reshape(std::vector<int64_t> shape)
-      : BaseOp(OpType::reshape),
-      shape_(std::move(shape)) {}
+      : BaseOp(OpType::reshape), shape_(std::move(shape)) {}
 
   at::Tensor run(at::Tensor& t) override {
     return at::reshape(t, shape_);
@@ -555,8 +562,7 @@ TEST(VulkanTest, OpsList2) {
   std::vector<int64_t> lhs = {1000};
   ops.emplace_back(new Add(lhs));
   OpsList opsList(ops);
-  auto t_in =
-      at::rand({1, 320, 7, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in = at::rand({1, 320, 7, 7}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_out_expected = opsList.run(t_in);
 
   auto tv_in = t_in.vulkan();

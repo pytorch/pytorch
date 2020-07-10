@@ -105,7 +105,6 @@ class VulkanTensor final {
   }
 
   std::vector<int64_t> sizes() const;
-  void resize(std::vector<int64_t> sizes);
   std::vector<int64_t> strides() const;
   int64_t dim() const;
   int64_t numel() const;
@@ -388,6 +387,11 @@ void createDescriptorSetLayoutSinglePool(
     VkDescriptorSetLayout* descrSetLayout,
     VkDescriptorPool* descrPool,
     VkDescriptorSet* descrSet);
+
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer);
+void beginCommandBuffer(VkCommandBuffer commandBuffer);
+void endCommandBuffer(VkCommandBuffer commandBuffer);
+void submitAndWaitCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer);
 
 struct WorkGroupSize {
   uint32_t x;

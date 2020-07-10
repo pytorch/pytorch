@@ -696,6 +696,50 @@ void createDescriptorSetLayoutSinglePool(
   allocateDescriptorSet(device, *descrPool, descrSetLayout, descrSet);
 }
 
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer) {
+  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
+  commandBufferAllocateInfo.sType =
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  commandBufferAllocateInfo.commandPool = context().commandPool();
+  commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  commandBufferAllocateInfo.commandBufferCount = 1;
+
+  VK_CHECK(vkAllocateCommandBuffers(
+      device, &commandBufferAllocateInfo, commandBuffer));
+}
+
+void beginCommandBuffer(VkCommandBuffer commandBuffer) {
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+}
+
+void endCommandBuffer(VkCommandBuffer commandBuffer) {
+  VK_CHECK(vkEndCommandBuffer(commandBuffer));
+}
+
+void submitAndWaitCommandBuffer(
+    VkDevice device,
+    VkQueue queue,
+    VkCommandBuffer commandBuffer) {
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+
+  VkFence fence;
+  VkFenceCreateInfo fenceCreateInfo{};
+  fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fenceCreateInfo.flags = 0;
+  VK_CHECK(vkCreateFence(device, &fenceCreateInfo, NULL, &fence))
+
+  VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
+  vkWaitForFences(device, 1, &fence, VK_TRUE, ComputeUnit::kFenceTimeoutNanos);
+
+  vkDestroyFence(device, fence, NULL);
+}
+
 ComputeUnit::~ComputeUnit() {
   vkDestroyShaderModule(context().device(), computeShaderModule_, nullptr);
   vkDestroyPipelineLayout(context().device(), pipelineLayout_, nullptr);
@@ -800,20 +844,8 @@ void ComputeUnit::createComputePipelineCompile(
 
 void ComputeUnit::createCommandBuffer(VkDescriptorSet& descriptorSet) {
   auto device = context().device();
-  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
-  commandBufferAllocateInfo.sType =
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  commandBufferAllocateInfo.commandPool = context().commandPool();
-  commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  commandBufferAllocateInfo.commandBufferCount = 1;
-
-  VK_CHECK(vkAllocateCommandBuffers(
-      device, &commandBufferAllocateInfo, &commandBuffer_));
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  VK_CHECK(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
+  allocateCommandBuffer(device, &commandBuffer_);
+  beginCommandBuffer(commandBuffer_);
 
   vkCmdBindPipeline(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
   vkCmdBindDescriptorSets(
@@ -858,7 +890,7 @@ void ComputeUnit::dispatchCommandBuffer(
 }
 
 void ComputeUnit::endCommandBuffer() {
-  VK_CHECK(vkEndCommandBuffer(commandBuffer_));
+  at::native::vulkan::detail::endCommandBuffer(commandBuffer_);
 }
 
 void ComputeUnit::dispatchCommandBuffer(
@@ -873,21 +905,8 @@ void ComputeUnit::dispatchCommandBuffer(
 }
 
 void ComputeUnit::submitAndWaitCommandBuffer() {
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer_;
-
-  VkFence fence;
-  VkFenceCreateInfo fenceCreateInfo{};
-  fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fenceCreateInfo.flags = 0;
-  VK_CHECK(vkCreateFence(context().device(), &fenceCreateInfo, NULL, &fence))
-
-  VK_CHECK(vkQueueSubmit(context().queue(), 1, &submitInfo, fence));
-  vkWaitForFences(context().device(), 1, &fence, VK_TRUE, kFenceTimeoutNanos);
-
-  vkDestroyFence(context().device(), fence, NULL);
+  at::native::vulkan::detail::submitAndWaitCommandBuffer(
+      context().device(), context().queue(), commandBuffer_);
 }
 
 VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
@@ -1022,20 +1041,9 @@ void copy_buffer_to_buffer(
     VkDeviceSize size) {
   auto device = context().device();
   VkCommandBuffer commandBuffer{};
-  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
-  commandBufferAllocateInfo.sType =
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  commandBufferAllocateInfo.commandPool = context().commandPool();
-  commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  commandBufferAllocateInfo.commandBufferCount = 1;
+  allocateCommandBuffer(device, &commandBuffer);
+  beginCommandBuffer(commandBuffer);
 
-  VK_CHECK(vkAllocateCommandBuffers(
-      device, &commandBufferAllocateInfo, &commandBuffer));
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
   VkBufferCopy copyRegion{};
   copyRegion.srcOffset = 0;
   copyRegion.dstOffset = 0;
@@ -1046,22 +1054,9 @@ void copy_buffer_to_buffer(
       dstBuffer.vkbuffer(),
       1,
       &copyRegion);
-  VK_CHECK(vkEndCommandBuffer(commandBuffer));
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
 
-  VkFence fence;
-  VkFenceCreateInfo fenceCreateInfo{};
-  fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fenceCreateInfo.flags = 0;
-  VK_CHECK(vkCreateFence(context().device(), &fenceCreateInfo, NULL, &fence))
-
-  VK_CHECK(vkQueueSubmit(context().queue(), 1, &submitInfo, fence));
-  vkWaitForFences(
-      context().device(), 1, &fence, VK_TRUE, ComputeUnit::kFenceTimeoutNanos);
-  vkDestroyFence(context().device(), fence, NULL);
+  endCommandBuffer(commandBuffer);
+  submitAndWaitCommandBuffer(device, context().queue(), commandBuffer);
 }
 
 // VulkanTensor
@@ -1079,12 +1074,6 @@ class VulkanTensor::Impl final {
     TORCH_CHECK(
         initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
   }
-
-  Impl(Impl&&) = default;
-  Impl& operator=(Impl&&) = default;
-
-  Impl(const Impl&) = delete;
-  Impl& operator=(const Impl&) = delete;
 
   std::vector<int64_t> sizes() const {
     return sizes_;
