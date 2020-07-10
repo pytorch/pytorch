@@ -93,9 +93,6 @@ class DataLoader(Generic[T_co]):
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
-        prefetch_factor (int, optional): Number of sample loaded in advance by each worker.
-            ``2`` means there will be a total of 2 * num_workers samples prefetched 
-            across all workers. (default: ``2``)
         collate_fn (callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
@@ -112,6 +109,9 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
+        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded 
+            in advance by each worker. ``2`` means there will be a total of 
+            2 * num_workers samples prefetched across all workers. (default: ``2``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -143,19 +143,19 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
-    prefetch_factor: int
     sampler: Sampler
+    prefetch_factor: int
 
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
-                 num_workers: int = 0, prefetch_factor: int = 2, 
-                 collate_fn: _collate_fn_t = None, pin_memory: bool = False, 
-                 drop_last: bool = False, timeout: float = 0, 
-                 worker_init_fn: _worker_init_fn_t = None,
-                 multiprocessing_context=None, generator=None):
+                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
+                 pin_memory: bool = False, drop_last: bool = False, 
+                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 multiprocessing_context=None, generator=None, 
+                 *, prefetch_factor: int = 2):
         torch._C._log_api_usage_once("python.data_loader")  # type: ignore
 
         if num_workers < 0:
