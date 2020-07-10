@@ -183,8 +183,11 @@ Stochastic Weight Averaging
 :class:`torch.optim.swa_utils.AveragedModel` class implements SWA models, 
 :class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and 
 :func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA batch 
-normalization statistics at the end of training. 
+normalization statistics at the end of training.
 
+SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_
+
+.. _`Averaging Weights Leads to Wider Optima and Better Generalization` https://arxiv.org/abs/1803.05407
 
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
