@@ -105,8 +105,8 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
                                                     // (offsets for the
                                                     // segments)
     int N, // number of rows (hash size) of embedding table
-    int post, // embedding dimension size
-    int len_length, // number of segments
+    int block_size, // embedding dimension size
+    int num_lengths, // number of segments
     const float epsilon,
     TParam* param,
     T* param_mom,
@@ -116,7 +116,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     ulong2 seed,
     float weight_decay = 0.f) {
   const float LR = lr[0];
-  // len_length blocks, each block process one segment
+  // num_lengths blocks, each block process one segment
   int group = blockIdx.x; // the group-th segment
   int start = group == 0
       ? 0
@@ -136,7 +136,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     // Allocate WarpReduce shared memory for 32 warps, 1024 / 32 = 32
     __shared__ typename WarpReduce::TempStorage temp_storage[32];
 
-    const size_t gradIdx = group * post + threadIdx.x; // index for grad
+    const size_t gradIdx = group * block_size + threadIdx.x; // index for grad
     for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
       // line: the idx in the indices
       // threadIdx.x: index in the embedding dimension
@@ -145,8 +145,9 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       float sum_squares = 0.0;
       __shared__ float row_sum_squares_avg;
 
-      // post == blockDim.x
-      const size_t paramIdx = index * post + threadIdx.x; // index for param
+      // block_size == blockDim.x
+      const size_t paramIdx =
+          index * block_size + threadIdx.x; // index for param
       const float x_ij = grad[gradIdx] +
           weight_decay * rand_factor.convertTypeFromSrcToDest(param[paramIdx]);
       sum_squares += x_ij * x_ij;
@@ -156,7 +157,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       float reduce_result = WarpReduce(temp_storage[warp_id]).Sum(sum_squares);
 
       if ((threadIdx.y * blockDim.x + threadIdx.x) % 32 == 0) {
-        row_sum_squares_avg = reduce_result / static_cast<float>(post);
+        row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
         // AtomicAdd when the embedding dim is larger than 32.
         // param_mom[index] += row_sum_squares_avg;
         gpuAtomicAdd(&param_mom[index], static_cast<T>(row_sum_squares_avg));
@@ -172,7 +173,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     // TODO: Tuning NumThreads for sum_squares
     typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
     __shared__ BlockReduce::TempStorage temp_storage;
-    int valid = min(post, blockDim.x);
+    int valid = min(block_size, blockDim.x);
 
     for (int line = start; line < end; ++line) {
       // line: the idx in the indices
@@ -180,17 +181,17 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       float sum_squares = 0.0;
       __shared__ float row_sum_squares_avg;
 
-      for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
         // i: index in the embedding dimension
-        const float x_ij = grad[group * post + i] +
+        const float x_ij = grad[group * block_size + i] +
             weight_decay *
-                rand_factor.convertTypeFromSrcToDest(param[index * post + i]);
+                rand_factor.convertTypeFromSrcToDest(param[index * block_size + i]);
         sum_squares += x_ij * x_ij;
       }
       float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
 
       if (threadIdx.x == 0) {
-        row_sum_squares_avg = reduce_result / static_cast<float>(post);
+        row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
         float mom_new = param_mom[index] + static_cast<T>(row_sum_squares_avg);
         param_mom[index] = mom_new;
       }
@@ -198,9 +199,9 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       // update param
       float step = LR / (sqrtf(param_mom[index]) + epsilon);
-      for (int i = threadIdx.x; i < post; i += blockDim.x) {
-        size_t paramIdx = index * post + i; // index for param
-        float x_ij = grad[group * post + i] +
+      for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
+        size_t paramIdx = index * block_size + i; // index for param
+        float x_ij = grad[group * block_size + i] +
             weight_decay *
                 rand_factor.convertTypeFromSrcToDest(param[paramIdx]);
         float param_new =
