@@ -1,13 +1,10 @@
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ComplexHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native {
 namespace {
-
-using namespace vec256;
 
 void complex_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(), "complex_cpu", [&]() {

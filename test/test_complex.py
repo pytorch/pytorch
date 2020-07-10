@@ -1,3 +1,5 @@
+import numpy as np
+
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -20,36 +22,37 @@ class TestComplexTensor(TestCase):
         x = torch.tensor([3., 3. + 5.j], device=device)
         torch.set_default_dtype(default_dtype)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
-
-instantiate_device_type_tests(TestComplexTensor, globals())
-
-    def test_torch_complex(self):
-        real = torch.tensor([1, 2], dtype=torch.float32)
-        imag = torch.tensor([3, 4], dtype=torch.float32)
+    
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex(self, device, dtype):
+        real = torch.tensor([1, 2], device=device, dtype=torch.int32)
+        imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
-        self.assertEqual(torch.tensor([1.0+3.0j, 2.0+4.0j]), z)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        self.assertEqual(torch.tensor([1.0+3.0j, 2.0+4.0j], dtype=complex_dtype), z)
 
-    def test_torch_complex_polar(self):
-        abs = torch.tensor([1, 2], dtype=torch.float64)
-        angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_polar(self, device, dtype):
+        abs = torch.tensor([1, 2], device=device, dtype=torch.int32)
+        angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], device=device, dtype=dtype)
         z = torch.complex_polar(abs, angle)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
         self.assertEqual(torch.tensor([0+1.0j, -1.41421356237-1.41421356237j],
-                                      dtype=torch.complex128),
+                                      dtype=complex_dtype),
                          z, atol=1e-5, rtol=1e-5)
 
-    def test_torch_complex_error(self):
-        real = torch.tensor([1, 2], dtype=torch.float32)
-        imag = torch.tensor([3, 4], dtype=torch.float64)
-        error = ("Expected object of scalar type Float but got scalar type "
-                 "Double for argument 'imag'")
-        with self.assertRaisesRegex(RuntimeError, error):
-            z = torch.complex(real, imag)
-
-        abs = torch.tensor([1, 2])
-        angle = torch.tensor([3, 4])
-        error = ("\"complex_polar_cpu\" not implemented for 'Long'")
+    @dtypes(torch.int32, torch.int64, torch.complex64, torch.complex128)
+    def test_torch_complex_error(self, device, dtype):
+        abs = torch.tensor([1, 2], device=device, dtype=dtype)
+        angle = torch.tensor([3, 4], device=device, dtype=dtype)
+        if device.startswith('cuda'):
+            error = r"\"complex_polar_cuda\" not implemented for '[A-Za-z]+'"
+        else:
+            error = r"\"complex_polar_cpu\" not implemented for '[A-Za-z]+'"
         with self.assertRaisesRegex(RuntimeError, error):
             z = torch.complex_polar(abs, angle)
+
+instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == '__main__':
     run_tests()
