@@ -112,6 +112,7 @@ void gemm(
     return;
   }
 #endif
+  TORCH_INTERNAL_ASSERT(k == 0, "BLAS should have been called");
   gemm_stub(
       at::kCPU, at::kDouble,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -142,6 +143,7 @@ void gemm(
     return;
   }
 #endif
+  TORCH_INTERNAL_ASSERT(k == 0, "BLAS should have been called");
   gemm_stub(
       at::kCPU, at::kFloat,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
