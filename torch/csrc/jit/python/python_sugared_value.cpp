@@ -664,7 +664,7 @@ bool isNamedTupleClass(const py::object& obj) {
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-      py::module::import("torch.jit").attr("_qualified_name")(obj)));
+      py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
   // Currently don't support default values
   if (py::hasattr(obj, "_field_defaults")) {
     auto default_dict = py::cast<std::map<std::string, py::object>>(
@@ -821,7 +821,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
+        py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
     auto qualname = c10::QualifiedName(qualifiedName);
     if (auto classType = pyCu->get_class(qualname)) {
@@ -837,7 +837,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-        py::module::import("torch.jit")
+        py::module::import("torch.jit._script")
             .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
@@ -855,7 +855,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
     auto overloads =
-        py::module::import("torch.jit").attr("_get_overloads")(obj);
+        py::module::import("torch.jit._script").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
       return std::make_shared<FunctionValue>(std::move(compiled_fns));
