@@ -44,18 +44,23 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
     for (auto* child_block : it->blocks()) {
       fuseConvBatchNorm(child_block, valsToParamsMap);
     }
-    if (it->kind() == onnx::Conv &&
-        it->next()->kind() == onnx::BatchNormalization) {
-      auto bnNode = it->next();
+    if (it->kind() == onnx::Conv) {
+      if (it->output()->uses().size() != 1) {
+        continue;
+      }
+      auto bnNode = it->output()->uses()[0].user;
+      if (bnNode->kind() != onnx::BatchNormalization) {
+        continue;
+      }
       auto origconvNode = *it;
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           w_conv_value.size() >= 1,
           "convolution node expected to have at least one initializer");
 
       auto bn_value = getValues(bnNode, valsToParamsMap);
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           bn_value.size() == 4,
           "batchnorm node expected to have four initializers");
 
@@ -108,7 +113,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       convNode->insertBefore(bnNode);
       convNode->addInput(origconvNode->inputs().at(0));
 
-      auto conv_W = b->addInput();
+      auto conv_W = b->owningGraph()->addInput();
       valsToParamsMap.insert(
           {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
@@ -117,7 +122,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto conv_B = b->addInput();
       valsToParamsMap.insert(
           {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
-      conv_B->inferTypeFrom(bn_B);
+      conv_B->inferTypeFrom(b_conv);
       convNode->addInput(conv_B);
 
       bnNode->replaceAllUsesWith(convNode);
