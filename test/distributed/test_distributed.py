@@ -2207,43 +2207,49 @@ class _DistTestBase(object):
 
         class TestNetWithParamListDict(nn.Module):
 
-            def __init__(module):
+            def __init__(self, unittest):
                 super().__init__()
 
-                module.beta = nn.Parameter(torch.tensor(10.0))
-                module.alpha = nn.ParameterList([
-                    nn.Parameter(torch.tensor(11.0)), nn.Parameter(torch.tensor(12.0)), nn.Parameter(torch.tensor(13.0))
+                self.unittest = unittest
+
+                self.beta = nn.Parameter(torch.tensor(10.0))
+                self.alpha = nn.ParameterList([
+                    nn.Parameter(torch.tensor(11.0)), 
+                    nn.Parameter(torch.tensor(12.0)), 
+                    nn.Parameter(torch.tensor(13.0))
                 ])
-                module.gamma = nn.ParameterDict({
-                    "A": nn.Parameter(torch.tensor(14.0)), "B": nn.Parameter(torch.tensor(15.0)), "C": nn.Parameter(torch.tensor(16.0))
+                self.gamma = nn.ParameterDict({
+                    "A": nn.Parameter(torch.tensor(14.0)),
+                    "B": nn.Parameter(torch.tensor(15.0)), 
+                    "C": nn.Parameter(torch.tensor(16.0))
                 })
 
-            def forward(module, x):
+            def forward(self, x):
 
                 if x.device.index == 0:
                     # check if module is itself on device 0
-                    self.assertFalse(hasattr(module, "_is_replica"))
+                    self.unittest.assertFalse(hasattr(self, "_is_replica"))
                 else:
                     # check if module is replica on device > 0
-                    self.assertTrue(hasattr(module, "_is_replica"))
+                    self.unittest.assertTrue(hasattr(self, "_is_replica"))
                     # check parameters' type on module replica
-                    self.assertIsInstance(module.beta, torch.Tensor)
-                    self.assertTrue(module.beta.device == x.device)
+                    self.unittest.assertIsInstance(self.beta, torch.Tensor)
+                    self.unittest.assertTrue(self.beta.device == x.device)
 
-                    self.assertIsInstance(module.alpha, list)
-                    self.assertTrue(len(module.alpha) == 3)
-                    self.assertTrue(all([a.device == x.device for a in module.alpha]))
+                    self.unittest.assertIsInstance(self.alpha, list)
+                    self.unittest.assertTrue(len(self.alpha) == 3)
+                    self.unittest.assertTrue(all([a.device == x.device for a in self.alpha]))
 
-                    self.assertIsInstance(module.gamma, OrderedDict)
-                    self.assertTrue(len(module.gamma) == 3)
-                    self.assertTrue(all([v.device == x.device for v in module.gamma.values()]))
+                    self.unittest.assertIsInstance(self.gamma, OrderedDict)
+                    self.unittest.assertTrue(len(self.gamma) == 3)
+                    self.unittest.assertTrue(all([v.device == x.device for v in self.gamma.values()]))
 
-                o1 = module.alpha[0] * x[:, 0] + module.alpha[1] * x[:, 1] + module.alpha[2] * x[:, 2]
-                o2 = module.gamma["A"] * x[:, 0] ** 2 + module.gamma["B"] * x[:, 1] ** 2 + module.gamma["C"] * x[:, 2] ** 2
-                return o1 + o2 + module.beta
+                o1 = self.alpha[0] * x[:, 0] + self.alpha[1] * x[:, 1] + self.alpha[2] * x[:, 2]
+                o2 = self.gamma["A"] * x[:, 0] ** 2 + self.gamma["B"] * x[:, 1] ** 2 + self.gamma["C"] * x[:, 2] ** 2
+                return o1 + o2 + self.beta
 
-        model = TestNetWithParamListDict().cuda()
-        copy_model = TestNetWithParamListDict().cuda()
+        model = TestNetWithParamListDict(unittest=self).cuda()
+        copy_model = TestNetWithParamListDict(unittest=self).cuda()
         model_DDP = nn.parallel.DistributedDataParallel(copy_model, device_ids=[0, 1])
 
         x = torch.tensor([[1.1, 1.2, 1.3], [2.1, 2.2, 2.3]], device="cuda")
@@ -2292,7 +2298,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @classmethod
         def setUpClass(cls):
             os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-            os.environ["MASTER_PORT"] = str(find_free_port())
+            os.environ["MASTER_PORT"] = str(MASTER_PORT)
             os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
             super().setUpClass()
 
