@@ -83,7 +83,7 @@ void backward(
     const Tensor& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
-  torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
+  torch::autograd::backward({self}, {gradient}, std::move(keep_graph), create_graph);
 }
 
 void set_data(const Tensor & self, const Tensor & new_data) {
@@ -187,27 +187,6 @@ void retain_grad(const Tensor & self) {
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if(torch::jit::tracer::isTracing()) {
-    const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
-    auto& graph = state.graph;
-    if (state.force_outplace && self.storage().use_count() <= 1) {
-      // if you have no views of self, then an in place copy is equivalent to
-      // making sure we expand src to the same size as self
-      jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
-      jit::tracer::addInputs(node, "src", src);
-      jit::tracer::addInputs(node, "self", self);
-      graph->insertNode(node);
-      output = node->output();
-    } else {
-      output = graph->insert(
-          jit::aten::copy_,
-          {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
-      jit::tracer::recordSourceLocation(output->node());
-    }
-    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
-  }
-#endif
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -223,18 +202,11 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     grad_fn->src_device = src.device();
   }
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.copy_(src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if(torch::jit::tracer::isTracing()) {
-    jit::tracer::setOutput(output, self);
-  }
-#endif
   return self;
 }
 
@@ -246,16 +218,7 @@ Tensor& resize_(
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntArrayRef("size");
-    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-#endif
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
   }
@@ -271,15 +234,7 @@ Tensor& resize_as_(
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-#endif
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
@@ -288,44 +243,13 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-
-#if !defined(PYTORCH_DISABLE_TRACING)
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->insertNode(node);
-  }
-#endif
-  // <NON_GENERATED_CODE>
   auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
-  // </NON_GENERATED_CODE>
- #if !defined(PYTORCH_DISABLE_TRACING)
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, result);
-  }
-#endif
   return result;
 }
 
 Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
-
-#if !defined(PYTORCH_DISABLE_TRACING)
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->insertNode(node);
-    jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
-  }
-#endif
-  // <NON_GENERATED_CODE>
   if (self.is_view()) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
@@ -339,12 +263,6 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-  // </NON_GENERATED_CODE>
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
-  }
-#endif
   return self;
 }
 

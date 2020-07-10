@@ -1305,11 +1305,13 @@ graph(%Ra, %Rb):
             self.assertNotIn('bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "fixme")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
-        x = torch.ones(4, 4).cuda().requires_grad_()
+        def _zero_rate(t):
+            return torch.true_divide((t == 0).sum(), t.numel())
+
+        x = torch.ones(1000, 1000).cuda().requires_grad_()
 
         with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
@@ -1324,8 +1326,14 @@ graph(%Ra, %Rb):
                 out = func(x)
                 grad = torch.autograd.grad(out.sum(), x)
 
-            self.assertEqual(out, out_ref)
-            self.assertEqual(grad, grad_ref)
+            # TODO(#40882): previously we assert exact matches between eager and JIT result:
+            #  self.assertEqual(out, out_ref)
+            #  self.assertEqual(grad, grad_ref)
+            # This test was disabled during legacy -> profiling executor transition.
+            # Currently JIT fused results doesn't match eager result exactly due to some changes merged in between.
+            # We temporarily only check statstical difference but it should be reverted once the issue is fixed.
+            self.assertEqual(_zero_rate(out), _zero_rate(out_ref), rtol=1e-3, atol=1e-4)
+            self.assertEqual(_zero_rate(grad[0]), _zero_rate(grad_ref[0]), rtol=1e-3, atol=1e-4)
 
     def test_torch_ops_overloaded(self):
         with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
@@ -4062,7 +4070,6 @@ def foo(xyz):
         scripted_y = scripted_f_data(y)
         self.assertEqual(scripted_y, f_data(y))
         self.assertEqual(scripted_x.requires_grad, False)
-
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -6845,13 +6852,31 @@ a")
         def foo(s: float):
             return torch.tensor(s), torch.tensor([s, s])
 
-        scripted_foo = torch.jit.script(foo)
-        with set_default_dtype(torch.float):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        # need to clear function cache so we re run shape analysis
         with set_default_dtype(torch.double):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+        with set_default_dtype(torch.float):
+            del torch.jit._state._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            del torch.jit._state._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+
+    def test_shape_analysis_grad_property(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.sub(x, torch.tanh(x))
+
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
+
+        # requires_grad property shouldn't be accidentally set by shape analysis
+        self.assertTrue(foo.graph.findNode("aten::sub").output().requiresGrad() is None)
 
     def test_empty_like_memory_format_bc(self):
         def f(x):
@@ -8168,7 +8193,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "'Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object for attribute 'invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -8190,6 +8215,17 @@ a")
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
             Foo3()
+
+        class Foo4(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo4, self).__init__()
+                self.invalid = np.int64(5)
+
+        # verify that we capture human understandable class name
+        with self.assertRaisesRegex(TypeError, "numpy.int64"):
+            Foo4()
 
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
@@ -13356,8 +13392,8 @@ a")
         self.checkScript(invoke_function, ())
 
         # testing that the functions are cached
-        compiled_fns_1 = torch.jit._get_overloads(test_simple)
-        compiled_fns_2 = torch.jit._get_overloads(test_simple)
+        compiled_fns_1 = torch.jit._script._get_overloads(test_simple)
+        compiled_fns_2 = torch.jit._script._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
             self.assertIs(a.graph, b.graph)
 

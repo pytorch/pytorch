@@ -24,7 +24,7 @@ struct id_int_lt {
 };
 
 // Simply grabs all exprs needed to produce provided outputs.
-struct Exprs : public IterVisitor {
+class Exprs : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
   void handle(Expr* e) override {
@@ -44,14 +44,27 @@ struct Exprs : public IterVisitor {
 
 } // namespace
 
-struct TORCH_CUDA_API ReplayTransformations : public IterVisitor {
+// Uses the history of _target_domain, and replays that history using the
+// provided map.
+//
+// target_domain contains the history we want replayed.
+//
+// id_map maps IterDomains in that history to the IterDomains we want it
+// replayed on.
+//
+// error_on_failure = true will cause the replay to error if we can't replay any
+// operation in target_domain's history due to missing IDs in the id_map.
+//
+// If error_on_failure = false, replay will replay everything it can, and ignore
+// operations it can't.
+class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  protected:
   const std::vector<IterDomain*>& target_domain_;
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
   std::vector<IterDomain*> leaf_vec_;
   size_t counter = 0;
-  bool check_all_ops_run_ = true;
+  bool error_on_failure_ = true;
   bool ran_replay = false; // Mark if replay has been run
   using IterVisitor::handle;
 
@@ -60,23 +73,16 @@ struct TORCH_CUDA_API ReplayTransformations : public IterVisitor {
 
   // TODO: HANDLE RFACTOR DOMAINS
   // We're going to replay this split operation on the corresponding ID
-  virtual void handle(Split* s) override;
+  void handle(Split* s) override;
 
   // We're going to replay this merge operation on the corresponding IDs
-  virtual void handle(Merge* m) override;
+  void handle(Merge* m) override;
 
  public:
-  // Uses the history of _target_domain, and replays that history using the
-  // provided map target_domain contains the history we want replayed, and
-  // id_map maps IterDomains in that history to the IterDomains we want it
-  // replayed on. check_all_ops_run will cause the replay to error if we can't
-  // play any operation in target_domain's history because the IDs are not in
-  // the id_map. If check_all_ops_run = false, replay will replay everything it
-  // can, and ignore operations it can't.
   ReplayTransformations(
       const std::vector<IterDomain*>& _target_domain,
       std::unordered_map<IterDomain*, IterDomain*> _id_map,
-      bool _check_all_ops_run = true);
+      bool _error_on_failure = true);
 
   // Replays outputs that were generated from ids.first on ids.second
   void runReplay();
@@ -155,7 +161,7 @@ struct TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * to the output of the equivlent expr's outputs in relpay_domain's history.
  */
 
-struct TORCH_CUDA_API BestEffortReplay {
+class TORCH_CUDA_API BestEffortReplay {
  private:
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
