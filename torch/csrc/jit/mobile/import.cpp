@@ -84,9 +84,7 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
-  TORCH_CHECK(
-      vals.size() > 0,
-      "Bytecode has no elements. ");
+  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
   // version number don't have to be re-generated.
