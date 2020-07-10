@@ -2807,8 +2807,7 @@ class AbstractTestCases:
                         src = torch.randn(num_copy - 1)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            # Only 16 (not 25) here as the warnings in the assertRaises are not caught on the python side
-            self.assertEqual(len(w), 16)
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -2841,8 +2840,8 @@ class AbstractTestCases:
                         dst.masked_fill_((dst > 0).to(dtype), val)
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
-                # Only 33 (not 32) here as the warning in the assertRaises are not caught on the python side
-                self.assertEqual(len(w), 33)
+
+                self.assertEqual(len(w), 34)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
@@ -5662,10 +5661,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(debug_msg, expected_msg)
 
         # Checks float tensor comparisons (with extremal values)
-        a = torch.tensor((float('inf'), 5), device=device, dtype=torch.float32)
-        b = torch.tensor((float('inf'), float('nan')), device=device, dtype=torch.float32)
+        a = torch.tensor((float('inf'), 5, float('inf')), device=device, dtype=torch.float32)
+        b = torch.tensor((float('inf'), float('nan'), float('-inf')), device=device, dtype=torch.float32)
         result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 1 element(s) (out of 2) "
+        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 3) "
                         "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
                         "The greatest difference was nan (5.0 vs. nan), "
                         "which occurred at index 1.").format(atol)
@@ -6759,6 +6758,7 @@ class TestTorchDeviceType(TestCase):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
@@ -6766,8 +6766,10 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
         expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
         self.assertEqual(a << 2, expected_l)
-        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype)  # [1111...111011, 101]
+        self.compare_with_numpy(lambda x: x << 2, lambda x: np.left_shift(x, 2), a)
+        expected_r = torch.tensor([-5, 5], device=device, dtype=dtype)  # [1111...111011, 101]
         self.assertEqual(a >> 1, expected_r)
+        self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
     def test_bitwise_not(self, device):
         res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
@@ -14735,7 +14737,6 @@ class TestTorchDeviceType(TestCase):
         expected_val = torch.ones(2, 2, 2, 2, device=device)
         expected_val[:, 0, :, :] *= 2.
         expected_val[:, 1, :, :] *= 1.5
-        print(val, ind)
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
@@ -16574,6 +16575,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         inputTensorCpy = inputTensor.clone().detach()
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
+                         atol=precision_4dps, rtol=0)
+
+    @dtypes(torch.float, torch.double)
+    def test_silu(self, device, dtype):
+        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
+        expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]
+        precision_4dps = 0.0002
+
+        input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+                         expected_output_tensor,
+                         atol=precision_4dps, rtol=0)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+                         expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
     @onlyCPU
@@ -19483,7 +19501,7 @@ def _generate_reference_input(dtype, device):
     # Some vectorized implementations don't support large values
     input.append([x + 1e10 for x in range(-5, 5)])
     input.append([x - 1e10 for x in range(-5, 5)])
-    input.append(torch.randn(10).tolist())
+    input.append([*torch.randn(7).tolist(), math.inf, -math.inf, math.nan])
     input.append((torch.randn(10) * 1e6).tolist())
     input.append([math.pi * (x / 2) for x in range(-5, 5)])
     return torch.tensor(input, dtype=dtype, device=device)
@@ -19571,7 +19589,8 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
                   _TorchMathTestMeta('trunc'),
                   _TorchMathTestMeta('round'),
-                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy'),
+                  # FIXME lgamma produces different result compared to scipy at -inf
+                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
                   _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                                      refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy'),

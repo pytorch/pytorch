@@ -1010,6 +1010,12 @@ c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
     // point
     bool is_dequantized = true;
     for (auto* input : inputs) {
+      GRAPH_DEBUG(
+          "checking if input:",
+          input->debugName(),
+          " in node:",
+          *input->node(),
+          "is quantized");
       is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
     }
     if (is_dequantized) {
