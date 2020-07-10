@@ -127,7 +127,9 @@ void tupleSlice(Stack& stack, size_t begin, size_t end) {
 
 void dequantize(Stack& stack) {
   auto iv = pop(stack);
-  if (iv.isTuple()) {
+  if (iv.isTensor()) {
+    push(stack, at::dequantize(iv.toTensor()));
+  } else if (iv.isTuple()) {
     auto tuple = iv.toTuple();
     auto elems = tuple->elements();
     std::vector<IValue> output_elems;
