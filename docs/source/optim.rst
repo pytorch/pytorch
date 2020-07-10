@@ -179,11 +179,11 @@ should write your code this way:
 Stochastic Weight Averaging
 ---------------------------
 
-:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particulat, 
+:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particular, 
 :class:`torch.optim.swa_utils.AveragedModel` class implements SWA models, 
-:class:`torch.optim.swa_utils.SWALR` implements thes SWA learning rate scheduler and 
-:func:`torch.optim.swa_utils.update_bn` is utility function to update SWA batch normalization 
-statistics at the end of training. 
+:class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and 
+:func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA batch 
+normalization statistics at the end of training. 
 
 
 Constructing averaged models
@@ -194,9 +194,9 @@ averaged model by running:
 
 >>> swa_model = AveragedModel(model)
 
-Here the model can be an arbitrary :class:`torch.nn.Module` object. ``swa_model`` will keep
-track of the running averages of the parameters of the ``model``. To update these averages,
-you should use the :func:`update_parameters` function:
+Here the model ``model`` can be an arbitrary :class:`torch.nn.Module` object. ``swa_model`` 
+will keep track of the running averages of the parameters of the ``model``. To update these
+averages, you can use the :func:`update_parameters` function:
 
 >>> swa_model.update_parameters(model)
 
@@ -207,13 +207,14 @@ SWA learning rate schedules
 The learning rate schedule is an important component of SWA. Typically, in SWA the learning rate
 is set to a high constant value. :class:`SWALR` is a learning rate scheduler that anneals the 
 learning rate to a fixed value, and then keeps it constant. For example, the following code creates 
-a scheduler that linearly anneals the learning rate from its initial value to ``0.05`` in ``5`` epochs
+a scheduler that linearly anneals the learning rate from its initial value to 0.05 in 5 epochs
 within each parameter group:
 
->>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, 
->>> anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
+>>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, \
+>>>         anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
 
-You cam also use cosine annealing to a fixed value by setting ``anneal_strategy="cos"``.
+You can also use cosine annealing to a fixed value instead of linear annealing by setting 
+``anneal_strategy="cos"``.
 
 
 Taking care of batch normalization
@@ -228,7 +229,7 @@ on a given dataloader ``loader`` at the end of training:
 statistics for each batch normalization layer in the model.
 
 .. warning::
-    :func:`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of 
+    :func:`update_bn` assumes that each batch in the dataloader ``loader`` is either a tensors or a list of 
     tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
     If your dataloader has a different structure, you can update the batch normalization statistics of the
     ``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
@@ -252,8 +253,8 @@ Putting it all together
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In the example below, ``swa_model`` is the SWA model that accumulates the averages of the weights.
-We train the model for a total of ``300`` epochs and we switch to the SWA learning rate schedule 
-and start to collect SWA averages of the parameters at epoch ``160``: 
+We train the model for a total of 300 epochs and we switch to the SWA learning rate schedule 
+and start to collect SWA averages of the parameters at epoch 160: 
 
 >>> loader, optimizer, model, loss_fn = ...
 >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
