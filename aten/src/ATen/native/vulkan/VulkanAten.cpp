@@ -165,8 +165,10 @@ at::Tensor vulkan_adaptive_avg_pool2d(
 }
 
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  VulkanTensor& x = vtensor_from_vulkan(self);
-  VulkanTensor& y = vtensor_from_vulkan(other);
+  auto xt = self.is_vulkan() ? self : self.vulkan();
+  VulkanTensor& x = vtensor_from_vulkan(xt);
+  auto yt = other.is_vulkan() ? other : other.vulkan();
+  VulkanTensor& y = vtensor_from_vulkan(yt);
   float a = alpha.to<float>();
 
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
