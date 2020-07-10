@@ -216,6 +216,24 @@ within each parameter group:
 You cam also use cosine annealing to a fixed value by setting ``anneal_strategy="cos"``.
 
 
+Taking care of batch normalization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:func:`update_bn` is a utility function that allows to compute the batchnorm statistics for the SWA model
+on a given dataloader ``loader`` at the end of training:
+
+>>> torch.optim.swa_utils.update_bn(loader, swa_model) 
+
+:func:`update_bn` applies the ``swa_model`` to every element in the dataloader and computes the activation
+statistics for each batch normalization layer in the model.
+
+.. warning::
+:func:`update_bn` assumes that each batch in the dataloader `loader` is either a tensors or a list of 
+tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
+If your dataloader has a different structure, you can update the batch normalization statistics of the
+``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
+
+
 Custom averaging strategies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
