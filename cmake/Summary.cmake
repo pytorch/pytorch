@@ -48,6 +48,7 @@ function(caffe2_print_configuration_summary)
 
   message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
+  message(STATUS "  CLANG_CODE_COVERAGE   : ${CLANG_CODE_COVERAGE}")
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
