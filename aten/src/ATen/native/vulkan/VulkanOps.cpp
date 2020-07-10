@@ -71,6 +71,57 @@ void upsample_nearest2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+void adaptive_avg_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    int64_t IH,
+    int64_t IW,
+    int64_t OH,
+    int64_t OW,
+    int64_t _N,
+    int64_t _C) {
+  auto device = context().device();
+  int64_t C = _N * _C;
+  struct ConstBlock {
+    int32_t IW;
+    int32_t IH;
+    int32_t OW;
+    int32_t OH;
+  };
+  ConstBlock cb{IW, IH, OW, OH};
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(adaptive_avg_pool2d),
+                          descriptorSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
+  computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
