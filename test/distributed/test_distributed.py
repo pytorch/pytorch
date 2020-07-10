@@ -7,6 +7,7 @@ import sys
 import time
 import tempfile
 import unittest
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
@@ -2195,6 +2196,75 @@ class _DistTestBase(object):
             global_bs=global_bs,
             offset=bs_offset)
 
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_gpu
+    @skip_if_rocm
+    @require_world_size(2)
+    def test_DistributedDataParallel_SingleProcessMultiGPU_ParamListDict(self):
+        group, group_id, rank = self._init_global_test()
+        print(group, group_id, rank)
+
+        class TestNetWithParamListDict(nn.Module):
+
+            def __init__(module):
+                super().__init__()
+
+                module.beta = nn.Parameter(torch.tensor(10.0))
+                module.alpha = nn.ParameterList([
+                    nn.Parameter(torch.tensor(11.0)), nn.Parameter(torch.tensor(12.0)), nn.Parameter(torch.tensor(13.0))
+                ])
+                module.gamma = nn.ParameterDict({
+                    "A": nn.Parameter(torch.tensor(14.0)), "B": nn.Parameter(torch.tensor(15.0)), "C": nn.Parameter(torch.tensor(16.0))
+                })
+
+            def forward(module, x):
+
+                if x.device.index == 0:
+                    # check if module is itself on device 0
+                    self.assertFalse(hasattr(module, "_is_replica"))
+                else:
+                    # check if module is replica on device > 0
+                    self.assertTrue(hasattr(module, "_is_replica"))
+                    # check parameters' type on module replica
+                    self.assertIsInstance(module.beta, torch.Tensor)
+                    self.assertTrue(module.beta.device == x.device)
+
+                    self.assertIsInstance(module.alpha, list)
+                    self.assertTrue(len(module.alpha) == 3)
+                    self.assertTrue(all([a.device == x.device for a in module.alpha]))
+
+                    self.assertIsInstance(module.gamma, OrderedDict)
+                    self.assertTrue(len(module.gamma) == 3)
+                    self.assertTrue(all([v.device == x.device for v in module.gamma.values()]))
+
+                o1 = module.alpha[0] * x[:, 0] + module.alpha[1] * x[:, 1] + module.alpha[2] * x[:, 2]
+                o2 = module.gamma["A"] * x[:, 0] ** 2 + module.gamma["B"] * x[:, 1] ** 2 + module.gamma["C"] * x[:, 2] ** 2
+                return o1 + o2 + module.beta
+
+        model = TestNetWithParamListDict().cuda()
+        copy_model = TestNetWithParamListDict().cuda()
+        model_DDP = nn.parallel.DistributedDataParallel(copy_model, device_ids=[0, 1])
+
+        x = torch.tensor([[1.1, 1.2, 1.3], [2.1, 2.2, 2.3]], device="cuda")
+        # compute param grads on non-wrapped model
+        res = model(x)
+        res.sum().backward()
+
+        # compute param grads on DDP model
+        res = model_DDP(x)
+        res.sum().backward()
+
+        for i in range(3):
+            self.assertTrue(
+                model.alpha[i].grad.equal(model_DDP.module.alpha[i].grad),
+                msg="{}: {} vs {}".format(i, model.alpha[i].grad, model_DDP.module.alpha[i])
+            )
+
+        for key in ["A", "B", "C"]:
+            self.assertTrue(model.gamma[key].grad.equal(model_DDP.module.gamma[key].grad))
+
+
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
         # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
@@ -2222,7 +2292,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @classmethod
         def setUpClass(cls):
             os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-            os.environ["MASTER_PORT"] = str(MASTER_PORT)
+            os.environ["MASTER_PORT"] = str(find_free_port())
             os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
             super().setUpClass()
 

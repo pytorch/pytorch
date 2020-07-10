@@ -731,6 +731,7 @@ class TestDataParallel(TestCase):
         # compute param grads on DP model
         res = dpnet(x)
         res.sum().backward()
+
         for i in range(3):
             self.assertTrue(net.beta[i].grad.equal(dpnet.module.beta[i].grad))
 
