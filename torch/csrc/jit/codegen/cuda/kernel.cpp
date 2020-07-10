@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/resource_guard.h>
 #include <fstream>
@@ -19,10 +20,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto CG_NAMESPACE = "CudaCodeGen";
-constexpr auto KERNEL_NAME = "kernel";
+constexpr auto kCgNamespace = "CudaCodeGen";
+constexpr auto kKernelName = "kernel";
 
 namespace {
+
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
 static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
@@ -147,24 +149,25 @@ struct KernelArgumentHolder {
 
 std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
   std::stringstream str_stream;
-  str_stream << "namespace " << CG_NAMESPACE << " {\n"
+  str_stream << "namespace " << kCgNamespace << " {\n"
              << code_template_tensor_struct << "\n"
              << code_fp16_support << "\n"
              << code_random_number_gen << "\n"
              << code_helper_funcs << "\n"
-             << code_template_block_reduction << "\n";
+             << code_template_block_reduction << "\n"
+             << code_template_grid_reduction << "\n";
   std::stringstream cdg;
   GPULower gpulw(fusion);
-  gpulw.printKernel(str_stream, KERNEL_NAME);
+  gpulw.printKernel(str_stream, kKernelName);
   str_stream << "\n} // namespace";
 
-  std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
+  std::string func_name = std::string(kCgNamespace) + "::" + kKernelName;
   return std::make_pair(func_name, str_stream.str());
-};
+}
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
@@ -219,7 +222,7 @@ bool validateKernelArgTensor(
 
 bool validateKernelArgScalar(
     const c10::TypePtr& arg_type,
-    const Val* const param,
+    const Val* param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
@@ -249,7 +252,7 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
@@ -271,7 +274,7 @@ void validateKernelArgs(
       "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* const param = entry.fusion_->inputs()[i];
+    const Val* param = entry.fusion_->inputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -290,7 +293,7 @@ void validateKernelArgs(
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* const param = entry.fusion_->outputs()[i];
+    const Val* param = entry.fusion_->outputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArgTensor(arg, param, entry.device_, msg),
@@ -300,6 +303,73 @@ void validateKernelArgs(
         msg.str());
   }
 }
+
+size_t size(const dim3& d) {
+  return (size_t)d.x * (size_t)d.y * (size_t)d.z;
+}
+
+dim3 dimensionOfReductionBlock(
+    const dim3& block_dim,
+    bool x_thread,
+    bool y_thread,
+    bool z_thread) {
+  return dim3{x_thread ? block_dim.x : 1,
+              y_thread ? block_dim.y : 1,
+              z_thread ? block_dim.z : 1};
+}
+
+int sizeOfReductionBlock(
+    const dim3& block_dim,
+    bool x_thread,
+    bool y_thread,
+    bool z_thread) {
+  return size(
+      dimensionOfReductionBlock(block_dim, x_thread, y_thread, z_thread));
+}
+
+// Returns the total number of reduction segments.
+size_t numberOfReductionSegments(
+    const dim3& grid_dim,
+    bool x_block,
+    bool y_block,
+    bool z_block) {
+  return (x_block ? 1 : grid_dim.x) * (y_block ? 1 : grid_dim.y) *
+      (z_block ? 1 : grid_dim.z);
+}
+
+std::array<size_t, 2> gridReductionTempBufferSizes(CudaKernel* entry) {
+  size_t buffer_size = 0;
+  size_t sync_flag_size = 0;
+  for (auto expr : entry->fusion_->exprs(true)) {
+    if (expr->getExprType() != ExprType::ReductionOp)
+      continue;
+    ReductionOp* rop = static_cast<ReductionOp*>(expr);
+    auto domains = rop->getParallelReductionDomains();
+    bool x_block = domains.find(ParallelType::BIDx) != domains.end();
+    bool y_block = domains.find(ParallelType::BIDy) != domains.end();
+    bool z_block = domains.find(ParallelType::BIDz) != domains.end();
+    // No buffer needed unless it's a grid reduction
+    if (!x_block && !y_block && !z_block)
+      continue;
+    // Assumption here is that reduction along the block-parallel
+    // domains is done prior to this grid reduction, so those domains
+    // do not need to participate in the grid reductions
+    bool x_thread = domains.find(ParallelType::TIDx) == domains.end();
+    bool y_thread = domains.find(ParallelType::TIDy) == domains.end();
+    bool z_thread = domains.find(ParallelType::TIDz) == domains.end();
+    auto rb_size =
+        sizeOfReductionBlock(entry->block_, x_thread, y_thread, z_thread);
+    auto num_blocks = size(entry->grid_);
+    auto element_size = dataTypeSize(*(rop->out()->getDataType()));
+    auto required_temp_buffer_size = num_blocks * rb_size * element_size;
+    buffer_size = std::max(buffer_size, required_temp_buffer_size);
+    auto flag_size = sizeof(unsigned) *
+        numberOfReductionSegments(entry->grid_, x_block, y_block, z_block);
+    sync_flag_size = std::max(sync_flag_size, flag_size);
+  }
+  return {{buffer_size, sync_flag_size}};
+}
+
 } // namespace
 
 bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
@@ -327,6 +397,16 @@ void compileKernel(CudaKernel* entry) {
   std::tie(func_name, code) = codeGeneration(entry->fusion_.get());
 
   static int32_t compiled_kernel_id = 0;
+  // We increment the id here instead of at the end of the function to avoid
+  // error during jit-compilation that would make debug message confusing.
+  compiled_kernel_id++;
+  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  if (debug_env && atoi(debug_env)) {
+    std::cout << "\n==== codegen output for kernel: " << compiled_kernel_id
+              << " ====" << std::endl
+              << code << std::endl
+              << "====================================" << std::endl;
+  }
 
   // vvv NVRTC COMPILATION vvv
 
@@ -452,7 +532,8 @@ void compileKernel(CudaKernel* entry) {
 void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs) {
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<int64_t>& broadcasted_shape) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -461,10 +542,32 @@ void runKernel(
 
   // TODO: Proper API to establish reasonable launch configurations;
   // Naive launch config;
-  size_t numel = outputs[0].numel();
+  const size_t numel = outputs[0].numel();
 
-  // TODO: we can't randomly clap down this until we got striding.
-  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
+  int blocks = 1;
+  int thread_x = 1;
+  int thread_y = 1;
+  if (!entry->reduction_axes_.empty()) {
+    // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
+    blocks = numel;
+    // Translated to `fcd_reduction`
+    if (entry->reduction_axes_.back() ==
+        outputs[0].dim() + ((int)entry->reduction_axes_.size()) - 1) {
+      thread_x = kFcdReductionThreadX;
+      thread_y = 1;
+    } else {
+      thread_x = kNonFcdReductionThreadX;
+      thread_y = kNonFcdReductionThreadY;
+    }
+  } else {
+    // TODO: we can't randomly clap down this until we got striding.
+    blocks = ceilDiv(numel, kPwThreadX * entry->unroll_factor_);
+    thread_x = kPwThreadX;
+    thread_y = 1;
+  }
+  const auto nBlocks = blocks;
+  const auto nThreadx = thread_x;
+  const auto nThready = thread_y;
 
   KernelArgumentHolder kernel_args;
 
@@ -473,7 +576,7 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      kernel_args.push(input.toTensor(), outputs[0].sizes());
+      kernel_args.push(input.toTensor(), broadcasted_shape);
     } else {
       kernel_args.push(input);
     }
@@ -505,8 +608,8 @@ void runKernel(
       nBlocks,
       1,
       1,
-      128,
-      1,
+      nThreadx,
+      nThready,
       1,
       0,
       stream,
@@ -522,7 +625,7 @@ void runKernel(
 void runTestKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs) {
+    const std::vector<at::Tensor>& outputs) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -540,9 +643,6 @@ void runTestKernel(
   KernelArgumentHolder kernel_args;
 
   auto exprs = entry->fusion_->exprs(true);
-  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr) {
-    return expr->getExprType() == ExprType::ReductionOp;
-  });
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
@@ -555,11 +655,7 @@ void runTestKernel(
       TORCH_INTERNAL_ASSERT(
           !entry->fusion_->outputs().empty(),
           "No output found for this kernel, aborting.");
-      if (has_reduction) {
-        kernel_args.push(input.toTensor());
-      } else {
-        kernel_args.push(input.toTensor(), outputs[0].sizes());
-      }
+      kernel_args.push(input.toTensor());
     } else {
       kernel_args.push(input);
     }
@@ -583,6 +679,22 @@ void runTestKernel(
     }
     kernel_args.push(philox_engine_inputs.first);
     kernel_args.push(philox_engine_inputs.second);
+  }
+
+  // When the kernel has global reductions, the kernel needs two
+  // additional temporary buffers, one for intermediate results and
+  // another for synchronization among thread blocks.
+  if (entry->fusion_->hasGridReduction()) {
+    auto temp_buf_type = at::kFloat;
+    auto temp_buf_sizes = gridReductionTempBufferSizes(entry);
+    auto options =
+        at::TensorOptions().dtype(temp_buf_type).device(at::kCUDA, 0);
+    at::Tensor reduction_work_buffer = at::empty(
+        {(long)(temp_buf_sizes[0] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(reduction_work_buffer);
+    at::Tensor sync_flags = at::zeros(
+        {(long)(temp_buf_sizes[1] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(sync_flags);
   }
 
   // launch kernel;

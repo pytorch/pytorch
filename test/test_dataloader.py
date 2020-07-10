@@ -821,6 +821,16 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
+    def test_typing(self):
+        from typing import List
+        # Make sure there is no TypeError
+
+        class SomeDatasetClass(Dataset[List[torch.Tensor]]):
+            pass
+
+        def _create_dataloader(is_train: bool) -> DataLoader[List[torch.Tensor]]:
+            pass
+
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
     def test_fd_limit_exceeded(self):
@@ -2017,6 +2027,7 @@ class TestSetAffinity(TestCase):
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
             self.assertEqual(sample, [2])
+
 
 
 if __name__ == '__main__':
