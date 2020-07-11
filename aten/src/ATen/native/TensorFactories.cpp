@@ -64,6 +64,9 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
 
 } // namespace
 
+DEFINE_DISPATCH(complex_stub);
+DEFINE_DISPATCH(complex_polar_stub);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -96,6 +99,46 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / complex_polar ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+  // Sort of hacky, but necessary so that input dtypes don't get promoted to complex.
+  auto iter = TensorIterator::comparison_op(result, real, imag,
+    /*check_mem_overlap=*/true);
+  complex_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex(const Tensor& real, const Tensor& imag) {
+  c10::TensorOptions options = real.options();
+  switch (promote_types(real.scalar_type(), imag.scalar_type())) {
+    case c10::kDouble: options = options.dtype(c10::kComplexDouble); break;
+    default:
+      options = options.dtype(c10::kComplexFloat); break;
+  }
+  Tensor result = at::empty(0, options);
+  return at::complex_out(result, real, imag);
+}
+
+Tensor& complex_polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+  // Sort of hacky, but necessary so that input dtypes don't get promoted to complex.
+  auto iter = TensorIterator::comparison_op(result, abs, angle,
+    /*check_mem_overlap=*/true);
+  complex_polar_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex_polar(const Tensor& abs, const Tensor& angle) {
+  c10::TensorOptions options = abs.options();
+  switch (promote_types(abs.scalar_type(), angle.scalar_type())) {
+    case c10::kDouble: options = options.dtype(c10::kComplexDouble); break;
+    default:
+      options = options.dtype(c10::kComplexFloat); break;
+  }
+  Tensor result = at::empty(0, options);
+  return at::complex_polar_out(result, abs, angle);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

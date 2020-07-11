@@ -332,6 +332,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: at::real(grad)
+  imag: at::imag(grad) * -1
+
+- name: complex_polar(Tensor abs, Tensor angle) -> Tensor
+  abs: at::real(grad) * angle.cos()  - at::imag(grad) * angle.sin()
+  angle: (at::real(grad) * angle.cos()  + at::imag(grad) * angle.sin()) * abs * -1
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 

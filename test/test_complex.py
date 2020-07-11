@@ -52,6 +52,28 @@ class TestComplexTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, error):
             torch.complex_polar(abs, angle)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_backward(self, device, dtype):
+        real = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
+        imag = torch.tensor([3, 4], device=device, dtype=dtype, requires_grad=True)
+        z = torch.complex(real, imag)
+        loss = z.sum()
+        loss.backward()
+        print(real.grad)
+        self.assertEqual(torch.tensor([1.0, 1.0], dtype=dtype), real.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([0.0, 0.0], dtype=dtype), imag.grad, atol=1e-5, rtol=1e-5)
+
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_polar_backward(self, device, dtype):
+        abs = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
+        angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], device=device, dtype=dtype, requires_grad=True)
+        z = torch.complex_polar(abs, angle)
+        loss = z.sum()
+        loss.backward()
+        self.assertEqual(torch.tensor([0.0, -0.70710678118], dtype=dtype), abs.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([0.0, 1.41421356237], dtype=dtype), angle.grad, atol=1e-5, rtol=1e-5)
+
+
 instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == '__main__':
