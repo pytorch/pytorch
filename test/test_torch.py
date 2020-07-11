@@ -18137,7 +18137,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     def get_dtype(scalar_type):
                         type_map = {int: torch.long, float: torch.float64, complex: torch.complex128}
                         return type_map[scalar_type]
-                    expected = torch.zeros((height, width), dtype = get_dtype(scalar_type_1))
+                    expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
                     expected[condition] = x1
                     expected[~condition] = x2
                     result = torch.where(condition, x1, x2)
