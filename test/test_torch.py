@@ -18083,7 +18083,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.linspace(start, end, steps, dtype=dtype, device=device)
         self.assertGreater(x[1] - x[0], (end - start) / steps)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar(self, device, dtype):
@@ -18094,7 +18093,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     for c in combinations(list(range(ndims)), n):
                         for scalar_type in [int, float, complex]:
                             if dtype.is_complex:
-                                condition = self._generate_input(shape, dtype, device, with_extremal).to(torch.bool)
+                                condition = self._generate_input(shape, dtype, device, with_extremal).abs() > 0.5
                             else:
                                 condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
 
