@@ -7102,6 +7102,9 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+    >>> torch.where(torch.randn(2,2) > 0.5, torch.randn(2,2), 0)
+    tensor([[0.0000, 0.0000],
+           [0.0000, 0.2442]])
 
 .. function:: where(condition) -> tuple of LongTensor
 
