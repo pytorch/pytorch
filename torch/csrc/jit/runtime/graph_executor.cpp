@@ -434,16 +434,14 @@ struct DifferentiableGraphOp {
 };
 
 struct FusibleOp {
-  FusibleOp(std::shared_ptr<Graph> g)
-      : f(g, "<foward op>") {
-      }
+  FusibleOp(std::shared_ptr<Graph> g) : f(g, "<foward op>") {}
 
   void operator()(Stack* stack) const {
     InterpreterState(f).run(*stack);
   }
-  
+
  private:
-    Code f;
+  Code f;
 };
 
 void addProfileNodesToInputs(std::shared_ptr<Graph> graph) {
@@ -461,31 +459,27 @@ void addProfileNodesToInputs(std::shared_ptr<Graph> graph) {
   }
 }
 
-
 RegisterOperators reg_graph_executor_ops({Operator(
     Symbol::fromQualString("tensorexpr::wrapper"),
     [](const Node* n) -> Operation {
-        auto g = n->g(attr::Subgraph);
-        addProfileNodesToInputs(g);
-        InsertGuards(g);
-        // note, no EliminateRedundantGuards
-        InsertBailOuts(g);
+      auto g = n->g(attr::Subgraph);
+      addProfileNodesToInputs(g);
+      InsertGuards(g);
+      // note, no EliminateRedundantGuards
+      InsertBailOuts(g);
 
-        auto diff_nodes = CreateAutodiffSubgraphs(
-            g,
-            getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-        for (Node* dnode : diff_nodes) {
-          auto diff_graph = std::move(dnode->g(attr::Subgraph));
-          Gradient gradient = differentiate(diff_graph);
-          FuseTensorExprs(gradient.f);
-          packGradient(gradient, dnode);
-        }
-        GRAPH_DUMP("after tensorexpr emitted ", g);
+      auto diff_nodes = CreateAutodiffSubgraphs(
+          g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+      for (Node* dnode : diff_nodes) {
+        auto diff_graph = std::move(dnode->g(attr::Subgraph));
+        Gradient gradient = differentiate(diff_graph);
+        FuseTensorExprs(gradient.f);
+        packGradient(gradient, dnode);
+      }
+      GRAPH_DUMP("after tensorexpr emitted ", g);
       return FusibleOp(g);
     },
     aliasAnalysisInternalSpecialCase())});
-
-
 
 Gradient getGradient(const Node* n) {
   AT_ASSERT(n->kind() == prim::DifferentiableGraph);
@@ -636,7 +630,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    //SOURCE_DUMP("Optimizing the following function:", opt_graph);
+    // SOURCE_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
@@ -811,32 +805,30 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 }
 
 void replaceTEGroupsWithTEWrapper(Block* b) {
-    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-      auto n = *it;
-      if (n->kind() == Symbol::fromQualString("tensorexpr::Group")) {
-
-          auto wrapper = b->owningGraph()->create(Symbol::fromQualString("tensorexpr::wrapper"), 0);
-          for (auto input : n->inputs()) {
-            wrapper->addInput(input);
-          }
-          wrapper->insertBefore(n);
-          wrapper->g_(attr::Subgraph, n->g(attr::Subgraph));
-          for (auto oo: n->outputs()) {
-            auto no = wrapper->addOutput();
-            no->setType(oo->type());
-            no->copyMetadata(oo);
-            oo->replaceAllUsesWith(no);
-          }
-          it.destroyCurrent();
-        }
-        else {
-          for (auto ib : n->blocks()) {
-            replaceTEGroupsWithTEWrapper(ib);
-          }
-        }
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    auto n = *it;
+    if (n->kind() == Symbol::fromQualString("tensorexpr::Group")) {
+      auto wrapper = b->owningGraph()->create(
+          Symbol::fromQualString("tensorexpr::wrapper"), 0);
+      for (auto input : n->inputs()) {
+        wrapper->addInput(input);
       }
+      wrapper->insertBefore(n);
+      wrapper->g_(attr::Subgraph, n->g(attr::Subgraph));
+      for (auto oo : n->outputs()) {
+        auto no = wrapper->addOutput();
+        no->setType(oo->type());
+        no->copyMetadata(oo);
+        oo->replaceAllUsesWith(no);
+      }
+      it.destroyCurrent();
+    } else {
+      for (auto ib : n->blocks()) {
+        replaceTEGroupsWithTEWrapper(ib);
+      }
+    }
+  }
 }
-
 
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
@@ -861,7 +853,6 @@ void runNondiffOptimization(
 
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-
       FuseTensorExprs(graph);
       replaceTEGroupsWithTEWrapper(graph->block());
     }
