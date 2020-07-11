@@ -889,7 +889,7 @@ class CrossEntropyLoss(_WeightedLoss):
     :attr:`weight` argument is specified then this is a weighted average:
 
     .. math::
-        \text{loss} = \frac{\sum^{N}_{i=1} loss(i, class[i])}{\sum^{N}_{i=1} weight[class[i]]}}
+        \text{loss} = \frac{\sum^{N}_{i=1} loss(i, class[i])}{\sum^{N}_{i=1} weight[class[i]]}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
     an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`,

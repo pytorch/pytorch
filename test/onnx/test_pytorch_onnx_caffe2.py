@@ -1620,7 +1620,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
-
+    @skipIfUnsupportedOpsetVersion([10])
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
