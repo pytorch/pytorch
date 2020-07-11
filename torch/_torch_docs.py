@@ -2871,6 +2871,25 @@ Example::
     tensor([False, True, False])
 """)
 
+add_docstr(torch.isreal,
+           r"""
+isreal(input) -> (bool)
+
+Returns True if the data type of :attr:`input` is a complex data type i.e.,
+one of ``torch.complex64``, and ``torch.complex128`` where the imaginary part is 0.
+
+Arguments:
+    input (Tensor): A tensor to check
+
+Returns:
+    Tensor: A ``torch.BoolTensor`` containing a True at each location of real elements.
+
+Example::
+
+    >>> torch.isreal(torch.tensor([1, 1+1j, 2+0j]))
+    tensor([True, False, True])
+""")
+
 add_docstr(torch.is_floating_point,
            r"""
 is_floating_point(input) -> (bool)

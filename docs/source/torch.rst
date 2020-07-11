@@ -351,6 +351,7 @@ Comparison Ops
     isfinite
     isinf
     isnan
+    isreal
     kthvalue
     le
     lt

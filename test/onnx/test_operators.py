@@ -531,6 +531,13 @@ class TestOperators(TestCase):
         x = torch.tensor([1, float('nan'), 2])
         self.assertONNX(lambda x: torch.isnan(x), x)
 
+    def test_isreal(self):
+        x = torch.tensor([1, 1+1j, 2+0j, 3j, 2-1j, 2-0j])
+        y = torch.tensor([True, False, True, False, False, True])
+        assert(torch.all(torch.eq(torch.isreal(x), y)))
+        assert(torch.all(torch.eq(x.isreal(), y)))
+        #self.assertONNX(lambda x: torch.isreal(x), x)
+
     def test_argmax(self):
         x = torch.randn(4, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.argmax(x, dim=1), x)
