@@ -12702,7 +12702,6 @@ class TestTorchDeviceType(TestCase):
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
-    @onlyCPU
     def test_scatter_reduce_operations_to_large_input(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -12737,7 +12736,6 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
-    @onlyCPU
     def test_scatter_reduce_scalar(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -12781,7 +12779,6 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor([[3], [1]], device=device,
                                       dtype=torch.float32).repeat(1, width))
 
-    @onlyCPU
     def test_scatter_reduce_non_unique_index(self, device):
         height = 2
         width = 2

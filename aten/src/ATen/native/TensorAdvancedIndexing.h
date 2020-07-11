@@ -13,6 +13,56 @@ namespace at { namespace native {
 
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_SUBTRACT, REDUCE_MULTIPLY, REDUCE_DIVIDE};
 
+// Implement as functors since lambdas don't get optimized.
+class ReduceMultiply {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data *= *src_data;
+  }
+
+  constexpr void operator() (bool * self_data, bool * src_data) const {
+    *self_data = *self_data && *src_data;
+  }
+};
+static ReduceMultiply reduce_multiply;
+
+class ReduceAdd {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data += *src_data;
+  }
+};
+static ReduceAdd reduce_add;
+
+class ReduceSubtract {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data -= *src_data;
+  }
+};
+static ReduceSubtract reduce_subtract;
+
+class ReduceDivide {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data /= *src_data;
+  }
+};
+static ReduceDivide reduce_divide;
+
+class TensorAssign {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data = *src_data;
+  }
+};
+static TensorAssign tensor_assign;
+
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
