@@ -60,7 +60,7 @@ void sort_pairs_wrapper(
       sorted_seg_id_buffer_->template mutable_data<int>(),
       num_indices,
       0,
-      int(log2(num_indices) + 1),
+      int(log2(float(num_indices)) + 1),
       context_->cuda_stream(),
       false);
 
@@ -79,7 +79,7 @@ void sort_pairs_wrapper(
       sorted_seg_id_buffer_->template mutable_data<int>(),
       num_indices,
       0,
-      int(log2(num_indices) + 1),
+      int(log2(float(num_indices)) + 1),
       context_->cuda_stream(),
       false);
 }
