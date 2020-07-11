@@ -84,7 +84,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
       if (op->isC10Op()) {
         return op;
       }
-      candidates.push_back(std::move(op));
+      candidates.emplace_back(op);
     }
   }
 
