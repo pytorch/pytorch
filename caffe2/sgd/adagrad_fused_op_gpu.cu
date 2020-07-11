@@ -43,6 +43,7 @@ void inclusive_scan_wrapper(
 template <typename SIndex>
 void sort_pairs_wrapper(
     int num_indices,
+    int num_rows,
     Tensor* temp_buffer,
     const Tensor* linear_ind_buffer_,
     Tensor* sorted_linear_ind_buffer_,
@@ -60,7 +61,7 @@ void sort_pairs_wrapper(
       sorted_seg_id_buffer_->template mutable_data<int>(),
       num_indices,
       0,
-      int(log2(float(num_indices)) + 1),
+      int(log2(float(num_rows)) + 1),
       context_->cuda_stream(),
       false);
 
@@ -79,7 +80,7 @@ void sort_pairs_wrapper(
       sorted_seg_id_buffer_->template mutable_data<int>(),
       num_indices,
       0,
-      int(log2(float(num_indices)) + 1),
+      int(log2(float(num_rows)) + 1),
       context_->cuda_stream(),
       false);
 }
@@ -914,76 +915,76 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
             lr,
             seed,
             weight_decay_);
-        } else {
-          rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
-              IndexType,
-              TParam,
-              T,
-              true,
-              NEAREST><<<num_lengths, block, 0, context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              block_size,
-              num_lengths,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              grad,
-              lr,
-              seed,
-              weight_decay_);
-        }
       } else {
-        if (round_option_) {
-          rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
-              IndexType,
-              TParam,
-              T,
-              false,
-              STOCHASTIC>
-              <<<num_lengths,
-                 std::min(maxThreads, block_size),
-                 0,
-                 context_.cuda_stream()>>>(
-                  prefix_sum_length_data,
-                  N,
-                  block_size,
-                  num_lengths,
-                  epsilon_,
-                  paramOut,
-                  momentOut,
-                  indices,
-                  grad,
-                  lr,
-                  seed,
-                  weight_decay_);
-        } else {
-          rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
-              IndexType,
-              TParam,
-              T,
-              false,
-              NEAREST>
-              <<<num_lengths,
-                 std::min(maxThreads, block_size),
-                 0,
-                 context_.cuda_stream()>>>(
-                  prefix_sum_length_data,
-                  N,
-                  block_size,
-                  num_lengths,
-                  epsilon_,
-                  paramOut,
-                  momentOut,
-                  indices,
-                  grad,
-                  lr,
-                  seed,
-                  weight_decay_);
-        }
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            true,
+            NEAREST><<<num_lengths, block, 0, context_.cuda_stream()>>>(
+            prefix_sum_length_data,
+            N,
+            block_size,
+            num_lengths,
+            epsilon_,
+            paramOut,
+            momentOut,
+            indices,
+            grad,
+            lr,
+            seed,
+            weight_decay_);
       }
-      return true;
+    } else {
+      if (round_option_) {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            STOCHASTIC>
+            <<<num_lengths,
+               std::min(maxThreads, block_size),
+               0,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                grad,
+                lr,
+                seed,
+                weight_decay_);
+      } else {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            NEAREST>
+            <<<num_lengths,
+               std::min(maxThreads, block_size),
+               0,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                grad,
+                lr,
+                seed,
+                weight_decay_);
+      }
+    }
+    return true;
   }
 
  private:
@@ -1061,6 +1062,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
     const int num_lengths = lengthsInput.dim(0);
     const int num_indices = indicesInput.dim(0);
+    const int num_rows = Input(PARAM).dim(0);
 
     CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(num_lengths == segmentGradsInput.dim(0));
@@ -1111,6 +1113,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
     sort_pairs_wrapper<IndexType>(
         num_indices,
+        num_rows,
         &sort_buffer_,
         &indicesInput,
         &sorted_linear_ind_buffer_,
