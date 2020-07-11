@@ -7,6 +7,56 @@
 namespace at { namespace native {
 
 namespace {
+  
+// Implement as functors since lambdas don't get optimized.
+class ReduceMultiply {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data *= *src_data;
+  }
+
+  constexpr void operator() (bool * self_data, bool * src_data) const {
+    *self_data = *self_data && *src_data;
+  }
+};
+static ReduceMultiply reduce_multiply;
+
+class ReduceAdd {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data += *src_data;
+  }
+};
+static ReduceAdd reduce_add;
+
+class ReduceSubtract {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data -= *src_data;
+  }
+};
+static ReduceSubtract reduce_subtract;
+
+class ReduceDivide {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data /= *src_data;
+  }
+};
+static ReduceDivide reduce_divide;
+
+class TensorAssign {
+public:
+  template <typename scalar_t>
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
+    *self_data = *src_data;
+  }
+};
+static TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
