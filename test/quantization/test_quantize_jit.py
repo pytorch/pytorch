@@ -2221,6 +2221,25 @@ class TestQuantizeJitOps(QuantizationTestCase):
                        .run(m.graph)
 
     @skipIfNoFBGEMM
+    def test_dequantize_tuple(self):
+        """ Make sure dequantize can support Tuple of tensor
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                return x1, x2
+
+        for tracing in [True, False]:
+            self.checkGraphModeOp(M(), self.img_data_2d, "quantized::conv2d", tracing)
+
+    @skipIfNoFBGEMM
     def test_clamp(self):
         class M(torch.nn.Module):
             def __init__(self):
