@@ -59,4 +59,14 @@ class TORCH_API ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
 };
 
+template <typename T>
+std::function<T(void)> wrapPropagateTLSState(
+    std::function<T(void)> callback) {
+  return [tls_state = ThreadLocalState(), callback = std::move(callback)]() {
+    ThreadLocalStateGuard g(tls_state);
+    // Propagate value returned by callback().
+    return callback();
+  };
+}
+
 } // namespace at
