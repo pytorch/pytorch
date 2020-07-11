@@ -104,8 +104,8 @@ class TestFuser(JitTestCase):
             b = x * y
             return a - b
 
-        x = torch.ones(2)
-        y = torch.ones(2)
+        x = torch.ones(2, requires_grad=True)
+        y = torch.ones(2, requires_grad=True)
         method1(x,y)
         method1(x,y)
 

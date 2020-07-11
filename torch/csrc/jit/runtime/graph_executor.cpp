@@ -470,7 +470,16 @@ RegisterOperators reg_graph_executor_ops({Operator(
         InsertGuards(g);
         // note, no EliminateRedundantGuards
         InsertBailOuts(g);
-        FuseTensorExprs(g);
+
+        auto diff_nodes = CreateAutodiffSubgraphs(
+            g,
+            getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+        for (Node* dnode : diff_nodes) {
+          auto diff_graph = std::move(dnode->g(attr::Subgraph));
+          Gradient gradient = differentiate(diff_graph);
+          FuseTensorExprs(gradient.f);
+          packGradient(gradient, dnode);
+        }
         GRAPH_DUMP("after tensorexpr emitted ", g);
       return FusibleOp(g);
     },
