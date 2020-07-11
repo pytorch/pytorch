@@ -1,13 +1,10 @@
 #include <torch/csrc/jit/mobile/deserializer.h>
 
-#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
@@ -15,25 +12,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-
-// The import process to serialize the bytecode package.
-// An example for bytecode.pkl of a small mobile_module looks like:
-// (3,
-//   ('__torch__.m.forward',
-//     (('instructions',
-//       (('STOREN', 1, 2),
-//        ('DROPR', 1, 0),
-//        ('MOVE', 2, 0),
-//        ('OP', 0, 0),
-//        ('RET', 0, 0))),
-//      ('operators', (('aten::Int', 'Tensor'),)),
-//      ('constants', ()),
-//      ('types', ()),
-//      ('register_size', 2))))
-
-// Note that currently the backward compatibility is not supported by bytecode.
-// This format and process need to be revisted and redesigned if we want to
-// support backward compatibility in future.
 
 namespace c10 {
 // std::string serializeType(const Type &t);
@@ -73,10 +51,9 @@ mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  // auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
-  // parseMethods(bvals, *mcu);
 
-  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
+  auto temp = readArchive("data", mcu);
+  return mobile::Module(temp.toObject(), mcu);
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
@@ -150,8 +127,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
       for (size_t i = 0; i < ndict; ++i) {
-        auto temp = obj->type();
-        temp->addAttribute(std::to_string(i), it->key().type());
+        std::stringstream name;
+        name << it->key();
+        obj->type()->addAttribute(name.str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
       }

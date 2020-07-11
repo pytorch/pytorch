@@ -1,12 +1,6 @@
 #include <torch/csrc/jit/mobile/serializer.h>
 
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/type_hashing.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <torch/csrc/jit/serialization/import_export_functions.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -15,10 +9,7 @@
 
 #include <caffe2/serialize/inline_container.h>
 
-#include <ATen/ATen.h>
-
 #include <ATen/core/jit_type.h>
-#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
 
