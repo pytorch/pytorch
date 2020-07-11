@@ -18083,6 +18083,46 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.linspace(start, end, steps, dtype=dtype, device=device)
         self.assertGreater(x[1] - x[0], (end - start) / steps)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_where_scalar(self, device, dtype):
+        for with_extremal in [True, False]:
+            for ndims in range(0, 4):
+                shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                for n in range(ndims + 1):
+                    for c in combinations(list(range(ndims)), n):
+                        for scalar_type in [int, float, complex]:
+                            if dtype.is_complex:
+                                condition = self._generate_input(shape, dtype, device, with_extremal).to(torch.bool)
+                            else:
+                                condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
+
+                            x = self._generate_input(shape, dtype, device, with_extremal)
+
+                            if not dtype.is_complex and scalar_type == complex:
+                                continue
+
+                            scalar_1 = scalar_type(random.random())
+                            scalar_2 = scalar_type(random.random())
+
+                            if self.device_type == 'cpu' and dtype == torch.half:
+                                with self.assertRaisesRegex(RuntimeError, "\"where_cpu\" not implemented for 'Half'"):
+                                    torch.where(condition, x, scalar_1)
+                            else:
+                                def x_like(scalar, without_dtype=False):
+                                    return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
+
+                                # X = Tensor, Y = Scalar
+                                scalar_out = torch.where(condition, x, scalar_1)
+                                tensor_out = torch.where(condition, x, x_like(scalar_1))
+                                self.assertEqual(scalar_out, tensor_out)
+
+                                # X = Scalar, Y = Tensor
+                                scalar_out = torch.where(condition, scalar_1, x)
+                                tensor_out = torch.where(condition, x_like(scalar_1), x)
+                                self.assertEqual(scalar_out, tensor_out)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
