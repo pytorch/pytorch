@@ -311,22 +311,15 @@ void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, con
   );
 }
 
-void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
+void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
 
 }
-
-void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                                      Scalar& value, const SCATTER_GATHER_OP& reduce) {
-
-}
-
 
 REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
-REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
     
 }} // namespace at::native
