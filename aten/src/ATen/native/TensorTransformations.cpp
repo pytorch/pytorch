@@ -152,10 +152,11 @@ Tensor atleast_1d(const Tensor& self) {
 }
 
 std::vector<Tensor> atleast_1d(TensorList tensors) {
-  std::vector<Tensor> result;
-  for (const auto& x: tensors){
-    result.emplace_back(at::atleast_1d(x));
-  }
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_1d(input);
+  };
+  std::transform(tensors.begin(), tensors.end(), result.begin(), transform_lambda);
   return result;
 }
 
@@ -172,10 +173,11 @@ Tensor atleast_2d(const Tensor& self) {
 }
 
 std::vector<Tensor> atleast_2d(TensorList tensors) {
-  std::vector<Tensor> result;
-  for (const auto& x: tensors){
-    result.emplace_back(at::atleast_2d(x));
-  }
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_2d(input);
+  };
+  std::transform(tensors.begin(), tensors.end(), result.begin(), transform_lambda);
   return result;
 }
 
@@ -195,10 +197,11 @@ Tensor atleast_3d(const Tensor& self) {
 }
 
 std::vector<Tensor> atleast_3d(TensorList tensors) {
-  std::vector<Tensor> result;
-  for (const auto& x: tensors){
-    result.emplace_back(at::atleast_3d(x));
-  }
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_3d(input);
+  };
+  std::transform(tensors.begin(), tensors.end(), result.begin(), transform_lambda);
   return result;
 }
 
