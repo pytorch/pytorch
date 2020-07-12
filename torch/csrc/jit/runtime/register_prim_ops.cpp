@@ -322,32 +322,6 @@ RegisterOperators reg(
            pack(stack, result);
          },
          aliasAnalysisFromSchema()),
-     // only used internally in range() translation
-     Operator(
-         "aten::__range_length(int lo, int hi, int step) -> int",
-         [](Stack* stack) {
-           int64_t lo, hi, step;
-           pop(stack, lo, hi, step);
-           // error handling when step_val = 0 during runtime
-           if (step == 0) {
-             throw std::runtime_error("range() arg 3 must not be zero");
-           }
-           if (step > 0 && lo < hi)
-             push(stack, 1 + (hi - 1 - lo) / step);
-           else if (step < 0 && lo > hi)
-             push(stack, 1 + (lo - 1 - hi) / (0 - step));
-           else
-             push(stack, 0);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::__derive_index(int index, int start, int step) -> int",
-         [](Stack* stack) {
-           int64_t index, start, step;
-           pop(stack, index, start, step);
-           push(stack, start + index * step);
-         },
-         aliasAnalysisFromSchema()),
      // these ops are generic over the list element type.
      // CREATING GENERIC_LIST_OPS
      Operator(
@@ -450,6 +424,19 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
+         [](Stack* stack) {
+           at::Tensor qtensor;
+           pop(stack, qtensor);
+           push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dequantize.any(Any tensors) -> Any",
+         [](Stack* stack) { dequantize(*stack); },
+         aliasAnalysisFromSchema()),
+     DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
      DEFINE_COMPARISON_OP(aten::lt, a < b),
@@ -514,16 +501,11 @@ RegisterOperators reg(
          float,
          float),
      DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-     DEFINE_SCALAR_BINARY_OP(
+     DEFINE_SCALAR_SCALAR_BINARY_OP(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::pow.Scalar,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
-         Scalar),
      DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
