@@ -2208,6 +2208,22 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_backend_bool_reduction(self):
+        element = (self.rank % 2 == 0)
+        # element = 1 if element else 0
+        torch.cuda.set_device(self.rank)
+        scalar_tensor = torch.tensor(element).to(self.rank)
+        with torch.no_grad():
+            dist.all_reduce(scalar_tensor, dist.ReduceOp.SUM)
+            print(f"Rank {self.rank} current_device is {torch.cuda.current_device()}")
+            torch.cuda.synchronize()
+            print(f"Got reduced tensor {scalar_tensor} type {scalar_tensor.dtype}")
+
+
+
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 

@@ -59,11 +59,13 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
-  try {
-    return ncclDataType.at(type);
-  } catch (std::out_of_range& e) {
-    throw std::runtime_error("Unsupported data type for NCCL process group");
+  auto it = ncclDataType.find(type);
+  if (it == ncclDataType.end()) {
+      // Input tensor is of an unsupported type.
+    auto err = c10::str("Input tensor data type is not supported for NCCL process group: ", type);
+    TORCH_CHECK(false, err);
   }
+  return it->second;
 }
 
 // Get the deviceList String from the list of devices
@@ -656,6 +658,36 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     PreProcess pre,
     PostProcess post) {
+      bool isBool = false;
+      if (inputs.size() > 0 && inputs[0].scalar_type() == at::ScalarType::Bool) {
+        isBool = true;
+        for (auto& tensor : inputs) {
+          LOG(INFO) << "Converting tensor to bool";
+          // tensor = tensor.to(at::kLong);
+          // TODO: for some reason, tensor = tensor.to(at::kLong) doesn't work.
+          // if we do that, then the resulting tensor is not modified in python,
+          // even though the allreduce works correctly here.
+          auto asIntBufTensor = tensor.to(at::kLong);
+          tensor.set_data(asIntBufTensor);
+          AT_CUDA_CHECK(cudaDeviceSynchronize());
+          LOG(INFO) << "tensor type: " << tensor.scalar_type();
+          LOG(INFO) << "tensor: " << tensor;
+        }
+
+        // Not needed, since they are the same tensor pointers
+        // for (auto& tensor : outputs) {
+        //   tensor = tensor.to(at::kLong);
+        //   AT_CUDA_CHECK(cudaDeviceSynchronize());
+        // }
+      }
+
+  for (auto& tensor: inputs) {
+           LOG(INFO) << "input tensor type: " << tensor.scalar_type();
+          LOG(INFO) << "input tensor: " << tensor;
+  }
+  for (auto& tensor: outputs) {
+    LOG(INFO) << "output tensor type: " << tensor.scalar_type() << " output tensor: " << tensor;
+  }
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
@@ -691,10 +723,35 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     for (size_t i = 0; i < inputs.size(); ++i) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      LOG(INFO) << "inputs[i] tensor: " << inputs[i];
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
     }
   }
+
+      // AT_CUDA_CHECK(cudaStreamSynchronize(ncclStream));
+      // This needs to be outside of the nccl_group-guard due to
+      // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/groups.html:
+      //Caution: When called inside a group, stream operations (like ncclAllReduce) can return without having enqueued the operation on the stream. Stream operations like cudaStreamSynchronize can therefore be called only after ncclGroupEnd returns.
+
+
+       AT_CUDA_CHECK(cudaDeviceSynchronize());
+       for (size_t i = 0; i < inputs.size(); ++i) {
+       LOG(INFO) << "output[i] tensor: " << outputs[i];
+      if (isBool) {
+        // outputs[i].add_(1);
+        // LOG(INFO) << outputs[i].size();
+        LOG(INFO) << "Converting output back to bool: " << outputs[i];
+        // TODO: need to apply logic of the actual reduction operator.
+        auto asBoolTensor = outputs[i].to(at::kBool);
+        // TODO: the simple t = t.to(bool) doesn't work similar to above.
+        outputs[i].set_data(asBoolTensor);
+        // outputs[i] = outputs[i].to(at::kBool);
+        LOG(INFO) << "outputs is now: " << outputs[i];
+        AT_CUDA_CHECK(cudaDeviceSynchronize());
+      }
+
+       }
 
   post(ncclStreams_[key]);
 
@@ -729,14 +786,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
 
-  return collective(
+  auto x =  collective(
       tensors,
       tensors,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        return ncclAllReduce(
+        auto ret = ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
@@ -744,7 +801,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             ncclOp[opts.reduceOp],
             comm,
             stream.stream());
+        return ret;
       });
+    AT_CUDA_CHECK(cudaDeviceSynchronize());
+    LOG(INFO) << "Output tensors: " << tensors;
+    x->wait();
+    LOG(INFO) << "Called wait.";
+    return x;
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
