@@ -207,6 +207,9 @@ _(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
+_(aten, atleast_1d) \
+_(aten, atleast_2d) \
+_(aten, atleast_3d) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
