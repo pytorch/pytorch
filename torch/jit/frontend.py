@@ -17,6 +17,7 @@ from torch._C._jit_tree_views import (
 from torch._utils_internal import get_source_lines_and_file
 
 from torch._jit_internal import SourceContext, should_drop
+import torch.jit.annotations
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#

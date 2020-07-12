@@ -135,7 +135,7 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     nans = torch.isnan(diff)
     num_nans = nans.sum()
 
-    outside_range = diff > (atol + rtol * torch.abs(b_flat))
+    outside_range = (diff > (atol + rtol * torch.abs(b_flat))) | (diff == math.inf)
     count_outside_range = torch.sum(outside_range, dtype=torch.long)
     greatest_diff_index = torch.argmax(diff)
     debug_msg = ("With rtol={0} and atol={1}, found {2} element(s) (out of {3}) whose "
