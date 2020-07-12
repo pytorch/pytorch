@@ -536,7 +536,7 @@ class TestOperators(TestCase):
         # TODO what's the point of the tests here compared to those in test_torch.py?
         common.TestCase.compare_with_numpy(self, torch_fn=torch.isreal,
                                            np_fn=np.isreal,
-                                           tensor_like=torch.tensor([1, 1+1j, 2+0j, 3j, 2-1j, 2-0j]))
+                                           tensor_like=torch.tensor([1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j]))
         # assert(torch.all(torch.eq(torch.isreal(x), y)))
         # assert(torch.all(torch.eq(x.isreal(), y)))
         # self.assertONNX(lambda x: torch.isreal(x), x)
