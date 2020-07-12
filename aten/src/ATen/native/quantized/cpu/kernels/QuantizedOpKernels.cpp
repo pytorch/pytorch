@@ -2107,6 +2107,53 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
+void fake_quantize_learnable_scale_grad_channel_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  float grad_small = quant_min - zero_point;
+  float grad_big = quant_max - zero_point;
+  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
+  cpu_kernel(iter_scale, [&](float x, float dx) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    float x_fq = static_cast<float>((xq - zero_point) * scale);
+    if (xq == quant_min) {
+      return dx * grad_small;
+    } else if (xq == quant_max) {
+      return dx * grad_big;
+    }
+    return dx * (x_fq - x) * inv_scale;
+  });
+}
+
+void fake_quantize_learnable_zero_point_grad_channel_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
+  cpu_kernel(iter_zero_point, [&](float x, float dx) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    if (xq == quant_min || xq == quant_max) {
+      return dx * (-1) * scale;
+    }
+    return 0;
+  });
+}
+
 // Assumes X is composed of M groups of N elements. Normalizes each of the
 // groups and optionally applies affine scaling. Useful for LayerNorm,
 // GroupNorm, InstanceNorm.
@@ -2569,6 +2616,8 @@ REGISTER_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub, &fake_quantize_le
 REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub, &fake_quantize_learnable_zero_point_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &fake_quantize_learnable_scale_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &fake_quantize_learnable_zero_point_grad_channel_kernel);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
