@@ -14,7 +14,10 @@
 
 #include <torch/custom_class.h>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 
@@ -209,9 +212,9 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 #endif // USE_FBGEMM
 
 template <int kSpatialDim = 2>
-CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   static auto register_conv_params =
-    torch::jit::class_<ConvPackedParamsBase<kSpatialDim>>(
+    torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
@@ -368,14 +371,14 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
 }
 
 template
-CAFFE2_API torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
-CAFFE2_API torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
+torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
   static auto register_linear_params =
-      torch::jit::class_<LinearPackedParamsBase>(
+      torch::class_<LinearPackedParamsBase>(
           "quantized", "LinearPackedParamsBase")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)

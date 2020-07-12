@@ -825,9 +825,9 @@ class TestTypePromotion(TestCase):
             x = torch.tensor([1, 2, 3], device=device, dtype=x_dtype)
             y = torch.tensor([4, 5, 6], device=device, dtype=y_dtype)
             expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=out_dtype)
-            if (((x_dtype.is_floating_point or y_dtype.is_floating_point) 
+            if (((x_dtype.is_floating_point or y_dtype.is_floating_point)
                     and not (out_dtype.is_floating_point or out_dtype.is_complex))
-                    or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)): 
+                    or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)):
                 # This combinations do not support type conversion to a different class out type
                 with self.assertRaises(RuntimeError):
                     torch.cat([x, y], out=out)
@@ -835,22 +835,34 @@ class TestTypePromotion(TestCase):
                 torch.cat([x, y], out=out)
                 self.assertEqual(out, expected_out, exact_dtype=True)
 
-    # Verfies that unary ops can be safely cast (like NumPy) using their
-    # out= kwargs.
+    # Verfies that unary ops require matching out types
     @onlyOnCPUAndCUDA
-    @dtypes(*itertools.product((torch.float32, torch.float64, torch.int64),
-                               (torch.float32, torch.float64, torch.int64)))
+    @dtypes(*itertools.product((torch.int64,
+                                torch.float32, torch.float64,
+                                torch.complex64, torch.complex128),
+                               (torch.int64,
+                                torch.float32, torch.float64,
+                                torch.complex64, torch.complex128)))
     def test_unary_op_out_casting(self, device, dtypes):
         t = torch.tensor((1), dtype=dtypes[0], device=device)
         out = torch.empty(1, dtype=dtypes[1], device=device)
 
-        ops = (torch.neg,)
+        ops = (torch.neg, torch.floor, torch.ceil, torch.cos, torch.erf, torch.log)
+        float_only_ops = {torch.floor, torch.ceil, torch.cos, torch.erf, torch.log}
+        real_only_ops = {torch.floor, torch.ceil, torch.erf}
         for op in ops:
-            if torch.can_cast(dtypes[0], dtypes[1]):
-                self.assertEqual(op(t, out=out), out)
-            else:
-                with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
+            if dtypes[0] is not dtypes[1]:
+                with self.assertRaises(RuntimeError):
                     op(t, out=out)
+            elif op in real_only_ops and dtypes[0].is_complex:
+                with self.assertRaises(RuntimeError):
+                    op(t, out=out)
+            elif op in float_only_ops and (not dtypes[0].is_floating_point and not dtypes[0].is_complex):
+                with self.assertRaises(RuntimeError):
+                    op(t, out=out)
+            else:
+                self.assertEqual(op(t, out=out), op(t))
+                self.assertEqual(op(t, out=out), out)
 
     # Verifies that the out= argument doesn't affect the computation, that
     # is, out = op(...) and op(..., out=out) produce the same result.

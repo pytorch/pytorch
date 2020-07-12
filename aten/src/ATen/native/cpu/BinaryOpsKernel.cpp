@@ -35,6 +35,27 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   }
 }
 
+void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val, Scalar max_val) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
+    auto alpha = alpha_scalar.to<scalar_t>();
+    auto alpha_vec = Vec256<scalar_t>(alpha);
+    auto min_scalar = min_val.to<scalar_t>();
+    auto min_vec = Vec256<scalar_t>(min_scalar);
+    auto max_scalar = max_val.to<scalar_t>();
+    auto max_vec = Vec256<scalar_t>(max_scalar);
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
+        return std::min(max_scalar, std::max(min_scalar, a + alpha * b));
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
+        auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
+        add_clamp_res = vec256::clamp_min(add_clamp_res, min_vec);
+        add_clamp_res = vec256::clamp_max(add_clamp_res, max_vec);
+        return add_clamp_res;
+      });
+    });
+}
+
 void atan2_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -644,6 +665,7 @@ void logaddexp2_kernel(TensorIterator& iter) {
 
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
+REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);

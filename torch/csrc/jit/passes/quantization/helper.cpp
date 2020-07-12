@@ -301,22 +301,32 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
-    return {n->input(0)};
+    // only propagate dequantize for Tensor
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      return {n->input(0)};
+    } else {
+      return {};
+    }
   } else if (
-      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
+      n->kind() == prim::ListConstruct &&
+      v->type()->isSubtypeOf(ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
     }
     return inputs;
-  } else if (isListAdd(n)) {
-    // We need to propagate dequantize of n->input(0) if it is
-    // not an empty list
-    if (isEmptyList(n->input(0)->node())) {
-      return {n->input(1)};
-    } else {
-      return {n->input(0), n->input(1)};
+  } else if (n->kind() == prim::TupleConstruct) {
+    std::vector<Value*> inputs;
+    for (auto* input : n->inputs()) {
+      if (input->type()->isSubtypeOf(TensorType::get())) {
+        inputs.push_back(input);
+      }
     }
+    return inputs;
+  } else if (n->kind() == Symbol::aten("append")) {
+    TORCH_WARN(
+        "Quantization for inplace operation aten::append "
+        "is not supported");
   }
 
   return {};
@@ -417,28 +427,6 @@ bool isPropagateQuantOp(Node* n) {
 
 bool isBinaryOpWithScalarInput(Node* n) {
   return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
-}
-
-bool isListAdd(Node* n) {
-  return n->kind() == Symbol::aten("add") && n->inputs().size() == 2 &&
-      n->outputs().size() == 1 &&
-      n->output()->type()->isSubtypeOf(ListType::ofTensors()) &&
-      n->input(0)->type()->isSubtypeOf(ListType::ofTensors()) &&
-      n->input(1)->type()->isSubtypeOf(ListType::ofTensors());
-}
-
-bool isEmptyList(Node* n) {
-  if (n->outputs().size() != 1) {
-    return false;
-  }
-  bool is_empty_tensor_list_node = n->kind() == prim::ListConstruct &&
-      n->inputs().size() == 0 &&
-      n->output()->type()->isSubtypeOf(ListType::ofTensors());
-  auto iv = toIValue(n->output());
-  bool is_empty_tensor_list_constant = iv.has_value() && iv->isList() &&
-      iv->toList().size() == 0 &&
-      n->output()->type()->isSubtypeOf(ListType::ofTensors());
-  return is_empty_tensor_list_node || is_empty_tensor_list_constant;
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
