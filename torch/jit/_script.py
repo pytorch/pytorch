@@ -418,7 +418,7 @@ if _enabled:
         def graph(self):
             r"""
             Returns a string representation of the internal graph for the
-            ``forward`` method. See `interpreting-graphs`_ for details.
+            ``forward`` method. See `interpreting-graphs` for details.
             """
             return self.forward.graph
 
@@ -427,7 +427,7 @@ if _enabled:
             r"""
             Returns a string representation of the internal graph for the
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
-            See `interpreting-graphs`_ for details.
+            See `interpreting-graphs` for details.
             """
             return self.forward.inlined_graph
 

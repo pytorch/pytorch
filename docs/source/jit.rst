@@ -236,6 +236,7 @@ and we will be able to step into the :func:`@torch.jit.script
 TorchScript compiler for a specific function, see
 :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
+.. _inspecting-code:
 
 Inspecting Code
 ~~~~~~~~~~~~~~~
@@ -286,6 +287,8 @@ This is TorchScript's compilation of the code for the ``forward`` method.
 You can use this to ensure TorchScript (tracing or scripting) has captured
 your model code correctly.
 
+
+.. _interpreting-graphs:
 
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
