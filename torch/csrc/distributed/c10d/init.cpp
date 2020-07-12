@@ -118,11 +118,13 @@ class PythonHookBinder {
   // register_comm_hook function of the reducer input to register that
   // PythonCommHook object.
   static void register_comm_hook(
-      ::c10d::Reducer& reducer,
+      py::object ddp_model,
       py::object state,
       py::object comm_hook) {
-    reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
-        std::move(state), std::move(comm_hook)));
+    ddp_model.attr("reducer")
+        .cast<std::shared_ptr<::c10d::Reducer>>()
+        ->register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
+            std::move(state), std::move(comm_hook)));
   }
 };
 
@@ -146,7 +148,7 @@ PyObject* c10d_init(PyObject* _unused) {
       .def_static(
           "register_comm_hook",
           &PythonHookBinder::register_comm_hook,
-          py::arg("reducer"),
+          py::arg("ddp_model"),
           py::arg("state"),
           py::arg("comm_hook"));
 

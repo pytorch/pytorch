@@ -3077,13 +3077,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupNCCL)
 
     @requires_gloo()
-    def test_ddp_invalid_comm_hook(self):
+    def test_ddp_invalid_comm_hook_init(self):
         """
         This unit test makes sure that register_comm_hook properly checks the format
         of hook defined by user. The Python hook must be callable. This test also
-        checks whether type of annotations checked properly. Finally, it checks
-        whether an internal error is thrown if return type is incorrect and user hasn't
-        specified any return type annotation.
+        checks whether bucket annotation checked properly if defined.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -3099,16 +3097,34 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
+
             model._register_comm_hook(state=None, hook=comm_hook)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_return_type(self):
+        """
+        This test checks whether return annotation checked properly if defined. It also
+        checks whether an internal error is thrown if return type is incorrect and user
+        hasn't specified any return type annotation.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
 
         with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
             def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
+
             model._register_comm_hook(state=None, hook=comm_hook)
 
         with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
             def comm_hook(state: object, bucket: dist.GradBucket):
                 return 1
+
             model._register_comm_hook(state=None, hook=comm_hook)
 
             # Run forward
@@ -3116,6 +3132,30 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             # Run backward
             output.mean().backward()
+
+    @requires_gloo()
+    def test_ddp_comm_hook_register_just_once(self):
+        """
+        DDP communication hook can only be registered once. This test validates whether
+        the error is thrown properly when register_comm_hook is called more than once.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
+
+        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
+            dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
 
 
 class ReducerModule(nn.Module):
@@ -3252,25 +3292,6 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
-
-    def test_ddp_comm_hook_register_just_once(self):
-        """
-        DDP communication hook can only be registered once. This test validates whether
-        the error is thrown properly when register_comm_hook is called more than once.
-        """
-        model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
-
-        def dummy_hook(state, bucket):
-            fut = torch.futures.Future()
-            fut.set_result(bucket.get_tensors())
-            return fut.then()
-
-        dist.PythonHookBinder.register_comm_hook(reducer, None, dummy_hook)
-
-        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
-            dist.PythonHookBinder.register_comm_hook(reducer, None, dummy_hook)
-
 
 
 class ComputeBucketAssignmentTest(TestCase):

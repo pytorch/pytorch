@@ -14,7 +14,8 @@ void broadcast_coalesced(
     at::TensorList tensors,
     size_t buffer_size);
 
-// This class passes bucket contents tensor to DDP communication hook.
+// This class passes bucket contents tensor (for multiple replicas) to
+// DDP communication hook.
 // Optionally in the future this can be enhanced with parameter to bucket
 // mappings as well.
 class GradBucket {

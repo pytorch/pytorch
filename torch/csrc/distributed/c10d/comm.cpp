@@ -102,7 +102,7 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
     auto type = py_fut.get_type();
     auto errMsg = c10::str(
         e.what(),
-        ". DDP communcation hook's callback must return a "
+        ". DDP communication hook's callback must return a "
         "torch.futures.Future object, but got ",
         type.attr("__module__").cast<std::string>(),
         ".",
@@ -113,10 +113,13 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
 
 std::vector<at::Tensor> PythonCommHook::processFuture(
     c10::IValue future_value) {
+  // Since we have a Python hook, future_value is a PyObject. Therefore, we
+  // first convert it to an IValue that contains a TensorVector.
   py::object obj =
       py::reinterpret_borrow<py::object>(future_value.toPyObject());
   auto value =
       torch::jit::toIValue(obj, c10::ListType::create(c10::TensorType::get()));
+
   return value.toTensorVector();
 }
 
