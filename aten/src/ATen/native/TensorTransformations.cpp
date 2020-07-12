@@ -142,4 +142,40 @@ Tensor flipud(const Tensor& self) {
   return self.flip({0});
 }
 
+Tensor atleast_1d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1});
+    default:
+      return self;
+  }
+}
+
+Tensor atleast_2d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1, 1});
+    case 1: {
+      return self.unsqueeze(0);
+    }
+    default:
+      return self;
+  }
+}
+
+Tensor atleast_3d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1, 1, 1});
+    case 1: {
+      return self.unsqueeze(0).unsqueeze(-1);
+    }
+    case 2: {
+      return self.unsqueeze(-1);
+    }
+    default:
+      return self;
+  }
+}
+
 }} // namespace at::native
