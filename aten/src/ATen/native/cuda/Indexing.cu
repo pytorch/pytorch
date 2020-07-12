@@ -7,6 +7,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
@@ -790,8 +791,8 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, long dim,
   static constexpr string_view DIM_WARNING =
     "Tensor too large or too many (> 25) dimensions";
 
-  TORCH_CHECK(out.device() == self.device(), "Input and output must be on the "
-              "same device");
+  TORCH_CHECK(at::cuda::check_device({out, self, index}),
+              "Input, output and indices must be on the current device");
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(out.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
