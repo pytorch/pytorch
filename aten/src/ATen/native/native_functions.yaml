@@ -496,11 +496,22 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+
 - func: atleast_2d(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+- func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
 - func: atleast_3d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
   variants: function
 
