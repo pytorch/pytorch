@@ -714,7 +714,7 @@ class FractionalMaxPool2d(Module):
         >>> output = m(input)
 
     .. _Fractional MaxPooling:
-        http://arxiv.org/abs/1412.6071
+        https://arxiv.org/abs/1412.6071
     """
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
@@ -778,7 +778,7 @@ class FractionalMaxPool3d(Module):
         >>> output = m(input)
 
     .. _Fractional MaxPooling:
-        http://arxiv.org/abs/1412.6071
+        https://arxiv.org/abs/1412.6071
     """
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']

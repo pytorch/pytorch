@@ -43,7 +43,7 @@ class TestUniqueOps(serial.SerializedTestCase):
             # allow negatives
             elements=st.integers(min_value=-10, max_value=10)),
         return_remapping=st.booleans(),
-        **hu.gcs
+        **hu.gcs_no_hip
     )
     def test_unique_op(self, X, return_remapping, gc, dc):
         # impl of unique op does not guarantees return order, sort the input

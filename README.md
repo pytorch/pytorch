@@ -323,6 +323,7 @@ Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
+- [Glossary](https://github.com/pytorch/pytorch/blob/master/GLOSSARY.md)
 
 ## Resources
 

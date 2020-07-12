@@ -184,12 +184,10 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
       for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
         accscalar_t gradient = accscalar_t(0);
         int offset = (n * channels + c) * pooled_height * pooled_width;
-        const scalar_t* ptr_top_diff = top_diff + offset;
-        const int64_t* ptr_top_mask = top_mask + offset;
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
-            if (ptr_top_mask[ph * pooled_width + pw] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(ptr_top_diff[ph * pooled_width + pw]);
+            if (top_mask[ph * pooled_width + pw + offset] == h * width + w) {
+              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[ph * pooled_width + pw + offset]);
             }
           }
         }
