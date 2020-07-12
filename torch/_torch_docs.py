@@ -752,7 +752,7 @@ View input tensors to tensor with at least one dimension.
 Scalar input tensors are converted to 1-dimensional arrays, whilst higher-dimensional inputs are preserved.
 
 Args:
-    input (Tensor): the input tensor.
+    input (Tensor or list of Tensors): the input tensor.
 
 Example::
 
@@ -766,6 +766,10 @@ Example::
     tensor(1.)
     >>> torch.atleast_1d(x)
     tensor([1.])
+    >>> x = torch.tensor(0.5)
+    >>> y = torch.tensor(1.)
+    >>> torch.atleast_1d((x,y))
+    (tensor([0.5000]), tensor([1.]))
 """)
 
 add_docstr(torch.atleast_2d,
@@ -775,7 +779,7 @@ atleast_2d(input) -> Tensor
 View input tensors to tensor with at least two dimension.
 
 Args:
-    input (Tensor): the input tensor.
+    input (Tensor or list of Tensors): the input tensor.
 
 Example::
 
@@ -791,6 +795,10 @@ Example::
     >>> torch.atleast_2d(x)
     tensor([[2.2086, 2.5165],
             [0.1757, 0.5194]])
+    >>> x = torch.tensor(0.5)
+    >>> y = torch.tensor(1.)
+    >>> torch.atleast_2d((x,y))
+    (tensor([[0.5000]]), tensor([[1.]]))
 """)
 
 add_docstr(torch.atleast_3d,
@@ -800,7 +808,7 @@ atleast_3d(input) -> Tensor
 View input tensors to tensor with at least three dimension.
 
 Args:
-    input (Tensor): the input tensor.
+    input (Tensor or list of Tensors): the input tensor.
 
 Example::
 
@@ -819,6 +827,10 @@ Example::
     tensor([[[-1.5689]]])
     >>> torch.atleast_3d(x)
     tensor([[[-1.5689]]])
+    >>> x = torch.tensor(0.5)
+    >>> y = torch.tensor(1.)
+    >>> torch.atleast_3d((x,y))
+    (tensor([[[0.5000]]]), tensor([[[1.]]]))
 """)
 
 add_docstr(torch.baddbmm,
