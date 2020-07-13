@@ -690,6 +690,7 @@ if _enabled:
         "_tracing_name",
         "eval",
         "train",
+        "has_uninitialized_params_or_buffers",
     }
 
     def _make_fail(name):

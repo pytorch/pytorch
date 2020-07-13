@@ -11533,8 +11533,6 @@ class TestLazyModules(TestCase):
         module = torch.nn.Module()
         module.register_parameter('test_param', UninitializedParameter())
         self.assertTrue(module.has_uninitialized_params_or_buffers())
-        self.assertTrue(module.has_uninitialized_params_or_buffers())
-        self.assertTrue(module.has_uninitialized_params_or_buffers())
         with self.assertRaisesRegex(ValueError, 'uninitialized'):
             list(module.parameters())
 
@@ -11574,6 +11572,13 @@ class TestLazyModules(TestCase):
         new_module.register_buffer('test_buffer', torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
         self.assertEqual(module.test_buffer, torch.ones((5, 5))) 
+
+    def test_lazy_module_jit(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+        with self.assertRaisesRegex(RuntimeError, 'infer_parameters'):
+            torch.jit.script(module)
 
     def test_linear(self):
         module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)

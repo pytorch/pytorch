@@ -203,9 +203,6 @@ class Module:
 
     training: bool
 
-    r"""Flag that shows if the module holds uninitialized parameters."""
-    _needs_initialization: bool = False
-
     def __init__(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
@@ -293,8 +290,6 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-        self._needs_initialization = self.has_uninitialized_params_or_buffers()
-
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
@@ -333,8 +328,6 @@ class Module:
                 "the forward() method.".format(name))
         else:
             self._parameters[name] = param
-
-        self._needs_initialization = self.has_uninitialized_params_or_buffers()
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
@@ -730,8 +723,10 @@ class Module:
                 if not isinstance(result, tuple):
                     result = (result,)
                 input = result
-        if self._needs_initialization:
+
+        if self.has_uninitialized_params_or_buffers():
             raise RuntimeError('Module {} has not been correctly initialized'.format(self._get_name()))
+
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -1440,8 +1435,10 @@ class Module:
         return replica
 
     def has_uninitialized_params_or_buffers(self):
-        r"""Check if a module has parameters that hasn't been initialized
+        r"""Check if a module has parameters that are not initialized
         """
+        # This is to avoid the JIT to track this parameter and force
+        # custom modules __setstate__ to add it
         params_and_buffers = dict(self.named_parameters(recurse=False))
         params_and_buffers.update(self.named_buffers(recurse=False))
         for name, param in params_and_buffers.items():
@@ -1469,7 +1466,7 @@ class Module:
         initialize_hooks = []
 
         def set_hooks(module):
-            if module._needs_initialization:
+            if module.has_uninitialized_params_or_buffers():
                 hook = module.register_forward_pre_hook(initialize_hook)
                 initialize_hooks.append(hook)
 

@@ -497,6 +497,10 @@ def check_module_initialized(mod):
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(torch.typename(type(mod))))
+    if mod.has_uninitialized_params_or_buffers():
+        raise RuntimeError("'{}' has uninitialized parameters or buffers, did you forget to call 'infer_parameters()'?"
+                           .format(torch.typename(type(mod))))
+
 
 def infer_methods_to_compile(nn_module):
     """
