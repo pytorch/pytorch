@@ -720,7 +720,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     }
   }
 
-  // AT_CUDA_CHECK(cudaStreamSynchronize(ncclStream));
   // This needs to be outside of the nccl_group-guard due to
   // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/groups.html:
   // Caution: When called inside a group, stream operations (like ncclAllReduce)
@@ -750,8 +749,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       }
     }
   }
-
-  //  AT_CUDA_CHECK(cudaDeviceSynchronize());
 
   post(ncclStreams_[key]);
 
