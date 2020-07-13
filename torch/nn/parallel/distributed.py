@@ -594,7 +594,7 @@ class DistributedDataParallel(Module):
 
         """
         self._check_comm_hook(hook)
-        dist.PythonHookBinder.register_comm_hook(self, state, hook)
+        dist.PythonHookHelper.register_comm_hook(self, state, hook)
 
     def _distributed_broadcast_coalesced(self, tensors, buffer_size):
         dist._broadcast_coalesced(self.process_group, tensors, buffer_size)

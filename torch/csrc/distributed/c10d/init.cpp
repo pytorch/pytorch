@@ -24,6 +24,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupFuture.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -106,10 +107,10 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// PythonhookBinder has a static function called register_comm_hook
+// PythonHookHelper has a static function called register_comm_hook
 // that enables registering a c10d PythonCommHook object to c10d
 // reducer from Python.
-class PythonHookBinder {
+class PythonHookHelper {
  public:
   // This static method is called from DDP's Python API. Its inputs are
   // a c10d reducer object, state, and callable comm_hook. State and
@@ -125,6 +126,10 @@ class PythonHookBinder {
         .cast<std::shared_ptr<::c10d::Reducer>>()
         ->register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
             std::move(state), std::move(comm_hook)));
+  }
+  static std::shared_ptr<torch::jit::Future> convert_dist_work_to_future(
+      std::shared_ptr<::c10d::ProcessGroup::Work> work) {
+        return std::make_shared<::c10d::ProcessGroupFuture>(work);
   }
 };
 
@@ -144,13 +149,20 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::GradBucket::getTensors,
           py::call_guard<py::gil_scoped_release>());
 
-  shared_ptr_class_<PythonHookBinder>(module, "PythonHookBinder")
+  shared_ptr_class_<torch::jit::Future>(module, "Future");
+
+  shared_ptr_class_<PythonHookHelper>(module, "PythonHookHelper")
       .def_static(
           "register_comm_hook",
-          &PythonHookBinder::register_comm_hook,
+          &PythonHookHelper::register_comm_hook,
           py::arg("ddp_model"),
           py::arg("state"),
-          py::arg("comm_hook"));
+          py::arg("comm_hook"))
+      .def_static(
+          "convert_dist_work_to_future",
+          &PythonHookHelper::convert_dist_work_to_future,
+          py::arg("work"),
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(

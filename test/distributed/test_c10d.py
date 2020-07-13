@@ -3015,8 +3015,47 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Register DDP Communication Hook
         cpu_model._register_comm_hook(None, self._simple_hook)
 
-        self._run_and_verify_simple_hook(cpu_model)
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
 
+    @requires_gloo()
+    def test_ddp_comm_hook_allreduce_hook_cpu(self):
+        """
+        This unit test verifies whether a DDP communication hook that just
+        calls allreduce gives the same result result with the case of no hook
+        registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            TestDdpCommHook().cpu(),
+            process_group=process_group
+        )
+
+        def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+            allreduce_work = process_group.allreduce(bucket.get_tensors())
+            allreduce_fut = dist.PythonHookHelper.convert_dist_work_to_future(allreduce_work)
+            return allreduce_fut
+
+        # Register DDP Communication Hook
+        cpu_model._register_comm_hook(None, allreduce_hook)
+
+        # check whether the grads are equal to what allreduce returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        # self._run_and_verify_hook(cpu_model, 8, 0.25 * torch.ones(2, 2))
+
+        output = cpu_model(8, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        # # # [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
+        [print(p.grad) for p in cpu_model.parameters()]
+
+    @requires_gloo()
     def _test_ddp_comm_hook_future_passing_gpu(self, c10d_process_group):
         """
         This unit test verifies whether the Future object is passed properly.
@@ -3036,7 +3075,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Register DDP Communication Hook
         gpu_model._register_comm_hook(None, self._simple_hook)
 
-        self._run_and_verify_simple_hook(gpu_model)
+        self._run_and_verify_hook(gpu_model, 8 , 2 * torch.ones(2, 2))
 
     def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
         fut = torch.futures.Future()
@@ -3049,16 +3088,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         return fut.then(fut_then)
 
-    def _run_and_verify_simple_hook(self, model):
+    def _run_and_verify_hook(self, model, input, expected_grad):
         # Run forward
-        output = model(8, self.rank)
+        output = model(input, self.rank)
 
         # Run backward
         output.mean().backward()
 
-        # check whether the grads are equal to what then callback returns.
-        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
-        [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
+        [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
@@ -3152,10 +3189,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result(bucket.get_tensors())
             return fut
 
-        dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
+        dist.PythonHookHelper.register_comm_hook(model, None, dummy_hook)
 
         with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
-            dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
+            dist.PythonHookHelper.register_comm_hook(model, None, dummy_hook)
 
 
 class ReducerModule(nn.Module):
