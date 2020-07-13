@@ -819,8 +819,13 @@ endif()
 
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
 if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  # PSIMD is required by FP16
+  if(NOT DEFINED PSIMD_SOURCE_DIR)
+    set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+  endif()
   if(NOT DEFINED FP16_SOURCE_DIR)
-    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+    set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   endif()
 
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
