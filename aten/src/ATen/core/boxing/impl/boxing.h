@@ -38,7 +38,7 @@ template<class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template<class T>
-struct has_ivalue_to<T, guts::void_t<decltype(IValue::to<T>())>> : std::true_type {};
+struct has_ivalue_to<T, guts::void_t<decltype(IValue::to<T>)>> : std::true_type {};
 
 //
 // boxing predicates
