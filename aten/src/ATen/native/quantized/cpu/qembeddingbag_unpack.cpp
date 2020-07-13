@@ -8,6 +8,9 @@ namespace {
 Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
+
+  // The last 2 values are used to store the FP32 scale and zero_point values
+  // per row.
   int output_columns = input_columns - 2 * sizeof(float);
 
   const auto* input = packed_weight.data_ptr<uint8_t>();
@@ -27,16 +30,11 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
     for (std::size_t col = 0; col < output_columns; ++col) {
       output_row[col] =
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
-    }
-  }
+    } // output_columns
+  } // input_rows
   return output;
 }
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-      __attribute__((no_sanitize("address")))
-#endif
-#endif
 Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
@@ -71,8 +69,8 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
       quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
       quantized &= (1 << BIT_RATE) - 1;
       output_row[col] = scale * quantized + zero_point;
-    }
-  }
+    } // output_columns
+  } // input_rows
   return output;
 }
 

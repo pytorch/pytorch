@@ -2758,7 +2758,7 @@ class TestQuantizedEmbeddingBag(TestCase):
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 2 == 0),)
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
     def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim):
         pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
@@ -2854,7 +2854,7 @@ class TestQuantizedEmbeddingBag(TestCase):
 
     """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 2 == 0),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())

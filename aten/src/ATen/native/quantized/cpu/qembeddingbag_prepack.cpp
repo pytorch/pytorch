@@ -46,8 +46,8 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
     for (std::size_t col = 0; col < embedding_cols; ++col) {
       output_row[col] =
           lrintf((input_row[col] - minimum_element) * inverse_scale);
-    }
-  }
+    } // embedding_cols
+  } // embedding_rows
   return output;
 }
 
@@ -87,10 +87,6 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
 
-    at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
-        output_row +
-        (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-
     float Xmin = *std::min_element(input_row, input_row + embedding_cols);
     float Xmax = *std::max_element(input_row, input_row + embedding_cols);
 
@@ -108,23 +104,32 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
       scale = 1.0f;
       inverse_scale = 1.0f;
     }
+
+    // Update the scale and zero_point of each row.
+    at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
+        output_row +
+        (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+
     output_row_scale_zp[0] = scale;
     output_row_scale_zp[1] = Xmin;
 
+    // Pack the weight values.
     for (int col = 0; col < embedding_cols; ++col) {
       float X = input_row[col];
       std::uint8_t quantized = std::max(
           0,
           std::min<int>(
               lrintf((X - Xmin) * inverse_scale), (1 << BIT_RATE) - 1));
+      // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
+      // and index 1 is packed in the upper 4-bits.
       if (col % NUM_ELEM_PER_BYTE == 0) {
         output_row[col / NUM_ELEM_PER_BYTE] = quantized;
       } else {
         output_row[col / NUM_ELEM_PER_BYTE] |=
             (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
       }
-    }
-  }
+    } // embedding_cols
+  } // embedding_rows
   return output;
 }
 
