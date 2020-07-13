@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors. It also defines mathematical operations that can be performed over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -311,11 +311,6 @@ def is_deterministic():
     """
     return _C._get_deterministic()
 
-# If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
-
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
@@ -388,6 +383,10 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+# If you edit these imports, please update torch/__init__.py.in as well
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
+from .serialization import save, load
+from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
@@ -508,6 +507,8 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
+
+from ._vmap_internals import vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom

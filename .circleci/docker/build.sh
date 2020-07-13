@@ -71,13 +71,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-pynightly)
-    TRAVIS_PYTHON_VERSION=nightly
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
     CUDA_VERSION=9.2
     CUDNN_VERSION=7
@@ -231,6 +224,22 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.3
     ;;
+  pytorch-linux-xenial-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
+    ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -276,6 +285,14 @@ docker build \
        -t "$tmp_tag" \
        "$@" \
        .
+
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to replace the
+#   "$UBUNTU_VERSION" == "18.04-rc"
+# with
+#   "$UBUNTU_VERSION" == "18.04"
+UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
   docker run --rm "$tmp_tag" $*

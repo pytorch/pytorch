@@ -124,15 +124,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::BFloat16, ScalarType::Half, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
-        binary_kernel_reduce_vec(
-            iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-            [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
-      });
-}
-
 static void mean_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&] {
     scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
@@ -304,7 +295,6 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);

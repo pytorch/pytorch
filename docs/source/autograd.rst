@@ -17,7 +17,7 @@ Functional higher level API
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. warning::
-    This API is experimental. Even though the function signatures are very unlikely to change, major
+    This API is in beta. Even though the function signatures are very unlikely to change, major
     improvements to performances are planned before we consider this stable.
 
 This section contains the higher level API for the autograd that builds on the basic API above
