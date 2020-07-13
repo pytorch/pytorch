@@ -548,3 +548,30 @@ class TestWith(JitTestCase):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+    def test_with_no_grad(self):
+        """
+        Check that torch.no_grad() works.
+        """
+        @torch.jit.script
+        class NoGrad(object):
+            def __init__(self):
+                self.prev: bool = False
+
+            def __enter__(self):
+                self.prev = torch.is_grad_enabled()
+                torch.set_grad_enabled(False)
+
+            def __exit__(self, exc: Any, type: Any, tb: Any):
+                torch.set_grad_enabled(self.prev)
+
+        def test_fn(x):
+            # type: (Tensor) -> (Tuple[Tensor, bool])
+            with NoGrad():
+                y = x * x
+
+            return y, y.requires_grad
+
+        test_input = torch.randn(5)
+
+        self.checkScript(test_fn, (test_input,))

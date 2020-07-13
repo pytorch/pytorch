@@ -406,7 +406,14 @@ RegisterOperators reg({
           push(stack, at::zero_(tensor));
         },
         aliasAnalysisFromSchema()),
-
+    Operator(
+        "aten::is_grad_enabled() -> bool",
+        [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::set_grad_enabled(bool val) -> ()",
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
+        aliasAnalysisFromSchema()),
 });
 } // namespace
 } // namespace jit

@@ -280,7 +280,7 @@ class WithItemBuilder(Builder):
         if op_vars:
             end = op_vars.col_offset + len(op_vars.id)
         else:
-            end = start + len(item.context_expr.id)
+            end = item.context_expr.end_col_offset
 
         r = ctx.make_range(lineno, start, end)
 
