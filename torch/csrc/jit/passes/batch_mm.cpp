@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -364,6 +365,7 @@ RegisterOperators mm_batch_side_reg({Operator(
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
     AliasDb& alias_db) {
+  GRAPH_DEBUG("Gathering independent MMUses for %", value->debugName(), "\n");
   const auto postprocess = [&](std::vector<Node*> mms) {
     if (mms.size() == 0) {
       return mms;
@@ -381,6 +383,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
         if (mms[j] == nullptr)
           continue;
         if (!alias_db.couldMoveBeforeTopologically(mms[j], mms[i])) {
+          GRAPH_DEBUG("Cannot move ", *mms[j], " to ", *mms[i], "\n");
           mms[j] = nullptr;
         }
       }
@@ -465,10 +468,11 @@ bool hasMutableOperators(Block* block) {
 }
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
-  if (hasMutableOperators(graph->block())) {
-    // TODO(suo): make BatchMM mutability-safe
-    return;
-  }
+  // if (hasMutableOperators(graph->block())) {
+  //   // TODO(suo): make BatchMM mutability-safe
+  //   return;
+  // }
+  GRAPH_DUMP("Before batchMM: ", graph);
   AliasDb alias_db(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);
@@ -476,6 +480,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
   PeepholeOptimize(graph);
+  GRAPH_DUMP("After batchMM: ", graph);
 }
 
 } // namespace jit
