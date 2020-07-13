@@ -193,57 +193,56 @@ def embedding_bag(g,
                   include_last_offset):
     from torch.onnx.symbolic_opset9 import size, div, select
 
-    if offsets.type().sizes() is not None:
-        # Initial indices is 2D. In functional.py:
-        # offsets is torch.arange(0, indices.numel(), indices.size(1))
-        # Then indices is reshaped to 1D: indices.reshape(-1)
-        if indices.node().kind() == 'onnx::Reshape':
-            embeddings = g.op("Gather", embedding_matrix, indices)
-            dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
-            dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
-            dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
+    # Check if initial indices was 2D. In functional.py:
+    # offsets is set to torch.arange(0, indices.numel(), indices.size(1))
+    # Then indices is reshaped to 1D: indices.reshape(-1)
+    if indices.node().kind() == 'onnx::Reshape':
+        embeddings = g.op("Gather", embedding_matrix, indices)
+        dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
+        dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
+        dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
 
-            shape = [dim_0, dim_1, dim_2]
-            shape = g.op("Concat", *shape, axis_i=0)
+        shape = [dim_0, dim_1, dim_2]
+        shape = g.op("Concat", *shape, axis_i=0)
 
-            if not sym_help._is_none(per_sample_weights):
-                per_sample_weights = g.op("Unsqueeze", per_sample_weights, axes_i=[1])
-                embeddings = g.op("Mul", embeddings, per_sample_weights)
+        if not sym_help._is_none(per_sample_weights):
+            per_sample_weights = g.op("Unsqueeze", per_sample_weights, axes_i=[1])
+            embeddings = g.op("Mul", embeddings, per_sample_weights)
 
-            embeddings = g.op("Reshape", embeddings, shape)
-            if mode == 0:
-                embeddings = g.op("ReduceSum", embeddings, axes_i=[1], keepdims_i=0)
-            elif mode == 1:
-                embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
-            else:
-                embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
-            return embeddings, None, None, None
+        embeddings = g.op("Reshape", embeddings, shape)
+        if mode == 0:
+            embeddings = g.op("ReduceSum", embeddings, axes_i=[1], keepdims_i=0)
+        elif mode == 1:
+            embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
         else:
-            offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
-            offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
-            list_ = []
-            for i in range(offsets.type().sizes()[0]):
-                start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
-                end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
-                axes_ = g.op("Constant", value_t=torch.tensor([0]))
-                indices_row = g.op("Slice", indices, start_, end_, axes_)
+            embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
+        return embeddings, None, None, None
+    elif offsets.type().sizes() is not None:
+        offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
+        offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
+        list_ = []
+        for i in range(offsets.type().sizes()[0]):
+            start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
+            end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
+            axes_ = g.op("Constant", value_t=torch.tensor([0]))
+            indices_row = g.op("Slice", indices, start_, end_, axes_)
 
-                embeddings = g.op("Gather", embedding_matrix, indices_row)
-                if not sym_help._is_none(per_sample_weights):
-                    per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
-                    per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
-                    embeddings = g.op("Mul", embeddings, per_sample_weights_row)
-                if mode == 0:
-                    embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
-                elif mode == 1:
-                    embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
-                else:
-                    embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+            embeddings = g.op("Gather", embedding_matrix, indices_row)
+            if not sym_help._is_none(per_sample_weights):
+                per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
+                per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+                embeddings = g.op("Mul", embeddings, per_sample_weights_row)
+            if mode == 0:
+                embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+            elif mode == 1:
+                embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+            else:
+                embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-                embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
-                list_.append(embeddings)
+            embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
+            list_.append(embeddings)
 
         output = g.op("Concat", *list_, axis_i=0)
         return output, None, None, None
     else:
-        return sym_help._onnx_unsupported('embedding_bag')
+        return sym_help._onnx_unsupported('embedding_bag with unknown shape of indices')
