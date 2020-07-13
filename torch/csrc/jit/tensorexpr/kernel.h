@@ -66,10 +66,10 @@ class TORCH_API TensorExprKernel {
 
   void runKernel(Stack& stack);
 
-  std::vector<DimArg> getDimsFromSizes(const std::vector<ExprHandle>& sizes);
-  std::vector<ExprHandle> getSizes(torch::jit::Value* v);
-  std::vector<DimArg> texprDims(torch::jit::Value* v);
-  std::vector<ExprHandle> texprSizes(const c10::VaryingShape<int64_t>& shape);
+  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
+  std::vector<ExprHandle> sizesForValue(torch::jit::Value* v);
+  std::vector<ExprHandle> sizesFromVaryingShape(
+      const c10::VaryingShape<int64_t>& shape);
 
   std::unordered_map<const torch::jit::Value*, std::vector<DimArg>> known_dims_;
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
