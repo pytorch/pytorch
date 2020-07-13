@@ -81,7 +81,11 @@ class DeterminationTest(unittest.TestCase):
         """testing/_internal files trigger dependent tests"""
         self.assertEqual(
             self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
-            ["test_quantization"],
+            [
+                "test_jit_profiling",
+                "test_jit",
+                "test_quantization",
+            ],
         )
 
     def test_torch_file(self):

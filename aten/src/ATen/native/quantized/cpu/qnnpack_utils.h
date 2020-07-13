@@ -58,8 +58,8 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(at::Tensor input) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -240,7 +240,6 @@ Tensor qnnpack_avg_pool2d(
 } // qnnp_avgpool_helper
 } // namespace native
 } // namespace at
-#endif
 
 namespace {
 std::vector<float> generate_requantization_scales(
@@ -311,5 +310,6 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
   }
   return {weight_zp, weight_scales};
 }
-
 } // namespace
+
+#endif

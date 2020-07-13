@@ -676,7 +676,6 @@ OnnxifiTransformer::~OnnxifiTransformer() {
 
 OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, TensorShape>& output_shape_hints,
     const std::unordered_set<std::string>& initialization_list,
     const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& external_outputs,
@@ -732,18 +731,21 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
 
   // Add output size hints
+  auto* output_shape_info_arg = op.add_arg();
+  output_shape_info_arg->set_name("output_shape_info");
+  auto* output_qshape_info_arg = op.add_arg();
+  output_qshape_info_arg->set_name("output_qshape_info");
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
-    const auto it = output_shape_hints.find(o);
-    if (it != output_shape_hints.end()) {
-      const auto& shape = it->second;
-      auto* output_shape_hint_arg = op.add_arg();
-      output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
-      output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
-      for (const auto& d : shape.dims()) {
-        output_shape_hint_arg->add_ints(d);
+    const auto it = shape_hints.find(o);
+    if (it != shape_hints.end()) {
+      if (!it->second.is_quantized) {
+        output_shape_info_arg->mutable_tensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoTensorProto(o, it->second));
+      } else {
+        output_qshape_info_arg->mutable_qtensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoQTensorProto(o, it->second));
       }
-
       VLOG(2) << "Adding output hint: " << o;
     }
   }
@@ -766,6 +768,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
   AddArgument("max_batch_size", opts_.bound_shape_spec.max_batch_size, &op);
   AddArgument("max_seq_size", opts_.bound_shape_spec.max_seq_size, &op);
+  AddArgument("timeout", opts_.timeout, &op);
   AddArgument("nominal_batch_idx", nominal_batch_idx, &op);
 
   return op;
@@ -848,6 +851,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   auto* qshape_arg = onnxifi_net.add_arg();
   shape_arg->set_name("input_shape_info");
   qshape_arg->set_name("input_qshape_info");
+  std::sort(total_inputs_vec.begin(), total_inputs_vec.end());
   onnxifi_net.clear_external_input();
   for (const auto& i : total_inputs_vec) {
     onnxifi_net.add_external_input(i);
@@ -859,16 +863,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(
           wrapShapeInfoIntoQTensorProto(i, shape_hints.at(i)));
     }
-  }
-
-  // Compute output shape hints
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
-  for (const auto& o : onnxifi_net.external_output()) {
-    const auto it = shape_hints.find(o);
-    CAFFE_ENFORCE(
-        it != shape_hints.end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second.shape;
-    output_shape_hints.emplace(o, shape);
   }
 
   // Rewrite the net into a dummy in loop test mode
@@ -905,7 +899,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.external_output().end());
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
@@ -999,16 +992,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       onnxifi_net_outputs,
       shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints_onnx_.find(i.name());
-    CAFFE_ENFORCE(
-        it != shape_hints_onnx_.end(),
-        "Cannot find shape info for output ",
-        i.name());
-    const auto& shape = it->second;
-    output_shape_hints.emplace(i.name(), shape);
   }
 
   // Convert inputs and figure out weights
@@ -1033,7 +1018,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   onnx_model.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
@@ -1247,7 +1231,8 @@ bool OnnxifiTransformer::supportOpC2(
     auto ret = lib_->onnxGetBackendCompatibility(
         backend_id, c2_model_str.size(), c2_model_str.c_str());
     if (ret != ONNXIFI_STATUS_SUCCESS) {
-      LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
+      LOG(INFO) << "Don't support c2 op " << op.type() << " at pos " << pos
+                << " (" << ret << ")";
       return false;
     } else {
       return true;
@@ -1436,6 +1421,9 @@ void OnnxifiTransformer::transform(
     LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
     annotateOpIndex(pred_net);
     shape_hints_mapped = input_shape_hints;
+    for (const auto& w : weights) {
+      input_mapping_.emplace(w, w);
+    }
   } else {
     shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   }

@@ -70,7 +70,6 @@ class TestModels(TestCase):
         self.exportTest(toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x))
 
     @skipIfNoLapack
-    @unittest.skip("This model is broken, see https://github.com/pytorch/pytorch/issues/18429")
     def test_super_resolution(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0)
@@ -83,26 +82,29 @@ class TestModels(TestCase):
         )
         self.exportTest(toC(alexnet()), toC(x))
 
-    @unittest.skip("Waiting for https://github.com/pytorch/pytorch/pull/3100")
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
 
+    @unittest.skip("This model takes too much memory")
     def test_vgg16(self):
         # VGG 16-layer model (configuration "D")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg16()), toC(x))
 
+    @unittest.skip("This model takes too much memory")
     def test_vgg16_bn(self):
         # VGG 16-layer model (configuration "D") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg16_bn()), toC(x))
 
+    @unittest.skip("This model takes too much memory")
     def test_vgg19(self):
         # VGG 19-layer model (configuration "E")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19()), toC(x))
 
+    @unittest.skip("This model takes too much memory")
     def test_vgg19_bn(self):
         # VGG 19-layer model (configuration 'E') with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -131,11 +133,10 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(densenet121()), toC(x))
+        self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
 
     def test_dcgan_netD(self):
         netD = _netD(1)

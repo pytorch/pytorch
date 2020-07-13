@@ -15,25 +15,25 @@ import unittest
 
 class TestTrigonometricOp(serial.SerializedTestCase):
     @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)),
+        X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
     def test_acos(self, X, gc, dc):
         self.assertTrigonometricChecks("Acos", X, lambda x: (np.arccos(X),), gc, dc)
 
     @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)),
+        X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
     def test_asin(self, X, gc, dc):
         self.assertTrigonometricChecks("Asin", X, lambda x: (np.arcsin(X),), gc, dc)
 
     @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-100, max_value=100)),
+        X=hu.tensor(elements=hu.floats(min_value=-100, max_value=100)),
         **hu.gcs)
     def test_atan(self, X, gc, dc):
         self.assertTrigonometricChecks("Atan", X, lambda x: (np.arctan(X),), gc, dc)
 
     @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-0.5, max_value=0.5)),
+        X=hu.tensor(elements=hu.floats(min_value=-0.5, max_value=0.5)),
         **hu.gcs)
     def test_tan(self, X, gc, dc):
         self.assertTrigonometricChecks("Tan", X, lambda x: (np.tan(X),), gc, dc)

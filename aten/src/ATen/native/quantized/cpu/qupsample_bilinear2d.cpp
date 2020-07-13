@@ -164,6 +164,20 @@ Tensor quantized_upsample_bilinear2d_cpu(
   }
 }
 
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor quantized_upsample_bilinear2d_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+      bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  return quantized_upsample_bilinear2d_cpu(input, osize, align_corners, scale_h, scale_w);
+}
+
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at

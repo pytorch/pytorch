@@ -31,16 +31,16 @@
 #  
 
 #  After loading w pointer in ip reg.
-#  And after pushing r4-r8 and d8-d15 on stack
+#  And after pushing r4-r9 and d8-d15 on stack
 #  |-----------|
 #  |d8 - d15   | 0
-#  |r4 - r8    | 64
-#  |a_stride   | 84
-#  |w          | 88
-#  |c          | 92
-#  |c_stride   | 96
-#  |out ch indx| 100
-#  |params     | 104
+#  |r4 - r9    | 64
+#  |a_stride   | 88
+#  |w          | 92
+#  |c          | 96
+#  |c_stride   | 100
+#  |out ch indx| 104
+#  |params     | 108
 #  |-----------|
 #  
 
@@ -78,18 +78,29 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
-    PUSH {r4, r5, r6, r7, r8}
+    PUSH {r4, r5, r6, r7, r8, r9}
 
-    VPUSH {d8-d15}
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 104]
+    LDR r7, [sp, 44]
+    VPUSH {d8-d15}
+
+    # Load bias0123, bias4567
+    VLDM ip!, {d16-d19}
 
     # Load output channel index
-    LDR r5, [sp, 100]
+    LDR r5, [sp, 104]
     # Load pointer to per channel zero points array
     # Post-index: After load increment r7 by 4
     LDR r4, [r7], #4
+    # Load a_zero_point:
+    # - d14 = a_zero_point
+    VLD1.8 {d14[]}, [r7]
+
+    # Load a_stride
+    # - r6 = a_stride
+    LDR r9, [sp, 88]
+
     # Byte offset of output channel index for requant scale.
     LSL r6, r5, 2
     # Load pointer to per channel requant scale
@@ -101,35 +112,25 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # - d15 = b_zero_point
     VLD1.8 {d15}, [r4]
 
-    # Store in r8 pointer from where to load requant scale.
-    ADD r8, r8, r6
-
-    # Load bias0123, bias4567
-    VLDM ip!, {d16-d19}
-
-    # Load a_stride
-    # - r6 = a_stride
-    LDR r6, [sp, 84]
-    CMP r0, 2
-
-    ADD r4, r3, r6
-
-    # Load a_zero_point:
-    # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r7]
     # add 8 bytes to get to vfmax
     ADD r7, r7, 12
 
+    CMP r0, 2
+    ADD r4, r3, r9
+
+    # Store in r8 pointer from where to load requant scale.
+    ADD r8, r8, r6
+
     MOVLO r4, r3
 
-    ADD r5, r4, r6
+    ADD r5, r4, r9
 
     # q10 := vacc1x0123
     VMOV.I32 q10, q8
     MOVLS r5, r4
     # q11 := vacc1x4567
     VMOV.I32 q11, q9
-    ADD r6, r5, r6
+    ADD r6, r5, r9
     # q12 := vacc2x0123
     VMOV.I32 q12, q8
     CMP r0, 4
@@ -761,7 +762,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load c, c_stride:
     # - r2 = c
     # - r2 = c_stride
-    LDRD r2, r3, [sp, 92]
+    LDRD r2, r3, [sp, 96]
 
     VSUB.S32 q8, q8, q1
     VSUB.S32 q9, q9, q1
@@ -806,7 +807,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     VST1.8 {d19}, [r3]
 
     VPOP {d8-d15}
-    POP {r4, r5, r6, r7, r8}
+    POP {r4, r5, r6, r7, r8, r9}
     BX lr
 
     .p2align 3
@@ -847,7 +848,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
 7:
     VPOP {d8-d15}
-    POP {r4, r5, r6, r7, r8}
+    POP {r4, r5, r6, r7, r8, r9}
     BX lr
 END_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 

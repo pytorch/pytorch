@@ -50,7 +50,7 @@
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
-#include <torch/csrc/distributed/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
@@ -205,26 +205,6 @@ PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
   torch::tensors::py_set_default_dtype(dtype);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}
-
-PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
-{
-  PyObject *result = nullptr;
-  PyObject *args_slice = nullptr;
-  PyThreadState *thread_state = PyThreadState_Get();
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
-  THPUtils_assert(num_args > 0, "expected at least one argument");
-  try {
-    args_slice = PyTuple_GetSlice(args, 1, num_args);
-    result = PyObject_Call(PyTuple_GET_ITEM(args, 0), args_slice, kwargs);
-  } catch (std::exception &e) {
-    PyEval_RestoreThread(thread_state);
-    Py_DECREF(args_slice);
-    PyErr_SetString(THPException_FatalError, e.what());
-    Py_LeaveRecursiveCall();
-  }
-  Py_DECREF(args_slice);
-  return result;
 }
 
 PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
@@ -446,6 +426,20 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setDeterministic(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_deterministic expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministic(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_deterministic(PyObject *_unused, PyObject *noargs)
+{
+  if (at::globalContext().deterministic()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
@@ -533,7 +527,6 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       nullptr},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  nullptr},
-  {"_safe_call",      (PyCFunction)(void(*)())THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, nullptr},
@@ -558,6 +551,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
+  {"_get_deterministic", (PyCFunction)THPModule_deterministic, METH_NOARGS,     nullptr},
+  {"_set_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
@@ -621,6 +616,7 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
+extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
 #endif

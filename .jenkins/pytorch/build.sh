@@ -20,7 +20,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc5* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
@@ -109,6 +109,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
+  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+    build_args+=("-DUSE_VULKAN=ON")
+  fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -147,11 +150,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
+  # Set ROCM_ARCH to gtx900 and gtx906
+  if [[ -n "$CIRCLECI" ]]; then
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
+
   python tools/amd_build/build_amd.py
   python setup.py install --user
-
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
 
   exit 0
 fi

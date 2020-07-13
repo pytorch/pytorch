@@ -122,7 +122,7 @@ Tensor& set_storage_quantized_(
     IntArrayRef sizes,
     IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage(storage);
+  self_->set_storage_keep_dtype(storage);
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -211,6 +211,10 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   auto input_contig = self.contiguous();
   float x_min = input_contig.min().item<float>();
   float x_max = input_contig.max().item<float>();
+
+  if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    reduce_range = false;
+  }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,

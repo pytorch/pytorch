@@ -9,11 +9,11 @@ namespace scope_utils {
 // START SCOPE HELPER SYSTEMS
 namespace {
 
-struct forLoopIndices : private OptInDispatch {
+class Loops : private OptInDispatch {
  private:
-  std::vector<Val*> inds_;
+  std::deque<ForLoop*> loops;
   void handle(ForLoop* fl) final {
-    inds_.insert(inds_.begin(), fl->index());
+    loops.insert(loops.begin(), fl);
   }
 
   void handle(IfThenElse* ite) final {}
@@ -23,43 +23,18 @@ struct forLoopIndices : private OptInDispatch {
   }
 
  public:
-  static std::vector<Val*> get(Expr* scope) {
-    forLoopIndices fli;
+  static std::vector<ForLoop*> getLoops(Expr* scope) {
+    Loops loops;
     Expr* it = scope;
     while (it != nullptr) {
-      fli.handle(it);
+      loops.handle(it);
       it = scope_utils::getParent(it);
     }
-    return fli.inds_;
+    return std::vector<ForLoop*>(loops.loops.begin(), loops.loops.end());
   }
 };
 
-struct forLoopIDs : private OptInDispatch {
- private:
-  std::vector<IterDomain*> IDs_;
-  void handle(ForLoop* fl) final {
-    IDs_.insert(IDs_.begin(), fl->iter_domain());
-  }
-
-  void handle(IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static std::vector<IterDomain*> get(Expr* scope) {
-    forLoopIDs fli;
-    Expr* it = scope;
-    while (it != nullptr) {
-      fli.handle(it);
-      it = scope_utils::getParent(it);
-    }
-    return fli.IDs_;
-  }
-};
-
-struct forLoopCount : private OptInDispatch {
+class forLoopCount : private OptInDispatch {
  private:
   unsigned int count_ = 0;
 
@@ -85,7 +60,7 @@ struct forLoopCount : private OptInDispatch {
   }
 };
 
-struct scopePushBack : private OptInDispatch {
+class scopePushBack : private OptInDispatch {
  private:
   Expr* expr_;
   void handle(ForLoop* fl) final {
@@ -112,7 +87,7 @@ struct scopePushBack : private OptInDispatch {
   }
 };
 
-struct scopeInsertBefore : private OptInDispatch {
+class scopeInsertBefore : private OptInDispatch {
  private:
   Expr* ref_;
   Expr* expr_;
@@ -140,7 +115,7 @@ struct scopeInsertBefore : private OptInDispatch {
   }
 };
 
-struct parentScope : private OptInDispatch {
+class parentScope : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
 
@@ -164,9 +139,8 @@ struct parentScope : private OptInDispatch {
   }
 };
 
-struct scopeClearExprs : private OptInDispatch {
+class scopeClearExprs : private OptInDispatch {
  private:
-  Expr* _expr = nullptr;
   void handle(ForLoop* fl) final {
     fl->body().clear();
   }
@@ -195,7 +169,7 @@ void assertScope(Expr* expr) {
       "Assert Scope failed when calling a scope_util function.");
 }
 
-struct CloneLoopNest : public OptOutMutator {
+class CloneLoopNest : public OptOutMutator {
  private:
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
@@ -225,50 +199,7 @@ struct CloneLoopNest : public OptOutMutator {
   }
 };
 
-struct ReplaceExprsInScope : public OptOutDispatch {
- private:
-  std::unordered_map<Expr*, Expr*> replacement_map_;
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(ForLoop* fl) final {
-    for (Expr* expr : fl->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      fl->body().insert_before(expr, replacement_map_[expr]);
-      fl->body().erase(expr);
-    }
-  }
-
-  void handle(IfThenElse* ite) final {
-    for (Expr* expr : ite->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->body().insert_before(expr, replacement_map_[expr]);
-      ite->body().erase(expr);
-    }
-    for (Expr* expr : ite->elseBody().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->elseBody().insert_before(expr, replacement_map_[expr]);
-      ite->elseBody().erase(expr);
-    }
-  }
-
-  ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map)
-      : replacement_map_(std::move(_replacement_map)) {}
-
+class ReplaceExprsInScope : public OptOutDispatch {
  public:
   static void replace(
       Expr* scope,
@@ -276,9 +207,40 @@ struct ReplaceExprsInScope : public OptOutDispatch {
     ReplaceExprsInScope reis(std::move(replacement_map));
     reis.handle(scope);
   }
+
+ private:
+  explicit ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> replacement_map)
+      : replacement_map_(std::move(replacement_map)) {}
+
+  void handleScope(Scope& scope) {
+    for (size_t i = 0; i < scope.size(); ++i) {
+      const auto it = replacement_map_.find(scope[i]);
+      if (it == replacement_map_.end()) {
+        handle(scope[i]);
+        continue;
+      }
+      scope[i] = it->second;
+    }
+  }
+
+  void handle(Expr* expr) final {
+    OptOutDispatch::handle(expr);
+  }
+
+  void handle(ForLoop* fl) final {
+    handleScope(fl->body());
+  }
+
+  void handle(IfThenElse* ite) final {
+    handleScope(ite->body());
+    handleScope(ite->elseBody());
+  }
+
+ private:
+  std::unordered_map<Expr*, Expr*> replacement_map_;
 };
 
-struct FirstInnerMostScope : private OptInDispatch {
+class FirstInnerMostScope : private OptInDispatch {
  private:
   Expr* active_scope = nullptr;
 
@@ -321,6 +283,10 @@ struct FirstInnerMostScope : private OptInDispatch {
 
     FirstInnerMostScope fims;
     Expr* inner = fims.getInner(scope);
+
+    if (inner == nullptr)
+      return scope;
+
     while (fims.getInner(inner) != nullptr)
       inner = fims.getInner(inner);
     return inner;
@@ -330,20 +296,12 @@ struct FirstInnerMostScope : private OptInDispatch {
 // END SCOPE HELPER SYSTEMS
 } // namespace
 
-// Grab the index variables of the active loop nest
-std::vector<Val*> getLoopIndices(Expr* scope) {
+// Grab the ForLoop starting from scope working out
+std::vector<ForLoop*> getLoops(Expr* scope) {
   if (scope == nullptr)
-    return std::vector<Val*>();
+    return std::vector<ForLoop*>();
   assertScope(scope);
-  return forLoopIndices::get(scope);
-}
-
-// Grab the iterDomains of the active loops
-std::vector<IterDomain*> getLoopIterDomains(Expr* scope) {
-  if (scope == nullptr)
-    return std::vector<IterDomain*>();
-  assertScope(scope);
-  return forLoopIDs::get(scope);
+  return Loops::getLoops(scope);
 }
 
 // Track how far our for loop scope is
@@ -380,11 +338,10 @@ Expr* getParent(Expr* scope) {
 ForLoop* openFor(Expr* scope, IterDomain* id) {
   ForLoop* new_scope = nullptr;
   if (id->isThread()) {
-    new_scope = new ForLoop(
-        new NamedScalar(stringify(id->parallel_method()), DataType::Int),
-        id,
-        {},
-        scope);
+    std::stringstream ss;
+    ss << id->parallel_method();
+    new_scope =
+        new ForLoop(new NamedScalar(ss.str(), DataType::Int), id, {}, scope);
   } else {
     new_scope = new ForLoop(new Int(), id, {}, scope);
   }
@@ -430,18 +387,43 @@ Expr* firstInnerMostScope(Expr* scope) {
 
 namespace ir_utils {
 
-bool isTV(const Val* const val) {
+std::vector<Val*> indices(std::vector<ForLoop*> loops) {
+  std::vector<Val*> inds(loops.size());
+  std::transform(loops.begin(), loops.end(), inds.begin(), [](ForLoop* fl) {
+    return fl->index();
+  });
+  return inds;
+}
+
+std::vector<IterDomain*> iterDomains(std::vector<ForLoop*> loops) {
+  std::vector<IterDomain*> ids(loops.size());
+  std::transform(loops.begin(), loops.end(), ids.begin(), [](ForLoop* fl) {
+    return fl->iter_domain();
+  });
+  return ids;
+}
+
+bool isTV(const Val* val) {
   return val->getValType().value() == ValType::TensorView;
 }
 
 // Check if we're a TensorView op that we can generate code for.
 bool isTVOp(const Expr* expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
+  if (expr->outputs().size() == 1 && isTV(expr->output(0)) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
+       expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
-       expr->getExprType().value() == ExprType::UnaryOp))
+       expr->getExprType().value() == ExprType::ReductionOp ||
+       expr->getExprType().value() == ExprType::BroadcastOp))
     return true;
   return false;
+}
+
+bool isScalarOp(const Expr* expr) {
+  for (auto out : expr->outputs())
+    if (!out->isScalar())
+      return false;
+  return true;
 }
 
 void ASSERT_EXPR(Statement* stmt) {
@@ -472,7 +454,7 @@ ForLoop* asForLoop(Statement* stmt) {
   return static_cast<ForLoop*>(expr);
 }
 
-const TensorView* asConstTV(const Val* const val) {
+const TensorView* asConstTV(const Val* val) {
   TORCH_INTERNAL_ASSERT(isTV(val));
   return static_cast<const TensorView*>(val);
 }

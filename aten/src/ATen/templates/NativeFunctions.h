@@ -45,6 +45,7 @@ namespace native {
     return native::tensor(ArrayRef<T>(value));                                \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
 ${native_function_declarations}
