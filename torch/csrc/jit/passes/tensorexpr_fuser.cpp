@@ -81,13 +81,6 @@ bool isSupported(Node* node) {
     case aten::expm1:
     case aten::lgamma:
 
-    case prim::ConstantChunk:
-      // TODO: The following ops require proper shape inferrence:
-      // case aten::cat:
-      // case prim::ListConstruct:
-      // case aten::slice:
-      // case aten::unsqueeze:
-
     case aten::frac:
     // TODO: uncomment once we can handle rand+broadcasts
     // case aten::rand_like:
@@ -102,7 +95,7 @@ bool isSupported(Node* node) {
       return true;
     // Operators that can be both elementwise or reductions:
     case aten::min:
-    case aten::max:
+    case aten::max: {
       if (node->inputs().size() != 2) {
         return false;
       }
@@ -111,6 +104,17 @@ bool isSupported(Node* node) {
         return false;
       }
       return true;
+    }
+
+    case prim::ConstantChunk:
+      return true;
+
+    // TODO: The following ops require proper shape inferrence:
+    // case aten::cat:
+    // case prim::ListConstruct:
+    // case aten::slice:
+    // case aten::unsqueeze:
+
     default:
       return false;
   }

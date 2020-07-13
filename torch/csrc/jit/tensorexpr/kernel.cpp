@@ -180,38 +180,24 @@ std::vector<ExprHandle> TensorExprKernel::getSizes(torch::jit::Value* v) {
     }
 
     case prim::ConstantChunk: {
-      // shape = shape(inp1)
-      // shape[dim] /= chunks
-      // XXX
-      //   auto dims = texprDims(v->node()->input());
-      //   int64_t dim = v->node()->i(attr::dim);
-      //   int64_t chunks = v->node()->i(attr::chunks);
-      //   dims[dim] = DimArg(dims[dim].dim() / chunks, dims[dim].name_hint());
-      //   return Compute("prim_constantchunk");
+      auto sizes = getSizes(v->node()->input());
+      int dim = v->node()->i(attr::dim);
+      int chunks = v->node()->i(attr::chunks);
+      sizes[dim] = sizes[dim] / chunks;
+      return sizes;
     }
 
     case aten::cat:
     case aten::slice:
     case aten::unsqueeze:
-      throw std::runtime_error("Unhandled node kind");
+      throw std::runtime_error(
+          "Shape info is not implemented for this kind of node");
 
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
   }
   return shape;
-  /*
-    if (v->type()->kind() != TypeKind::TensorType) {
-      throw malformed_input("type is not Tensor");
-    }
-
-    auto tt = v->type()->cast<TensorType>();
-    int i = 0;
-    for (auto const& s : texprSizes(tt->sizes())) {
-      dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
-    }
-    known_dims_[v] = dimArgs;
-    return dimArgs;*/
 }
 
 std::vector<DimArg> TensorExprKernel::texprDims(torch::jit::Value* v) {
@@ -1027,17 +1013,9 @@ Tensor* TensorExprKernel::computeValue(torch::jit::Value* v) {
     } break;
 
     case prim::ConstantChunk: {
-      auto sizes = getSizes(v->node()->input());
-      std::vector<DimArg> dims;
-      for (size_t idx = 0; idx < sizes.size(); idx++) {
-        dims.emplace_back(DimArg(sizes[idx], "i" + c10::to_string(idx)));
-      }
-      int dim = v->node()->i(attr::dim);
-      int chunks = v->node()->i(attr::chunks);
-      dims[dim] = DimArg(dims[dim].dim() / chunks, dims[dim].name_hint());
       return Compute(
           "prim_constantchunk",
-          dims,
+          texprDims(v),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             int64_t dim = n->i(attr::dim);
