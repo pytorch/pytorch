@@ -1034,14 +1034,17 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Expected type hint for result of tolist()"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            r"Expected type hint for result of tolist()",
+            "x.tolist("
         ):
             self.checkScript(to_list_missing_type_annotation, (torch.randn(5),))
 
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
             r"Return value was annotated as having type List\[float\] but is actually of type float",
+            "return li"
         ):
             self.checkScript(to_list_incorrect_type_annotation, (torch.randn(5),))
 
@@ -1441,6 +1444,15 @@ class TestDict(JitTestCase):
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
         test_func(test_dict_constructor, ())
+
+        def test_dict_initializer_list():
+            a = {"1": torch.tensor(1), "2": torch.tensor(2)}
+            output_order = []
+            for key in a:
+                output_order.append(a[key])
+            return output_order
+
+        test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
             a = dict()

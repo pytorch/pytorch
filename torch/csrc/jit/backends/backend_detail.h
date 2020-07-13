@@ -6,10 +6,22 @@ namespace torch {
 namespace jit {
 namespace detail {
 
+constexpr static auto kBackendsNamespace = "__backends__";
+
+using BackendRegistrationCallback = std::function<void(const std::string&)>;
+
+// Add a function \p callback that should be invoked every time a backend is
+// registered. The name of the backend is passed to the callback. This is
+// primarily used for creating Python bindings for lowering to backends from
+// Python.
+void addBackendRegistrationCallback(BackendRegistrationCallback callback);
+
+// Register the provided \p lowering_function in the backend registry
+// under the name \p backend_name.
+void registerBackend(const std::string& backend_name);
+
 c10::FunctionSchema getPreprocessSchema();
-
 c10::FunctionSchema getCompileSchema();
-
 c10::FunctionSchema getExecuteSchema();
 
 template <typename TBackendInterface>

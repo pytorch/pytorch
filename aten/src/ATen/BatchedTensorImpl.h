@@ -12,6 +12,10 @@ namespace at {
 // but there isn't a centralized definition.
 constexpr int64_t kVmapMaxTensorDims = 64;
 
+// The valid vmap levels range from [0, 64). This effectively means that we
+// support a maximum of 64 nested vmaps.
+constexpr int64_t kVmapNumLevels = 64;
+
 // Store this number of elements of BatchDims on the stack. Most people will
 // probably use <= 5 nested vmaps, but adjust this number as necessary.
 constexpr int64_t kBatchDimsStackSize = 5;
@@ -19,7 +23,9 @@ constexpr int64_t kBatchDimsStackSize = 5;
 // a BatchDim represents a "private" dimension on a Tensor created inside of
 // vmap. It is a (level, dim) tuple, with the `dim` indicating which dimension
 // is being vmap'ed over and the `level` being an identifier for which vmap
-// said dimension was created inside.
+// said dimension was created inside. The `dim` corresponds to a "physical
+// dim" - it is a dimension index on the underlying physical tensor that is being
+// vmapped over.
 struct BatchDim {
   BatchDim(int64_t level, int64_t dim) : dim_(dim), level_(level) {}
   int64_t dim() const {
@@ -37,6 +43,8 @@ using BatchDims = SmallVector<BatchDim, kBatchDimsStackSize>;
 using BatchDimsRef = ArrayRef<BatchDim>;
 
 // A BatchedTensorImpl holds an underlying Tensor and a list of BatchDim
+// NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
+// BatchedTensorImpl.
 //
 // The batch dimensions are treated as being "private"; they are not user-visible.
 // For example, in the following Tensor,
@@ -76,8 +84,12 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   int64_t storage_offset() const override;
 
  private:
+  // see NOTE: [BatchedTensorImpl levels invariant]
+  void checkInvariants() const;
+
   Tensor value_;
 
+  // Note: [BatchedTensorImpl levels invariant]
   // There is an invariant that the BatchDims must be stored in increasing `level`
   // order. That is, for i < j, bdims_[i].level must be less than bdims_[j].level.
   BatchDims bdims_;
@@ -114,17 +126,10 @@ inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
   return out;
 }
 
-inline Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
-  auto tensor_dim = tensor.dim();
-  TORCH_CHECK(
-      tensor_dim <= kVmapMaxTensorDims,
-      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
-      "; got a tensor with dim ", tensor_dim);
-  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
-}
+// Use this to construct a BatchedTensor from a regular Tensor
+TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
 
-// Adds a batch dim to `tensor`, returning a Tensor backed by a BatchedTensorImpl.
+// Adds a batch dim to `tensor`, returning a BatchedTensor
 TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
 
 

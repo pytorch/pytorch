@@ -5,9 +5,11 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/Dimname.h>
+
 #include <ATen/core/boxing/KernelFunction.h>
 
-#include <ATen/core/Dimname.h>
+#include <c10/util/Metaprogramming.h>
 
 namespace c10 {
 namespace impl {
@@ -16,37 +18,27 @@ namespace impl {
 // utils
 //
 
-// is_specialization_of
-//
-template <template <typename...> class T, typename U>
-struct is_specialization_of: std::false_type {};
+// is_tensor_ref
+template<class T> struct is_tensor_ref : std::false_type {};
+template <> struct is_tensor_ref<at::Tensor&> : std::true_type {};
 
-template <template <typename...> class T, typename... Us>
-struct is_specialization_of<T, T<Us...>>: std::true_type {};
-
-// is_tuple_of_lvalue_refs
+// is_tuple_of_tensor_refs
 //
-template<class T, bool = is_specialization_of<std::tuple, T>::value>
-struct is_tuple_of_lvalue_refs :
-  guts::typelist::all<std::is_lvalue_reference, guts::typelist::from_tuple_t<T>>
-{};
+template<class T, class Enable = void>
+struct is_tuple_of_tensor_refs : std::false_type {};
 
 template<class T>
-struct is_tuple_of_lvalue_refs<T, false> : std::false_type {};
+struct is_tuple_of_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>> :
+  guts::typelist::all<is_tensor_ref, guts::typelist::from_tuple_t<T>>
+{};
 
-// tuple_elements
+// has_ivalue_to
 //
-template <class Tuple, size_t... ns>
-constexpr auto tuple_elements(Tuple t, std::index_sequence<ns...>) {
-    return std::tuple<std::tuple_element_t<ns, Tuple>...>(std::get<ns>(t)...);
-}
+template<class T, class Enable = void>
+struct has_ivalue_to : std::false_type {};
 
-// tuple_take
-//
-template <class Tuple, size_t n>
-constexpr auto tuple_take(Tuple t) {
-    return tuple_elements(t, std::make_index_sequence<n>{});
-}
+template<class T>
+struct has_ivalue_to<T, guts::void_t<decltype(IValue::to<T>())>> : std::true_type {};
 
 //
 // boxing predicates
@@ -72,6 +64,7 @@ using can_unbox =
   guts::conjunction<
     guts::disjunction<
       // using IValue(T) as a proxy for IValue.to<T>() here
+      // has_ivalue_to<T>,
       std::is_constructible<IValue, T>,
       // void returns are ok
       std::is_same<void, T>
@@ -96,7 +89,7 @@ using can_unbox =
 
 // base definition should never be instantiated.
 // A "no call method defined on BoxedKernelWrapper" compile error means that
-// an op signature has failed to trigger any of the partial specialiations
+// an op signature has failed to trigger any of the partial specializations
 // that follow.
 //
 template<class FuncType, class Enable = void>
@@ -155,7 +148,9 @@ struct BoxedKernelWrapper<
     Args... args
   ) {
     // TODO Reuse stack vector instead of allocating?
+    // initializing with args provokes type inference error in if_constexpr below
     torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
     torch::jit::push(stack, std::forward<Args>(args)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
@@ -202,6 +197,7 @@ struct BoxedKernelWrapper<
   ) {
     // TODO Reuse stack vector instead of allocating?
     torch::jit::Stack stack;
+    stack.reserve(1 + sizeof...(OtherArgs));
     torch::jit::push_one(stack, outArg);
     torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
 
@@ -216,8 +212,7 @@ struct BoxedKernelWrapper<
   }
 };
 
-// 4. signatures returning a tuple of references, of the same type as
-// the equivalent number of initial arguments.
+// 4. signatures returning a tuple of Tensor references.
 // Note that the passed kernels are assumed to be for inplace/outplace ops,
 // and the generated BoxedKernelWrapper specializations will return a tuple
 // of those initial arguments.
@@ -226,7 +221,7 @@ template<class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
-    can_box_all<Args...>::value && is_tuple_of_lvalue_refs<Result>::value,
+    can_box_all<Args...>::value && is_tuple_of_tensor_refs<Result>::value,
     void
   >
 > {
@@ -237,14 +232,13 @@ struct BoxedKernelWrapper<
     Args... args
   ) {
     // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    torch::jit::push(stack, std::forward<Args>(args)...);
+    torch::jit::Stack stack {std::forward<Args>(args)...};
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
 
     using ArgTuple = std::tuple<Args...>;
     constexpr int n = std::tuple_size<Result>();
-    auto result = tuple_take<ArgTuple, n>(ArgTuple{args...});
+    auto result = guts::tuple_take<ArgTuple, n>(ArgTuple{args...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of references "

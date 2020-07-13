@@ -1,21 +1,22 @@
-import sys
 import ast
 import inspect
 import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, RRef, is_rref, Future, is_future
+    is_optional, _qualified_name, Any, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, RRefType, FutureType
+    DeviceObjType, FutureType
 
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
-PY35 = sys.version_info >= (3, 5)
+if torch.distributed.rpc.is_available():
+    from .._jit_internal import RRef, is_rref
+    from torch._C import RRefType
 
 
 class Module(object):
@@ -39,12 +40,13 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        'RRef': RRef,
         'Future': Future,
     }
 
     def __init__(self, rcb):
         self.rcb = rcb
+        if torch.distributed.rpc.is_available():
+            self.env['RRef'] = RRef
 
     def __getitem__(self, name):
         if name in self.env:
@@ -54,18 +56,15 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    # Python 3.5 adds support for the nice annotation syntax, so try that first.
-    signature = None
-    if PY35:
-        signature = try_real_annotations(fn, loc)
-        if signature is not None and is_method:
-            # If this is a method, then the signaure will include a type for
-            # `self`, but type comments do not contain a `self`. So strip it
-            # away here so everything is consistent (`inspect.ismethod` does
-            # not work here since `fn` is unbound at this point)
-            param_types, return_type = signature
-            param_types = param_types[1:]
-            signature = (param_types, return_type)
+    signature = try_real_annotations(fn, loc)
+    if signature is not None and is_method:
+        # If this is a method, then the signature will include a type for
+        # `self`, but type comments do not contain a `self`. So strip it
+        # away here so everything is consistent (`inspect.ismethod` does
+        # not work here since `fn` is unbound at this point)
+        param_types, return_type = signature
+        param_types = param_types[1:]
+        signature = (param_types, return_type)
 
     if signature is None:
         type_line, source = None, None
@@ -261,7 +260,7 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
-    if is_rref(ann):
+    if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
@@ -281,6 +280,8 @@ def try_ann_to_type(ann, loc):
         return InterfaceType(_qualified_name(ann))
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.dtype:
+        return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))

@@ -883,6 +883,13 @@ Args:
 
 """.format(**common_args))
 
+add_docstr_all('count_nonzero',
+               r"""
+count_nonzero(dim=None) -> Tensor
+
+See :func:`torch.count_nonzero`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -1241,6 +1248,20 @@ add_docstr_all('flip',
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
+""")
+
+add_docstr_all('fliplr',
+               r"""
+fliplr() -> Tensor
+
+See :func:`torch.fliplr`
+""")
+
+add_docstr_all('flipud',
+               r"""
+flipud() -> Tensor
+
+See :func:`torch.flipud`
 """)
 
 add_docstr_all('roll',
@@ -3167,7 +3188,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
@@ -3794,6 +3815,12 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_quantized',
                r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
 """)
 
 add_docstr_all('device',

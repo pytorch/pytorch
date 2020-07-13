@@ -21,6 +21,7 @@ struct UnaryOp;
 struct BinaryOp;
 struct TernaryOp;
 struct ReductionOp;
+struct BroadcastOp;
 
 struct ForLoop;
 struct IfThenElse;
@@ -34,7 +35,6 @@ struct TensorContiguity;
 
 struct Split;
 struct Merge;
-struct Reorder;
 
 struct Bool;
 struct Float;
@@ -95,30 +95,29 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     OptInConstDispatch::handle(e);
   };
 
-  virtual void handle(const TensorDomain* const);
-  virtual void handle(const TensorView* const);
-  virtual void handle(const IterDomain* const);
-  virtual void handle(const TensorIndex* const);
-  virtual void handle(const TensorContiguity* const);
+  virtual void handle(const TensorDomain* const) override;
+  virtual void handle(const TensorView* const) override;
+  virtual void handle(const IterDomain* const) override;
+  virtual void handle(const TensorIndex* const) override;
 
-  virtual void handle(const Bool* const);
-  virtual void handle(const Float* const);
-  virtual void handle(const Half* const);
-  virtual void handle(const Int* const);
-  virtual void handle(const NamedScalar* const);
+  virtual void handle(const Bool* const) override;
+  virtual void handle(const Float* const) override;
+  virtual void handle(const Half* const) override;
+  virtual void handle(const Int* const) override;
+  virtual void handle(const NamedScalar* const) override;
 
-  virtual void handle(const UnaryOp* const);
-  virtual void handle(const BinaryOp* const);
-  virtual void handle(const TernaryOp* const);
-  virtual void handle(const ReductionOp* const);
+  virtual void handle(const UnaryOp* const) override;
+  virtual void handle(const BinaryOp* const) override;
+  virtual void handle(const TernaryOp* const) override;
+  virtual void handle(const ReductionOp* const) override;
+  virtual void handle(const BroadcastOp* const) override;
 
-  virtual void handle(const ForLoop* const);
-  virtual void handle(const IfThenElse* const);
-  virtual void handle(const Allocate* const);
+  virtual void handle(const ForLoop* const) override;
+  virtual void handle(const IfThenElse* const) override;
+  virtual void handle(const Allocate* const) override;
 
-  virtual void handle(const Split* const);
-  virtual void handle(const Merge* const);
-  virtual void handle(const Reorder* const);
+  virtual void handle(const Split* const) override;
+  virtual void handle(const Merge* const) override;
 
   void print_inline(const Statement* const stmt) {
     bool prev = print_inline_;

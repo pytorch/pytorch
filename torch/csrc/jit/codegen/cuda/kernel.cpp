@@ -37,10 +37,16 @@ struct ExtractSizeStride {
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
-  ExtractSizeStride(
+  explicit ExtractSizeStride(
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     if (broadcasted_size) {
+      // [Note - broadcast support in integration]
+      // PyTorch follows numpy broadcasting rule.
+      // (https://numpy.org/doc/stable/user/basics.broadcasting.html)
+      //
+      // So in case where the rank of two operators differ, we align them on
+      // the higher dimensions, hence the offset o_dim-b_dim to the index here.
       int b_dim = (int)broadcasted_size->size();
       int o_dim = (int)val.dim();
       TORCH_CHECK(b_dim >= o_dim);
@@ -139,7 +145,7 @@ struct KernelArgumentHolder {
   }
 };
 
-std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
+std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
   std::stringstream str_stream;
   str_stream << "namespace " << CG_NAMESPACE << " {\n"
              << code_template_tensor_struct << "\n"
@@ -148,7 +154,7 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
              << code_helper_funcs << "\n"
              << code_template_block_reduction << "\n";
   std::stringstream cdg;
-  GPULower gpulw(&fusion);
+  GPULower gpulw(fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
   str_stream << "\n} // namespace";
 
@@ -156,6 +162,144 @@ std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   return std::make_pair(func_name, str_stream.str());
 };
 
+bool validateKernelArgTensor(
+    const at::Tensor& arg,
+    const Val* const param,
+    int device_index,
+    std::stringstream& msg) {
+  // Arg is a tensor. Param must be a tensor too.
+  if (*param->getValType() != ValType::TensorView) {
+    msg << "Argument is a tensor, but the parameter is not.";
+    return false;
+  }
+
+  // Check the rank of the tensors.
+  size_t arg_dim = arg.dim();
+  // Note: This requires current Fusion to be active.
+  size_t param_dim = TensorDomain::noReductions(
+                         static_cast<const TensorView*>(param)->getRootDomain())
+                         .size();
+  // see [Note - broadcast support in integration]
+  // Because of broadcasting support handled in integration, we relax the rank
+  // check as necessary.
+  if (arg_dim > param_dim) {
+    msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
+        << param_dim;
+    return false;
+  }
+
+  if (arg.device().index() != device_index) {
+    msg << "Argument is on device that is not compiled for";
+    return false;
+  }
+  // Check element type
+  at::ScalarType arg_data_type = arg.scalar_type();
+  DataType param_data_type = *param->getDataType();
+  bool match = false;
+  switch (arg_data_type) {
+    case at::ScalarType::Half:
+      match = param_data_type == DataType::Half;
+      break;
+    case at::ScalarType::Float:
+      match = param_data_type == DataType::Float;
+      break;
+    case at::ScalarType::Bool:
+      match = param_data_type == DataType::Bool;
+      break;
+    default:
+      msg << "Argument element type, " << arg_data_type
+          << ", is not supported.";
+      return false;
+  }
+  if (!match)
+    msg << "Argument element type is " << arg_data_type
+        << ", but the parameter is " << param_data_type;
+  return match;
+}
+
+bool validateKernelArgScalar(
+    const c10::TypePtr& arg_type,
+    const Val* const param,
+    std::stringstream& msg) {
+  if (!param->isScalar()) {
+    msg << "Argument is a scalar, but the parameter is not.";
+    return false;
+  }
+  DataType param_type = *param->getDataType();
+  bool match = false;
+  switch (arg_type->kind()) {
+    case c10::TypeKind::IntType:
+      match = param_type == DataType::Int;
+      break;
+    case c10::TypeKind::FloatType:
+      match = param_type == DataType::Float;
+      break;
+    case c10::TypeKind::BoolType:
+      match = param_type == DataType::Bool;
+      break;
+    default:
+      match = false;
+  }
+  if (!match) {
+    msg << "Argument type is " << *arg_type << ", but the parameter is "
+        << param_type;
+  }
+  return match;
+}
+
+bool validateKernelArg(
+    const c10::IValue& arg,
+    const Val* const param,
+    int device_index,
+    std::stringstream& msg) {
+  if (arg.type()->kind() != c10::TypeKind::TensorType) {
+    return validateKernelArgScalar(arg.type(), param, msg);
+  } else {
+    return validateKernelArgTensor(arg.toTensor(), param, device_index, msg);
+  }
+}
+
+void validateKernelArgs(
+    const CudaKernel& entry,
+    const at::ArrayRef<IValue>& inputs,
+    const std::vector<at::Tensor>& outputs) {
+  // This is necessary as we were traversing the fusion graph later in the check
+  FusionGuard fg(&entry);
+  // Check inputs
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == entry.fusion_->inputs().size(),
+      "Wrong number of kernel inputs.");
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    const IValue& arg = inputs[i];
+    const Val* const param = entry.fusion_->inputs()[i];
+    std::stringstream msg;
+    TORCH_INTERNAL_ASSERT(
+        validateKernelArg(arg, param, entry.device_, msg),
+        "Input argument at position ",
+        i,
+        " is invalid; ",
+        msg.str());
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      entry.fusion_->outputs().size() != 0,
+      "Kernel should have at least one output tensor.");
+
+  TORCH_INTERNAL_ASSERT(
+      outputs.size() == entry.fusion_->outputs().size(),
+      "Wrong number of kernel outputs.");
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    const at::Tensor& arg = outputs[i];
+    const Val* const param = entry.fusion_->outputs()[i];
+    std::stringstream msg;
+    TORCH_INTERNAL_ASSERT(
+        validateKernelArgTensor(arg, param, entry.device_, msg),
+        "Output argument at position ",
+        i,
+        " is invalid; ",
+        msg.str());
+  }
+}
 } // namespace
 
 bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
@@ -176,18 +320,11 @@ bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
   return true;
 }
 
-void compileKernel(Fusion& fusion, CudaKernel* entry) {
+void compileKernel(CudaKernel* entry) {
   // generating cuda code;
   std::string code;
   std::string func_name;
-  std::tie(func_name, code) = codeGeneration(fusion);
-
-  // Keep input and output reference to validate/line up arguments
-  for (auto inp : fusion.inputs())
-    entry->inputs.push_back(inp);
-
-  for (auto out : fusion.outputs())
-    entry->outputs.push_back(out);
+  std::tie(func_name, code) = codeGeneration(entry->fusion_.get());
 
   static int32_t compiled_kernel_id = 0;
 
@@ -204,7 +341,7 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   // set device for the operation;
   at::cuda::set_device(entry->device_);
-  entry->has_random_ = fusion.hasRNG();
+  entry->has_random_ = entry->fusion_->hasRNG();
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
   int nvrtc_major, nvrtc_minor;
@@ -226,7 +363,6 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
-
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 
@@ -317,6 +453,8 @@ void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs) {
+  validateKernelArgs(*entry, inputs, outputs);
+
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -335,9 +473,6 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      TORCH_INTERNAL_ASSERT(
-          input.toTensor().device().index() == entry->device_,
-          "input to kernel on device that is not compiled for");
       kernel_args.push(input.toTensor(), outputs[0].sizes());
     } else {
       kernel_args.push(input);
@@ -388,6 +523,8 @@ void runTestKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs) {
+  validateKernelArgs(*entry, inputs, outputs);
+
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry->device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -402,7 +539,7 @@ void runTestKernel(
 
   KernelArgumentHolder kernel_args;
 
-  auto exprs = entry->outputs[0]->fusion()->exprs(true);
+  auto exprs = entry->fusion_->exprs(true);
   bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr) {
     return expr->getExprType() == ExprType::ReductionOp;
   });
@@ -416,7 +553,7 @@ void runTestKernel(
           input.toTensor().device().index() == entry->device_,
           "input to kernel on device that is not compiled for");
       TORCH_INTERNAL_ASSERT(
-          !entry->outputs.empty(),
+          !entry->fusion_->outputs().empty(),
           "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());

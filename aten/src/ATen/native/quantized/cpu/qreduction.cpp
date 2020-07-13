@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
@@ -66,7 +66,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Global Average Pooling operator");
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(

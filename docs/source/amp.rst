@@ -74,8 +74,8 @@ but ``a.addmm_(b, c)`` and ``a.addmm(b, c, out=d)`` cannot.
 For best performance and stability, prefer out-of-place ops in autocast-enabled
 regions.
 
-Ops called with an explicit `dtype=...` argument are not eligible,
-and will produce output that respects the `dtype` argument.
+Ops called with an explicit ``dtype=...`` argument are not eligible,
+and will produce output that respects the ``dtype`` argument.
 
 Op-Specific Behavior
 --------------------

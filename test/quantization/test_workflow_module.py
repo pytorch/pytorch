@@ -397,6 +397,22 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         qparams = myobs.calculate_qparams()
         self.assertEqual(qparams[1].item(), 0)
 
+    def test_histogram_observer_same_inputs(self):
+        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        w = torch.ones(4, requires_grad=True)
+        x = torch.zeros(4, requires_grad=True)
+        y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
+        z = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(w)
+        myobs(x)
+        myobs(x)
+        myobs(y)
+        myobs(z)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
 class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
@@ -565,6 +581,27 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertEqual(
             zero_point_shape_before, zero_point_shape_after,
             msg="FakeQuant zero_point shape must stay consistent")
+
+    def fake_quant_scriptable(self):
+        observer = default_observer
+        quant_min = 0
+        quant_max = 255
+        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        scripted_module = torch.jit.script(fq_module)
+
+        X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+
+        fq_module(X)
+        scripted_module(X)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         scripted_module.calculate_qparams())
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted_module, buf)
+        buf.seek(0)
+        loaded_module = torch.jit.load(buf)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         loaded_module.calculate_qparams())
 
 
 class TestFakeQuantizePerChannel(TestCase):

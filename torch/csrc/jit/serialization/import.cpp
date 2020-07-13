@@ -50,7 +50,7 @@ void postSetStateValidate(const IValue& v) {
               "The field '{}' was left uninitialized after '__setstate__', "
               "but expected a value of type '{}'",
               attrName,
-              attrType->python_str()));
+              attrType->repr_str()));
     }
   }
 }

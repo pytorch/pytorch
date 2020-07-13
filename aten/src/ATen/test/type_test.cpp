@@ -19,12 +19,12 @@ TEST(TypeCustomPrinter, Basic) {
   // Tensor types should be rewritten
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
-  EXPECT_EQ(type->python_str(), "Tensor");
-  EXPECT_EQ(type->python_str(printer), "CustomTensor");
+  EXPECT_EQ(type->annotation_str(), "Tensor");
+  EXPECT_EQ(type->annotation_str(printer), "CustomTensor");
 
   // Unrelated types shoudl not be affected
   const auto intType = IntType::create();
-  EXPECT_EQ(intType->python_str(printer), intType->python_str());
+  EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
 TEST(TypeCustomPrinter, ContainedTypes) {
@@ -40,14 +40,14 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 
   // Contained types should work
   const auto tupleType = TupleType::create({type, IntType::get(), type});
-  EXPECT_EQ(tupleType->python_str(), "Tuple[Tensor, int, Tensor]");
+  EXPECT_EQ(tupleType->annotation_str(), "Tuple[Tensor, int, Tensor]");
   EXPECT_EQ(
-      tupleType->python_str(printer), "Tuple[CustomTensor, int, CustomTensor]");
+      tupleType->annotation_str(printer), "Tuple[CustomTensor, int, CustomTensor]");
   const auto dictType = DictType::create(IntType::get(), type);
-  EXPECT_EQ(dictType->python_str(printer), "Dict[int, CustomTensor]");
+  EXPECT_EQ(dictType->annotation_str(printer), "Dict[int, CustomTensor]");
   const auto listType = ListType::create(tupleType);
   EXPECT_EQ(
-      listType->python_str(printer),
+      listType->annotation_str(printer),
       "List[Tuple[CustomTensor, int, CustomTensor]]");
 }
 
@@ -67,11 +67,11 @@ TEST(TypeCustomPrinter, NamedTuples) {
 
   const auto namedTupleType = TupleType::createNamed(
       "my.named.tuple", {"foo", "bar"}, {type, IntType::get()});
-  EXPECT_EQ(namedTupleType->python_str(printer), "Rewritten");
+  EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work
   const auto outerTupleType = TupleType::create({IntType::get(), namedTupleType});
-  EXPECT_EQ(outerTupleType->python_str(printer), "Tuple[int, Rewritten]");
+  EXPECT_EQ(outerTupleType->annotation_str(printer), "Tuple[int, Rewritten]");
 }
 
 static TypePtr importType(

@@ -322,7 +322,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   irb_.CreateRet(cc);
 }
 
-class IntrinsicsExpander : public IRMutator {
+class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
  private:
   const Expr* mutate(const Intrinsics* v) {
     if (v->op_type() == kTanh) {
@@ -330,11 +330,16 @@ class IntrinsicsExpander : public IRMutator {
       if (stype == ScalarType::Float) {
         return fast_tanh(v->param(0));
       }
+    } else if (v->op_type() == kSigmoid) {
+      ScalarType stype = v->dtype().scalar_type();
+      if (stype == ScalarType::Float) {
+        return fast_sigmoid(v->param(0));
+      }
     }
     // TODO: fast exp
     // TODO: fast erf
     // TODO: fast sigmoid
-    return v;
+    return GenericIntrinsicsExpander::mutate(v);
   }
 
   // The default tanh is quite slow, use the Eigen version from here:
@@ -385,6 +390,18 @@ class IntrinsicsExpander : public IRMutator {
     return result.node();
   }
 
+  const Expr* fast_sigmoid(const Expr* v_ptr) {
+    // sigmoid(x) = (tanh(x / 2) + 1) / 2
+    ExprHandle x{v_ptr};
+    int lanes = x.dtype().lanes();
+    ExprHandle one_v = to_vec(1.f, lanes);
+    ExprHandle half_v = to_vec(0.5f, lanes);
+    ExprHandle x2 = x * half_v;
+    ExprHandle y{fast_tanh(x2.node())};
+    ExprHandle z = (y + one_v) * half_v;
+    return z.node();
+  }
+
   ExprHandle to_vec(float v, int lanes) {
     if (lanes == 1) {
       return v;
@@ -402,7 +419,7 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
-  IntrinsicsExpander intrinsics_expander;
+  LLVMIntrinsicsExpander intrinsics_expander;
   stmt = stmt->accept_mutator(&intrinsics_expander);
 
   // Compile the kernel.

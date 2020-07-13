@@ -90,9 +90,6 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Merge:
       ptr(handler)->handle(static_cast<Merge*>(expr));
       return;
-    case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<Reorder*>(expr));
-      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(static_cast<UnaryOp*>(expr));
       return;
@@ -104,6 +101,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::ReductionOp:
       ptr(handler)->handle(static_cast<ReductionOp*>(expr));
+      return;
+    case ExprType::BroadcastOp:
+      ptr(handler)->handle(static_cast<BroadcastOp*>(expr));
       return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<ForLoop*>(expr));
@@ -130,18 +130,18 @@ void Statement::dispatch(T handler, Statement* stmt) {
 }
 
 template <typename T>
-void Val::constDispatch(T handler, const Val* const val) {
+void Val::constDispatch(T handler, const Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Bool:
-          ptr(handler)->handle(static_cast<const Bool* const>(val));
+          ptr(handler)->handle(static_cast<const Bool*>(val));
           return;
         case DataType::Float:
           ptr(handler)->handle(static_cast<const Float*>(val));
           return;
         case DataType::Half:
-          ptr(handler)->handle(static_cast<const Half* const>(val));
+          ptr(handler)->handle(static_cast<const Half*>(val));
           return;
         case DataType::Int:
           ptr(handler)->handle(static_cast<const Int*>(val));
@@ -180,9 +180,6 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Merge:
       ptr(handler)->handle(static_cast<const Merge*>(expr));
       return;
-    case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<const Reorder*>(expr));
-      return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(static_cast<const UnaryOp*>(expr));
       return;
@@ -190,10 +187,13 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       ptr(handler)->handle(static_cast<const BinaryOp*>(expr));
       return;
     case ExprType::TernaryOp:
-      ptr(handler)->handle(static_cast<const TernaryOp* const>(expr));
+      ptr(handler)->handle(static_cast<const TernaryOp*>(expr));
       return;
     case ExprType::ReductionOp:
-      ptr(handler)->handle(static_cast<const ReductionOp* const>(expr));
+      ptr(handler)->handle(static_cast<const ReductionOp*>(expr));
+      return;
+    case ExprType::BroadcastOp:
+      ptr(handler)->handle(static_cast<const BroadcastOp*>(expr));
       return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<const ForLoop*>(expr));
@@ -270,8 +270,6 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<Split*>(expr));
     case ExprType::Merge:
       return ptr(mutator)->mutate(static_cast<Merge*>(expr));
-    case ExprType::Reorder:
-      return ptr(mutator)->mutate(static_cast<Reorder*>(expr));
     case ExprType::UnaryOp:
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
@@ -280,6 +278,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<TernaryOp*>(expr));
     case ExprType::ReductionOp:
       return ptr(mutator)->mutate(static_cast<ReductionOp*>(expr));
+    case ExprType::BroadcastOp:
+      return ptr(mutator)->mutate(static_cast<BroadcastOp*>(expr));
     case ExprType::ForLoop:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::IfThenElse:

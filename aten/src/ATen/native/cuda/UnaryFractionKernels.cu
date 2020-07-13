@@ -7,7 +7,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
-#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -63,7 +62,7 @@ __host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
 }
 
 template<typename T>
-__host__ __device__ static inline thrust::complex<T> reciprocal_wrapper(thrust::complex<T> v) {
+__host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::complex<T> v) {
   // Handle extreme cases for numpy compatibility
   auto both_inf = [](T real, T imag) {
     return (::isinf(real) && ::isinf(imag));
@@ -84,15 +83,14 @@ __host__ __device__ static inline thrust::complex<T> reciprocal_wrapper(thrust::
     // If either is Inf, return {0, 0}
     return {0, 0};
   }
-  const thrust::complex<T> one = thrust::complex<T>(1.0, 0);
+  const c10::complex<T> one = c10::complex<T>(1.0, 0);
   return one/v;
 }
 
 void reciprocal_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "reciprocal_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "reciprocal_cuda", [&] {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return reciprocal_wrapper(a);
       });
     });

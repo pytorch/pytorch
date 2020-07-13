@@ -25,6 +25,19 @@ class Context;
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
+#ifdef _MSC_VER
+constexpr const char* CUDA_HELP =
+  "PyTorch splits its backend into two shared libraries: a CPU library "
+  "and a CUDA library; this error has occurred because you are trying "
+  "to use some CUDA functionality, but the CUDA library has not been "
+  "loaded by the dynamic linker for some reason.  The CUDA library MUST "
+  "be loaded, EVEN IF you don't directly use any symbols from the CUDA library! "
+  "One common culprit is a lack of -INCLUDE:?warp_size@cuda@at@@YAHXZ "
+  "in your link arguments; many dynamic linkers will delete dynamic library "
+  "dependencies if you don't depend on any of their symbols.  You can check "
+  "if this has occurred by using link on your binary to see if there is a "
+  "dependency on *_cuda.dll library.";
+#else
 constexpr const char* CUDA_HELP =
   "PyTorch splits its backend into two shared libraries: a CPU library "
   "and a CUDA library; this error has occurred because you are trying "
@@ -36,6 +49,7 @@ constexpr const char* CUDA_HELP =
   "depend on any of their symbols.  You can check if this has occurred by "
   "using ldd on your binary to see if there is a dependency on *_cuda.so "
   "library.";
+#endif
 
 // The CUDAHooksInterface is an omnibus interface for any CUDA functionality
 // which we may want to call into from CPU code (and thus must be dynamically

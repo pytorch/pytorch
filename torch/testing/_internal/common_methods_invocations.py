@@ -203,6 +203,8 @@ def method_tests():
         ('flip', (S, S, S), ([0, 2],), 'd02'),
         ('flip', (S, S, S), ([2, 0],), 'd20'),
         ('flip', (S, S, S), ([-1],), 'neg_d'),
+        ('fliplr', (S, S, S), ()),
+        ('flipud', (S, S, S), ()),
         ('roll', (S, S, S), (0, 0), 'd0'),
         ('roll', (S, S, S), (1, 2), 'd12'),
         ('roll', (S, S, S), (0, 2,), 'd02'),

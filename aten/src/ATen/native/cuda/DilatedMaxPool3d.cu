@@ -80,80 +80,6 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   }
 }
 
-template <int KERNEL_WIDTH, typename scalar_t>
-__global__ static void max_pool3d_with_indices_single_out_frame(
-  scalar_t* inputData,
-  PackedTensorAccessor64<scalar_t, 4> output,
-  PackedTensorAccessor64<int64_t, 4> indices,
-  int itime, int iheight, int iwidth,
-  int kT, int kH,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
-  int offsetZ)
-{
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
-
-  if (oRow < output.size(2) && oColumn < output.size(3))
-  {
-    int tStart = oFrame  * dT - pT;
-    int hStart = oRow    * dH - pH;
-    int wStart = oColumn * dW - pW;
-    int tEnd = min(tStart + (kT - 1) * dilationT + 1, itime);
-    int hEnd = min(hStart + (kH - 1) * dilationH + 1, iheight);
-    int wEnd = min(wStart + (KERNEL_WIDTH - 1) * dilationW + 1, iwidth);
-
-    while(tStart < 0)
-      tStart += dilationT;
-    while(hStart < 0)
-      hStart += dilationH;
-    while(wStart < 0)
-      wStart += dilationW;
-
-    int index = 0;
-    int maxIndex = -1;
-
-    scalar_t max = THCNumerics<scalar_t>::min();
-
-    for (int t = tStart; t < tEnd; t += dilationT)
-    {
-      for (int h = hStart; h < hEnd; h += dilationH)
-      {
-        for (int w = wStart; w < wEnd; w += dilationW)
-        {
-          index = t * iheight * iwidth + h * iwidth + w;
-          scalar_t val = inputData[slice * itime * iheight * iwidth + index];
-
-          if (max < val)
-          {
-            max = val;
-            maxIndex = index;
-          }
-        }
-      }
-    }
-
-    output[slice][oFrame][oRow][oColumn] = max;
-    indices[slice][oFrame][oRow][oColumn] = maxIndex;
-  }
-}
-
-#define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:           \
-  max_pool3d_with_indices_single_out_frame<KW>            \
-  <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
-    input_data,                                           \
-    output.packed_accessor64<scalar_t, 4>(),                \
-    indices.packed_accessor64<int64_t, 4>(),                \
-    itime, iheight, iwidth,                               \
-    kT, kH,                                               \
-    dT, dH, dW,                                           \
-    pT, pH, pW,                                           \
-    dilationT, dilationH, dilationW, offsetZ);            \
-    break
-
 template <typename scalar_t>
 void max_pool3d_with_indices_out_frame(
   scalar_t* input_data,
@@ -175,27 +101,17 @@ void max_pool3d_with_indices_out_frame(
               cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
-    switch (kW) {
-      UPDATE_OUTPUT_KERNEL_WIDTH(1);
-      UPDATE_OUTPUT_KERNEL_WIDTH(2);
-      UPDATE_OUTPUT_KERNEL_WIDTH(3);
-      UPDATE_OUTPUT_KERNEL_WIDTH(4);
-      UPDATE_OUTPUT_KERNEL_WIDTH(5);
-      UPDATE_OUTPUT_KERNEL_WIDTH(6);
-      UPDATE_OUTPUT_KERNEL_WIDTH(7);
-    default:
-      max_pool3d_with_indices_single_out_frame
-        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-           input_data,
-           output.packed_accessor64<scalar_t, 4>(),
-           indices.packed_accessor64<int64_t, 4>(),
-           itime, iheight, iwidth,
-           kT, kH, kW,
-           dT, dH, dW,
-           pT, pH, pW,
-           dilationT, dilationH, dilationW,
-           offsetZ);
-    }
+    max_pool3d_with_indices_single_out_frame
+      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+         input_data,
+         output.packed_accessor64<scalar_t, 4>(),
+         indices.packed_accessor64<int64_t, 4>(),
+         itime, iheight, iwidth,
+         kT, kH, kW,
+         dT, dH, dW,
+         pT, pH, pW,
+         dilationT, dilationH, dilationW,
+         offsetZ);
 
     AT_CUDA_CHECK(cudaGetLastError()); 
 

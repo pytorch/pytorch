@@ -37,10 +37,9 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
         os << "Tensor<" << val->getDataType().value() << ", "
-           << static_cast<TensorView*>(val)
-                  ->getRootDomain()
-                  ->noReductions()
-                  ->nDims()
+           << TensorDomain::noReductions(
+                  static_cast<TensorView*>(val)->getRootDomain())
+                  .size()
            << "> T" << val->name();
         break;
       case (ValType::Scalar):
@@ -92,13 +91,15 @@ void IRPrinter::handle(const TensorView* const tv) {
   if (tv->getComputeAtView() != nullptr) {
     os << " compute_at( ";
     os << "T" << tv->getComputeAtView()->name();
-    os << ", " << tv->getComputeAtAxis() << " )";
+    os << ", " << tv->getRelativeComputeAtAxis() << " )";
   }
 }
 
 void IRPrinter::handle(const IterDomain* const id) {
   if (id->isReduction())
     os << "r";
+  else if (id->isBroadcast())
+    os << "b";
   else
     os << "i";
   switch (id->parallel_method()) {
@@ -139,10 +140,6 @@ void IRPrinter::handle(const TensorIndex* const ti) {
   os << " ]";
 }
 
-void IRPrinter::handle(const TensorContiguity* const t) {
-  os << "format_tag: " << t->getContiguityTag();
-}
-
 void IRPrinter::handle(const Bool* const b) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
     os << "( ";
@@ -170,7 +167,8 @@ void IRPrinter::handle(const Float* const f) {
     os << "f" << f->name();
   } else {
     os << "float("
-       << std::setprecision(std::numeric_limits<float>::max_digits10)
+       << std::setprecision(
+              std::numeric_limits<Float::ScalarType>::max_digits10)
        << *(f->value()) << ")";
   }
 }
@@ -414,6 +412,18 @@ void IRPrinter::handle(const ReductionOp* const rop) {
   os << ");\n";
 }
 
+void IRPrinter::handle(const BroadcastOp* const bop) {
+  indent();
+  handle(bop->out());
+  os << "\n";
+  indent_size++;
+  indent();
+  os << " = ";
+  handle(bop->in());
+  indent_size--;
+  os << ";\n";
+}
+
 void IRPrinter::handle(const ForLoop* const fl) {
   if (fl->iter_domain()->isThread()) {
     for (auto& expr : fl->constBody().exprs())
@@ -494,23 +504,21 @@ void IRPrinter::handle(const Allocate* const a) {
 void IRPrinter::handle(const Split* const s) {
   os << "Split: ";
   handle(s->in());
-  os << " axis " << s->axis() << " by factor " << s->factor() << " -> ";
-  handle(s->out());
+  os << " by factor " << s->factor() << " -> ";
+  handle(s->outer());
+  os << ", ";
+  handle(s->inner());
   os << "\n";
 }
 
 void IRPrinter::handle(const Merge* const m) {
-  os << "Merge: " << m->in() << " axis " << m->axis()
-     << " with the following -> ";
-  handle(m->out());
-  os << "\n";
-}
-
-void IRPrinter::handle(const Reorder* const ro) {
-  os << "Reorder: ";
-  handle(ro->in());
+  os << "Merge: ";
+  handle(m->outer());
+  os << " and ";
+  handle(m->inner());
   os << " -> ";
-  handle(ro->out());
+  handle(m->out());
+  --indent_size;
   os << "\n";
 }
 
@@ -543,7 +551,7 @@ void IRPrinter::printReductionOps(Fusion* fusion) {
     auto d_type = rop_pair.second;
 
     indent();
-    os << "__global__ void reduction_" << op_type << "_" << d_type << "("
+    os << "__device__ void reduction_" << op_type << "_" << d_type << "("
        << d_type << "& a, "
        << "const " << d_type << " b) {\n";
     indent_size++;

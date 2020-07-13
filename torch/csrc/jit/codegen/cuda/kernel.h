@@ -40,12 +40,11 @@ struct NaivePWKernelArgsReq : KernelArgsReq {
   std::vector<int> dims_;
 };
 
-class CudaKernel {
+struct CudaKernel {
  public:
-  std::deque<Val*> inputs;
-  std::deque<Val*> outputs;
-
-  CudaKernel() = default;
+  CudaKernel() {
+    fusion_ = std::make_unique<Fusion>();
+  }
 
   CUmodule& getModule() {
     return module_;
@@ -75,12 +74,14 @@ class CudaKernel {
   dim3 block_;
   dim3 grid_;
   bool has_random_;
+
+  std::unique_ptr<Fusion> fusion_;
 };
 
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
 // 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
+TORCH_CUDA_API void compileKernel(CudaKernel* entry);
 
 // run loaded kernel through Function.
 // inputs/outputs is given in the sense of a PyTorch JIT ir node. This function

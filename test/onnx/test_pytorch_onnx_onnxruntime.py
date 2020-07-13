@@ -197,6 +197,27 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5,
                                                ort_optim_on=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_attribute_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.ones(2, 1024)
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(LargeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    @unittest.skip("Enable this once large model with subgraph is supported in ORT")
+    def test_subgraph_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                for i in range(x.size(0)):
+                    x = x + torch.ones(2, 1024)
+                return x
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
+
     # Export Torchvision models
 
     def test_alexnet(self):
@@ -348,21 +369,10 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
-        class KeyPointRCNN(torch.nn.Module):
-            def __init__(self):
-                super(KeyPointRCNN, self).__init__()
-                self.model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True,
-                                                                                                  min_size=200,
-                                                                                                  max_size=300)
-
-            def forward(self, images):
-                output = self.model(images)
-                # TODO: The keypoints_scores require the use of Argmax that is updated in ONNX.
-                #       For now we are testing all the output of KeypointRCNN except keypoints_scores.
-                #       Enable When Argmax is updated in ONNX Runtime.
-                return output[0]['boxes'], output[0]['labels'], output[0]['scores'], output[0]['keypoints']
+        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
+                                                                                     max_size=300)
         images = self.get_test_images()
-        self.run_test(KeyPointRCNN(), (images,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
@@ -818,7 +828,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_test(DynamicSliceExportMod(), x,
                       dynamic_axes={'input_1': [0, 1, 2],
-                      'output_1': [0, 1, 2]})
+                                    'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
@@ -1865,6 +1875,97 @@ class TestONNXRuntime(unittest.TestCase):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_no_bias(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(num_layers, bidirectional):
+            input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(num_layers, bidirectional)
+            h0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            c0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            return model, (input, (h0, c0))
+
+        num_layers = [1, 1, 2, 3]
+        bidirectional = [True, False, True, False]
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)]
+        for model, input in models_and_inputs:
+            self.run_test(model, input)
+
+    def test_rnn_no_bias(self):
+        def make_model(layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=False,
+                                 batch_first=batch_first, bias=False)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequence(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequence(model, True)
+            return model
+
+        def make_input(batch_size, layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            h0 = torch.randn(layers, batch_size, RNN_HIDDEN_SIZE)
+            inputs.append(h0)
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        layers = [1, 3, 1, 3, 1, 3]
+        packed_sequence = [0, 0, 1, 1, 2, 2]
+        models = [make_model(l, p) for l, p in zip(layers, packed_sequence)]
+        inputs = [make_input(RNN_BATCH_SIZE, l, p) for l, p in zip(layers, packed_sequence)]
+
+        for model, input in zip(models, inputs):
+            self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+
+    def test_gru_no_bias(self):
+        class GruNet(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = torch.nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional, bias=False)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        input_size = [7, 5]
+        hidden_size = [3, 4]
+        num_layers = [2, 3]
+        batch_size = [3, 4]
+        seq_len = [5, 7]
+        bidirectional = [True, False]
+        models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
+                             for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
+        for model, input in models_and_inputs:
+            self.run_test(model, input, do_constant_folding=True)
+
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -2583,7 +2684,7 @@ class TestONNXRuntime(unittest.TestCase):
             # add is used for exporting full
             def forward(self, x):
                 return torch.full((3, 4), x)
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         self.run_test(FullModel(), x)
 
     def test_l1_norm(self):
@@ -2722,6 +2823,18 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_cumsum_with_cast(self):
+        class CumSum(torch.nn.Module):
+            def forward(self, input):
+                return torch.cumsum(input, dim=0, dtype=torch.float32)
+
+        model = CumSum()
+        x = torch.tensor([2, 3, 4], dtype=torch.int32)
+        self.run_test(model, x)
+        x = torch.tensor([False, True, True])
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
@@ -2796,6 +2909,27 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([1], dtype=torch.int64)
         model = MyModule()
         self.run_test(model, (x, y))
+
+    def test_cast_to_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.cat((input.to(other), other), 0)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.zeros([2, 3, 4], dtype=torch.bool)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ones_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input):
+                true = torch.ones(input.shape, dtype=torch.bool)
+                return input.to(true) & true
+
+        x = torch.randn(2, 3, 4)
+        model = MyModule()
+        self.run_test(model, x)
 
     def test_log(self):
         class Log(torch.nn.Module):
@@ -3543,10 +3677,6 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
-            # This is a hack to skip elman_rnn bidirectional tests for now
-            # TODO: Revert this once elman_rnn bidirectional issue is fixed
-            if base == 'elman' and bidirectional[1] == 'bidirectional':
-                continue
             make_test(name, base, layer, bidirectional, initial_state,
                       variable_length, dropout,
                       **extra_kwargs)
@@ -3557,10 +3687,8 @@ def setup_rnn_tests():
 
     # make sure no one accidentally disables all the tests without
     # noticing
-    # assert test_count == 192, test_count
-    # TODO: Revert this once elman_rnn bidirectional issue is fixed
-    if test_count != 144:
-        raise ValueError('Expected 144 tests but found {}'.format(test_count))
+    if test_count != 192:
+        raise ValueError('Expected 192 tests but found {}'.format(test_count))
 
 
 setup_rnn_tests()
@@ -3597,7 +3725,7 @@ TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
                                    dict(TestONNXRuntime.__dict__,
-                                   keep_initializers_as_inputs=False))
+                                        keep_initializers_as_inputs=False))
 
 
 # opset 10 tests, with keep_initializers_as_inputs=False for
@@ -3605,7 +3733,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 # opset 11 tests, with keep_initializers_as_inputs=False for
@@ -3613,14 +3741,14 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=11,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 # opset 12 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 if __name__ == '__main__':

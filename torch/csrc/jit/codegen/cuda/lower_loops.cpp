@@ -43,7 +43,23 @@ void UnrollPass::handle(Expr* expr) {
 }
 
 namespace {
-Bool* getPredicate(TensorView* tv, std::vector<Val*> inds) {
+Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_) {
+  TORCH_INTERNAL_ASSERT(
+      inds_.size() == tv->nDims() ||
+      inds_.size() == tv->domain()->noReductions().size());
+
+  std::vector<Val*> inds;
+  if (inds_.size() < tv->nDims()) {
+    size_t i_ = 0;
+    for (size_t i = 0; i < tv->nDims() && i_ < inds_.size(); i++) {
+      if (tv->axis(i)->isReduction())
+        inds.push_back(new Int(0));
+      else
+        inds.push_back(inds_[i_++]);
+    }
+  } else {
+    inds = inds_;
+  }
   if (tv->nDims() > inds.size()) {
     for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
       if (tv->axis(i)->isReduction())
@@ -73,6 +89,7 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds) {
           cond->getDataType().value() == DataType::Bool,
       "Error computing predicate, should be returning a Bool, but returning ",
       cond->getDataType().value());
+
   return static_cast<Bool*>(cond);
 }
 } // namespace
@@ -139,7 +156,6 @@ void UnrollPass::handle(ForLoop* fl) {
 
     // Make predicates for the unrolling, and the epilogue
     Bool* unroll_predicate = getPredicate(out, unroll_pred_inds);
-
     // Make the IfThenElse controlling the unrolling
     IfThenElse* unroll_ite =
         new IfThenElse(unroll_predicate, {}, {}, first_unroll->parentScope());
@@ -186,17 +202,14 @@ void UnrollPass::handle(ForLoop* fl) {
 
       TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
 
-      if (has_global) {
-        Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
+      Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
 
-        // If we need a predicate, put expr inside an if then else
-
-        if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
-          IfThenElse* inline_ite =
-              new IfThenElse(pred, {expr}, {}, for_loops.back());
-          for_loops.back()->body().insert_before(expr, inline_ite);
-          for_loops.back()->body().erase(expr);
-        }
+      // If we need a predicate, put expr inside an if then else
+      if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
+        IfThenElse* inline_ite =
+            new IfThenElse(pred, {expr}, {}, for_loops.back());
+        for_loops.back()->body().insert_before(expr, inline_ite);
+        for_loops.back()->body().erase(expr);
       }
     }
   } // else (if(!within_unroll))
@@ -242,9 +255,10 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
 
   // Compute at axis can be == tv->nDims() meaning it's inline
   decltype(tv->nDims()) alloc_pos = 0;
+  // Do we need to close to root and alloc there?
   bool reset = true;
   while (alloc_pos <= tv->nDims()) {
-    if (tv->hasComputeAt() && alloc_pos == tv->getComputeAtAxis()) {
+    if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
       reset = false;
       break;
     }
@@ -263,7 +277,6 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
     IterDomain* dim = tv->getComputeAtAxis(i).first;
     if (dim->isThreadDim() || dim->isReduction())
       continue;
-    // TORCH_INTERNAL_ASSERT()
     alloc_dims.push_back(dim->extent());
   }
 
@@ -277,6 +290,7 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
     }
   }
   Allocate* alloc = new Allocate(tv, size);
+
   if (alloc_pos == 0) {
     lowered_exprs.insert(lowered_exprs.begin(), alloc);
   } else if (alloc_pos == for_loops.size()) {
@@ -317,19 +331,75 @@ void LoopNestGenerator::pushBack(Expr* expr) {
 
 // Update for loop structure based on this TensorView
 void LoopNestGenerator::initReduction(TensorView* tv, Val* init_val) {
-  TORCH_INTERNAL_ASSERT(
-      tv->getComputeAtAxis() <= for_loops.size(),
-      "Initialization of reduction was trying to be placed at the wrong point in the loop nest.");
-  int depth = for_loops.size();
-  for (decltype(tv->nDims()) i = depth; i < tv->nDims(); i++) {
-    if (!tv->axis(i)->isReduction())
-      openFor(tv->getComputeAtAxis(i));
+  // This logic was taken from allocation placement, as we want to initialize
+  // the reduction buffers right after they're allocated. Compute at axis can be
+  // == tv->nDims() meaning it's inline
+  decltype(tv->nDims()) alloc_pos = 0;
+  // Do we need to close to root and alloc there?
+  bool reset = true;
+  while (alloc_pos <= tv->nDims()) {
+    if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
+      reset = false;
+      break;
+    }
+    if (alloc_pos < tv->nDims() &&
+        tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
+            ParallelType::Unroll) {
+      reset = false;
+      break;
+    }
+    alloc_pos++;
   }
-  auto clone = tv->unsafeClone();
-  pushBack(new UnaryOp(UnaryOpType::Set, clone, init_val));
+  alloc_pos = reset ? 0 : alloc_pos;
 
-  while (for_loops.size() > (unsigned int)depth)
-    popFor();
+  std::vector<IterDomain*> ids;
+  for (auto i = alloc_pos; i < tv->nDims(); i++) {
+    IterDomain* dim = tv->getComputeAtAxis(i).first;
+    if (dim->isReduction())
+      continue;
+    ids.push_back(dim);
+  }
+
+  auto clone = tv->unsafeClone();
+  auto init_stmt = new UnaryOp(UnaryOpType::Set, clone, init_val);
+
+  Expr* init = nullptr;
+  ForLoop* inner_fl = nullptr;
+  if (alloc_pos >= 1)
+    inner_fl = for_loops[alloc_pos - 1];
+  for (auto id : ids) {
+    ForLoop* new_fl;
+    if (id->isThread()) {
+      std::stringstream ss;
+      ss << id->parallel_method();
+      new_fl = new ForLoop(
+          new NamedScalar(ss.str(), DataType::Int), id, {}, inner_fl);
+    } else {
+      new_fl = new ForLoop(new Int(), id, {}, inner_fl);
+    }
+
+    if (init == nullptr) {
+      init = new_fl;
+      inner_fl = new_fl;
+    } else {
+      inner_fl->body().push_back(new_fl);
+      inner_fl = new_fl;
+    }
+  }
+  if (init == nullptr) {
+    init = init_stmt;
+  } else {
+    inner_fl->body().push_back(init_stmt);
+  }
+
+  if (alloc_pos == 0) {
+    lowered_exprs.insert(lowered_exprs.begin(), init);
+  } else if (alloc_pos == for_loops.size()) {
+    scope_utils::pushBack(for_loops[alloc_pos - 1], init);
+  } else {
+    scope_utils::insertBefore(
+        for_loops[alloc_pos - 1], for_loops[alloc_pos], init);
+  }
 }
 
 /*
@@ -355,7 +425,7 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   TensorView* out = static_cast<TensorView*>(expr->output(0));
   // 1) Reduce loop structure
-  while (compute_at_scope.size() > out->getComputeAtAxis() &&
+  while (compute_at_scope.size() > out->getThisComputeAtAxis() &&
          compute_at_scope.back().second != out &&
          compute_at_scope.back() !=
              out->getComputeAtAxis((int)compute_at_scope.size() - 1)) {
@@ -363,7 +433,7 @@ void LoopNestGenerator::handle(Expr* expr) {
   }
 
   // 2) Open back up to computeAt
-  while (compute_at_scope.size() < out->getComputeAtAxis()) {
+  while (compute_at_scope.size() < out->getThisComputeAtAxis()) {
     openFor(out->getComputeAtAxis((int)compute_at_scope.size()));
   }
 
@@ -385,7 +455,7 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   // 7) Reduce loop structure back to computeAt
   while (!compute_at_scope.empty() &&
-         compute_at_scope.size() > out->getComputeAtAxis())
+         compute_at_scope.size() > out->getThisComputeAtAxis())
     popFor();
 }
 

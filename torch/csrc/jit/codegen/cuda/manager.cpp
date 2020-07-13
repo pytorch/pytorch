@@ -106,13 +106,12 @@ class CudaFusionManager {
           makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      Fusion fusion;
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
       // we should propagate more information back:
       //   1. device;
       //   2. launch config;
-      parseJitIR(graph, fusion, cuda_kernel.value());
+      parseJitIR(graph, cuda_kernel.value());
 
       // find device in inputs.
       for (const auto& input : inputs) {
@@ -126,7 +125,7 @@ class CudaFusionManager {
       }
 
       // NVRTC compile kernel
-      compileKernel(fusion, cuda_kernel.value());
+      compileKernel(cuda_kernel.value());
 
       runKernel(*cuda_kernel, inputs, outputs);
     }

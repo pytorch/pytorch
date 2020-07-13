@@ -95,6 +95,29 @@ struct TORCH_CUDA_API Statement {
   // Make sure this is an Expr and return it as an Expr*
   Expr* asExpr();
 
+  // Replacement for static_cast<T*>(ptr): ptr->as<T>()
+  template <class T>
+  T* as() {
+#ifdef NDEBUG
+    auto downcast_ptr = static_cast<T*>(this);
+#else
+    auto downcast_ptr = dynamic_cast<T*>(this);
+    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
+#endif
+    return downcast_ptr;
+  }
+
+  template <class T>
+  const T* as() const {
+#ifdef NDEBUG
+    auto downcast_ptr = static_cast<const T*>(this);
+#else
+    auto downcast_ptr = dynamic_cast<const T*>(this);
+    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
+#endif
+    return downcast_ptr;
+  }
+
   // Return the fusion this statement belongs to
   Fusion* fusion() const noexcept {
     return fusion_;
@@ -136,7 +159,8 @@ struct TORCH_CUDA_API Statement {
  * Adding a Val:
  * Right now adding a Val is quite involved. Val's can be defined in ir.h or in
  * their own header file. The following is what is currently needed to add a new
- * Val: 1) Definition inheriting from Val
+ * Val:
+ * 1) Definition inheriting from Val
  *     - Members must be private or protected
  *     - Accessor functions for members
  *     - Must call Val constructor, Val constructor registers with fusion
@@ -152,7 +176,15 @@ struct TORCH_CUDA_API Val : public Statement {
   virtual ~Val() = default;
 
   Val() = delete;
-  Val(ValType _vtype, DataType _dtype = DataType::Null);
+
+  // We may not want to register this value during Val's constructor. The reason
+  // for this is that if we register the val, then ina derived constructor try
+  // to throw, fusion's destructor will get called, but the pointer to this Val
+  // will be invalid. When fusion tries to delete this value it will cause a seg
+  // fault, instead of showing the thrown error.
+  Val(ValType _vtype,
+      DataType _dtype = DataType::Null,
+      bool register_val = true);
 
   // TODO: Values are unique and not copyable
   Val(const Val& other) = delete;
@@ -349,18 +381,20 @@ struct TORCH_CUDA_API IRInputOutput {
  * Adding an Expr:
  * Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
  * in their own header file. The following is what is currently needed for Expr
- * definitions: 1) Definition inheriting from Expr.
+ * definitions:
+ * 1) Definition inheriting from Expr.
  *     - Members must be private or protected
  *     - Accessor functions for members
  *     - Constructors need to register with the Fusion after inputs/outputs are
- * defined
+ *        defined
  *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
  * 4) Printing functions should be added to ir_iostream.h/.cpp
  * 5) Lower case convenience functions should be added to arith.h/.cpp (If user
- * facing) 6) An enum value must be added to ExprType in type.h 7) A string
- * entry must be added in expr_type_string_map
+ *  facing)
+ * 6) An enum value must be added to ExprType in type.h 7) A string
+ *  entry must be added in expr_type_string_map
  */
 struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
  public:
@@ -387,7 +421,7 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
     if (inputs().size() != other->inputs().size() ||
         outputs().size() != other->outputs().size())
       return false;
-    for (decltype(inputs().size()) i{0}; i < inputs().size(); i++) {
+    for (size_t i = 0; i < inputs().size(); i++) {
       if (!input(i)->sameAs(other->input(i)))
         return false;
     }

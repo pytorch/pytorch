@@ -35,7 +35,7 @@ def make_stub(func, name):
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
-    func = get_function_from_type(type(nn_module), method_name)
+    func = getattr(nn_module, method_name)
     if isinstance(func, ScriptMethodStub):
         return func
     # Make sure the name present in the resulting AST will match the name
@@ -90,7 +90,12 @@ def infer_concrete_type_builder(nn_module):
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
-        if name in class_annotations:
+        # The forward function from Module is special; never use this annotations; we
+        # need to infer type directly using JIT.  I originally wanted to write
+        # this test as isinstance(class_annotations[name], Callable) but
+        # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
+        # is also true!
+        if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
             attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
@@ -309,7 +314,6 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -346,6 +350,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             else:
                 # use the default recursive rule to compile the module
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
@@ -371,6 +376,19 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         create_methods_from_stubs(concrete_type, stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
+
+    # Special handling so methods like __len__ work in script methods on classes derived from containers
+    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
+            '__len__' not in cpp_module._method_names():
+        script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
+    if isinstance(nn_module, torch.nn.ModuleDict) and \
+            '__contains__' not in cpp_module._method_names():
+        if len(nn_module.keys()):
+            keys = repr(list(nn_module.keys()))
+            script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+        else:
+            script_module.define("def __contains__(self, key: str):\n   return False\n")
+
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
@@ -457,7 +475,7 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func, None, None, inspect.ismethod(func))
+    signature = torch.jit.annotations.get_signature(func, None, _jit_internal.fake_range(), inspect.ismethod(func))
     if signature is None:
         qual_name = torch.jit._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))

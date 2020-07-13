@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -15,18 +13,6 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
-// Clear out the last recorded computeAtView
-void GPULower::clearActiveView() {
-  active_view_axis = 0;
-  active_view = nullptr;
-}
-
-// Set active views from computeAtView
-void GPULower::setActiveView(const TensorView* const tv) {
-  active_view_axis = tv->getComputeAtAxis();
-  active_view = tv->getComputeAtView();
-}
 
 void GPULower::pushBack(Expr* expr) {
   if (active_scope == nullptr)
@@ -97,7 +83,6 @@ Statement* GPULower::mutate(ForLoop* fl) {
   }
 
   active_scope = prev_scope;
-
   if (is_mutated) {
     auto newFL = new ForLoop(
         fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
@@ -222,6 +207,23 @@ Statement* GPULower::mutate(ReductionOp* rop) {
   return new_op;
 }
 
+Statement* GPULower::mutate(BroadcastOp* bop) {
+  if (!ir_utils::isTVOp(bop))
+    return OptOutMutator::mutate(bop);
+
+  TensorIndex* out = Index::getConsumerIndex(
+      ir_utils::asTV(bop->out()), scope_utils::getLoops(active_scope));
+  Val* in = bop->in();
+  if (ir_utils::isTV(in))
+    in = Index::getProducerIndex(
+        ir_utils::asTV(in),
+        ir_utils::asTV(bop->out()),
+        scope_utils::getLoops(active_scope));
+  Expr* new_op = new BroadcastOp(out, in);
+
+  return new_op;
+}
+
 // TensorViews are all based on symbolic sizes. When we first initialize them we
 // don't know if they're inputs or outputs which would mean that they have
 // runtime shapes. Intermediate tensors (those not going to global memory) do
@@ -257,7 +259,7 @@ void GPULower::replaceSizes() {
   // view. For example T0 may be translated to T9. We don't want our new
   // variable to be T0->size[...] we need it to be T9->size[...]
   //
-  // This could be done in a better way but changing split/merge/reorder to be a
+  // This could be done in a better way but changing split/merge to be a
   // TensorDomain focused operation, then we could simply do this process on
   // domains, instead of tensorviews. This would have the benefit that the
   // TensorView wouldn't change, so users pointers will remain valid. The other
@@ -266,14 +268,14 @@ void GPULower::replaceSizes() {
   for (TensorView* tv : orig_inp_out) {
     // Replace the domain with one based on Ti.size[j]
     std::vector<IterDomain*> new_domain_iters;
-    TensorDomain* root_td = tv->getRootDomain();
+    const std::vector<IterDomain*>& root_td = tv->getRootDomain();
 
-    for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
+    for (decltype(root_td.size()) i{0}; i < root_td.size(); i++) {
       // Output sizes could have reduction axes, which isn't what gets output.
-      if (root_td->axis(i)->isReduction())
+      if (root_td[i]->isReduction())
         continue;
 
-      Val* orig_size = root_td->axis(i)->extent();
+      Val* orig_size = root_td[i]->extent();
 
       std::stringstream ss;
       ss << "T" << tv->name() << ".size[" << i << "]";
@@ -292,19 +294,20 @@ void GPULower::replaceSizes() {
   // Set domains to be based on symbolic sizes (i.e. Ti.size[...])
   for (TensorView* tv : all_tvs) {
     std::vector<IterDomain*> new_domain_iters;
-    TensorDomain* root_td = tv->getRootDomain();
+    const std::vector<IterDomain*>& root_td = tv->getRootDomain();
 
-    for (decltype(root_td->nDims()) i{0}; i < root_td->nDims(); i++) {
-      Val* new_size = root_td->axis(i)->extent();
+    for (decltype(root_td.size()) i{0}; i < root_td.size(); i++) {
+      Val* new_size = root_td[i]->extent();
       if (size_map.find(new_size) != size_map.end())
         new_size = size_map[new_size];
 
       new_domain_iters.push_back(new IterDomain(
-          root_td->axis(i)->start(),
+          root_td[i]->start(),
           new_size,
-          root_td->axis(i)->parallel_method(),
-          root_td->axis(i)->isReduction(),
-          root_td->axis(i)->isRFactorProduct()));
+          root_td[i]->parallel_method(),
+          root_td[i]->isReduction(),
+          root_td[i]->isRFactorProduct(),
+          root_td[i]->isBroadcast()));
     }
 
     TensorDomain* old_domain = tv->domain();
@@ -313,10 +316,8 @@ void GPULower::replaceSizes() {
     // We should just be able to replace sizes in place, but mutator is setup to
     // do that as it set up to replace vals in Exprs, but
     // IterDomain/TensorDomain are vals.
-    std::vector<int> axis_map(new_domain->nDims());
-    std::iota(axis_map.begin(), axis_map.end(), 0);
-    new_domain = TransformIter::replaySelf(
-        new_domain, TransformIter::getHistory(old_domain), axis_map);
+
+    new_domain = TransformReplay::fullSelfReplay(new_domain, old_domain);
 
     TORCH_INTERNAL_ASSERT(
         old_domain->nDims() == new_domain->nDims(),
@@ -382,7 +383,7 @@ void GPULower::fixComputeAt(Fusion* fusion) {
     TensorView* ctv = tv->getComputeAtView();
 
     if (ctv != nullptr && visited.find(ctv) == visited.end()) {
-      ctv->setComputeAt(tv, (int)tv->getComputeAtAxis());
+      ctv->setComputeAt(tv, (int)tv->getThisComputeAtAxis());
       tv->clearComputeAt();
     }
     visited.emplace(tv);
@@ -396,10 +397,6 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   // Compute at can have some circular references. Before we can call any tv
   // with tv->getComputeAtAxis(i) we need to break those circular dependencies.
   fixComputeAt(fusion_);
-
-  // Initialize members of the class
-  active_view = nullptr;
-  active_view_axis = 0;
 
   validate(fusion_);
   replaceSizes();

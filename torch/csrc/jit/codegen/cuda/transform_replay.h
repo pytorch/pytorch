@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
@@ -121,34 +122,34 @@ struct TensorView;
 struct TORCH_CUDA_API TransformReplay {
  private:
  public:
-  // Self replay.
-  static TensorDomain* fullSelfReplay(
-      TensorDomain* self,
-      TensorDomain* self_copy);
-
   // Replay producer as consumer.
   static TensorDomain* replayPasC(
       TensorDomain* producer,
       TensorDomain* consumer,
-      int compute_at_axis);
+      int consumer_compute_at_axis);
 
   // Replay producer as consumer.
   static TensorView* replayPasC(
       TensorView* producer,
       TensorView* consumer,
-      int compute_at_axis);
+      int consumer_compute_at_axis);
 
   // Replay producer as consumer.
   static TensorDomain* replayCasP(
       TensorDomain* consumer,
       TensorDomain* producer,
-      int compute_at_axis);
+      int producer_compute_at_axis);
 
   // Replay producer as consumer.
   static TensorView* replayCasP(
       TensorView* consumer,
       TensorView* producer,
-      int compute_at_axis);
+      int producer_compute_at_axis);
+
+  // Self replay.
+  static TensorDomain* fullSelfReplay(
+      TensorDomain* new_self_root,
+      TensorDomain* self);
 };
 
 } // namespace fuser
