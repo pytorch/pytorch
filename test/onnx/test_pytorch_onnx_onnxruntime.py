@@ -2905,6 +2905,7 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -2918,6 +2919,7 @@ class TestONNXRuntime(unittest.TestCase):
         embedding_matrix = torch.rand(10, 15)
         self.run_test(model, (embedding_matrix, x, offset, w))
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
