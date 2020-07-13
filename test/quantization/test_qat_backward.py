@@ -25,7 +25,6 @@ class TestQATBackward(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_forward_and_backward(self, quantize_forward, quantize_backward, device, X):
-
         r"""Tests the forward and backward path of the FakeQuantizeWithBackward module
         """
         def fake_quantize_tensor(X):
