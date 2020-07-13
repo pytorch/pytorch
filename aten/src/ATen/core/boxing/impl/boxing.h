@@ -34,11 +34,11 @@ struct is_tuple_of_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std
 
 // has_ivalue_to
 //
-template<class T, class Enable = void>
-struct has_ivalue_to : std::false_type {};
+// template<class T, class Enable = void>
+// struct has_ivalue_to : std::false_type {};
 
-template<class T>
-struct has_ivalue_to<T, guts::void_t<decltype(IValue::to<T>)>> : std::true_type {};
+// template<class T>
+// struct has_ivalue_to<T, guts::void_t<decltype(IValue::to<T>())>> : std::true_type {};
 
 //
 // boxing predicates
