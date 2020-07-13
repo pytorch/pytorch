@@ -218,55 +218,60 @@ namespace test_filter_map {
 }
 
 namespace test_tuple_elements {
-  // empty input
-  static_assert(
-    tuple_elements(std::make_tuple(), std::index_sequence<>()) == std::make_tuple(),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleElements_emptyInput) {
+    auto x = std::make_tuple();
+    auto y = tuple_elements(x, std::index_sequence<>());
+    EXPECT_EQ(x, y);
+  }
 
-  // empty selection
-  static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<>()) == std::make_tuple(),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleElements_emptySelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<>());
+    auto z = std::make_tuple();
+    EXPECT_EQ(y, z);
+  }
 
-  // subselect
-  static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2>()) == std::make_tuple(0, 2.0),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleElements_subsetSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2>());
+    auto z = std::make_tuple(0, 2.0);
+    EXPECT_EQ(y, z);
+  }
 
-  // reorder
-  static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2, 1>()) == std::make_tuple(0, 2.0, "HEY"),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleElements_reorderSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2, 1>());
+    auto z = std::make_tuple(0, 2.0, "HEY");
+    EXPECT_EQ(y, z);
+  }
 }
 
 namespace test_tuple_take {
-  // empty input
-  static_assert(
-    tuple_take<std::tuple<>, 0>(std::make_tuple()) == std::make_tuple(),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleTake_emptyInput) {
+    auto x = std::make_tuple();
+    auto y = tuple_take<std::tuple<>, 0>(x);
+    EXPECT_EQ(x, y);
+  }
 
-  // empty selection
-  static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 0>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleTake_emptyPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 0>(x);
+    auto z = std::make_tuple();
+    EXPECT_EQ(y, z);
+  }
 
-  // take prefix
-  static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 2>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(0, "HEY"),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 2>(x);
+    auto z = std::make_tuple(0, "HEY");
+    EXPECT_EQ(y, z);
+  }
 
-  // take full
-  static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 3>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(0, "HEY", 2.0),
-    ""
-  );
+  TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 3>(x);
+    EXPECT_EQ(x, y);
+  }
 }
 
 }
