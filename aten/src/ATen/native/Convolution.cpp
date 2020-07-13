@@ -789,6 +789,18 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
+  } else if (
+        !params.transposed && (input.ndimension() == 4) &&
+        (input.device().type() == c10::DeviceType::CPU) &&
+        !params.is_dilated()) {
+      // fast path for grouped conv2d
+      output = at::thnn_conv2d(
+          input,
+          weight,
+          weight.sizes().slice(2),
+          bias,
+          params.stride,
+          params.padding);
 #ifdef USE_VULKAN
   } else if (params.use_vulkan(input, weight)) {
     output = at::native::vulkan_convolution(
@@ -929,9 +941,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   params.dilation = dilation_.vec();
   params.transposed = transposed_;
   params.output_padding = output_padding_.vec();
-  // TODO: hacky way of inferring the groups number for grouped Conv3D
+  // TODO: hacky way of inferring the groups number for grouped Conv3D and Conv2D
   // See: https://github.com/pytorch/pytorch/pull/36355
-  if (!params.transposed && input.dim() > 4) {
+  if (!params.transposed && input.dim() > 3) {
     params.groups = input.size(1) / weight.size(1);
   } else {
     params.groups = groups_;
