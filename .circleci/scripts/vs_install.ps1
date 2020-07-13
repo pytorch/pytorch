@@ -1,7 +1,7 @@
 $VS_DOWNLOAD_LINK = "https://aka.ms/vs/15/release/vs_buildtools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.14.11",
+                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.14.13",
                                                      "--add Microsoft.Component.MSBuild",
                                                      "--add Microsoft.VisualStudio.Component.Roslyn.Compiler",
                                                      "--add Microsoft.VisualStudio.Component.TextTemplating",

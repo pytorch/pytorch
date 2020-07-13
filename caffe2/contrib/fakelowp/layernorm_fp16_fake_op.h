@@ -51,14 +51,10 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
-    scale_.Resize(M);
-    bias_.Resize(M);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     T* mean_data = mean->template mutable_data<T>();
     T* sigma_data = sigma->template mutable_data<T>();
-    T* scale_data = scale_.template mutable_data<T>();
-    T* bias_data = bias_.template mutable_data<T>();
 
     std::vector<float> X_rounded(X.numel());
     fbgemm::RoundToFloat16(
@@ -137,9 +133,6 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
   const int axis_;
   const float epsilon_;
   const bool elementwise_affine_;
-
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
 
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT, MEAN, STD);

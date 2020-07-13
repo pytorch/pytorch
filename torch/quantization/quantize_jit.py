@@ -35,28 +35,38 @@ def script_qconfig_dict(qconfig_dict):
     """
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
-def fuse_conv_bn_jit(model):
+def fuse_conv_bn_jit(model, inplace=False):
     r""" Fuse conv - bn module
     Works for eval model only.
 
     Args:
         model: TorchScript model from scripting or tracing
     """
-    return torch.jit._recursive.wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model_c = model._c
+    model_c = torch._C._jit_pass_fold_convbn(model_c)
+    if inplace:
+        model._reconstruct(model_c)
+    else:
+        model = wrap_cpp_module(model_c)
+    return model
 
 def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
-    assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
     _check_forward_method(model)
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    model = fuse_conv_bn_jit(model)
-    return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
-                                                               'forward',
-                                                               scripted_qconfig_dict,
-                                                               inplace,
-                                                               quant_type))
+    model = fuse_conv_bn_jit(model, inplace)
+    model_c = torch._C._jit_pass_insert_observers(model._c,
+                                                  'forward',
+                                                  scripted_qconfig_dict,
+                                                  inplace,
+                                                  quant_type)
+    if inplace:
+        model._reconstruct(model_c)
+    else:
+        model = wrap_cpp_module(model_c)
+    return model
 
 def prepare_jit(model, qconfig_dict, inplace=False):
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
@@ -65,15 +75,19 @@ def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
 
 def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC):
-    assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
     model.eval()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, debug, quant_type))
+    model_c = model._c
+    model_c = torch._C._jit_pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
     if not debug:
         # Moving model parameters to CPU since quantized operators
         # are only supported on CPU right now
         model.cpu()
-        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, quant_type))
+        model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type)
+    if inplace:
+        model._reconstruct(model_c)
+    else:
+        model = wrap_cpp_module(model_c)
     return model
 
 def convert_jit(model, inplace=False, debug=False):
@@ -83,20 +97,17 @@ def convert_dynamic_jit(model, inplace=False, debug=False):
     return _convert_jit(model, inplace, debug, quant_type=QuantType.DYNAMIC)
 
 def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
-    assert not inplace, "We don't support inplace right now"
     # Always do inplace convert because the Tensor is already
     # copied in prepare_jit when inplace is False
     if quant_type == QuantType.DYNAMIC:
         model = prepare_dynamic_jit(model, qconfig_dict, inplace)
-        # TODO: change inplace to True
-        model = convert_dynamic_jit(model, False, debug)
+        model = convert_dynamic_jit(model, True, debug)
     else:
         assert run_fn, "Must provide calibration function for post training static quantization"
         assert run_args, "Must provide calibration dataset for post training static quantization"
         model = prepare_jit(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
-        # TODO: change inplace to True
-        model = convert_jit(model, False, debug)
+        model = convert_jit(model, True, debug)
 
     return model
 

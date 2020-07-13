@@ -1,6 +1,7 @@
 import contextlib
 import gc
 import sys
+import io
 import math
 import tempfile
 import time
@@ -141,9 +142,9 @@ class TestAutograd(TestCase):
 
         x, y = self._function_test(MyFunction)
         self.assertEqual(graph_desc(x.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
         self.assertEqual(graph_desc(y.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
 
     def test_function_returns_input(self):
         class MyFunction(Function):
@@ -158,12 +159,12 @@ class TestAutograd(TestCase):
         for shape in [(1,), ()]:
             v = torch.ones(shape, requires_grad=True)
             MyFunction.apply(v).backward()
-            self.assertEqual(v.grad, torch.full(shape, 2))
+            self.assertEqual(v.grad, torch.full(shape, 2.))
 
             with torch.no_grad():
                 v.grad.zero_()
             MyFunction.apply(v.clone()).backward()
-            self.assertEqual(v.grad, torch.full(shape, 2))
+            self.assertEqual(v.grad, torch.full(shape, 2.))
 
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
@@ -236,30 +237,36 @@ class TestAutograd(TestCase):
         self.assertEqual(x_grad, x_grad_clone)
 
     def test_accumulate_grad_tensor_reference(self):
-        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
+        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference, create_graph):
             params = torch.tensor([1.5, 1.5]).requires_grad_()
             params.grad = params_grad_tensor
             grad_saved = params.grad
-            params.backward(backward_grad_tensor)
+            params.backward(backward_grad_tensor, create_graph=create_graph)
             self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
 
-        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.tensor([1.5, 1.5]),
-            False)
+        for create_graph in (False, True):
+            # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.tensor([1.5, 1.5]),
+                False,  # never accumulates in-place
+                create_graph)
 
-        # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.tensor([1.5, 1.5]),
-            torch.tensor([1.5, 1.5]),
-            True)
+            # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference,
+            # but only if create_graph=False.
+            _test_grad_tensor(
+                torch.tensor([1.5, 1.5]),
+                torch.tensor([1.5, 1.5]),
+                not create_graph,
+                create_graph)
 
-        # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            True)
+            # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference,
+            # but only if create_graph=False.
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                not create_graph,
+                create_graph)
 
     @skipIfNoLapack
     def test_slogdet_sign(self):
@@ -2660,8 +2667,9 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
-                 'add', 'to', 'empty_strided', 'copy_', 'empty']
+        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'is_complex',
+                 'is_complex', 'empty', 'is_complex', 'add', 'to', 'empty_strided',
+                 'copy_', 'is_complex', 'is_complex', 'empty']
         top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
@@ -3305,6 +3313,56 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    def test_anomaly_grad_warnings(self):
+        # PyTorch won't throw warnings if there is an error
+        # but we'd want to at least see them in stderr
+
+        class StdErrDiverter:
+            def __enter__(self):
+                self.stderr_orig = sys.stderr
+                self.stderr_new = io.StringIO()
+                sys.stderr = self.stderr_new
+                return self
+
+            def __exit__(self, *args):
+                self.captured = self.stderr_new.getvalue()
+                sys.stderr = self.stderr_orig
+
+
+        # if the warnings don't throw, they will be handled as regular warnings
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    a = torch.randn(5, requires_grad=True)
+                    d1 = a + 1
+                    d2 = d1 ** 2
+                    d1 += 1
+                    torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 2)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', str(w[1].message))
+
+        # if the warning throws, it will be printed to sys.stderr
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    warnings.simplefilter("error")
+                    with StdErrDiverter() as s:
+                        a = torch.randn(5, requires_grad=True)
+                        d1 = a + 1
+                        d2 = d1 ** 2
+                        d1 += 1
+                        torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 1)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', s.captured)
 
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
@@ -4476,12 +4534,12 @@ def add_test(
                                 if i.grad is not None:
                                     with torch.no_grad():
                                         i.grad.zero_()
-                            for io, o in zip(inplace_output_variable, output_variable):
+                            for i_o, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
-                                    grad = randn_like(io).to(torch.cdouble)
+                                    grad = randn_like(i_o).to(torch.cdouble)
                                 else:
-                                    grad = randn_like(io).double()
-                                io.backward(grad)
+                                    grad = randn_like(i_o).double()
+                                i_o.backward(grad)
                                 o.backward(grad)
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
                                                 (self_variable,) + args_variable):
@@ -6399,6 +6457,38 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
+    def test_strided_leaf_grad_layout(self, device):
+        # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
+        for fmt_a in (torch.contiguous_format, torch.channels_last):
+            for fmt_b in (torch.contiguous_format, torch.channels_last):
+                a = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_a)
+                b = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_b)
+                a.requires_grad_()
+                b.requires_grad_()
+                # checks (1) for broadcasted gradients
+                a.sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                b.sum().backward()
+                self.assertEqual(b.grad.stride(), b.stride())
+                # checks (1) for non-broadcasted gradients
+                a.grad = None
+                b.grad = None
+                (a * b).sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                self.assertEqual(b.grad.stride(), b.stride())
+
+        # (2) If leaf isn't dense, checks that grads are rowmajor contiguous.
+        c = torch.empty_strided((2, 2), (4, 2), device=device).copy_(torch.rand((2, 2), device=device))
+        c.requires_grad_()
+        d = torch.rand((2, 2), device=device)
+        # checks (2) for broadcasted gradients
+        c.sum().backward()
+        self.assertEqual(c.grad.stride(), (2, 1))
+        # checks (2) for non-broadcasted gradients
+        c.grad = None
+        (c * d).sum().backward()
+        self.assertEqual(c.grad.stride(), (2, 1))
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
@@ -6421,7 +6511,6 @@ class TestMultithreadAutograd(TestCase):
             self.assertEqual(x.grad, x + 3.5)
 
         self._run_py_multithread_fn(train_fn)
-
 
     def test_simple_backward_same_input(self):
         # simple multithreaded backward with only shared inputs (i.e. This is common
@@ -6448,7 +6537,6 @@ class TestMultithreadAutograd(TestCase):
         # since we use functional grad() api, gradients will not
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
-
 
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
@@ -6488,7 +6576,6 @@ class TestMultithreadAutograd(TestCase):
         self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
         # result should equal to num_thread * gradients
         self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain + 1))
-
 
     def test_fork_join_in_middle(self):
         # multiple backward with jit threads (fork/join primitive)
@@ -6534,7 +6621,6 @@ class TestMultithreadAutograd(TestCase):
         grad, grad1, grad2 = train_fn_fork_join_calls_retain(torch.randn(5, 5, requires_grad=True))
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
-
 
 
 for test in method_tests():

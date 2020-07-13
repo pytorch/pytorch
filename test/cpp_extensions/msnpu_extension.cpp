@@ -20,9 +20,13 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_override(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
-  return get_tensor(options.dtype(), size);
+  caffe2::TypeMeta typeMeta;
+  if (dtype.has_value()) {
+    typeMeta = scalarTypeToTypeMeta(*dtype);
+  }
+  return get_tensor(typeMeta, size);
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {

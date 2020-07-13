@@ -55,7 +55,7 @@ inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
 
 namespace at { namespace native {
 
-ideep::tensor _mkldnn_convolution(
+ideep::tensor _mkldnn_conv2d(
     const ideep::tensor& x,
     const ideep::tensor& w,
     const c10::optional<ideep::tensor>& b,
@@ -113,7 +113,7 @@ at::Tensor mkldnn_convolution(
     mkldnn_bias = get_mkldnn_tensor(bias);
   }
 
-  ideep::tensor mkldnn_output = _mkldnn_convolution(
+  ideep::tensor mkldnn_output = _mkldnn_conv2d(
       mkldnn_input,
       mkldnn_weight,
       mkldnn_bias,

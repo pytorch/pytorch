@@ -47,7 +47,7 @@ struct ConvParams {
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
-  bool use_mkldnn(const at::Tensor& input) const;
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool use_vulkan(const at::Tensor& input, const at::Tensor& weight) const;
@@ -227,7 +227,7 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
-auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
+auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
@@ -235,9 +235,10 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
-     !is_dilated() && // doesn't support dilation
-     !transposed // or transposed tensors
-    );
+     !transposed && // or transposed tensors
+     input.ndimension() == 4 &&  // must be in NCHW format
+     (groups > 1 || weight.size(2) > 3 || input.size(0) > 1
+      || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
 #endif
   return false;
 }
@@ -262,9 +263,7 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -741,7 +740,7 @@ at::Tensor _convolution(
           input.contiguous(), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
-  } else if (params.use_mkldnn(input)) {
+  } else if (params.use_mkldnn(input, weight)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),

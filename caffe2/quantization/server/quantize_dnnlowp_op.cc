@@ -6,6 +6,7 @@
 #endif
 
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "caffe2_dnnlowp_utils.h"
 #include "dnnlowp_partition.h"
 
@@ -29,25 +30,20 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
     arguments_parsed_ = true;
   }
 
-  CAFFE_ENFORCE(InputSize() == 1 || InputSize() == 3);
+  CAFFE_ENFORCE(InputSize() <= 2);
   CAFFE_ENFORCE(Input(0).template IsType<float>());
 
   bool use_input_qparam = false;
   float in_scale = 0;
   int in_zero_point = 0;
-  if (InputSize() == 3) {
+  if (InputSize() == 2) {
     use_input_qparam = true;
 
-    CAFFE_ENFORCE(Input(1).template IsType<float>());
-    CAFFE_ENFORCE(Input(2).template IsType<int>());
-
-    const auto& in_1 = Input(1);
-    CAFFE_ENFORCE_EQ(in_1.numel(), 1);
-    in_scale = *(in_1.template data<float>());
-
-    const auto& in_2 = Input(2);
-    CAFFE_ENFORCE_EQ(in_2.numel(), 1);
-    in_zero_point = *(in_2.template data<int>());
+    const auto* input_qparam_blob =
+        Input<caffe2::unique_ptr<Int8QuantParamsBlob>>(1).get();
+    CAFFE_ENFORCE(input_qparam_blob);
+    in_scale = input_qparam_blob->qparam.scale;
+    in_zero_point = input_qparam_blob->qparam.zero_point;
   }
 
   TensorQuantizationParams in_qparams;
@@ -88,7 +84,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
 }
 
 OPERATOR_SCHEMA(Quantize)
-    .NumInputs(1, 3)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0);
 

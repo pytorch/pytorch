@@ -630,6 +630,47 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
 
+Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  enum {
+    ARG_INDICES = 0,
+    ARG_VALUES,
+    ARG_SIZE,
+    ARG_TYPE,
+    ARG_DEVICE,
+    ARG_REQUIRES_GRAD,
+    ARGS_COUNT
+  };
+  static PythonArgParser parser({
+    "_sparse_coo_tensor_unsafe(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+  });
+
+  ParsedArgs<ARGS_COUNT> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  bool type_inference = r.isNone(ARG_TYPE);
+  const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+  const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+  at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+  Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+  Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+  return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+}
+
+void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "_validate_sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size)",
+  });
+
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Tensor values = internal_new_from_data(
+      dispatch_key, scalar_type, c10::nullopt,
+      r.pyobject(1), false, true, true);
+  Tensor indices = internal_new_from_data(
+      legacyExtractDispatchKey(values.key_set()), kLong, c10::nullopt,
+      r.pyobject(0), false, true, false);
+  at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
+}
+
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",

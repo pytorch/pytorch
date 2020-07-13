@@ -11,17 +11,14 @@ import torch
 from torch.distributed import rpc
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_gloo,
-)
-from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    requires_nccl,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.dist_utils import dist_init
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.nn as nn
-import unittest
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -188,7 +185,7 @@ class Trainer:
         rank: int,
     ):
         self.rank = rank
-        self.trainer_group = dist.new_group(TRAINER_RANKS)
+        self.trainer_group = dist.new_group(TRAINER_RANKS) if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE) else None
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
@@ -218,7 +215,8 @@ class Trainer:
         )
 
     def destroy_pg(self):
-        dist.destroy_process_group(self.trainer_group)
+        if self.trainer_group:
+            dist.destroy_process_group(self.trainer_group)
 
     def train_batch(self, mini_batch: FeatureSet):
         grads_dict = None
@@ -284,11 +282,7 @@ def set_shutdown_signal():
     with shutdown_signal:
         shutdown_signal.notify()
 
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "Skip ASAN as torch + multiprocessing spawn have known issues",
-)
-class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
+class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -301,14 +295,6 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
     def trainer_name(self, rank):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
-
-    def setUp(self):
-        super(TestDdpUnderDistAutograd, self).setUp()
-
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDdpUnderDistAutograd, self).tearDown()
 
     def _remote_worker_process(self):
         gLogger.info("The remote worker is running.")
@@ -445,11 +431,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
         self._do_test(DdpMode.INSIDE)
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "Skip ASAN as torch + multiprocessing spawn have known issues",
-)
-class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
+class DdpComparisonTest(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -458,14 +440,6 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
     def trainer_name(self, rank):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
-
-    def setUp(self):
-        super(TestDdpComparison, self).setUp()
-
-        self._spawn_processes()
-
-    def tearDown(self):
-        super(TestDdpComparison, self).tearDown()
 
     @requires_gloo()
     @dist_init
@@ -586,7 +560,80 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
                 layer1.weight.grad,
                 rpc.rpc_sync(
                     "worker0",
-                    TestDdpComparison.get_remote_grads,
+                    DdpComparisonTest.get_remote_grads,
                     args=(remote_layer1.module_rref, context_id)
                 )
             )
+
+    @skip_if_lt_x_gpu(NUM_TRAINERS)
+    @requires_nccl()
+    @dist_init
+    def test_ddp_dist_autograd_local_vs_remote_gpu(self):
+        # Each trainer uses a different random seed. Otherwise, they are going
+        # to have exactly the same initial model parameters, input, and
+        # therefore grads. That means the grads will be the same before and
+        # after DDP's all-reduce.
+        torch.manual_seed(self.rank)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
+
+        remote_layer1 = RemoteModule("worker0", nn.Linear, args=(10, 7, False))
+        layer1 = nn.Linear(10, 7, False)
+        # Start with the same parameters for remote and local
+        layer1.weight = remote_layer1.module_rref.to_here().weight
+
+        layer2 = nn.Linear(7, 5).cuda(self.rank)
+        ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
+
+        remote_layer3 = RemoteModule("worker0", nn.Linear, args=(5, 3, False))
+        layer3 = nn.Linear(5, 3, False)
+        # Start with the same parameters for remote and local
+        layer3.weight = remote_layer3.module_rref.to_here().weight
+
+        layer4 = nn.Linear(3, 1).cuda(self.rank)
+        ddp_layer4 = DistributedDataParallel(layer4, device_ids=[self.rank])
+
+        # Run local case.
+        inputs = torch.rand((10, 10))
+        loss = ddp_layer4(
+            layer3(
+                ddp_layer2(
+                    layer1(inputs).cuda(self.rank)
+                ).cpu()
+            ).cuda(self.rank)
+        ).sum()
+        loss.backward()
+
+        # Run remote case.
+        with dist_autograd.context() as context_id:
+            loss = ddp_layer4(
+                remote_layer3(
+                    ddp_layer2(
+                        remote_layer1(inputs).cuda(self.rank)
+                    ).cpu()
+                ).cuda(self.rank)
+            ).sum()
+            dist_autograd.backward(context_id, [loss])
+            grads_dict = dist_autograd.get_gradients(context_id)
+            dist.barrier()
+            self.assertEqual(
+                layer1.weight.grad,
+                rpc.rpc_sync(
+                    "worker0",
+                    DdpComparisonTest.get_remote_grads,
+                    args=(remote_layer1.module_rref, context_id)
+                )
+            )
+            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
+            self.assertEqual(
+                layer3.weight.grad,
+                rpc.rpc_sync(
+                    "worker0",
+                    DdpComparisonTest.get_remote_grads,
+                    args=(remote_layer3.module_rref, context_id)
+                )
+            )
+            self.assertEqual(layer4.weight.grad, grads_dict[layer4.weight])
