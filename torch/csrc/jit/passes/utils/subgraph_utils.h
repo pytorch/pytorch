@@ -23,7 +23,7 @@ TORCH_API Node* createSingletonSubgraph(Node* n, Symbol subgraphKind);
 // Merge a node into a subgraph node. If `toMerge` is also a subgraph, the
 // subgraphs are merged.
 // `toMerge` is destroyed.
-TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
+TORCH_API Node* mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
 
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.
