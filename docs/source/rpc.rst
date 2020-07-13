@@ -203,12 +203,8 @@ The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
 developed. At the moment, it only supports CPU tensors, with GPU support coming
 soon. It comes with a TCP-based transport, just like Gloo. It is also able to
 automatically chunk and multiplex large tensors over multiple sockets and
-threads in order to achieve very high bandwidths. In addition to that, it packs
-two Linux-specific transports for communication between processes on a same
-machine (one based on ringbuffers stored in shared memory, the other on the
-cross-memory attach syscalls) which can achieve lower latencies than TCP.
-The agent will be able to pick the best transport on its own, with no
-intervention required.
+threads in order to achieve very high bandwidths. The agent will be able to pick
+the best transport on its own, with no intervention required.
 
 Example::
 
