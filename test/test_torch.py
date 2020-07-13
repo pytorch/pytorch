@@ -62,9 +62,11 @@ class AbstractTestCases:
     # run its methods as test cases.
     class _TestTorchMixin(TestCase):
         def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
-                          use_complex=False) -> Dict[str, List[torch.Tensor]]:
+                          use_complex=False, use_half=False) -> Dict[str, List[torch.Tensor]]:
             float_types = [torch.double,
                            torch.float]
+            if use_half:
+                float_types += [torch.half]
             int_types = [torch.int64,
                          torch.int32,
                          torch.int16]
@@ -551,7 +553,7 @@ class AbstractTestCases:
                 self.assertEqual(n, t, equal_nan=True)
 
         def _test_dim_ops(self, pytorch_op, numpy_op,
-                          use_floating=True, use_integral=True, use_complex=False):
+                          use_floating=True, use_integral=True, use_complex=False, use_half=False):
             def do_one(tensors_dict, dim):
                 for category, tensors in tensors_dict.items():
                     if category == "slice":
@@ -567,29 +569,29 @@ class AbstractTestCases:
                             self._assert_matches_numpy(pytorch_op(tensor.cuda(),
                                                                   dim).cpu(),
                                                        expected)
-            do_one(self._make_tensors((5, 400000), use_floating=use_floating,
+            do_one(self._make_tensors((5, 100000), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 1)
-            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 0)
-            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 1)
-            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            do_one(self._make_tensors((3, 5, 7), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 2)
-            do_one(self._make_tensors((100000, ), use_floating=use_floating,
+            do_one(self._make_tensors((100000, ), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), -1)
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 0)
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 1)
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), 2)
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), (1, 2))
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), (1, -1))
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), (0, 2))
-            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            do_one(self._make_tensors((50, 50, 50), use_floating=use_floating, use_half=use_half,
                                       use_integral=use_integral, use_complex=use_complex), (0, 2, 1))
 
         @slowTest
@@ -598,14 +600,14 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.sum(d),
                 lambda n, d: n.sum(d),
-                use_floating=True, use_integral=True, use_complex=True)
+                use_integral=True, use_complex=True, use_half=True)
 
         @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
         def test_mean_dim(self):
             self._test_dim_ops(
                 lambda t, d: t.mean(d),
                 lambda n, d: n.mean(d),
-                use_integral=False)
+                use_integral=False, use_half=False) # support for half has been compiled by tests are failed
 
         @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
         def test_std_dim(self):
@@ -630,7 +632,7 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.logsumexp(d),
                 lambda n, d: logsumexp(n, d),
-                use_integral=False)
+                use_integral=False, use_half=True)
 
         def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
             shape = (3, 4, 5)
@@ -9365,8 +9367,8 @@ class TestTorchDeviceType(TestCase):
                  torch.int64,
                  torch.int32,
                  torch.int16]
-        if self.device_type == 'cuda':  # 'cpu' and 'xla' do not support half
-            types.append(torch.half)
+        if self.device_type == 'cuda' or self.device_type == 'cpu':  # 'xla' do not support half
+            types.insert(2, torch.half)
 
         sum_dtype = {
             torch.double: torch.double,
@@ -9389,13 +9391,20 @@ class TestTorchDeviceType(TestCase):
             torch.sum(x, 0, out=y)
             self.assertEqual(x.sum(0), y)
 
+        tolerance = {
+            torch.double: (1e-9, 0),
+            torch.float: (1e-6, 0),
+            torch.half: (1e-3, 0)
+        }
+
         # Mean not supported for Int types
-        for dtype in types[:2]:
+        for dtype in types[:-3]:
             x = torch.tensor(example, device=device, dtype=dtype)
-            self.assertEqual(x.mean().item(), 16.0 / 6)
-            self.assertEqual(x.mean(0), torch.tensor([2.0, 2.5, 7.0 / 2], dtype=dtype))
-            self.assertEqual(x.mean(1), torch.tensor([2.0 / 3, 14.0 / 3], dtype=dtype))
-            self.assertEqual(x.mean(), x.mean((0, 1)))
+            atol, rtol = tolerance[dtype]
+            self.assertEqual(x.mean().item(), 16.0 / 6, atol=atol, rtol=rtol)
+            self.assertEqual(x.mean(0), torch.tensor([2.0, 2.5, 7.0 / 2], dtype=dtype), atol=atol, rtol=rtol)
+            self.assertEqual(x.mean(1), torch.tensor([2.0 / 3, 14.0 / 3], dtype=dtype), atol=atol, rtol=rtol)
+            self.assertEqual(x.mean(), x.mean((0, 1)), atol=atol, rtol=rtol)
 
         prod_dtype = {
             torch.double: torch.double,
@@ -12878,8 +12887,8 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
-        # Since complex and half on CPU is not supported, need to skip the remaining test cases
-        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+        # Since complex on CPU is not supported, need to skip the remaining test cases
+        if dtype.is_complex and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
@@ -19151,10 +19160,10 @@ tensor_op_tests = [
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('chunk', 'dim', _medium_2d, lambda t, d: [4, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('chunk', 'neg_dim', _medium_2d, lambda t, d: [4, -2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('clamp', 'neg', _medium_2d, lambda t, d: [-1, 5], 1e-5, 1e-2, 1e-5, _signed_types, [torch.bfloat16]),
-    ('clamp', 'pos', _medium_2d, lambda t, d: [1, 5], 1e-5, 1e-2, 1e-5, _unsigned_types, [torch.bfloat16]),
-    ('clamp_min', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16]),
-    ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16]),
+    ('clamp', 'neg', _medium_2d, lambda t, d: [-1, 5], 1e-5, 1e-2, 1e-5, _signed_types, [torch.bfloat16, torch.half]),
+    ('clamp', 'pos', _medium_2d, lambda t, d: [1, 5], 1e-5, 1e-2, 1e-5, _unsigned_types, [torch.bfloat16, torch.half]),
+    ('clamp_min', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16, torch.half]),
+    ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16, torch.half]),
     ('clone', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
