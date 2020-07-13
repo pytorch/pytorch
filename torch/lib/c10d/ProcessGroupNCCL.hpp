@@ -283,6 +283,10 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   void ncclCommWatchdogInternal();
 
+  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
+  // accordingly.
+  void parseNcclBlockingWait();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 
