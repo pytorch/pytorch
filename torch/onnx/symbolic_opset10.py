@@ -201,7 +201,7 @@ def embedding_bag(g,
             embeddings = g.op("Gather", embedding_matrix, indices)
             dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
             dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))),
-                       size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0]))))
+                        size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0]))))
             dim_2 = size(g, embedding_matrix, g.op("Constant", value_t=torch.LongTensor([1])))
 
             shape = [dim_0, dim_1, dim_2]
@@ -224,7 +224,7 @@ def embedding_bag(g,
             list_ = []
             for i in range(offsets.type().sizes()[0]):
                 start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
-                end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i+1)), axes_i=[0])
+                end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
                 axes_ = g.op("Constant", value_t=torch.tensor([0]))
                 indices_row = g.op("Slice", indices, start_, end_, axes_)
 
