@@ -307,7 +307,8 @@ class TestCuda(TestCase):
         # Assert this call doesn't raise.
         torch.cuda.check_error(0)
 
-        with self.assertRaisesRegex(torch.cuda.CudaError, "out of memory"):
+        with self.assertRaisesRegex(torch.cuda.CudaError,
+                                    "out of memory|hipErrorOutOfMemory"):
             torch.cuda.check_error(2)
 
     def test_cuda_get_device_name(self):
