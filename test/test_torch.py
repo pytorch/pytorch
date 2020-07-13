@@ -13560,6 +13560,8 @@ class TestTorchDeviceType(TestCase):
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
             ("sigmoid", doubles, True, True, 'cuda'),
+            ("logit", doubles, True, True, 'cpu'),
+            ("logit", doubles, True, True, 'cuda'),
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
@@ -15013,6 +15015,10 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.rsqrt_(),
                 lambda x, y: x.sigmoid(),
                 lambda x, y: x.sigmoid_(),
+                lambda x, y: x.logit(),
+                lambda x, y: x.logit_(),
+                lambda x, y: x.logit(1e-6),
+                lambda x, y: x.logit_(1e-6),
                 lambda x, y: x.sign(),
                 lambda x, y: x.sign_(),
                 lambda x, y: x.sin(),
@@ -19376,6 +19382,7 @@ tensor_op_tests = [
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
@@ -19518,6 +19525,7 @@ def _generate_gamma_input(dtype, device, test_poles=True):
     input.append((zeros - 0.49).tolist())
     input.append((zeros + 0.49).tolist())
     input.append((zeros + (torch.rand(10) * 0.99) - 0.5).tolist())
+
     if test_poles:
         input.append([-0.999999994, -1.999999994, -2.0000000111,
                       -100.99999994, -1931.99999994, 0.000000111,
@@ -19603,7 +19611,8 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('digamma',
                                      input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
                                      replace_inf_with_nan=True),
-                  _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.)]
+                  _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.),
+                  _TorchMathTestMeta('logit', ref_backend='scipy')]
 
 
 def generate_torch_test_functions(cls, testmeta, inplace):
