@@ -1,5 +1,4 @@
 import io
-import warnings
 
 import torch
 from ._utils import _type, _cuda
@@ -31,9 +30,8 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
-        warnings.warn("pickle support for Storage will be removed in 1.5. Use `torch.save` instead", FutureWarning)
         b = io.BytesIO()
-        torch.save(self, b)
+        torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):

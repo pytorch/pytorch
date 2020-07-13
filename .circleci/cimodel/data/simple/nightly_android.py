@@ -14,7 +14,7 @@ class AndroidNightlyJob:
         self.template_name = template_name
         self.extra_props = extra_props or {}
         self.with_docker = with_docker
-        self.requires = requires or ["setup"]
+        self.requires = requires
         self.no_build_suffix = no_build_suffix
 
     def gen_tree(self):

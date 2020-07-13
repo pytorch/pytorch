@@ -458,8 +458,7 @@ TEST(BoundShapeInference, ElementwiseOp) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Mul", "", {"I0", "I1"}, {"Out"}, {MakeArgument<int>("broadcast", 1)}));
-  net.add_op()->CopyFrom(CreateOperatorDef(
-      "Mul", "", {"I3", "I4"}, {"Out3"}));
+  net.add_op()->CopyFrom(CreateOperatorDef("Mul", "", {"I3", "I4"}, {"Out3"}));
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Add",
       "",
@@ -727,6 +726,44 @@ TEST(BoundShapeInference, Quantization) {
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
       {16, 72},
       TensorProto_DataType_UINT8);
+}
+
+TEST(BoundShapeInference, Tile) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Tile",
+      "",
+      {"blob"},
+      {"blob_tile"},
+      {MakeArgument<int>("tiles", 32),
+       MakeArgument<int>("axis", 0),
+       MakeArgument<int>("dynamic", 1)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "blob",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "blob_tile",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {32, 16});
+
+  BoundShapeSpec spec2(8, 1000);
+  BoundShapeInferencer eng2(spec2);
+  eng2.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape2 = eng2.shape_info();
+  verifyShapeInfo(
+      out_shape2,
+      "blob_tile",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {8, 16});
 }
 
 TEST(BoundShapeInference, Combo0) {

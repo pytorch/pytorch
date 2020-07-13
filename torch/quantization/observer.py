@@ -193,12 +193,14 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        # if len(scale.shape) == 0:
-        #     scale = torch.tensor(scale)
-        #     scale = torch.tensor([scale])
-        # if len(zero_point.shape) == 0:
-        #     zero_point = torch.tensor(zero_point)
-        #     zero_point = torch.tensor([zero_point])
+        # For scalar values, cast them to Tensors of size 1 to keep the shape
+        # consistent with default values in FakeQuantize.
+        if len(scale.shape) == 0:
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+        if len(zero_point.shape) == 0:
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
 
         return scale, zero_point
 
@@ -402,7 +404,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
 
-    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+    .. note:: Only works with ``torch.per_tensor_affine`` quantization scheme.
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
@@ -452,8 +454,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
         r"""Calculates the quantization parameters."""
 
         if self.max_val.numel() == 0 or self.min_val.numel() == 0:
-            warnings.warn("Must run observer before calling calculate_qparams.\
-                           Returning default scale and zero point.")
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert self.min_val <= self.max_val, "min {} should be less than max {}".format(
@@ -910,7 +910,13 @@ class HistogramObserver(_ObserverBase):
     def _forward(self, x_orig, min_val, max_val, histogram, initialized):
         # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tuple[Tensor, Tensor, Tensor]
         x = x_orig.detach()
-        if not initialized:
+        min_val = self.min_val
+        max_val = self.max_val
+        same_values = False
+        if min_val.numel() > 0 and max_val.numel() > 0:
+            same_values = min_val.item() == max_val.item()
+
+        if not initialized or same_values:
             min_val = torch.min(x)
             max_val = torch.max(x)
             histogram = torch.histc(x, self.bins, min=min_val, max=max_val)

@@ -370,7 +370,7 @@ def init_process_group(backend,
             is set to 1.
         group_name (str, optional, deprecated): Group name.
 
-    To enable ``backend == Backend.MPI``, PyTorch needs to built from source
+    To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
     on a system that supports MPI.
 
     """

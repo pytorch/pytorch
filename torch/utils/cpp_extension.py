@@ -4,6 +4,7 @@ import glob
 import imp
 import os
 import re
+import shlex
 import setuptools
 import subprocess
 import sys
@@ -161,6 +162,11 @@ COMMON_HIPCC_FLAGS = [
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
+PLAT_TO_VCVARS = {
+    'win32' : 'x86',
+    'win-amd64' : 'x86_amd64',
+}
+
 
 def _is_binary_build():
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
@@ -306,27 +312,33 @@ class BuildExtension(build_ext, object):
     @classmethod
     def with_options(cls, **options):
         r'''
-        Returns an alternative constructor that extends any original keyword
+        Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        def init_with_options(*args, **kwargs):
-            kwargs = kwargs.copy()
-            kwargs.update(options)
-            return cls(*args, **kwargs)
-        return init_with_options
+        class cls_with_options(cls):
+            def __init__(self, *args, **kwargs):
+                kwargs.update(options)
+                super().__init__(*args, **kwargs)
+
+        return cls_with_options
 
     def __init__(self, *args, **kwargs):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = kwargs.get('use_ninja', False if IS_HIP_EXTENSION else True)
+        self.use_ninja = kwargs.get('use_ninja', True)
         if self.use_ninja:
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if not _is_ninja_available():
+            if not is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
+
+    def finalize_options(self):
+        super().finalize_options()
+        if self.use_ninja:
+            self.force = True
 
     def build_extensions(self):
         self._check_abi()
@@ -433,6 +445,8 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
+            if IS_HIP_EXTENSION:
+                post_cflags += COMMON_HIPCC_FLAGS
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -449,12 +463,14 @@ class BuildExtension(build_ext, object):
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
+                cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
+                cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
-                cflags=extra_cc_cflags + common_cflags,
-                post_cflags=post_cflags,
+                cflags=[shlex.quote(f) for f in extra_cc_cflags + common_cflags],
+                post_cflags=[shlex.quote(f) for f in post_cflags],
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 build_directory=output_dir,
@@ -657,6 +673,12 @@ class BuildExtension(build_ext, object):
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
+        # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
+        if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
+            msg = ('It seems that the VC environment is activated but DISTUTILS_USE_SDK is not set.'
+                   'This may lead to multiple activations of the VC env.'
+                   'Please set `DISTUTILS_USE_SDK=1` and try again.')
+            raise UserWarning(msg)
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
@@ -1257,7 +1279,11 @@ def _write_ninja_file_and_build_library(
         error_prefix="Error building extension '{}'".format(name))
 
 
-def _is_ninja_available():
+def is_ninja_available():
+    r'''
+    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
+    available on the system, ``False`` otherwise.
+    '''
     with open(os.devnull, 'wb') as devnull:
         try:
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
@@ -1269,10 +1295,10 @@ def _is_ninja_available():
 
 def verify_ninja_availability():
     r'''
-    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
-    available on the system.
+    Raises ``RuntimeError`` if `ninja <https://ninja-build.org/>`_ build system is not
+    available on the system, does nothing otherwise.
     '''
-    if not _is_ninja_available():
+    if not is_ninja_available():
         raise RuntimeError("Ninja is required to load C++ extensions")
 
 
@@ -1356,10 +1382,11 @@ def _get_cuda_arch_flags(cflags=None):
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
+        ('Ampere', '8.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5']
+                        '7.0', '7.2', '7.5', '8.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1446,6 +1473,22 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
+    env = os.environ.copy()
+    # Try to activate the vc env for the users
+    if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
+        from distutils.util import get_platform
+        from distutils._msvccompiler import _get_vc_env
+
+        plat_name = get_platform()
+        plat_spec = PLAT_TO_VCVARS[plat_name]
+
+        vc_env = _get_vc_env(plat_spec)
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        for k, v in env.items():
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
+        env = vc_env
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1468,12 +1511,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
-                check=True)
+                check=True,
+                env=env)
         else:
             subprocess.check_output(
                 command,
                 stderr=subprocess.STDOUT,
-                cwd=build_directory)
+                cwd=build_directory,
+                env=env)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
@@ -1692,6 +1737,7 @@ def _write_ninja_file(path,
             source_file = source_file.replace(':', '$:')
             object_file = object_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
+        object_file = object_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(object_file, rule, source_file))
 
     if library_target is not None:

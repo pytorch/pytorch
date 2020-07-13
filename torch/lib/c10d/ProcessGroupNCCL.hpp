@@ -97,7 +97,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
 
-    // Clonge of opTimeout_ from ProcessGroupNCCL.
+    // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
 
     // Time point representing when the work started.
@@ -282,6 +282,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   void ncclCommWatchdog();
 
   void ncclCommWatchdogInternal();
+
+  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
+  // accordingly.
+  void parseNcclBlockingWait();
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

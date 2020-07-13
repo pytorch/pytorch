@@ -55,6 +55,8 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
+    elif t == 'int[]?':
+        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -76,6 +78,10 @@ def type_argument_translations(arg):
         t = 'double'
     elif t == 'float?':
         t = 'double?'
+    elif t == 'float[]':
+        t = 'ArrayRef<double>'
+    elif t == 'float[]?':
+        t = 'ArrayRef<double>?'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
@@ -147,7 +153,7 @@ def type_argument_translations(arg):
     return t, name, default, nullable, size, annotation
 
 
-def parse_arguments(args, func_variants, declaration, func_return):
+def parse_arguments(args):
     arguments = []
     kwarg_only = False
 
@@ -174,6 +180,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
             argument_dict['kwarg_only'] = True
         arguments.append(argument_dict)
 
+    return arguments
+
+def process_arguments(arguments, func_variants, declaration, func_return):
     is_out_fn = False
     arguments_out = []
     arguments_other = []
@@ -362,6 +371,23 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     return arguments
 
 
+def parse_dispatch(name, dispatch):
+    """
+    Parse a dictionary like {"CPU, CUDA": "blah"}
+    into {"CPU": "blah", "CUDA": "blah"}
+    """
+    if not isinstance(dispatch, dict):
+        return dispatch
+    r = {}
+    for old_k, v in dispatch.items():
+        ks = old_k.split(',')
+        for k in ks:
+            k = k.strip()
+            assert k not in r, "{}, {}".format(name, k)
+            r[k] = v
+    return r
+
+
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
@@ -400,12 +426,12 @@ def run(paths):
                 declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
-                arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)
+                schema_order_arguments = parse_arguments(arguments)
+                arguments = process_arguments(schema_order_arguments, func.get('variants', []), declaration, return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
-                declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
@@ -414,13 +440,14 @@ def run(paths):
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
-                declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'with_codegenerated_unboxing_wrapper')
                 assert declaration['use_c10_dispatcher'] in ['with_codegenerated_unboxing_wrapper', 'full']
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
-                declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+                declaration['schema_order_arguments'] = func.get('schema_order_arguments', schema_order_arguments)
+                declaration['type_method_definition_dispatch'] = \
+                    parse_dispatch(fn_name, func.get('dispatch', declaration['name']))
                 declaration['python_module'] = func.get('python_module', '')
                 declarations.append(declaration)
             except Exception as e:

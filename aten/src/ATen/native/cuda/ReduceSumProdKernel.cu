@@ -36,7 +36,7 @@ static void sum_kernel_cuda(TensorIterator& iter) {
     return sum_kernel_impl<at::BFloat16, float, float>(iter);
   }
   #endif
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
     sum_kernel_impl<scalar_t>(iter);
   });
 }

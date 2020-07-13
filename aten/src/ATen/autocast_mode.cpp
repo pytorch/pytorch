@@ -402,7 +402,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL_UNBOXED_ONLY(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
+  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), fp16)
   // fp32
   KERNEL(ADD_NS(acos), "acos", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(asin), "asin", Tensor (const Tensor &), fp32)
@@ -482,15 +482,16 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
   KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
   KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
   KERNEL_UNBOXED_ONLY(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
+  KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
+  KERNEL(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
+  KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
   KERNEL_UNBOXED_ONLY(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
   KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(index_put), "index_put", Tensor (const Tensor &, TensorList, const Tensor &, bool), promote)
+  KERNEL(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
 
   m.impl_UNBOXED("binary_cross_entropy", &at::autocast::binary_cross_entropy_banned);
 }

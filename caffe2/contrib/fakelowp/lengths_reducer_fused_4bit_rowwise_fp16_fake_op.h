@@ -101,7 +101,8 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         int64_t idx = indices_data[current];
 
         int accIdx = 0;
-        if (output_block_size % 2 == 0 && output_block_size <= 96) {
+        if (output_block_size % 2 == 0 && output_block_size <= 96 &&
+            data.size(1) % 2 == 0) {
           accIdx = i % 2;
         }
 
