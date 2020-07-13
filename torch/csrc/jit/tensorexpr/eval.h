@@ -406,16 +406,49 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       throw malformed_input("bad dtype in CompareSelect", v);
     }
 
-    switch (lhs_v.dtype().scalar_type()) {
+    switch (ret_val1_v.dtype().scalar_type()) {
+      case ScalarType::Float: {
+        switch (lhs_v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                          \
+  case ScalarType::Name:                               \
+    value_ = compare_select_op<Type, float>(           \
+        lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
+    break;
+          AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+          default:
+            throw unsupported_dtype();
+        }
+        break;
+      }
+      case ScalarType::Bool: {
+        switch (lhs_v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                          \
+  case ScalarType::Name:                               \
+    value_ = compare_select_op<Type, bool>(            \
+        lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
+    break;
+          AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+          default:
+            throw unsupported_dtype();
+        }
+        break;
+      }
+      default: {
+        switch (lhs_v.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                          \
   case ScalarType::Name:                               \
     value_ = compare_select_op<Type, int>(             \
         lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
     break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+          AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
-      default:
-        throw unsupported_dtype();
+          default:
+            throw unsupported_dtype();
+        }
+        break;
+      }
     }
   }
 
@@ -552,7 +585,13 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void visit(const IfThenElse* v) override {
     v->condition()->accept(this);
-    if (value_.as<int>()) {
+    bool cond;
+    if (value_.dtype().scalar_type() == ScalarType::Bool) {
+      cond = value_.as<bool>();
+    } else if (value_.dtype().scalar_type() == ScalarType::Int) {
+      cond = value_.as<int>();
+    }
+    if (cond) {
       v->true_value()->accept(this);
     } else {
       v->false_value()->accept(this);

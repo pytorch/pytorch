@@ -250,8 +250,10 @@ void CudaPrinter::visit(const Intrinsics* v) {
     returnType = promoteTypes(returnType, v->param(i)->dtype().scalar_type());
   }
 
-  if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
-    func_name = func_name + "f";
+  if (func_name != "sigmoid") {
+    if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
+      func_name = func_name + "f";
+    }
   }
 
   os() << func_name << "(";
