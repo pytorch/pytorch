@@ -37,6 +37,12 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           out << ":" << *value->strides()[i];
         }
       }
+      if (value->requiresGrad()) {
+        out << ", requires_grad=" << *value->requiresGrad();
+      }
+      if (value->device()) {
+        out << ", device=" << *value->device();
+      }
       out << ")";
     }
 
