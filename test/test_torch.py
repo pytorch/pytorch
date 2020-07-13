@@ -607,7 +607,7 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.mean(d),
                 lambda n, d: n.mean(d),
-                use_integral=False, use_half=False) # support for half has been compiled by tests are failed
+                use_integral=False, use_half=False)  # support for half has been compiled by tests are failed
 
         @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
         def test_std_dim(self):
@@ -632,7 +632,7 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.logsumexp(d),
                 lambda n, d: logsumexp(n, d),
-                use_integral=False, use_half=True)
+                use_integral=False)
 
         def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
             shape = (3, 4, 5)
@@ -9392,8 +9392,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.sum(0), y)
 
         tolerance = {
-            torch.double: (1e-9, 0),
-            torch.float: (1e-6, 0),
+            torch.double: (1e-7, 0),
+            torch.float: (1e-5, 0),
             torch.half: (1e-3, 0)
         }
 
