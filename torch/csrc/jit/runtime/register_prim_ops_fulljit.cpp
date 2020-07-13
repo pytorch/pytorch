@@ -50,6 +50,13 @@ RegisterOperators reg(
          [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::TypeCheck(Tensor(a) x, bool y) -> (Tensor(a), bool)",
+         [](Stack& /* stack */) {
+           AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BailOut(...) -> Tensor(a)",
          [](Stack* /* stack */) {
            AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
