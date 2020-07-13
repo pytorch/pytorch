@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "unary_fp16_fake_op.h"
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/utils/eigen_utils.h"
@@ -528,6 +529,24 @@ at::Half CalcSwishByLUT(at::Half x) {
   return at::Half(res1 + res2);
 }
 
+at::Half CalcLogit(at::Half input) {
+  float eps = at::Half(1e-6); //default eps value
+  float x = clamp(at::Half(input), at::Half(eps), at::Half(1 - eps));
+  if (x < 0.0f || x > 1.0f) {
+    return at::Half(NAN);
+  } else {
+    if (x < eps) {
+      float lower_bound = log(eps / (1.0 - eps));
+      return at::Half(lower_bound);
+    } else if (input >= (1.0f - eps)) {
+      float upper_bound = log((1.0 - eps) / eps);
+      return at::Half(upper_bound);
+    } else {
+      return at::Half(log((x / (1 - x))));
+    }
+  }
+}
+
 } // namespace
 
 REGISTER_CPU_OPERATOR(
@@ -817,6 +836,19 @@ struct SwishEmulatorFunctor {
   }
 };
 
+struct LogitEmulatorFunctor {
+  bool operator()(
+      const int N,
+      const float* X,
+      float* Y,
+      CPUContext* /* unused */) const {
+    for (int i = 0; i < N; i++) {
+      Y[i] = CalcLogit((at::Half)X[i]);
+    }
+    return true;
+  }
+};
+
 REGISTER_CPU_OPERATOR(
     SwishFakeFp16NNPI,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SwishEmulatorFunctor>);
@@ -844,11 +876,18 @@ The input and output of this operator are converted to fp16 precision.
     .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(
-    LogitFakeFp16,
-    UnaryElementwiseOp<
-        TensorTypes<float>,
-        CPUContext,
-        LogitFakeIdealFp16Functor>);
-OPERATOR_SCHEMA(LogitFakeFp16).NumInputs(1).NumOutputs(1);
+    LogitFakeFp16NNPI,
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogitEmulatorFunctor>);
+
+OPERATOR_SCHEMA(LogitFakeFp16NNPI)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+      Elementwise logit fake fp16 transform:
+      $$logit(x) = log(\frac{x}{(1 - x)})$$
+      where x is the input data clampped in (eps, 1-eps).)DOC")
+    .Arg("eps (optional)", "small positive epsilon value, the default is 1e-6.")
+    .Input(0, "X", "input float tensor")
+    .Output(0, "Y", "output float tensor");
 
 } // namespace caffe2

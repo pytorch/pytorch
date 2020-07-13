@@ -631,11 +631,12 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple):  A tuple of example inputs that will be passed
-            to the function while tracing. The resulting trace can be run with
-            inputs of different types and shapes assuming the traced operations
-            support those types and shapes. `example_inputs` may also be a
-            single Tensor in which case it is automatically wrapped in a tuple.
+        example_inputs (tuple or torch.Tensor):  A tuple of example inputs that
+            will be passed to the function while tracing. The resulting trace
+            can be run with inputs of different types and shapes assuming the
+            traced operations support those types and shapes. `example_inputs`
+            may also be a single Tensor in which case it is automatically
+            wrapped in a tuple.
 
     Keyword arguments:
         check_trace (``bool``, optional): Check if the same inputs run through
