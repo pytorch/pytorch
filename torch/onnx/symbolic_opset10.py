@@ -200,7 +200,7 @@ def embedding_bag(g,
     # offsets is set to torch.arange(0, indices.numel(), indices.size(1))
     # Then indices is reshaped to 1D: indices.reshape(-1)
     if len(list(indices.node().inputs())) > 0 and indices.node().inputs().__next__().type().sizes() is not None \
-        and len(indices.node().inputs().__next__().type().sizes()) == 2:
+            and len(indices.node().inputs().__next__().type().sizes()) == 2:
         # Assert include_last_offset is False
         assert not include_last_offset
         embeddings = g.op("Gather", embedding_matrix, indices)
