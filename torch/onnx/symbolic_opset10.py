@@ -222,6 +222,8 @@ def embedding_bag(g,
             embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
         else:
             embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
+        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.          
         return embeddings, None, None, None
     elif offsets.type().sizes() is not None:
         if include_last_offset:
@@ -254,6 +256,8 @@ def embedding_bag(g,
             list_.append(embeddings)
 
         output = g.op("Concat", *list_, axis_i=0)
+        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
         return output, None, None, None
     else:
         return sym_help._onnx_unsupported('embedding_bag with unknown shape of indices')
