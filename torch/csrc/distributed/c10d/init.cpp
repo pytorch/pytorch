@@ -212,6 +212,38 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
+  py::class_<::c10d::NCCLAllreduceOptions>(module, "NCCLAllreduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::NCCLAllreduceOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::NCCLAllreduceOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLAllreduceOptions::cudaStreams);
+
+  py::class_<::c10d::NCCLAllgatherOptions>(module, "NCCLAllgatherOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::NCCLAllgatherOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLAllgatherOptions::cudaStreams);
+
+  py::class_<::c10d::NCCLReduceOptions>(module, "NCCLReduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::NCCLReduceOptions::reduceOp)
+      .def_readwrite("rootRank", &::c10d::NCCLReduceOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::NCCLReduceOptions::rootTensor)
+      .def_readwrite("timeout", &::c10d::NCCLReduceOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLReduceOptions::cudaStreams);
+
+  py::class_<::c10d::NCCLBroadcastOptions>(module, "NCCLBroadcastOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::NCCLBroadcastOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::NCCLBroadcastOptions::rootTensor)
+      .def_readwrite("timeout", &::c10d::NCCLBroadcastOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLBroadcastOptions::cudaStreams);
+
+  py::class_<::c10d::NCCLReduceScatterOptions>(module, "NCCLReduceScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::NCCLReduceScatterOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::NCCLReduceScatterOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLReduceScatterOptions::cudaStreams);
+
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
           module, "Store")
