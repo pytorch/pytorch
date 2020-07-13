@@ -6580,3 +6580,9 @@
   python_module: nn
   dispatch:
     CPU: _test_optional_intlist
+
+# Note: this function is only for testing.
+- func: _test_optional_floatlist(Tensor values, float[]? addends) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: _test_optional_floatlist
