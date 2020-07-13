@@ -216,7 +216,7 @@ class cudaStatus(object):
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
-        msg = _cudart.cudaGetErrorString(code).decode('utf-8')
+        msg = _cudart.cudaGetErrorString(torch._C._cudart.cudaError(code))
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
 
 
