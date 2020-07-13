@@ -191,6 +191,8 @@ def embedding_bag(g,
                   sparse,
                   per_sample_weights,
                   include_last_offset):
+    if scale_grad_by_freq:
+        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq')
     from torch.onnx.symbolic_opset9 import size, div, select
 
     # Check if initial indices was 2D. In functional.py:
@@ -218,10 +220,16 @@ def embedding_bag(g,
             embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
         return embeddings, None, None, None
     elif offsets.type().sizes() is not None:
-        offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
-        offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
+        if include_last_offset:
+            offset_len = offsets.type().sizes()[0] - 1
+            offsets_extended = offsets
+            print("offsets_extendedoffsets_extended", offsets_extended)
+        else:
+            offset_len = offsets.type().sizes()[0]
+            offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
+            offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
         list_ = []
-        for i in range(offsets.type().sizes()[0]):
+        for i in range(offset_len):
             start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
             end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
             axes_ = g.op("Constant", value_t=torch.tensor([0]))

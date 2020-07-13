@@ -2916,9 +2916,9 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag(self):
-        model = torch.nn.EmbeddingBag(10, 5, mode='mean', sparse=True)
+        model = torch.nn.EmbeddingBag(10, 5, mode='sum', include_last_offset=True)
         input = torch.randint(10, (7,))
-        offset = torch.tensor([0, 2, 5])
+        offset = torch.tensor([0, 2, 5, 6])
         self.run_test(model, (input, offset))
 
         model = torch.nn.EmbeddingBag(10, 5, mode='max')
