@@ -179,7 +179,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(torch::jit::Value* v) {
       auto shape = sizesForValue(v->node()->input());
       int dim = v->node()->i(attr::dim);
       int chunks = v->node()->i(attr::chunks);
-      shape[dim] = shape[dim] / chunks;
+      shape[dim] = IRSimplifier::simplify(shape[dim] / chunks);
       return shape;
     }
 
@@ -1596,8 +1596,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
       if (it != varToSize.end()) {
         tensorSize.push_back(it->second);
       } else {
-        const IntImm* s =
-            dynamic_cast<const IntImm*>(IRSimplifier::simplify(dim));
+        const IntImm* s = dynamic_cast<const IntImm*>(dim);
         if (!s) {
           throw malformed_input("output expected Int", dim);
         }
