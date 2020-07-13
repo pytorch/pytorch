@@ -55,13 +55,11 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   for (size_t row = 0; row < input_rows; ++row) {
     float* output_row = output_data + row * output_columns;
     const std::uint8_t* input_row = input_data + row * input_columns;
-    float scale = *reinterpret_cast<const at::Half*>(
+    const at::Half* input_row_scale_zp = reinterpret_cast<const at::Half*>(
         input_row +
         (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-    float zero_point = *reinterpret_cast<const at::Half*>(
-        input_row +
-        (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
-        sizeof(at::Half));
+    float scale = input_row_scale_zp[0];
+    float zero_point = input_row_scale_zp[1];
 
     for (int col = 0; col < output_columns; ++col) {
       std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];

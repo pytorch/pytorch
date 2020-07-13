@@ -87,14 +87,9 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
 
-    at::Half* output_row_scale = reinterpret_cast<at::Half*>(
+    at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
         output_row +
         (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-
-    at::Half* output_row_zp = reinterpret_cast<at::Half*>(
-        output_row +
-        (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
-        sizeof(at::Half));
 
     float Xmin = *std::min_element(input_row, input_row + embedding_cols);
     float Xmax = *std::max_element(input_row, input_row + embedding_cols);
@@ -113,8 +108,8 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
       scale = 1.0f;
       inverse_scale = 1.0f;
     }
-    *output_row_scale = scale;
-    *output_row_zp = Xmin;
+    output_row_scale_zp[0] = scale;
+    output_row_scale_zp[1] = Xmin;
 
     for (int col = 0; col < embedding_cols; ++col) {
       float X = input_row[col];
