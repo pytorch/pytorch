@@ -786,7 +786,7 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 }
 } // anonymous namespace
 
-Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, long dim,
+Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
                               const Tensor& index) {
   static constexpr string_view DIM_WARNING =
     "Tensor too large or too many (> 25) dimensions";
