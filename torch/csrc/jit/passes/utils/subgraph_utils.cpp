@@ -96,10 +96,11 @@ std::unordered_set<Value*> closedOverValues(
   return closed_over_values;
 }
 
-void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
+Node* mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   AT_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
   if (hasSubgraph(toMerge)) {
-    return mergeSubgraph(subgraphNode, toMerge);
+    mergeSubgraph(subgraphNode, toMerge);
+    return nullptr;
   }
 
   auto subgraph = getSubgraph(subgraphNode);
@@ -195,6 +196,7 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   }
   // Remove the original node now that the merge is complete
   toMerge->destroy();
+  return mergedNode;
 }
 
 Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
