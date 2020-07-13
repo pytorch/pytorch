@@ -5661,10 +5661,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(debug_msg, expected_msg)
 
         # Checks float tensor comparisons (with extremal values)
-        a = torch.tensor((float('inf'), 5), device=device, dtype=torch.float32)
-        b = torch.tensor((float('inf'), float('nan')), device=device, dtype=torch.float32)
+        a = torch.tensor((float('inf'), 5, float('inf')), device=device, dtype=torch.float32)
+        b = torch.tensor((float('inf'), float('nan'), float('-inf')), device=device, dtype=torch.float32)
         result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 1 element(s) (out of 2) "
+        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 3) "
                         "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
                         "The greatest difference was nan (5.0 vs. nan), "
                         "which occurred at index 1.").format(atol)
@@ -14183,7 +14183,7 @@ class TestTorchDeviceType(TestCase):
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
         # TODO: update this once torch.addmm is supported for complex
-        if dtype.is_complex:
+        if dtype.is_complex and device != 'cpu':
             return
 
         # torch.addmm
@@ -16437,6 +16437,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 1e-1,
+            torch.half: 1e-1,
+            torch.cfloat: 1e-4,
+            torch.cdouble: 1e-8
         }
         for dtype, prec in dtypes.items():
             M = torch.randn(10, 25).to(device=device, dtype=dtype)
@@ -16915,7 +16918,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @slowTest
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
@@ -19501,7 +19504,7 @@ def _generate_reference_input(dtype, device):
     # Some vectorized implementations don't support large values
     input.append([x + 1e10 for x in range(-5, 5)])
     input.append([x - 1e10 for x in range(-5, 5)])
-    input.append(torch.randn(10).tolist())
+    input.append([*torch.randn(7).tolist(), math.inf, -math.inf, math.nan])
     input.append((torch.randn(10) * 1e6).tolist())
     input.append([math.pi * (x / 2) for x in range(-5, 5)])
     return torch.tensor(input, dtype=dtype, device=device)
@@ -19589,7 +19592,8 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
                   _TorchMathTestMeta('trunc'),
                   _TorchMathTestMeta('round'),
-                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy'),
+                  # FIXME lgamma produces different result compared to scipy at -inf
+                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
                   _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                                      refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy'),
