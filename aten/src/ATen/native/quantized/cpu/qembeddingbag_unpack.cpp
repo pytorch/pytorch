@@ -32,6 +32,11 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   return output;
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+      __attribute__((no_sanitize("address")))
+#endif
+#endif
 Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);

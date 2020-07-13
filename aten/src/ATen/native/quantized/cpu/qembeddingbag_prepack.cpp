@@ -45,7 +45,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
     const auto inverse_scale = 255.0f / (range + kEpsilon);
     for (std::size_t col = 0; col < embedding_cols; ++col) {
       output_row[col] =
-          std::lrintf((input_row[col] - minimum_element) * inverse_scale);
+          lrintf((input_row[col] - minimum_element) * inverse_scale);
     }
   }
   return output;
@@ -116,7 +116,7 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
       std::uint8_t quantized = std::max(
           0,
           std::min<int>(
-              std::lrintf((X - Xmin) * inverse_scale), (1 << BIT_RATE) - 1));
+              lrintf((X - Xmin) * inverse_scale), (1 << BIT_RATE) - 1));
       if (col % NUM_ELEM_PER_BYTE == 0) {
         output_row[col / NUM_ELEM_PER_BYTE] = quantized;
       } else {
