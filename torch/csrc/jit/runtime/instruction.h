@@ -35,6 +35,7 @@ namespace jit {
   _(WAIT, "") /* wait for a future to be complete */                        \
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check a guard against type_table, true if passes */      \
+  _(TYPECHECK, "T") /* check a guard against type_table, true if passes */  \
   _(FAIL_GUARD, "T") /* fail a guard, patch back to GUARD */                \
   _(PROFILE_OP, "F") /* get a callback from profile_function_table at X */  \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
