@@ -1181,6 +1181,12 @@
 - name: relu_(Tensor(a!) self) -> Tensor(a!)
   self: threshold_backward(grad, result, 0)
 
+- name: silu(Tensor self) -> Tensor
+  self: silu_backward(grad, self)
+
+- name: silu_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("silu_ cannot compute gradient of inplace version, use silu instead")
+
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
 

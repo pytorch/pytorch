@@ -2428,6 +2428,20 @@
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
 
+- func: silu(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  
+- func: silu_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

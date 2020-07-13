@@ -5661,10 +5661,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(debug_msg, expected_msg)
 
         # Checks float tensor comparisons (with extremal values)
-        a = torch.tensor((float('inf'), 5), device=device, dtype=torch.float32)
-        b = torch.tensor((float('inf'), float('nan')), device=device, dtype=torch.float32)
+        a = torch.tensor((float('inf'), 5, float('inf')), device=device, dtype=torch.float32)
+        b = torch.tensor((float('inf'), float('nan'), float('-inf')), device=device, dtype=torch.float32)
         result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 1 element(s) (out of 2) "
+        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 3) "
                         "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
                         "The greatest difference was nan (5.0 vs. nan), "
                         "which occurred at index 1.").format(atol)
@@ -16577,6 +16577,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
                          atol=precision_4dps, rtol=0)
 
+    @dtypes(torch.float, torch.double)
+    def test_silu(self, device, dtype):
+        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
+        expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]
+        precision_4dps = 0.0002
+
+        input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+                         expected_output_tensor,
+                         atol=precision_4dps, rtol=0)
+
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+                         expected_output_tensor,
+                         atol=precision_4dps, rtol=0)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag_embed(self, device, dtype):
@@ -19484,7 +19501,7 @@ def _generate_reference_input(dtype, device):
     # Some vectorized implementations don't support large values
     input.append([x + 1e10 for x in range(-5, 5)])
     input.append([x - 1e10 for x in range(-5, 5)])
-    input.append(torch.randn(10).tolist())
+    input.append([*torch.randn(7).tolist(), math.inf, -math.inf, math.nan])
     input.append((torch.randn(10) * 1e6).tolist())
     input.append([math.pi * (x / 2) for x in range(-5, 5)])
     return torch.tensor(input, dtype=dtype, device=device)
@@ -19572,7 +19589,8 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
                   _TorchMathTestMeta('trunc'),
                   _TorchMathTestMeta('round'),
-                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy'),
+                  # FIXME lgamma produces different result compared to scipy at -inf
+                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
                   _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                                      refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy'),
