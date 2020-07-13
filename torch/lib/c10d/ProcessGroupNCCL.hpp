@@ -119,9 +119,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // exception_ptr.
     bool finishedGPUExecutionInternal() const;
 
-    // Aborts all NCCL Communicators
-    void abortNCCLComms();
-
     // Reference to the store so that we can write aborted communicators
     // to the store.
     std::shared_ptr<Store> store_;
@@ -285,6 +282,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   void ncclCommWatchdog();
 
   void ncclCommWatchdogInternal();
+
+  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
+  // accordingly.
+  void parseNcclBlockingWait();
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

@@ -1992,6 +1992,11 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    if dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
+
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
@@ -2000,22 +2005,8 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=start_dim)
     if start_dim == 0 and end_dim == dim - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    p = _reshape_from_tensor(g, input, shape)
-    return p
 
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
 @parse_args('v')
 def nonzero(g, input):
