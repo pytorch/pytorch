@@ -2913,7 +2913,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = EmbeddingModel()
         x = torch.randint(7, (6,))
         w = torch.randn(6,)
-        offset = torch.tensor([0, 2])
+        offset = torch.tensor([0, 2, 5])
         embedding_matrix = torch.rand(10, 15)
         self.run_test(model, (embedding_matrix, x, offset, w))
 
