@@ -2921,7 +2921,7 @@ class TestONNXRuntime(unittest.TestCase):
         offset = torch.tensor([0, 2, 5, 6])
         self.run_test(model, (input, offset))
 
-        model = torch.nn.EmbeddingBag(10, 5, mode='max')
+        model = torch.nn.EmbeddingBag(10, 5, mode='max', scale_grad_by_freq=True)
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
