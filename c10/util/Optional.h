@@ -130,7 +130,7 @@ constexpr U convert(U v) {
 
 } // namespace detail_
 
-// \uncond
+// \endcond
 
 constexpr struct trivial_init_t {
 } trivial_init{};
