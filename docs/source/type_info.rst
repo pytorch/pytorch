@@ -27,6 +27,7 @@ eps         float   The smallest representable number such that ``1.0 + eps != 1
 max         float   The largest representable number.
 min         float   The smallest representable number (typically ``-max``).
 tiny        float   The smallest positive representable number.
+resolution  float   The approximate decimal resolution of this type, i.e., ``10**-precision``.
 =========   =====   ========================================
 
 .. note::

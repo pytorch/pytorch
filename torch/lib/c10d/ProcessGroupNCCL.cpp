@@ -202,12 +202,6 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-void ProcessGroupNCCL::WorkNCCL::abortNCCLComms() {
-  for (const auto& ncclComm : ncclComms_) {
-    ncclComm->ncclCommAbort();
-  }
-}
-
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   // Call Synchronize without a timeout. We use this method to avoid adding a
   // timeout argument to the public synchronize API.
@@ -281,6 +275,21 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
+void ProcessGroupNCCL::parseNcclBlockingWait() {
+  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
+  if (blockingWait != nullptr) {
+    auto val = std::stoi(blockingWait);
+    if (val == 1) {
+      // Make wait() and synchronize() a blocking call.
+      blockingWait_ = true;
+    } else if (val != 0) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(NCCL_BLOCKING_WAIT));
+    }
+  }
+}
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     const std::shared_ptr<Store>& store,
     int rank,
@@ -291,19 +300,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       terminateWatchdog_(false),
       opTimeout_(opTimeout) {
-  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
   try {
-    if (blockingWait != nullptr) {
-      auto val = std::stoi(blockingWait);
-      if (val == 1) {
-        // Make wait() and synchronize() a blocking call.
-        blockingWait_ = true;
-      } else if (val != 0) {
-        throw std::runtime_error(
-            "Invalid value for environment variable: " +
-            std::string(NCCL_BLOCKING_WAIT));
-      }
-    }
+    parseNcclBlockingWait();
   } catch (std::exception& e) {
     throw std::runtime_error(
         "Invalid value for environment variable: " +
