@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
 C10_DECLARE_bool();
 
@@ -78,6 +79,21 @@ static bool needsGradientInProfilingMode(Block* b) {
   }
   return false;
 }
+void removeProfilingNodes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+      if (it->outputs().size()) {
+        it->input()->setType(it->output()->type());
+        it->output()->replaceAllUsesWith(it->input());
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfilingNodes(ib);
+      }
+    }
+  }
+}
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
@@ -87,19 +103,26 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     return;
   }
 
-  InsertGuards(copy);
+  GRAPH_DUMP("Before running optimizations:", copy);
+  runOptimization(copy, true);
+  if (tensorExprFuserEnabled()) {
+    GRAPH_DUMP("Before fusion:", copy);
+    FuseTensorExprs(copy);
+  } else {
+    GRAPH_DUMP("Before removing profiling nodes:", copy);
+    removeProfilingNodes(copy->block());
+  }
+  GRAPH_DUMP("After fusion:", copy);
   LowerGradOf(*copy);
-  EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   specializeAutogradZero(*copy);
 
   runRequiredPasses(copy);
   PeepholeOptimize(copy);
   ConstantPropagation(copy);
-  runOptimization(copy);
+  runOptimization(copy, false);
 
-  if (needsGradientInProfilingMode(copy->block())) {
+  if (false && needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -176,9 +199,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
-    if (remaining_bailout_depth == getBailoutDepth()) {
-      PeelProfilingLoops(copy);
-    }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);

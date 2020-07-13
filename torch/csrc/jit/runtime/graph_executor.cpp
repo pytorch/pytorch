@@ -28,7 +28,6 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -613,6 +612,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole graph if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
+      GRAPH_DUMP("Before autodiff subgraphs:", opt_graph);
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphNodeThreshold : 1);
@@ -633,6 +633,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       InlineAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphInlineThreshold : 1);
+      GRAPH_DUMP("After autodiff subgraphs:", opt_graph);
     } else {
       runNondiffOptimization(opt_graph);
     }
@@ -774,11 +775,7 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  if (getProfilingMode()) {
-    if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
-    }
-  } else {
+  if (!getProfilingMode()) {
     FuseGraph(graph, strict_fuser_check);
   }
 
@@ -800,11 +797,13 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
   if (unroll) {
+    GRAPH_DUMP("Before unroll:", graph);
     UnrollLoops(graph);
     // run again with unrolled loops
     RemoveListMutation(graph);
     PeepholeOptimize(graph);
     ConstantPropagation(graph);
+    GRAPH_DUMP("After unroll and cleanups:", graph);
   }
 
   EliminateCommonSubexpression(graph);
