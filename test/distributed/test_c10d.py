@@ -3040,11 +3040,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
         fut = torch.futures.Future()
-        fut_result = []
         fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
 
         def fut_then(fut):
-            # Add ones to future's result.
+            # Add ones to fut's result.
             return [t + torch.ones_like(t) for t in fut.wait()]
 
         return fut.then(fut_then)
