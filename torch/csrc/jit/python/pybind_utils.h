@@ -839,7 +839,7 @@ inline py::object toPyObject(IValue ivalue) {
       auto fieldNames = fmap(
           tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
-      return py::module::import("torch.jit")
+      return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
