@@ -376,8 +376,9 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver(), HistogramObserver()]
         for obs in obs_list:
+            print(obs)
             scripted = torch.jit.script(obs)
 
             x = torch.rand(3, 4)
@@ -444,20 +445,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
-        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-        # Calculate qparams should work for empty observers
-        qparams = myobs.calculate_qparams()
-        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
-        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
-        out_x = myobs(x)
-        self.assertTrue(out_x.requires_grad)
-        myobs(y)
-        self.assertEqual(myobs.min_val, 2.0)
-        self.assertEqual(myobs.max_val, 8.0)
-        self.assertEqual(myobs.histogram, [2., 3., 3.])
-
-        qparams = myobs.calculate_qparams()
-
+        # generate reference result
         if reduce_range:
             if qscheme == torch.per_tensor_symmetric:
                 ref_scale = 0.0470588 * 255 / 127
@@ -472,6 +460,20 @@ class TestRecordHistogramObserver(QuantizationTestCase):
             else:
                 ref_scale = 0.0235294
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
+
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate qparams should work for empty observers
+        qparams = myobs.calculate_qparams()
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
+        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        out_x = myobs(x)
+        self.assertTrue(out_x.requires_grad)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
+        qparams = myobs.calculate_qparams()
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
@@ -491,6 +493,23 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, loaded_obs.histogram)
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
+        # make sure the observer works on list
+        obs_list = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate qparams should work for empty observers
+        qparams = obs_list.calculate_qparams()
+        x = [torch.tensor([2.0, 3.0, 4.0, 5.0]), torch.tensor([2.0, 3.0, 4.0, 5.0])]
+        y = [torch.tensor([5.0, 6.0, 7.0, 8.0]), torch.tensor([5.0, 6.0, 7.0, 8.0])]
+        obs_list(x)
+        obs_list(y)
+        self.assertEqual(obs_list.min_val, [2.0, 2.0])
+        self.assertEqual(obs_list.max_val, [8.0, 8.0])
+        self.assertEqual(obs_list.histogram, [2., 3., 3., 2., 3., 3.])
+        qparams = obs_list.calculate_qparams()
+        for i in range(2):
+            self.assertEqual(qparams[i][1].item(), ref_zero_point)
+            self.assertAlmostEqual(qparams[i][0].item(), ref_scale, delta=1e-5)
+
 
     def test_histogram_observer_one_sided(self):
         myobs = HistogramObserver(bins=8, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
