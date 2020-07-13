@@ -38,14 +38,14 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indices,
 
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
-  iter.add_output(result);
-  iter.add_output(indices);
-  iter.add_input(self);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .add_output(result)
+    .add_output(indices)
+    .add_input(self)
+    .build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* result_data_bytes = data[0];

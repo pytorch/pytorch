@@ -8,6 +8,7 @@ install_ubuntu() {
       # gpg-agent is not available by default on 18.04
       apt-get install -y --no-install-recommends gpg-agent
     fi
+    apt-get install -y kmod
     apt-get install -y wget
     apt-get install -y libopenblas-dev
 
@@ -35,6 +36,15 @@ install_ubuntu() {
                    rocprofiler-dev \
                    roctracer-dev
 
+    # precompiled miopen kernels added in ROCm 3.5; search for all unversioned packages
+    # if search fails it will abort this script; use true to avoid case where search fails
+    MIOPENKERNELS=$(apt-cache search --names-only miopenkernels | awk '{print $1}' | grep -F -v . || true)
+    if [[ "x${MIOPENKERNELS}" = x ]]; then
+      echo "miopenkernels package not available"
+    else
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
+    fi
+
   # Cleanup
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -43,6 +53,7 @@ install_ubuntu() {
 install_centos() {
 
   yum update -y
+  yum install -y kmod
   yum install -y wget
   yum install -y openblas-devel
 

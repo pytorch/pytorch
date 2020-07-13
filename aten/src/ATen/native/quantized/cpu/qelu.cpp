@@ -9,28 +9,16 @@ namespace native {
 
 DEFINE_DISPATCH(qelu_stub);
 
-Tensor& quantized_elu_out(Tensor& result, const Tensor& self, Scalar alpha,
-    Scalar scale, Scalar input_scale) {
-  qelu_stub(self.device().type(), self, alpha, result);
-  return result;
-}
-
-Tensor& quantized_elu_(Tensor& self, Scalar alpha, Scalar scale,
-    Scalar input_scale) {
-  Tensor qy = at::_empty_affine_quantized(self.sizes(), self.options(),
-      self.q_scale(), self.q_zero_point());
-  qelu_stub(self.device().type(), self, alpha, qy);
-  // This can be optimized in a later PR if necessary.
-  self.copy_(qy);
-  return self;
-}
-
 Tensor quantized_elu(
-    const Tensor& qx, Scalar alpha, Scalar scale, Scalar input_scale) {
+    const Tensor& qx, double output_scale, int64_t output_zero_point, Scalar alpha, Scalar scale, Scalar input_scale) {
   Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(),
-      qx.q_scale(), qx.q_zero_point());
+      output_scale, output_zero_point);
   qelu_stub(qx.device().type(), qx, alpha, qy);
   return qy;
+}
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl("elu", quantized_elu);
 }
 
 }}  // namespace at::native

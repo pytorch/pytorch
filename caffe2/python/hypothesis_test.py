@@ -778,7 +778,7 @@ class TestOperators(hu.HypothesisTestCase):
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs)
+           **hu.gcs_no_hip)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1900,6 +1900,34 @@ class TestOperators(hu.HypothesisTestCase):
 
         def ref(inputs=None):
             outputs = np.full(shape=gt_shape, fill_value=value, dtype=dtype)
+            return [outputs]
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        out, = self.assertReferenceChecks(gc, op, inputs, ref)
+        self.assertEqual(dtype, out.dtype)
+
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+        flatmap(lambda dtype: hu.tensor(
+            min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
+        **hu.gcs)
+    def test_constant_fill_from_tensor(self, data, gc, dc):
+        dtype = data.dtype.type
+        if data.dtype == np.dtype(np.bool):
+            dtype = np.bool
+
+        value = np.array([data.item(0)], dtype=dtype)
+        inputs = [data, value]
+        enum_type = _NUMPY_TYPE_TO_ENUM[dtype]
+
+        op = core.CreateOperator(
+            'ConstantFill',
+            ["X", "V"],
+            ["Y"],
+            dtype=enum_type,
+        )
+
+        def ref(x, v):
+            outputs = np.full(shape=data.shape, fill_value=value[0], dtype=dtype)
             return [outputs]
 
         self.assertDeviceChecks(dc, op, inputs, [0])

@@ -485,7 +485,7 @@ Tensor EmptyTensorFromProto(const TensorProto& tensor_proto) {
 }
 
 void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
-  auto tensor_proto = blob_proto.tensor();
+  const auto& tensor_proto = blob_proto.tensor();
   auto context = ContextFromProto(tensor_proto);
   context->SwitchToDevice();
   if (NumelFromTensorProto(tensor_proto) == 0 &&

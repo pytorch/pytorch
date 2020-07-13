@@ -162,6 +162,7 @@ _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
 _(aten, _unsafe_view) \
+_(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \
 _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \
@@ -259,6 +260,7 @@ _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
+_(aten, count_nonzero) \
 _(aten, cross) \
 _(aten, std_mean) \
 _(aten, var_mean) \
@@ -605,6 +607,7 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -730,6 +733,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

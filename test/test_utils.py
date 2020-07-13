@@ -576,6 +576,15 @@ class TestHub(TestCase):
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_state_dict_from_url_with_name(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            file_name = 'test_file'
+            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
+            self.assertEqual(sum_of_state_dict(loaded_state),
+                             SUM_OF_HUB_EXAMPLE)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):

@@ -132,4 +132,11 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   return s.highestPriorityTypeId();
 }
 
+// For backwards compatibility with XLA repository
+// (I don't want to fix this in XLA right now because there might be
+// more renaming coming in the future.)
+static inline DispatchKeySet XLA() {
+  return DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd};
+}
+
 }

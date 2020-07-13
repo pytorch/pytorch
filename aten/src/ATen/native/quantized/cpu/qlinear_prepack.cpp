@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <vector>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {
@@ -353,22 +353,22 @@ class QLinearPackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightInt8::run);
-  m.impl("linear_prepack_legacy", QLinearPackWeightInt8Legacy::run);
+  m.impl("linear_prepack", TORCH_FN(QLinearPackWeightInt8::run));
+  m.impl("linear_prepack_legacy", TORCH_FN(QLinearPackWeightInt8Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
-  m.impl("linear_prepack_fp16_legacy", QLinearPackWeightFp16Legacy::run);
+  m.impl("linear_prepack_fp16", TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl("linear_prepack_fp16_legacy", TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightInt8::run);
+  m.impl("linear_prepack", TORCH_FN(QLinearPackWeightInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
-  m.impl("linear_prepack_fp16_legacy", QLinearPackWeightFp16Legacy::run);
+  m.impl("linear_prepack_fp16", TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl("linear_prepack_fp16_legacy", TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 } // namespace

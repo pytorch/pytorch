@@ -7,10 +7,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
+DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
@@ -58,6 +61,53 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::add_out(self, self, other, alpha);
+}
+
+Tensor& add_relu_impl(
+    Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  Scalar min_val;
+  Scalar max_val;
+  if (self.dtype() == at::kInt) {
+    min_val = 0;
+    max_val = std::numeric_limits<int32_t>::max();
+  } else if (self.dtype() == at::kLong) {
+    min_val = 0;
+    max_val = std::numeric_limits<int64_t>::max();
+  } else if (self.dtype() == at::kShort) {
+    min_val = 0;
+    max_val = std::numeric_limits<int16_t>::max();
+  } else if (self.dtype() == at::kChar) {
+    min_val = 0;
+    max_val = std::numeric_limits<int8_t>::max();
+  } else if (self.dtype() == at::kFloat) {
+    min_val = 0.0;
+    max_val = std::numeric_limits<float>::max();
+  } else if (self.dtype() == at::kDouble) {
+    min_val = 0.0;
+    max_val = std::numeric_limits<double>::max();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        "Unsupported datatype for add_relu:", self.dtype().name());
+  }
+
+  result = iter.output();
+  add_clamp_stub(iter.device_type(), iter, alpha, min_val, max_val);
+  return result;
+}
+
+Tensor& add_relu_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  return add_relu_impl(result, self, other, alpha);
+}
+
+Tensor add_relu(const Tensor& self, const Tensor& other, Scalar alpha) {
+  Tensor result;
+  return add_relu_impl(result, self, other, alpha);
+}
+
+Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return add_relu_impl(self, self, other, alpha);
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -790,6 +840,38 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 // It is undocumented and should not be used outside of tests.
 Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
+}
+
+// TODO: Deduplicate this with the TensorIterator logic.  This would
+// also fix the TODOs below.
+Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
+  // TODO: Doesn't do type promotion correctly
+  // TODO: Doesn't do strides correctly
+  int64_t dim = std::max(self.dim(), other.dim());
+  std::vector<int64_t> sizes(dim);
+  for (int64_t i = 0; i < dim; i++) {
+    int64_t j = -1 - i;
+    if (i >= self.dim() || self.size(j) == 1) {
+      sizes[dim + j] = other.size(j);
+    } else if (i >= other.dim() || self.size(i) == 1) {
+      sizes[dim + j] = self.size(j);
+    } else {
+      TORCH_CHECK(
+        self.size(j) == other.size(j),
+        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
+      );
+      sizes[dim + j] = self.size(j);
+    }
+  }
+  return at::empty_meta(sizes, self.options());
+}
+
+Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
+  return binary_op_meta(self, other);
+}
+
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+  m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
 
