@@ -96,11 +96,32 @@ void slot_params_recurse(
     }
   }
 }
+
+void slot_named_params_recurse(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj,
+    c10::Dict<std::string, at::Tensor>* params) {
+  for (const auto& slot : obj->slots()) {
+    if (slot.isTensor()) {
+      auto attributes = obj->type()->getAttributes();
+      for (auto attr : attributes) {
+        params->insert(attr.getName(), slot.toTensor());
+      }
+    } else if (slot.isObject()) {
+      slot_named_params_recurse(slot.toObject(), params);
+    }
+  }
+}
 } // namespace
 
 const std::vector<at::Tensor> Module::parameters() const {
   std::vector<at::Tensor> params;
   slot_params_recurse(object_, &params);
+  return params;
+}
+
+const c10::Dict<std::string, at::Tensor> Module::named_parameters() const {
+  c10::Dict<std::string, at::Tensor> params;
+  slot_named_params_recurse(object_, &params);
   return params;
 }
 } // namespace mobile
