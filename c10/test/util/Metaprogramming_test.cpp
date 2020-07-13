@@ -220,52 +220,52 @@ namespace test_filter_map {
 namespace test_tuple_elements {
   // empty input
   static_assert(
-    tuple_elements(std::make_tuple(), std::index_sequence<>()) ==
-    std::make_tuple()
+    tuple_elements(std::make_tuple(), std::index_sequence<>()) == std::make_tuple(),
+    ""
   );
 
   // empty selection
   static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<>()) ==
-    std::make_tuple()
+    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<>()) == std::make_tuple(),
+    ""
   );
 
   // subselect
   static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2>()) ==
-    std::make_tuple(0, 2.0)
+    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2>()) == std::make_tuple(0, 2.0),
+    ""
   );
 
   // reorder
   static_assert(
-    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2, 1>()) ==
-    std::make_tuple(0, 2.0, "HEY")
+    tuple_elements(std::make_tuple(0, "HEY", 2.0), std::index_sequence<0, 2, 1>()) == std::make_tuple(0, 2.0, "HEY"),
+    ""
   );
 }
 
 namespace test_tuple_take {
   // empty input
   static_assert(
-    tuple_take<std::tuple<>, 0>(std::make_tuple()) ==
-    std::make_tuple()
+    tuple_take<std::tuple<>, 0>(std::make_tuple()) == std::make_tuple(),
+    ""
   );
 
   // empty selection
   static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 0>(std::make_tuple(0, "HEY", 2.0)) ==
-    std::make_tuple()
+    tuple_take<std::tuple<int, const char*, double>, 0>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(),
+    ""
   );
 
   // take prefix
   static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 2>(std::make_tuple(0, "HEY", 2.0)) ==
-    std::make_tuple(0, "HEY")
+    tuple_take<std::tuple<int, const char*, double>, 2>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(0, "HEY"),
+    ""
   );
 
   // take full
   static_assert(
-    tuple_take<std::tuple<int, const char*, double>, 3>(std::make_tuple(0, "HEY", 2.0)) ==
-    std::make_tuple(0, "HEY", 2.0)
+    tuple_take<std::tuple<int, const char*, double>, 3>(std::make_tuple(0, "HEY", 2.0)) == std::make_tuple(0, "HEY", 2.0),
+    ""
   );
 }
 

@@ -347,8 +347,8 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
         A common PyTorch convention is to save tensors using .pt file extension.
 
     .. note::
-        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
-        for more details.
+        PyTorch preserves storage sharing across serialization. See
+        `preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new

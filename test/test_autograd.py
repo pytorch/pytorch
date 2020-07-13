@@ -1,6 +1,7 @@
 import contextlib
 import gc
 import sys
+import io
 import math
 import tempfile
 import time
@@ -3313,6 +3314,56 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    def test_anomaly_grad_warnings(self):
+        # PyTorch won't throw warnings if there is an error
+        # but we'd want to at least see them in stderr
+
+        class StdErrDiverter:
+            def __enter__(self):
+                self.stderr_orig = sys.stderr
+                self.stderr_new = io.StringIO()
+                sys.stderr = self.stderr_new
+                return self
+
+            def __exit__(self, *args):
+                self.captured = self.stderr_new.getvalue()
+                sys.stderr = self.stderr_orig
+
+
+        # if the warnings don't throw, they will be handled as regular warnings
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    a = torch.randn(5, requires_grad=True)
+                    d1 = a + 1
+                    d2 = d1 ** 2
+                    d1 += 1
+                    torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 2)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', str(w[1].message))
+
+        # if the warning throws, it will be printed to sys.stderr
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    warnings.simplefilter("error")
+                    with StdErrDiverter() as s:
+                        a = torch.randn(5, requires_grad=True)
+                        d1 = a + 1
+                        d2 = d1 ** 2
+                        d1 += 1
+                        torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 1)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', s.captured)
+
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
@@ -4483,12 +4534,12 @@ def add_test(
                                 if i.grad is not None:
                                     with torch.no_grad():
                                         i.grad.zero_()
-                            for io, o in zip(inplace_output_variable, output_variable):
+                            for i_o, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
-                                    grad = randn_like(io).to(torch.cdouble)
+                                    grad = randn_like(i_o).to(torch.cdouble)
                                 else:
-                                    grad = randn_like(io).double()
-                                io.backward(grad)
+                                    grad = randn_like(i_o).double()
+                                i_o.backward(grad)
                                 o.backward(grad)
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
                                                 (self_variable,) + args_variable):

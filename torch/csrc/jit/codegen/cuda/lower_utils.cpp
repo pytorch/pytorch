@@ -9,7 +9,7 @@ namespace scope_utils {
 // START SCOPE HELPER SYSTEMS
 namespace {
 
-struct Loops : private OptInDispatch {
+class Loops : private OptInDispatch {
  private:
   std::deque<ForLoop*> loops;
   void handle(ForLoop* fl) final {
@@ -34,7 +34,7 @@ struct Loops : private OptInDispatch {
   }
 };
 
-struct forLoopCount : private OptInDispatch {
+class forLoopCount : private OptInDispatch {
  private:
   unsigned int count_ = 0;
 
@@ -60,7 +60,7 @@ struct forLoopCount : private OptInDispatch {
   }
 };
 
-struct scopePushBack : private OptInDispatch {
+class scopePushBack : private OptInDispatch {
  private:
   Expr* expr_;
   void handle(ForLoop* fl) final {
@@ -87,7 +87,7 @@ struct scopePushBack : private OptInDispatch {
   }
 };
 
-struct scopeInsertBefore : private OptInDispatch {
+class scopeInsertBefore : private OptInDispatch {
  private:
   Expr* ref_;
   Expr* expr_;
@@ -115,7 +115,7 @@ struct scopeInsertBefore : private OptInDispatch {
   }
 };
 
-struct parentScope : private OptInDispatch {
+class parentScope : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
 
@@ -139,7 +139,7 @@ struct parentScope : private OptInDispatch {
   }
 };
 
-struct scopeClearExprs : private OptInDispatch {
+class scopeClearExprs : private OptInDispatch {
  private:
   void handle(ForLoop* fl) final {
     fl->body().clear();
@@ -169,7 +169,7 @@ void assertScope(Expr* expr) {
       "Assert Scope failed when calling a scope_util function.");
 }
 
-struct CloneLoopNest : public OptOutMutator {
+class CloneLoopNest : public OptOutMutator {
  private:
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
@@ -199,50 +199,7 @@ struct CloneLoopNest : public OptOutMutator {
   }
 };
 
-struct ReplaceExprsInScope : public OptOutDispatch {
- private:
-  std::unordered_map<Expr*, Expr*> replacement_map_;
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(ForLoop* fl) final {
-    for (Expr* expr : fl->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      fl->body().insert_before(expr, replacement_map_[expr]);
-      fl->body().erase(expr);
-    }
-  }
-
-  void handle(IfThenElse* ite) final {
-    for (Expr* expr : ite->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->body().insert_before(expr, replacement_map_[expr]);
-      ite->body().erase(expr);
-    }
-    for (Expr* expr : ite->elseBody().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->elseBody().insert_before(expr, replacement_map_[expr]);
-      ite->elseBody().erase(expr);
-    }
-  }
-
-  ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map)
-      : replacement_map_(std::move(_replacement_map)) {}
-
+class ReplaceExprsInScope : public OptOutDispatch {
  public:
   static void replace(
       Expr* scope,
@@ -250,9 +207,40 @@ struct ReplaceExprsInScope : public OptOutDispatch {
     ReplaceExprsInScope reis(std::move(replacement_map));
     reis.handle(scope);
   }
+
+ private:
+  explicit ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> replacement_map)
+      : replacement_map_(std::move(replacement_map)) {}
+
+  void handleScope(Scope& scope) {
+    for (size_t i = 0; i < scope.size(); ++i) {
+      const auto it = replacement_map_.find(scope[i]);
+      if (it == replacement_map_.end()) {
+        handle(scope[i]);
+        continue;
+      }
+      scope[i] = it->second;
+    }
+  }
+
+  void handle(Expr* expr) final {
+    OptOutDispatch::handle(expr);
+  }
+
+  void handle(ForLoop* fl) final {
+    handleScope(fl->body());
+  }
+
+  void handle(IfThenElse* ite) final {
+    handleScope(ite->body());
+    handleScope(ite->elseBody());
+  }
+
+ private:
+  std::unordered_map<Expr*, Expr*> replacement_map_;
 };
 
-struct FirstInnerMostScope : private OptInDispatch {
+class FirstInnerMostScope : private OptInDispatch {
  private:
   Expr* active_scope = nullptr;
 
@@ -295,6 +283,10 @@ struct FirstInnerMostScope : private OptInDispatch {
 
     FirstInnerMostScope fims;
     Expr* inner = fims.getInner(scope);
+
+    if (inner == nullptr)
+      return scope;
+
     while (fims.getInner(inner) != nullptr)
       inner = fims.getInner(inner);
     return inner;
@@ -411,13 +403,13 @@ std::vector<IterDomain*> iterDomains(std::vector<ForLoop*> loops) {
   return ids;
 }
 
-bool isTV(const Val* const val) {
+bool isTV(const Val* val) {
   return val->getValType().value() == ValType::TensorView;
 }
 
 // Check if we're a TensorView op that we can generate code for.
 bool isTVOp(const Expr* expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)) &&
+  if (expr->outputs().size() == 1 && isTV(expr->output(0)) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
@@ -462,7 +454,7 @@ ForLoop* asForLoop(Statement* stmt) {
   return static_cast<ForLoop*>(expr);
 }
 
-const TensorView* asConstTV(const Val* const val) {
+const TensorView* asConstTV(const Val* val) {
   TORCH_INTERNAL_ASSERT(isTV(val));
   return static_cast<const TensorView*>(val);
 }

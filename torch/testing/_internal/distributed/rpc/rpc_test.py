@@ -995,7 +995,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(self_worker_name in rpc_event.name)
         self.assertTrue(dst_worker_name in rpc_event.name)
         if isinstance(func, torch.jit.ScriptFunction):
-            self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(func) in rpc_event.name)
         else:
             self.assertTrue(func.__name__ in rpc_event.name)
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
@@ -1485,7 +1485,7 @@ class RpcTest(RpcAgentTestFixture):
             with torch.autograd.profiler.profile() as pf:
                 key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch.jit._qualified_name(my_script_func),
+                    torch._jit_internal._qualified_name(my_script_func),
                     "worker1",
                     "worker0",
                 )
@@ -1502,9 +1502,9 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(result, expected)
             events = pf.function_events
             rpc_event = get_function_event(
-                events, torch.jit._qualified_name(my_script_func)
+                events, torch._jit_internal._qualified_name(my_script_func)
             )
-            self.assertTrue(torch.jit._qualified_name(my_script_func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(my_script_func) in rpc_event.name)
 
     @dist_init
     def test_py_class_constructor(self):
