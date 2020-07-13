@@ -128,6 +128,11 @@ white_list = [
     ('aten::atan2', datetime.date(2020, 7, 30)),
     ('aten::copy_', datetime.date(2020, 7, 30)),
     ('aten::sort', datetime.date(2020, 7, 30)),
+    ('aten::_cudnn_init_dropout_state', datetime.date(2020, 7, 30)),
+    ('aten::sparse_coo_tensor', datetime.date(2020, 7, 30)),
+    ('aten::_sparse_coo_tensor_with_dims', datetime.date(2020, 7, 30)),
+    ('aten::_sparse_coo_tensor_with_dims_and_tensors', datetime.date(2020, 7, 30)),
+    ('aten::to', datetime.date(2020, 7, 15)),
 ]
 
 
