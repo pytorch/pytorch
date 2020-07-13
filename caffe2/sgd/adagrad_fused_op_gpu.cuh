@@ -104,7 +104,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     const int* __restrict__ prefix_sum_length_data, // prefix of lengths
                                                     // (offsets for the
                                                     // segments)
-    int N, // number of rows (hash size) of embedding table
+    int num_indices, // size of the indices array
     int block_size, // embedding dimension size
     int num_lengths, // number of segments
     const float epsilon,
@@ -122,8 +122,8 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       ? 0
       : prefix_sum_length_data[group - 1]; // start offset of the segment
   int end = prefix_sum_length_data[group]; // end offset of the segment
-  CUDA_KERNEL_ASSERT(start <= N);
-  CUDA_KERNEL_ASSERT(end <= N);
+  CUDA_KERNEL_ASSERT(start <= num_indices);
+  CUDA_KERNEL_ASSERT(end <= num_indices);
 
   class randFactor<TParam, T, roundOpt> rand_factor(
       seed,
