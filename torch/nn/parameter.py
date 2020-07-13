@@ -79,6 +79,12 @@ class UninitializedParameter(Parameter):
             dtype = self.data.dtype
         return Parameter(torch.empty(shape, device=device, dtype=dtype), requires_grad=self.requires_grad)
 
+    def share_memory_(self):
+        raise RuntimeError(
+            'Can\'t share memory on an uninitialized parameter. '
+            'Run forward to initialize the network before calling '
+            '`module.share_memory()`.')
+
     def __repr__(self):
         return 'Uninitialized parameter'
 
@@ -110,6 +116,12 @@ class UninitializedBuffer(torch.Tensor):
         if dtype is None:
             dtype = self.data.dtype
         return torch.empty(shape, device=device, dtype=dtype)
+
+    def share_memory_(self):
+        raise RuntimeError(
+            'Can\'t share memory on an uninitialized buffer. '
+            'Run forward to initialize the network before calling '
+            '`module.share_memory()`.')
 
     def __repr__(self):
         return 'Uninitialized buffer'

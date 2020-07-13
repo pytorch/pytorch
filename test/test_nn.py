@@ -11580,6 +11580,13 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'infer_parameters'):
             torch.jit.script(module)
 
+    def test_lazy_share_memory(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+        with self.assertRaisesRegex(RuntimeError, 'initialize'):
+            module.share_memory()
+
     def test_linear(self):
         module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)
         self.assertIsInstance(module.weight, UninitializedParameter)
