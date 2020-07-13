@@ -250,6 +250,12 @@ if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
+# Preserve CUDA_GENCODE flags
+if(USE_CUDA)
+  torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})

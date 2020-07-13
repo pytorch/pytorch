@@ -572,3 +572,15 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_cuda_quantization_does_not_pin_memory(self):
+        # Context - https://github.com/pytorch/pytorch/issues/41115
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+        q_int = torch.randint(0, 100, [1, 2, 3], device="cuda", dtype=torch.uint8)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=0.1, zero_point=0)
+
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)

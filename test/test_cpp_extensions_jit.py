@@ -722,21 +722,21 @@ class TestCppExtensionJIT(common.TestCase):
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should not be detected
+            # Catched with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 2)
 
-            # Catched with python error should not be detected
+            # Catched with python error should also be detected
             with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
                 warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should not be detected
+            # Catched with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 4)
 
         # Make sure raising warnings are handled properly
         with warnings.catch_warnings(record=True) as w:

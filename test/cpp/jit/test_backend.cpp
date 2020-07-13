@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend.h>
 
 namespace torch {

@@ -220,7 +220,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq(Device a, Device b) -> bool",
+         "aten::eq.device(Device a, Device b) -> bool",
          [](Stack* stack) {
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
@@ -328,14 +328,6 @@ RegisterOperators reg(
            push(stack, a.cuda());
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)",
-         [](Stack* stack) {
-           bool _requires_grad = pop(stack).toBool();
-           at::Tensor self = pop(stack).toTensor();
-           self.requires_grad_(_requires_grad);
-         },
-         aliasAnalysisConservative()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
@@ -621,12 +613,6 @@ RegisterOperators reg(
            push(stack, std::move(val));
          },
          aliasAnalysisFromSchema()),
-     // This op is no longer generated, but old models use it instead of
-     // unchecked_cast, so we keep it here so it gets handled correctly.
-     Operator(
-         "prim::unchecked_cast(t x) -> t",
-         noop,
-         aliasAnalysisSpecialCase()),
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack* stack) {
@@ -713,7 +699,7 @@ RegisterOperators reg2({
       listRemove<value_type>,                              \
       aliasAnalysisFromSchema()),                          \
       Operator(                                            \
-          "aten::index." decl_type "(" decl_type           \
+          "aten::index.list_" decl_type "(" decl_type      \
           "[] self,                                                               \
         " decl_type " el) -> int",                         \
           listIndex<value_type>,                           \
@@ -736,15 +722,15 @@ RegisterOperators reg2({
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
     Operator(
-        "aten::__contains__.int(int[] l, int item) -> bool",
+        "aten::__contains__.int_list(int[] l, int item) -> bool",
         listContains<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__contains__.float(float[] l, float item) -> bool",
+        "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__contains__.str(str[] l, str item) -> bool",
+        "aten::__contains__.str_list(str[] l, str item) -> bool",
         listContains<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
@@ -778,11 +764,6 @@ RegisterOperators reg2({
     Operator(
         "aten::sorted.bool(bool[](a) input) -> (bool[])",
         listCopyAndSort<bool>,
-        aliasAnalysisFromSchema()),
-
-    Operator(
-        "aten::eq.int_list(int[] a, int[] b) -> bool",
-        listEq<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
@@ -883,16 +864,17 @@ RegisterOperators reg2({
           push(stack, ss.str());
         },
         aliasAnalysisFromSchema()),
-#define CREATE_COPY_OP(other_type, c_type)                                 \
-  Operator(                                                                \
-      "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \
-      [](Stack* stack) {                                                   \
-        at::Tensor t;                                                      \
-        c_type other;                                                      \
-        pop(stack, t, other);                                              \
-        std::move(t) = other; /* NOLINT(bugprone-use-after-move) */        \
-        push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */   \
-      },                                                                   \
+#define CREATE_COPY_OP(other_type, c_type)                               \
+  Operator(                                                              \
+      "aten::copy_." #other_type "(Tensor(a!) self, " #other_type        \
+      " other) -> Tensor(a!)",                                           \
+      [](Stack* stack) {                                                 \
+        at::Tensor t;                                                    \
+        c_type other;                                                    \
+        pop(stack, t, other);                                            \
+        std::move(t) = other; /* NOLINT(bugprone-use-after-move) */      \
+        push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
+      },                                                                 \
       aliasAnalysisFromSchema())
 
     CREATE_COPY_OP(Tensor, at::Tensor),
@@ -945,7 +927,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
-    DEFINE_SCALAR_BINARY_OP(
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
         aten::log,
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
@@ -957,7 +939,18 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
     DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
+    DEFINE_GENERIC_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float),
     DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
     DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
     DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
@@ -1006,16 +999,6 @@ RegisterOperators reg2({
         std::copysign(a, b),
         std::copysign(a, b),
         float),
-
-    Operator(
-        "aten::isnan(float a) -> bool",
-        [](Stack* stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::isnan(a));
-        },
-        aliasAnalysisFromSchema()),
-
     Operator(
         "aten::_tensor_to_list(Tensor self) -> int[]",
         [](Stack* stack) {
@@ -1131,7 +1114,8 @@ RegisterOperators reg2({
 
 #define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                           \
   Operator(                                                              \
-      "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",     \
+      "aten::divmod." #type_a "_" #type_b "(" #type_a " x," #type_b      \
+      " y) -> (float, float)",                                           \
       [](Stack* stack) {                                                 \
         type_a a;                                                        \
         type_b b;                                                        \
@@ -1150,15 +1134,15 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash(str t) -> int",
+        "aten::hash.str(str t) -> int",
         hashValue<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::hash(int t) -> int",
+        "aten::hash.int(int t) -> int",
         hashValue<int>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::hash(float t) -> int",
+        "aten::hash.float(float t) -> int",
         hashValue<double>,
         aliasAnalysisFromSchema()),
 });
@@ -1230,11 +1214,11 @@ void sort_op(Stack* stack) {
 // NB: this must be registered after the other aten::sort operators
 RegisterOperators regSort({
     Operator(
-        "aten::sorted(t[](a) self) -> (t[])",
+        "aten::sorted.any(t[](a) self) -> (t[])",
         sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.any(t[](a!) self, bool reverse=False) -> ()",
         sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
@@ -1573,11 +1557,11 @@ RegisterOperators reg3({
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.scale_list(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear.size_list(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.size_list_scale_list(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
 
