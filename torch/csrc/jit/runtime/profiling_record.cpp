@@ -176,6 +176,16 @@ bool needsProfiledInputs(Node* n) {
   }
 }
 
+bool inputsProfilable(Node* n) {
+  for (auto iv : n->inputs()) {
+    if (!needsProfiledInputs(iv->node()) && n->kind() != prim::Constant) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool needsProfiledOutput(Node* n) {
   if (tensorexpr::isSupported(n)) {
     return true;
@@ -190,12 +200,17 @@ bool needsProfiledOutput(Node* n) {
   }
 }
 
+// 1. check if producer inputs are profiled
+// 2. check if a producer is profilable
+//
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
       if (i->type()->kind() == c10::TypeKind::TensorType &&
-          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
+          ((needsProfiledInputs(n) && !inputsProfilable(n)) ||
+           needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, i);
       }
     }
