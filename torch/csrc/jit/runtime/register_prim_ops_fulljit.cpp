@@ -1347,7 +1347,7 @@ at::Tensor interpolate(
   auto input_dim = input.dim();
   if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors), scale_factors_1);
+        input, _output_size(input, 1, size, scale_factors), c10::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
@@ -1375,7 +1375,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        scale_factors_1);
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
