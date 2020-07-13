@@ -13,6 +13,26 @@
 
 namespace c10d {
 
+struct NCCLAllreduceOptions : AllreduceOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
+struct NCCLAllgatherOptions : AllgatherOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
+struct NCCLReduceOptions : ReduceOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
+struct NCCLBroadcastOptions : BroadcastOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
+struct NCCLReduceScatterOptions : ReduceScatterOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";

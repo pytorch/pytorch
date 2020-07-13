@@ -65,24 +65,4 @@ struct BarrierOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
-struct NCCLAllreduceOptions : AllreduceOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLAllgatherOptions : AllgatherOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLReduceOptions : ReduceOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLBroadcastOptions : BroadcastOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLReduceScatterOptions : ReduceScatterOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
 } // namespace c10d
