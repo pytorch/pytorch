@@ -821,9 +821,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     self.conv2 = torch.jit.trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
 
                 def forward(self, input):
-                  input = F.relu(self.conv1(input))
-                  input = F.relu(self.conv2(input))
-                  return input
+                    input = F.relu(self.conv1(input))
+                    input = F.relu(self.conv2(input))
+                    return input
 
             scripted_module = torch.jit.script(MyModule())
 
@@ -936,10 +936,10 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
-              return torch.linear(x)
-           else:
-              return unsupported_linear_op(x)
+            if not torch.jit.is_scripting():
+                return torch.linear(x)
+            else:
+                return unsupported_linear_op(x)
     """
     return False
 
