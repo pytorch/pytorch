@@ -616,7 +616,7 @@ Tensor* TensorExprKernel::computeFourOperand(
       });
 }
 
-Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
+Tensor* TensorExprKernel::computeValue(torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -802,8 +802,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand(
-          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
+      // return computeOneOperand(
+      //     "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a);
+      //     });
+      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
+        return ExprHandle(1.0f) /
+            (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - a));
+      });
     } break;
 
     case aten::reciprocal: {
@@ -1679,7 +1684,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
       if (it != varToSize.end()) {
         tensorSize.push_back(it->second);
       } else {
-        const IntImm* s = dynamic_cast<const IntImm*>(dim);
+        const IntImm* s = dynamic_cast<const IntImm*>(IRSimplifier::simplify(dim));
         if (!s) {
           throw malformed_input("output expected Int", dim);
         }

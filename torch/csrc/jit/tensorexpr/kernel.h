@@ -113,7 +113,7 @@ class TORCH_API TensorExprKernel {
           const ExprHandle&,
           const ExprHandle&)>& innerExpr);
 
-  Tensor* computeValue(const torch::jit::Value* v);
+  Tensor* computeValue(torch::jit::Value* v);
 
   void flattenTensors(BackendType backendType);
   Stmt* generateStmt(BackendType backendType);

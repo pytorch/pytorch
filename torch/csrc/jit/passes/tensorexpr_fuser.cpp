@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -10,8 +11,22 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/utils/memory.h>
+
 namespace torch {
 namespace jit {
+void CreateFunctionalGraphs2(const std::shared_ptr<Graph>& graph);
+
+/**
+ * TODO:
+ * [ ] Add 2nd argument to prim::TypeCheck to allow chaining them.
+ * [ ] Construct prim::If for fusion group.
+ * [ ] Construct non-optimized graph in else-branch.
+ * [ ] Remove fuser-pass based on functional subgraphs.
+ * [ ] Cleanup.
+ * [ ] Fix tests.
+ */
 
 namespace tensorexpr {
 bool isSupported(Node* node) {
@@ -58,9 +73,6 @@ bool isSupported(Node* node) {
     case aten::trunc:
     case aten::threshold:
     case aten::remainder:
-    case prim::ConstantChunk:
-    case aten::cat:
-    case prim::ListConstruct:
     case aten::sigmoid:
     case aten::relu:
     case aten::addcmul:
@@ -68,8 +80,14 @@ bool isSupported(Node* node) {
     case aten::reciprocal:
     case aten::expm1:
     case aten::lgamma:
-    case aten::slice:
-    case aten::unsqueeze:
+
+    case prim::ConstantChunk:
+      // TODO: The following ops require proper shape inferrence:
+      // case aten::cat:
+      // case prim::ListConstruct:
+      // case aten::slice:
+      // case aten::unsqueeze:
+
     case aten::frac:
     // TODO: uncomment once we can handle rand+broadcasts
     // case aten::rand_like:
@@ -161,7 +179,7 @@ bool allShapesAreKnown(Node* node) {
   return true;
 }
 
-bool canHandle(Node* node, AliasDb& aliasDb) {
+bool canHandle(Node* node) {
   if (node->kind() == prim::Constant) {
     if (node->output()->type()->cast<TensorType>()) {
       // TODO: add support for tensor constants.
@@ -169,12 +187,15 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
     }
     return true;
   }
+  if (node->kind() == prim::profile) {
+    return true;
+  }
   if (node->kind() == prim::Loop) {
     return false; // TODO
   }
-  if (!allShapesAreKnown(node)) {
-    return false;
-  }
+  //   if (!allShapesAreKnown(node)) {
+  //     return false;
+  //   }
 
   // Don't include nodes whose inputs are tensor constants - we cannot handle
   // them at the moment.
@@ -188,16 +209,25 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   return tensorexpr::isSupported(node);
 }
 
+bool canHandle(Node* node, AliasDb& aliasDb) {
+  return canHandle(node);
+}
+
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
     return false;                           \
   }
 
-bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
+bool canMerge(
+    Node* consumer,
+    Node* producer,
+    AliasDb& aliasDb,
+    const std::unordered_map<Value*, TensorTypePtr>& value_types) {
   // Only handle complete tensor types
   for (torch::jit::Value* output : consumer->outputs()) {
-    REQ(output->isCompleteTensor());
+    REQ(output->isCompleteTensor() ||
+        (value_types.count(output) && value_types.at(output)->isComplete()));
   }
 
   // Only fuse within a block
@@ -259,7 +289,8 @@ Node* getOrCreateTensorExprSubgraph(Node* n) {
 c10::optional<Node*> tryMerge(
     Node* consumer,
     Node* producer,
-    AliasDb& aliasDb) {
+    AliasDb& aliasDb,
+    std::unordered_map<Value*, TensorTypePtr>& value_types) {
   GRAPH_DEBUG(
       "Trying producer ",
       getHeader(producer),
@@ -267,11 +298,56 @@ c10::optional<Node*> tryMerge(
       getHeader(consumer),
       ":\n");
 
-  if (!canMerge(consumer, producer, aliasDb)) {
+  if (!canMerge(consumer, producer, aliasDb, value_types)) {
     return c10::nullopt;
   }
 
-  consumer = getOrCreateTensorExprSubgraph(consumer);
+  std::vector<c10::optional<TensorTypePtr>> consumer_type_info;
+  for (int idx = 0; idx < consumer->outputs().size(); idx++) {
+    if (value_types.count(consumer->output(idx))) {
+      consumer_type_info.push_back(value_types.at(consumer->output(idx)));
+    } else {
+      consumer_type_info.push_back(c10::nullopt);
+    }
+  }
+  std::vector<c10::optional<TensorTypePtr>> producer_inputs_type_info;
+  std::vector<c10::optional<TensorTypePtr>> producer_outputs_type_info;
+  for (int idx = 0; idx < producer->outputs().size(); idx++) {
+    if (value_types.count(producer->output(idx))) {
+      producer_outputs_type_info.push_back(value_types.at(producer->output(idx)));
+    } else {
+      producer_outputs_type_info.push_back(c10::nullopt);
+    }
+  }
+  for (int idx = 0; idx < producer->inputs().size(); idx++) {
+    if (value_types.count(producer->input(idx))) {
+      producer_inputs_type_info.push_back(value_types.at(producer->input(idx)));
+    } else {
+      producer_inputs_type_info.push_back(c10::nullopt);
+    }
+  }
+  Node* te_group = getOrCreateTensorExprSubgraph(consumer);
+  // Propagate profiling info to the newly create node representing the TE
+  // fusion group
+  if (te_group != consumer) {
+    for (int idx = 0; idx < te_group->outputs().size(); idx++) {
+      if (consumer_type_info[idx]) {
+        value_types[te_group->output(idx)] = *consumer_type_info[idx];
+        GRAPH_DEBUG(
+            "%",
+            te_group->output(idx)->debugName(),
+            " -> ",
+            *value_types[te_group->output(idx)],
+            "\n");
+      } else {
+        GRAPH_DEBUG(
+            "No shape info for TE group output %",
+            te_group->output(idx)->debugName(),
+            "!\n");
+      }
+    }
+    consumer = te_group;
+  }
 
   if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
@@ -289,7 +365,29 @@ c10::optional<Node*> tryMerge(
     aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
-    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+    Node* mergedNode = SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+    if (mergedNode) {
+      for (int idx = 0; idx < mergedNode->outputs().size(); idx++) {
+        Value* v = mergedNode->output(idx);
+        if (producer_outputs_type_info[idx]) {
+          value_types[v] = *producer_outputs_type_info[idx];
+          GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
+        } else {
+          GRAPH_DEBUG(
+              "No shape info for TE group output %", v->debugName(), "!\n");
+        }
+      }
+      for (int idx = 0; idx < mergedNode->inputs().size(); idx++) {
+        Value* v = mergedNode->input(idx);
+        if (producer_inputs_type_info[idx]) {
+          value_types[v] = *producer_inputs_type_info[idx];
+          GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
+        } else {
+          GRAPH_DEBUG(
+              "No shape info for TE group input %", v->debugName(), "!\n");
+        }
+      }
+    }
   }
 
   return consumer;
@@ -297,7 +395,8 @@ c10::optional<Node*> tryMerge(
 
 std::pair<graph_node_list::iterator, bool> scanNode(
     Node* consumer,
-    AliasDb& aliasDb) {
+    AliasDb& aliasDb,
+    std::unordered_map<Value*, TensorTypePtr>& value_types) {
   auto inputs =
       sortReverseTopological(consumer->inputs(), consumer->owningBlock());
 
@@ -306,7 +405,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   // the block.
   auto iter = --consumer->reverseIterator();
   for (auto input : inputs) {
-    if (auto group = tryMerge(consumer, input->node(), aliasDb)) {
+    if (auto group = tryMerge(consumer, input->node(), aliasDb, value_types)) {
       // Resume iteration from where consumer is/used to be.
       return {++iter, true};
     }
@@ -316,14 +415,199 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
+void removeProfilingNodes_(
+    Block* b,
+    std::unordered_map<Value*, TensorTypePtr>& value_types) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+      for (auto o : it->outputs()) {
+        value_types.erase(o);
+      }
+      if (it->outputs().size()) {
+        //         it->input()->setType(it->output()->type());
+        it->output()->replaceAllUsesWith(it->input());
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfilingNodes_(ib, value_types);
+      }
+    }
+  }
+}
+
+void findValuesWithKnownSizes_(
+    Block* block,
+    std::unordered_map<Value*, TensorTypePtr>& value_types) {
+  auto reverse_iter = block->nodes().reverse();
+  for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
+    Node* n = *it++;
+
+    for (torch::jit::Value* output : n->outputs()) {
+      if (allShapesAreKnown(output)) {
+        if (auto tensor_ty = output->type()->cast<TensorType>()) {
+          value_types[output] = tensor_ty;
+        }
+      }
+    }
+
+    // constants get copied into the graph
+    if (n->kind() == prim::profile && n->outputs().size() == 1 &&
+        allShapesAreKnown(n->output())) {
+      if (auto tensor_ty = n->output()->type()->cast<TensorType>()) {
+        value_types[n->input()] = tensor_ty;
+      }
+    }
+
+    for (Block* b : n->blocks()) {
+      findValuesWithKnownSizes_(b, value_types);
+    }
+  }
+}
+
+/*
+*** INSERT GUARDS TRANSFORMATION ***
+
+Original IR:
+```
+  %a, %b = tensorexpr::Group_0(%x, %y)
+  ...
+with tensorexpr::Group_0 = graph(%p : Tensor, %q : Tensor):
+  %v = aten::gt(%p, %q)
+  %w = aten::where(%v, %p, %q)
+  return (%v, %w)
+```
+
+Should be transformed to:
+```
+  %x1 : Double(...), %check_x : bool = prim::TypeCheck(%x, true)
+  %y1 : Double(...), %check_xy : bool = prim::TypeCheck(%y, %check_x)
+  %a1, %b1 = prim::If(%check_xy)
+    block0():
+      %a, %b = tensorexpr::Group_0(%x1, %y1)
+      -> (%a, %b)
+    block1():
+      %v1 = aten::gt(%x, %y)
+      %w1 = aten::where(%v1, %x, %y)
+      -> (%v1, %w1)
+  ...
+with tensorexpr::Group_0 = graph(%p : Double(...), %q : Double(...)):
+  %v = aten::gt(%p, %q)
+  %w = aten::where(%v, %p, %q)
+  return (%v, %w)
+```
+ */
+void insertGuards(
+    Block* b,
+    std::unordered_map<Value*, TensorTypePtr>& value_types) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+    if (it->kind() != getTensorExprSymbol()) {
+      for (Block* ib : it->blocks()) {
+        insertGuards(ib, value_types);
+      }
+      it++;
+      continue;
+    }
+    GRAPH_DEBUG("Inserting guards for the node:\n", **it);
+
+    // Fixup types in subgraph inputs
+    auto te_g = it->g(attr::Subgraph);
+    for (size_t idx = 0; idx < te_g->inputs().size(); idx++) {
+      auto inp = it->input(idx);
+      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+        te_g->inputs().at(idx)->setType(value_types.at(inp));
+      }
+    }
+
+    // Add guard for inputs
+    Value* check_result = nullptr;
+    std::unordered_map<Value*, Value*> checked_values;
+    Value* cond = b->owningGraph()->insertConstant(true);
+    for (auto inp : it->inputs()) {
+      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+        auto guard = b->owningGraph()->create(prim::TypeCheck, {inp, cond}, 2);
+        auto go0 = guard->output(0);
+        cond = guard->output(1);
+        check_result = guard->output(1);
+        go0->setType(value_types.at(inp));
+        check_result->setType(BoolType::get());
+        guard->insertBefore(*it);
+        checked_values[inp] = go0;
+      }
+    }
+    // checked_values = {x -> x1, y -> y1}
+
+    if (!check_result) {
+      GRAPH_DEBUG("No checks were needed.\n");
+      continue;
+    }
+    auto fusion_group = *it;
+    it++;
+    auto versioning_if = b->owningGraph()->create(
+        prim::If, {check_result}, fusion_group->outputs().size());
+
+    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
+      fusion_group->output(i)->replaceAllUsesWith(versioning_if->output(i));
+    }
+    versioning_if->insertAfter(fusion_group);
+    auto true_block = versioning_if->addBlock();
+    auto false_block = versioning_if->addBlock();
+    fusion_group->moveBefore(true_block->return_node());
+
+    WithInsertPoint guard(false_block->return_node());
+    const auto subgraphOutputs = insertGraph(
+        *b->owningGraph(),
+        *fusion_group->g(attr::Subgraph),
+        fusion_group->inputs());
+
+    for (size_t i = 0; i < fusion_group->inputs().size(); ++i) {
+      Value* inp = fusion_group->input(i);
+      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+        fusion_group->replaceInput(
+            i, checked_values.at(fusion_group->input(i)));
+      }
+    }
+    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
+      true_block->registerOutput(fusion_group->output(i));
+      false_block->registerOutput(subgraphOutputs[i]);
+      if (value_types.count(fusion_group->output(i))) {
+        value_types[versioning_if->output(i)] =
+            value_types.at(fusion_group->output(i));
+        GRAPH_DEBUG(
+            "%",
+            versioning_if->output(i)->debugName(),
+            " -> ",
+            *value_types.at(versioning_if->output(i)),
+            "\n");
+      } else {
+        GRAPH_DEBUG(
+            "No shape info for %",
+            versioning_if->output(i)->debugName(),
+            "!\n");
+      }
+    }
+      GRAPH_DEBUG("Guarded:\n", *versioning_if);
+  }
+}
+
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
+
+  std::unordered_map<Value*, TensorTypePtr> value_types;
+
+  findValuesWithKnownSizes_(graph->block(), value_types);
+  removeProfilingNodes_(graph->block(), value_types);
+  GRAPH_DUMP("After removing profiling nodes:", graph);
+  for (const auto& kv : value_types) {
+    GRAPH_DEBUG("%", kv.first->debugName(), " -> ", *kv.second, "\n");
+  }
 
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
   AliasDb aliasDb(graph);
   auto block = graph->block();
+  //   CreateFunctionalGraphs2(graph);
 
   std::vector<std::pair<graph_node_list_iterator, graph_node_list_iterator>>
       worklist;
@@ -354,7 +638,7 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
         }
       } else {
         bool changed;
-        std::tie(it, changed) = scanNode(*it, aliasDb);
+        std::tie(it, changed) = scanNode(*it, aliasDb, value_types);
         any_changed |= changed;
         if (it == end) {
           worklist.pop_back();
@@ -362,6 +646,9 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
       }
     }
   }
+  GRAPH_DUMP("Before inserting checks:\n", graph);
+  insertGuards(graph->block(), value_types);
+  GRAPH_DUMP("After inserting checks:\n", graph);
 
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
