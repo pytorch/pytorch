@@ -15,6 +15,7 @@ import types
 import pickle
 import textwrap
 import operator
+import os
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -28,7 +29,8 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC, \
+    wrapDeterministicFlagAPITest, checkAlertCuBLASConfigNotDeterministic
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -113,17 +115,14 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
-            deterministic_restore = torch.is_deterministic()
-
             for deterministic in [True, False]:
                 torch.set_deterministic(deterministic)
                 self.assertEqual(deterministic, torch.is_deterministic())
 
             with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
                 torch.set_deterministic(1)
-
-            torch.set_deterministic(deterministic_restore)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -17043,6 +17042,51 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # check that mixed arguments are rejected
             self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cuda()))
             self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cuda(), b2))
+
+    @onlyCUDA
+    @wrapDeterministicFlagAPITest
+    def test_cublas_config_deterministic_error(self, device):
+        test_cases = [
+            # (function, (tensor sizes))
+            (torch.mm, ((2, 2), (2, 2),)),
+            (torch.mv, ((2, 2), (2,),)),
+            (torch.bmm, ((1, 2, 2), (1, 2, 2),))]
+
+        test_configs = [
+            # (config, is deterministic)
+            ('garbage', False),
+            (None, False),
+            (':4096:8', True),
+            (':16:8', True)]
+
+        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        processes = []
+        for fn, arg_sizes in test_cases:
+            args = []
+            for arg_size in arg_sizes:
+                args.append(torch.randn(*arg_size, device=device))
+
+            for config, is_config_deterministic in test_configs:
+                if config is None:
+                    if os.environ.get(cublas_var_name) is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = config
+
+                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
+                p = torch.multiprocessing.spawn(
+                    checkAlertCuBLASConfigNotDeterministic,
+                    args=(fn, args, should_throw_error),
+                    join=False
+                )
+                processes.append(p)
+
+        for p in processes:
+            p.join()
 
     @onlyCPU
     @dtypes(torch.float)

@@ -387,6 +387,79 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# This decorator can be used for API tests that call torch.set_deterministic().
+# When the test is finished, it will restore the previous deterministic flag
+# setting. Also, if CUDA >= 10.2, this will set the environment variable 
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
+# is not thrown during the test unless the test changes that variable on purpose.
+# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
+# test is finished.
+def wrapDeterministicFlagAPITest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        deterministic_restore = torch.is_deterministic()
+
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        if is_cuda10_2_or_higher:
+            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+            cublas_config_restore = os.environ.get(cublas_var_name)
+            os.environ[cublas_var_name] = ':4096:8'
+
+        def restore():
+            torch.set_deterministic(deterministic_restore)
+            if is_cuda10_2_or_higher:
+                cur_cublas_config = os.environ.get(cublas_var_name)
+                if cublas_config_restore is None:
+                    if cur_cublas_config is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = cublas_config_restore
+        try:
+            fn(*args, **kwargs)
+        except RuntimeError:
+            restore()
+            raise
+        else:
+            restore()
+    return wrapper
+
+# Check if a given function either does or does not throw an error indicating that
+# the CuBLAS workspace config is set nondeterministically. This function should be
+# called as the target of a torch.multiprocessing.spawn() call, after setting
+# os.environ['CUBLAS_WORKSPACE_CONFIG'].
+#
+# Parameters:
+#   i                   process index (required for torch.multiprocessing.spawn)
+#   fn                  function to test
+#   fn_args             args to give to fn
+#   should_throw_error  True if fn should throw the nondeterministic error
+def checkAlertCuBLASConfigNotDeterministic(i, fn, fn_args, should_throw_error):
+    def test_case_info():
+        config = os.environ.get('CUBLAS_WORKSPACE_CONFIG')
+        return 'function "%s", config "%s"' % (fn.__name__, '' if config is None else config)
+    torch.set_deterministic(True)
+    try:
+        fn(*fn_args)
+    except RuntimeError as e:
+        if should_throw_error:
+            correct_error_message = 'Deterministic behavior was enabled with either '
+            if correct_error_message not in str(e):
+                raise RuntimeError(
+                    test_case_info() + ": "
+                    + 'expected non-deterministic CuBLAS config error message to start with "'
+                    + correct_error_message + '" but got this instead: "' + str(e) + '"')
+        else:
+            raise RuntimeError(
+                test_case_info() + ": "
+                + 'did not expect an error, but got this instead: "' + str(e) + '"')
+    else:
+        if should_throw_error:
+            raise RuntimeError(
+                test_case_info() + ": "
+                + 'expected a non-deterministic CuBLAS config error, but it was not raised')
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the

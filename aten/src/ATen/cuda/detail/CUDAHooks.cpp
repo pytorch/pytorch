@@ -226,6 +226,24 @@ long CUDAHooks::versionCuDNN() const {
 #endif
 }
 
+long CUDAHooks::versionCUDART() const {
+#ifdef CUDART_VERSION
+  return CUDART_VERSION;
+#else
+  TORCH_CHECK(
+    false,
+    "Cannot query CUDART version because CUDART is not available");
+#endif
+}
+
+bool CUDAHooks::hasCUDART() const {
+#ifdef CUDART_VERSION
+  return true;
+#else
+  return false;
+#endif
+}
+
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
