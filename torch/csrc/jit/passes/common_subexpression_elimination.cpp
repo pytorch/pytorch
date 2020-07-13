@@ -72,11 +72,15 @@ void EliminateCommonSubexpression(
       auto existing = *subit.first;
 
       // don't introduce new aliasing among graph outputs
-      if (aliasDb.mayContainAlias(
-              node->outputs(), node->owningGraph()->outputs()) &&
-          aliasDb.mayContainAlias(existing->outputs(), g_out)) {
-        continue;
-      }
+      // if (aliasDb.mayContainAlias(
+      //         node->outputs(), node->owningGraph()->outputs()) &&
+      //     aliasDb.mayContainAlias(existing->outputs(), g_out)) {
+      //   GRAPH_UPDATE(
+      //       "Not replacing\n",
+      //       *node,
+      //       " to avoid introducing new aliasing for outputs\n");
+      //   continue;
+      // }
 
       GRAPH_UPDATE("Replacing\n", *node, "with\n", *existing);
       node->replaceAllUsesWith(existing);
@@ -90,8 +94,10 @@ void EliminateCommonSubexpression(
 void EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   GRAPH_DUMP("Before CSE", graph);
+  GRAPH_DEBUG("AliasDB", aliasDb.toString());
   EliminateCommonSubexpression(
       graph->block(), aliasDb, [](Node*) { return nullptr; });
+  GRAPH_DUMP("After CSE", graph);
 }
 } // namespace jit
 } // namespace torch
