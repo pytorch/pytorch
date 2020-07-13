@@ -191,8 +191,9 @@ def embedding_bag(g,
                   sparse,
                   per_sample_weights,
                   include_last_offset):
-    if scale_grad_by_freq:
-        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq')
+    global _training_mode
+    if scale_grad_by_freq and _training_mode:
+        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
     from torch.onnx.symbolic_opset9 import size, div, select
 
     # Check if initial indices was 2D. In functional.py:
