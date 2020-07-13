@@ -2879,11 +2879,10 @@ class TestONNXRuntime(unittest.TestCase):
         class EmbeddingModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.embedd = torch.nn.EmbeddingBag(40, 12, mode='sum')
+                self.embeddingbag = torch.nn.EmbeddingBag(40, 12, mode='sum')
 
-            def forward(self, x_user):
-                user = self.embedd(x_user)
-                return user
+            def forward(self, input):
+                return self.embeddingbag(input)
 
         model = EmbeddingModel()
         x = torch.randint(7, (10, 5))
@@ -2905,6 +2904,29 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.EmbeddingBag(10, 5, mode='max')
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
+
+    def test_embedding_bag_1d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, offset, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input, offsets=offset, mode='sum', per_sample_weights=weights)
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (6,))
+        w = torch.randn(6,)
+        offset = torch.tensor([0, 2])
+        embedding_matrix = torch.rand(10, 15)
+        self.run_test(model, (embedding_matrix, x, offset, w))
+
+    def test_embedding_bag_2d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input, mode='sum', per_sample_weights=weights)
+
+        embedding_matrix = torch.rand(10, 15)
+        model = EmbeddingModel()
+        x = torch.randint(7, (2, 3))
+        w = torch.randn(2, 3)
+        self.run_test(model, (embedding_matrix, x, w))
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
