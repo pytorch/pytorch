@@ -10,7 +10,7 @@
 namespace torch {
 namespace utils {
 
-static std::pair<std::string, std::string> getDtypeNames(
+std::pair<std::string, std::string> getDtypeNames(
     at::ScalarType scalarType) {
   switch (scalarType) {
     case at::ScalarType::Byte:

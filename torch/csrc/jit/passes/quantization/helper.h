@@ -77,12 +77,6 @@ TORCH_API bool isPropagateQuantOp(Node* n);
 // quantized::{op}_scalar
 TORCH_API bool isBinaryOpWithScalarInput(Node* n);
 
-// Check if the node is a aten::add with list inputs
-bool isListAdd(Node* n);
-
-// Check if the node is a empty list construct node
-bool isEmptyList(Node* n);
-
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
 
