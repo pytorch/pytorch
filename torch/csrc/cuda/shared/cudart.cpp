@@ -30,6 +30,16 @@ void initCudartBindings(PyObject* module) {
 #ifndef __HIP_PLATFORM_HCC__
   cudart.def("cudaProfilerInitialize", cudaProfilerInitialize);
 #endif
+
+  // The HIP rewrite rules mean that the functions defined above will have their
+  // names changed when built with HIP. To provide a consistent interface, we
+  // also define some versions that won't be touched by the rewrite (but will
+  // still correctly resolve to CUDA and HIP). We leave the ones above there for
+  // backwards compatibility.
+  cudart.def("getErrorString", cudaGetErrorString);
+  cudart.def("profilerStart", cudaProfilerStart);
+  cudart.def("profilerStop", cudaProfilerStop);
+  cudart.def("hostRegister", cudaHostRegister);
 }
 
 } // namespace shared
