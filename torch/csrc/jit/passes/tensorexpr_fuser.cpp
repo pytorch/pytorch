@@ -16,17 +16,6 @@
 
 namespace torch {
 namespace jit {
-void CreateFunctionalGraphs2(const std::shared_ptr<Graph>& graph);
-
-/**
- * TODO:
- * [ ] Add 2nd argument to prim::TypeCheck to allow chaining them.
- * [ ] Construct prim::If for fusion group.
- * [ ] Construct non-optimized graph in else-branch.
- * [ ] Remove fuser-pass based on functional subgraphs.
- * [ ] Cleanup.
- * [ ] Fix tests.
- */
 
 namespace tensorexpr {
 bool isSupported(Node* node) {
@@ -611,7 +600,6 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
 
   AliasDb aliasDb(graph);
   auto block = graph->block();
-  //   CreateFunctionalGraphs2(graph);
 
   std::vector<std::pair<graph_node_list_iterator, graph_node_list_iterator>>
       worklist;

@@ -1684,7 +1684,8 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
       if (it != varToSize.end()) {
         tensorSize.push_back(it->second);
       } else {
-        const IntImm* s = dynamic_cast<const IntImm*>(IRSimplifier::simplify(dim));
+        const IntImm* s =
+            dynamic_cast<const IntImm*>(IRSimplifier::simplify(dim));
         if (!s) {
           throw malformed_input("output expected Int", dim);
         }
