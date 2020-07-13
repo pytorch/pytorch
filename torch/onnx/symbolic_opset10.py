@@ -191,21 +191,24 @@ def embedding_bag(g,
                   sparse,
                   per_sample_weights,
                   include_last_offset):
-    from torch.onnx.symbolic_opset9 import size, div
-
-    if not sym_help._is_none(per_sample_weights):
-        return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
+    from torch.onnx.symbolic_opset9 import size, div, select
 
     if offsets.type().sizes() is not None:
-        if indices.node().kind() != 'prim::Param':
+        # Initial indices is 2D. In functional.py:
+        # offsets is torch.arange(0, indices.numel(), indices.size(1))
+        # Then indices is reshaped to 1D: indices.reshape(-1)
+        if indices.node().kind() == 'onnx::Reshape':
             embeddings = g.op("Gather", embedding_matrix, indices)
             dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
-            dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))),
-                        size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0]))))
-            dim_2 = size(g, embedding_matrix, g.op("Constant", value_t=torch.LongTensor([1])))
+            dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
+            dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
 
             shape = [dim_0, dim_1, dim_2]
             shape = g.op("Concat", *shape, axis_i=0)
+
+            if not sym_help._is_none(per_sample_weights):
+                per_sample_weights = g.op("Unsqueeze", per_sample_weights, axes_i=[1])
+                embeddings = g.op("Mul", embeddings, per_sample_weights)
 
             embeddings = g.op("Reshape", embeddings, shape)
             if mode == 0:
@@ -216,11 +219,8 @@ def embedding_bag(g,
                 embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
             return embeddings, None, None, None
         else:
-            from torch.onnx.symbolic_opset9 import select
-
             offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
             offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
-
             list_ = []
             for i in range(offsets.type().sizes()[0]):
                 start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
@@ -229,6 +229,10 @@ def embedding_bag(g,
                 indices_row = g.op("Slice", indices, start_, end_, axes_)
 
                 embeddings = g.op("Gather", embedding_matrix, indices_row)
+                if not sym_help._is_none(per_sample_weights):
+                    per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
+                    per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+                    embeddings = g.op("Mul", embeddings, per_sample_weights_row)
                 if mode == 0:
                     embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
                 elif mode == 1:
