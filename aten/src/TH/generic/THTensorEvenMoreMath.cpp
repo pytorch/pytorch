@@ -73,30 +73,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #undef IS_NONZERO
 }
 
-#if !defined(TH_REAL_IS_BOOL)
-
-accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
-{
-  at::NoNamesGuard guard;
-  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
-    THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimension(tensor), THTensor_nDimension(src));
-  }
-  accreal sum = 0;
-  /* we use a trick here. careful with that. */
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   int64_t sz = (tensor_size-tensor_i < src_size-src_i ? tensor_size-tensor_i : src_size-src_i);
-                   sum += THBlas_(dot)(sz, src_data, src_stride, tensor_data, tensor_stride);
-                   tensor_i += sz;
-                   src_i += sz;
-                   tensor_data += sz*tensor_stride;
-                   src_data += sz*src_stride;
-                   break;);
-  return sum;
-}
-
-#endif
-
 #if !defined(TH_REAL_IS_HALF) /* non half part */
 
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
@@ -179,64 +155,6 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
 #endif
 
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
-
-accreal THTensor_(sumall)(THTensor *tensor)
-{
-  accreal sum = 0;
-  TH_TENSOR_APPLY_REDUCTION_SUM_PARALLEL(
-    scalar_t, tensor, *tensor_data, sum, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  return sum;
-}
-
-scalar_t THTensor_(minall)(THTensor *tensor)
-{
-  scalar_t theMin;
-  scalar_t value;
-
-  THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
-      1,
-      "cannot perform reduction function min "
-      "on tensor with no elements because the "
-      "operation does not have an identity"
-  );
-
-  theMin = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value<theMin in the case of NaNs */
-                  if(!(value >= theMin))
-                  {
-                    theMin = value;
-                    th_isnan_break(value)
-                  });
-  return theMin;
-}
-
-scalar_t THTensor_(maxall)(THTensor *tensor)
-{
-  scalar_t theMax;
-  scalar_t value;
-
-  THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
-      1,
-      "cannot perform reduction function max "
-      "on tensor with no elements because the "
-      "operation does not have an identity"
-  );
-
-  theMax = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value>theMax in the case of NaNs */
-                  if(!(value <= theMax))
-                  {
-                    theMax = value;
-                    th_isnan_break(value)
-                  });
-  return theMax;
-}
 
 void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
@@ -390,7 +308,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
     {
       tSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor,dim,index_data[i]);
-      THTensor_(fill)(tSlice, val);
+      THTensor_wrap(tSlice).fill_(val);
       c10::raw::intrusive_ptr::decref(tSlice);
     }
     else

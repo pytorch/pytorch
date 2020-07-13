@@ -59,6 +59,25 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministic() const {
+  return _deterministic;
+}
+
+void Context::setDeterministic(bool b) {
+  _deterministic = b;
+}
+
+void Context::alertNotDeterministic(c10::string_view const& caller) {
+  if (globalContext().deterministic()) {
+    TORCH_CHECK(false,
+      caller, " does not have a deterministic implementation, but you set "
+      "'torch.set_deterministic(True)'. You can turn off determinism just "
+      "for this operation if that's acceptable for your application. You "
+      "can also file an issue at https://github.com/pytorch/pytorch/issues "
+      "to help us prioritize adding deterministic support for this operation.");
+  }
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }

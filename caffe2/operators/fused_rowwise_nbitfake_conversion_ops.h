@@ -36,7 +36,7 @@ void param_search_greedy(
 } // namespace internal
 
 // Fake 2/4 bit quantization
-// Creeates a 2/4bit rowwise quantized blob with scales and biases in fp16
+// Creates a 2/4bit rowwise quantized blob with scales and biases in fp16
 // The storage format is 8 bit rowwise with scales and biases in fp32
 template <
     int BIT_RATE,

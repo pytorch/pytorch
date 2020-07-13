@@ -15,17 +15,14 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto DISABLED_FALLBACK = true;
-
 namespace {
-
-KernelArgsReq expandSizeSupport(const at::IntArrayRef sizes) {
-  KernelArgsReq req;
-  for (auto size : sizes) {
-    req.low_.push_back(size);
-    req.hi_.push_back(size);
+std::unique_ptr<KernelArgsReq> makePWKernelSupport(
+    const at::ArrayRef<IValue>& inputs) {
+  auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
+  for (const auto& input : inputs) {
+    req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
   }
-  return req;
+  return req_ptr;
 }
 
 // CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
@@ -65,7 +62,10 @@ class CudaFusionManager {
       graph_cache_[repr] = kernel_id;
 
       // create entry for cached kernel;
-      kernel_cache_.insert({kernel_id, CudaKernelCache()});
+      // Note: use make_pair instead of uniform initialization list here since
+      //       it doesn't work under some env that we still support.
+      //       eg. cuda9.2 + gcc5.4
+      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
 
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)
@@ -78,32 +78,31 @@ class CudaFusionManager {
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs,
-      std::vector<at::Tensor> outputs) {
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<int64_t>& broadcasted_shape) {
     std::lock_guard<std::mutex> guard(mutex_);
     TORCH_CHECK(
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     // TODO: temporary hack
-    auto cuda_kernel =
-        kernel_cache_[kernel_id].getKernelPtr(outputs[0].sizes());
+    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(inputs);
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel, inputs, outputs);
+      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
     } else {
-      // major HACK!
-      auto kernel_arg_req = expandSizeSupport(outputs[0].sizes());
-      cuda_kernel =
-          kernel_cache_[kernel_id].allocateKernelInCache(kernel_arg_req);
+      // TODO: this should somehow be done after kernel compilation.
+      //       we will want compileKernel to return a heuristic
+      cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(
+          makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      Fusion fusion;
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
       // we should propagate more information back:
       //   1. device;
       //   2. launch config;
-      parseJitIR(graph, fusion, cuda_kernel.value());
+      parseJitIR(graph, cuda_kernel.value());
 
       // find device in inputs.
       for (const auto& input : inputs) {
@@ -117,9 +116,9 @@ class CudaFusionManager {
       }
 
       // NVRTC compile kernel
-      compileKernel(fusion, cuda_kernel.value());
+      compileKernel(cuda_kernel.value());
 
-      runKernel(*cuda_kernel, inputs, outputs);
+      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
     }
   }
 
@@ -156,7 +155,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
   fusion_node->i_(attr::cache_id, fusion_cache_id);
 }
 
-void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
+void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "prim::CudaFusionGroup expected");
@@ -170,23 +169,29 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   // Currently we just construct I/O tensors for static graph;
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
-  try {
+  auto execute_lambda = [&]() {
     const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     // shape inference in graph
     // update shape information per the new inputs;
     EraseShapeInformation(graph);
-    for (int i = 0; i < nInputs; i++) {
+    for (size_t i = 0; i < nInputs; i++) {
       graph->inputs()[i]->setType(inputs[i].type());
     }
     // shape inference
     ShapeTypePropagate(graph);
 
+    // TODO: temporary WAR that allows us to handle fusion with uniform output
+    // shape and consistent broadcast scheme. The difinition is loose and the
+    // implementation is risky. We'll do this properly when we integrate proper
+    // broadcast support.
+    std::vector<int64_t> broadcasted_shape;
+
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
-    for (const auto* const output : graph->outputs()) {
-      auto type = output->type()->expect<TensorType>();
+    for (const auto* output : graph->outputs()) {
+      const auto type = output->type()->expect<TensorType>();
       // Expect output to be tensor;
       TORCH_CHECK(
           type && type->isComplete(),
@@ -205,20 +210,57 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       const auto sizes = extractSizes(type);
       const auto strides = extractStrides(type);
 
-      auto tensor = at::empty_strided(sizes, strides, options);
+      const auto tensor = at::empty_strided(sizes, strides, options);
       outputs.push_back(tensor);
+
+      // TODO: unsafe broadcast assumption. We assume all output from fusion has
+      //       identical size when broadcasting.
+      if (broadcasted_shape.empty()) {
+        if (!hasReductionNode(graph->block())) {
+          broadcasted_shape = sizes;
+        } else if (isReductionNode(output->node())) {
+          auto i_type =
+              output->node()->inputs()[0]->type()->expect<TensorType>();
+          TORCH_CHECK(
+              i_type && i_type->sizes().isComplete(),
+              "Complete TensorType for output is expected.");
+          broadcasted_shape = extractSizes(i_type);
+        } else {
+          // TODO: this assert is not fool proof. We could have ignored
+          // pre-reduction tensor marked as output after we first encountered
+          // reduction output tensor.
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
+        }
+      }
     }
+
     CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs);
+        kernel_id, graph, inputs, outputs, broadcasted_shape);
     drop(stack, inputs.size());
     stack.insert(
         stack.end(),
         std::make_move_iterator(outputs.begin()),
         std::make_move_iterator(outputs.end()));
-  } catch (...) {
-    TORCH_CHECK(!DISABLED_FALLBACK, "codegen errored out.");
-    EraseShapeInformation(graph);
-    InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
+  };
+
+  const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
+  int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
+  if (disable_fb_flag) {
+    execute_lambda();
+  } else {
+    try {
+      execute_lambda();
+    } catch (...) {
+      TORCH_WARN(
+          "FALLBACK path is taken. This is an indication that codegen"
+          "Failed for some reason. To debug try disable codegen fallback path"
+          "via setting the env variable"
+          "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
+      EraseShapeInformation(graph);
+      InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
+    }
   }
 }
 

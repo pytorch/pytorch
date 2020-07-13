@@ -3,6 +3,7 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 namespace at { namespace native {
@@ -14,28 +15,6 @@ namespace at { namespace native {
 constexpr int num_threads = NUM_THREADS;
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 constexpr int block_work_size = BLOCK_WORK_SIZE;
-
-// `needs_dynamic_casting` compares the types expected by iterator
-// (i.e. dtypes of the operands) with the actual type of the arguments
-// of func_t
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct needs_dynamic_casting {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
-      return true;
-    }
-    return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
-  }
-};
-
-template<typename func_t>
-struct needs_dynamic_casting<func_t, 0> {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
-  }
-};
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
@@ -76,7 +55,6 @@ namespace at { namespace native {
 
 template <typename func_t>
 void gpu_kernel(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
@@ -96,6 +74,36 @@ void gpu_kernel(TensorIterator& iter, const func_t& f) {
   gpu_kernel_impl(iter, f);
 }
 
+template<typename func_t>
+struct AUnaryFunctor {
+  using traits = function_traits<func_t>;
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+  using return_t = typename traits::result_type;
+  __device__ return_t operator()(arg2_t b) const {
+    return f(a, b);
+  }
+  AUnaryFunctor(func_t f_, arg1_t a_): f(f_), a(a_) {}
+  private:
+    func_t f;
+    arg1_t a;
+};
+
+template<typename func_t>
+struct BUnaryFunctor {
+  using traits = function_traits<func_t>;
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+  using return_t = typename traits::result_type;
+  __device__ return_t operator()(arg1_t a) const {
+    return f(a, b);
+  }
+  BUnaryFunctor(func_t f_, arg2_t b_): f(f_), b(b_) {}
+  private:
+    func_t f;
+    arg2_t b;
+};
+
 template <typename func_t>
 void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
@@ -106,22 +114,17 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
 
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
   if (iter.is_cpu_scalar(1)) {
-    using arg1_t = typename traits::template arg<0>::type;
-    using arg2_t = typename traits::template arg<1>::type;
-    auto a = iter.scalar_value<arg1_t>(1);
+    AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
     iter.remove_operand(1);
-    gpu_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
-      return f(a, b);
-    });
+    const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
+    gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
-    using arg1_t = typename traits::template arg<0>::type;
-    using arg2_t = typename traits::template arg<1>::type;
-    auto b = iter.scalar_value<arg2_t>(2);
+    BUnaryFunctor<func_t> bf(f, iter.scalar_value<arg2_t>(2));
     iter.remove_operand(2);
-    gpu_kernel(iter, [=]GPU_LAMBDA(arg1_t a) {
-      return f(a, b);
-    });
+    gpu_kernel(iter, bf);
   } else {
     gpu_kernel(iter, f);
   }

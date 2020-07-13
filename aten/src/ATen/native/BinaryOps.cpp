@@ -7,10 +7,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
+DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
@@ -36,6 +39,8 @@ DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
+DEFINE_DISPATCH(logaddexp_stub);
+DEFINE_DISPATCH(logaddexp2_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -58,10 +63,57 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::add_out(self, self, other, alpha);
 }
 
+Tensor& add_relu_impl(
+    Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  Scalar min_val;
+  Scalar max_val;
+  if (self.dtype() == at::kInt) {
+    min_val = 0;
+    max_val = std::numeric_limits<int32_t>::max();
+  } else if (self.dtype() == at::kLong) {
+    min_val = 0;
+    max_val = std::numeric_limits<int64_t>::max();
+  } else if (self.dtype() == at::kShort) {
+    min_val = 0;
+    max_val = std::numeric_limits<int16_t>::max();
+  } else if (self.dtype() == at::kChar) {
+    min_val = 0;
+    max_val = std::numeric_limits<int8_t>::max();
+  } else if (self.dtype() == at::kFloat) {
+    min_val = 0.0;
+    max_val = std::numeric_limits<float>::max();
+  } else if (self.dtype() == at::kDouble) {
+    min_val = 0.0;
+    max_val = std::numeric_limits<double>::max();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        "Unsupported datatype for add_relu:", self.dtype().name());
+  }
+
+  result = iter.output();
+  add_clamp_stub(iter.device_type(), iter, alpha, min_val, max_val);
+  return result;
+}
+
+Tensor& add_relu_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  return add_relu_impl(result, self, other, alpha);
+}
+
+Tensor add_relu(const Tensor& self, const Tensor& other, Scalar alpha) {
+  Tensor result;
+  return add_relu_impl(result, self, other, alpha);
+}
+
+Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return add_relu_impl(self, self, other, alpha);
+}
+
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated, ",
+    TORCH_CHECK(false,
+      "Integer division of tensors using div or / is no longer supported, ",
       "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
@@ -75,11 +127,12 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 Tensor div(const Tensor& self, const Tensor& other) {
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated, ",
+    TORCH_CHECK(false,
+      "Integer division of tensors using div or / is no longer supported, ",
       "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
+
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -109,23 +162,34 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
-            "True division requires a floating output type, but got ",
-            result.scalar_type());
+  // If both inputs have integral (or bool) types, creates
+  // temporary float copies as new inputs.
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    auto iter = TensorIterator::binary_op(result,
+                                          self.to(scalar_type),
+                                          divisor.to(scalar_type),
+                                          /*check_mem_overlap=*/ true);
+    div_stub(iter.device_type(), iter);
+    return result;
+  }
   auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
   div_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor true_divide(const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, sets the output to have
-  // the default (floating) scalar type
+  // If both inputs have integral (or bool) types, creates
+  // temporary float copies as new inputs and sets the result's type to
+  // the default scalar type
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
    && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
     const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
     Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-
-    auto iter = TensorIterator::binary_op(result, self, divisor);
+    auto iter = TensorIterator::binary_op(result,
+                                          self.to(scalar_type),
+                                          divisor.to(scalar_type));
     div_stub(iter.device_type(), iter);
     return result;
   }
@@ -742,6 +806,28 @@ Tensor& fmod_(Tensor& self, Scalar other) {
   return at::fmod_out(self, self, other);
 }
 
+Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp_out(result, self, other);
+}
+
+Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp2_out(result, self, other);
+}
+
 Tensor true_divide(const Tensor& self, Scalar divisor) {
   return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
@@ -754,6 +840,38 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 // It is undocumented and should not be used outside of tests.
 Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
+}
+
+// TODO: Deduplicate this with the TensorIterator logic.  This would
+// also fix the TODOs below.
+Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
+  // TODO: Doesn't do type promotion correctly
+  // TODO: Doesn't do strides correctly
+  int64_t dim = std::max(self.dim(), other.dim());
+  std::vector<int64_t> sizes(dim);
+  for (int64_t i = 0; i < dim; i++) {
+    int64_t j = -1 - i;
+    if (i >= self.dim() || self.size(j) == 1) {
+      sizes[dim + j] = other.size(j);
+    } else if (i >= other.dim() || self.size(i) == 1) {
+      sizes[dim + j] = self.size(j);
+    } else {
+      TORCH_CHECK(
+        self.size(j) == other.size(j),
+        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
+      );
+      sizes[dim + j] = self.size(j);
+    }
+  }
+  return at::empty_meta(sizes, self.options());
+}
+
+Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
+  return binary_op_meta(self, other);
+}
+
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+  m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
 

@@ -17,7 +17,7 @@ import unittest
 
 class TestErfOp(serial.SerializedTestCase):
     @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)),
+        X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
     def test_erf(self, X, gc, dc):
         op = core.CreateOperator('Erf', ["X"], ["Y"])

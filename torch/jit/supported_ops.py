@@ -89,7 +89,7 @@ def _get_nn_functional_ops():
             pass
 
     # Iterate over modules that we know contain a lot of builtins
-    for mod in torch.jit._modules_containing_builtins:
+    for mod in torch.jit._builtins._modules_containing_builtins:
         name = mod.__name__
         for elem in dir(mod):
             builtin = torch.jit._find_builtin(getattr(mod, elem))
@@ -103,8 +103,13 @@ def _get_nn_functional_ops():
 
 def _get_builtins_helper():
     builtins = []
-    for fn, _builtin_name in torch.jit._builtin_ops:
+    for fn, _builtin_name in torch.jit._builtins._builtin_ops:
         mod = inspect.getmodule(fn)
+        if not hasattr(fn, '__name__'):
+            # typing classes
+            continue
+        if not mod:
+            continue
         if _hidden(fn.__name__) or _hidden(fn.__qualname__) or _hidden(mod.__name__):
             # skip internal-only methods
             continue
@@ -225,7 +230,7 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
-        magic_methods_rows.append('":any:`{}`", "``{}``"'.format(fn, magic_method))
+        magic_methods_rows.append('"{}", "``{}``"'.format(fn, magic_method))
 
     schematized_ops = []
     schemaless_ops = []
@@ -264,7 +269,7 @@ The following functions will use the corresponding magic method on :any:`TorchSc
 
 {}
 
-These built-in functions do have a schema
+These built-in functions use the schema
 
 .. rst-class:: codeblock-height-limiter
 

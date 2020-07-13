@@ -12,6 +12,9 @@
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -44,9 +47,10 @@ struct ConvParams {
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
-  bool use_mkldnn(const at::Tensor& input) const;
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_vulkan(const at::Tensor& input, const at::Tensor& weight) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -134,7 +138,7 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) && !defined(C10_IOS)
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
          (input.size(1) == groups) &&
@@ -197,12 +201,14 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (deterministic && is_dilated()) {
-    // cudnn doesn't support deterministic dilated convolution fully yet
-    return false;
-  }
-  if (is_dilated()) {
-    return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
+  if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
+    if (deterministic && is_dilated()) {
+      // cudnn doesn't support deterministic dilated convolution fully yet
+      return false;
+    }
+    if (is_dilated()) {
+      return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
+    }
   }
   return !is_output_padding_big();
 }
@@ -221,7 +227,7 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
-auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
+auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
@@ -229,9 +235,10 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
-     !is_dilated() && // doesn't support dilation
      !transposed && // or transposed tensors
-     input.ndimension() == 4); // must be in NCHW format
+     input.ndimension() == 4 &&  // must be in NCHW format
+     (groups > 1 || weight.size(2) > 3 || input.size(0) > 1
+      || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
 #endif
   return false;
 }
@@ -256,9 +263,7 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -272,6 +277,20 @@ auto ConvParams::use_xnnpack(
   }
 #endif
   return false;
+}
+
+auto ConvParams::use_vulkan(
+        const at::Tensor &input, const at::Tensor& weight) const -> bool {
+#ifdef USE_VULKAN
+  if (!(input.is_vulkan() && input.scalar_type() == kFloat &&
+        !transposed && input.ndimension() == 4)) {
+    return false;
+  }
+  return (groups == 1) || (input.size(1) == groups && groups > 1 &&
+                           weight.size(0) % input.size(1) == 0);
+#else
+  return false;
+#endif
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -400,6 +419,9 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
+    return true;
+  }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
@@ -578,7 +600,7 @@ at::Tensor convolution(
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN() || ctx.deterministic(), ctx.userEnabledCuDNN());
 }
 
 at::Tensor convolution_overrideable(
@@ -669,6 +691,12 @@ at::Tensor _convolution(
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+#ifdef USE_VULKAN
+      } else if (params.use_vulkan(input, weight)) {
+        output = at::native::vulkan_convolution(
+            input, weight, bias,
+            params.padding, params.stride, params.dilation, params.groups);
+#endif
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
@@ -712,7 +740,7 @@ at::Tensor _convolution(
           input.contiguous(), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
-  } else if (params.use_mkldnn(input)) {
+  } else if (params.use_mkldnn(input, weight)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
@@ -761,6 +789,12 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
+#ifdef USE_VULKAN
+  } else if (params.use_vulkan(input, weight)) {
+    output = at::native::vulkan_convolution(
+        input, weight, bias,
+        params.padding, params.stride, params.dilation, params.groups);
+#endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
@@ -927,8 +961,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         ggO = ggW_term;
       }
     }
-  } else {
-    ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (ggb.defined()) {
@@ -1017,8 +1049,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         }
       }
     }
-  } else {
-    gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -1106,13 +1136,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         gI = gIt.transpose(0, 1);
       }
     }
-  } else {
-    gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }

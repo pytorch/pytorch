@@ -210,42 +210,42 @@ TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withoutReturn_whenCallingUnboxe
 }
 
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
 TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
 }
 
 TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withoutReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
 }
 
 TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_with_return), &kernels::unboxed_function_with_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
 TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(kernels::unboxed_function_without_return), &kernels::unboxed_function_without_return>();
+  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 

@@ -47,14 +47,14 @@ class SmoketestJob:
         props_dict = {
             "build_environment": " ".join(self.build_env_parts),
             "name": self.job_name,
-            "requires": ["setup"] + self.requires,
+            "requires": self.requires,
         }
 
         if self.docker_image:
             props_dict["docker_image"] = self.docker_image
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         if self.has_libtorch_variant:
             props_dict["libtorch_variant"] = "shared-with-deps"

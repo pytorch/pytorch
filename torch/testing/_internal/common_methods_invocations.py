@@ -104,7 +104,7 @@ def ident(x):
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
 #   test variant name (will be used at test name suffix),    // optional
-#   (True, nonfusible_nodes, fusible_nodes) for autodiff,    // optional
+#   (should_check_autodiff[bool], nonfusible_nodes, fusible_nodes) for autodiff, // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs                                                   // optional
@@ -117,6 +117,8 @@ def ident(x):
 def method_tests():
     set_rng_seed(0)
     return [
+        ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, ''),
+        ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar'),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -126,6 +128,10 @@ def method_tests():
         ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
+        ('asinh', (S, S, S), NO_ARGS, ''),
+        ('asinh', (), NO_ARGS, 'scalar'),
+        ('atanh', torch.rand(S, S, S), NO_ARGS, ''),
+        ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar'),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
@@ -197,6 +203,8 @@ def method_tests():
         ('flip', (S, S, S), ([0, 2],), 'd02'),
         ('flip', (S, S, S), ([2, 0],), 'd20'),
         ('flip', (S, S, S), ([-1],), 'neg_d'),
+        ('fliplr', (S, S, S), ()),
+        ('flipud', (S, S, S), ()),
         ('roll', (S, S, S), (0, 0), 'd0'),
         ('roll', (S, S, S), (1, 2), 'd12'),
         ('roll', (S, S, S), (0, 2,), 'd02'),
@@ -254,6 +262,8 @@ def method_tests():
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
+        ('absolute', (S, S, S), NO_ARGS, '', (False,)),
+        ('absolute_', (S, S, S), NO_ARGS, '', (False,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -292,6 +302,8 @@ def method_tests():
         ('floor', (), NO_ARGS, 'scalar', (True,)),
         ('ceil', (S, S, S), NO_ARGS, '', (True,)),
         ('ceil', (), NO_ARGS, 'scalar', (True,)),
+        ('rad2deg', (S, S, S), NO_ARGS),
+        ('deg2rad', (S, S, S), NO_ARGS),
         ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('frac', (S, S, S), NO_ARGS, '', (True,)),
@@ -430,6 +442,9 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
+        ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
+        ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
         ('cummax', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummax', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummax', (), (0,), 'dim0_scalar', (), [0]),
@@ -559,6 +574,8 @@ def method_tests():
         ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), (), ident, {'value': 0.5}),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
+        ('logaddexp', (S, S), ((S, S),)),
+        ('logaddexp2', (S, S), ((S, S),)),
         ('logsumexp', (S, S), (1,), '', (True,)),
         ('logsumexp', (), (0,), 'scalar', (True,)),
         ('norm', (S, S), (), 'default'),
