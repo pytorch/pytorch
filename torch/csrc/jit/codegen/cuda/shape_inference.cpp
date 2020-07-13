@@ -225,7 +225,7 @@ class NaiveShapeTypePropagator {
 
 } // namespace
 
-TORCH_CUDA_API void ShapeTypePropagate(std::shared_ptr<Graph>& graph) {
+void ShapeTypePropagate(std::shared_ptr<Graph>& graph) {
   NaiveShapeTypePropagator(graph).run();
 }
 

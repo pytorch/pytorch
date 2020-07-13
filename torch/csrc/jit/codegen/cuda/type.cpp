@@ -405,63 +405,45 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   return at_type2data_type(scalar_type);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ValType vtype) {
+std::ostream& operator<<(std::ostream& out, const ValType vtype) {
   return out << val_type2string(vtype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const DataType dtype) {
+std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   return out << data_type2string(dtype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ExprType etype) {
+std::ostream& operator<<(std::ostream& out, const ExprType etype) {
   return out << expr_type2string(etype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const UnaryOpType uotype) {
+std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
   return out << unary_op_type2string(uotype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const BinaryOpType botype) {
+std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
   return out << binary_op_type2string(botype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const TernaryOpType totype) {
+std::ostream& operator<<(std::ostream& out, const TernaryOpType totype) {
   return out << ternary_op_type2string(totype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ParallelType ptype) {
+std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   return out << stringifyThread(ptype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const MemoryType mtype) {
+std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
 }
 
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(
-    const UnaryOpType uotype) {
+c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
 }
 
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(
-    const BinaryOpType botype) {
+c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   const char* str = binary_op_type_inline_op2string(botype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
@@ -475,7 +457,7 @@ std::string stringifyThread(const ParallelType ptype) {
   return parallel_type2string(ptype);
 }
 
-TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>& cast) {
   const char* str = supported_casts2string(cast);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
