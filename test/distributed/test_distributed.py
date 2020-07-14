@@ -2224,6 +2224,7 @@ class _DistTestBase(object):
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_nccl_backend_bool_reduction(self):
         torch.cuda.set_device(self.rank)
         # Run all_reduce with PRODUCT
@@ -2247,6 +2248,7 @@ class _DistTestBase(object):
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_nccl_backend_bool_allgather(self):
         torch.cuda.set_device(self.rank)
         inp = {0: [True, True], 1: [False, True]}
@@ -2270,6 +2272,7 @@ class _DistTestBase(object):
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_nccl_backend_bool_reduce(self):
         torch.cuda.set_device(self.rank)
         inp = {0: [True, True], 1: [False, False]}
@@ -2290,6 +2293,7 @@ class _DistTestBase(object):
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_nccl_backend_bool_broadcast(self):
         tensor_size = 10
         bcast_tensor = torch.tensor(
