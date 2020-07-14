@@ -29,6 +29,24 @@ void adaptive_avg_pool2d(
     int64_t _N,
     int64_t _C);
 
+void max_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    int iH,
+    int iW,
+    int oH,
+    int oW,
+    int _n,
+    int _c,
+    int kH,
+    int kW,
+    int dH,
+    int dW,
+    int padH,
+    int padW,
+    int dilationH,
+    int dilationW);
+
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape);

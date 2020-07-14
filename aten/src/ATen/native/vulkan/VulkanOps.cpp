@@ -140,6 +140,74 @@ void adaptive_avg_pool2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+void max_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    int iH,
+    int iW,
+    int oH,
+    int oW,
+    int _n,
+    int _c,
+    int kH,
+    int kW,
+    int dH,
+    int dW,
+    int padH,
+    int padW,
+    int dilationH,
+    int dilationW) {
+  auto device = context().device();
+  const auto c = _n * _c;
+  struct ConstBlock {
+    int32_t inputSize[4];
+    int32_t outputSize[4];
+    int32_t kernelSize[2];
+    int32_t stride[2];
+    int32_t padding[2];
+    int32_t dilate[2];
+  };
+  ConstBlock cb{
+      {iW, iH, c, 0},
+      {oW, oH, c, 0},
+      {kW, kH},
+      {dW, dH},
+      {padW, padH},
+      {dilationW, dilationH},
+  };
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(max_pool2d),
+                          descriptorSetLayout,
+                          workGroupSize};
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
+  computeUnit.dispatchCommandBuffer(oW, oH, c, workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
