@@ -95,6 +95,25 @@ TEST(VulkanTest, add_cpu_vulkan) {
   ASSERT_TRUE(almostEqual(t_out2, t_out_expected));
 }
 
+TEST(VulkanTest, add_) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_in0 = at::rand({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 = at::rand({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+
+  t_in0.add_(t_in1, 2);
+  tv_in0.add_(tv_in1, 2);
+  auto t_out = tv_in0.cpu();
+  bool check = almostEqual(t_out, t_in0);
+  if (!check) {
+    std::cout << "expected:\n" << t_in0 << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanTest, conv2d) {
   if (!at::vulkan::is_available())
     return;
@@ -210,6 +229,24 @@ TEST(VulkanTest, hardtanh_) {
   auto t_out = tv_out.cpu();
 
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, relu_) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t = at::empty({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in = t.uniform_(-1, 1);
+  auto tv_in = t_in.vulkan();
+
+  t_in.relu_();
+  tv_in.relu_();
+  auto tv_out = tv_in.cpu();
+  bool check = almostEqual(t_in, tv_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_in << std::endl;
+    std::cout << "got:\n" << tv_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, mean) {

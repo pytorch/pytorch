@@ -274,6 +274,20 @@ Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
+Tensor& vulkan_add_(Tensor& self, const Tensor& other, Scalar alpha) {
+  auto xt = self.is_vulkan() ? self : self.vulkan();
+  VulkanTensor& x = vtensor_from_vulkan(xt);
+  auto yt = other.is_vulkan() ? other : other.vulkan();
+  VulkanTensor& y = vtensor_from_vulkan(yt);
+  float a = alpha.to<float>();
+
+  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  output.allocate_storage();
+  vulkan::detail::add(output, x, y, a);
+  x = std::move(output);
+  return self;
+}
+
 at::Tensor vulkan_convolution(
     const at::Tensor& input, // Vulkan
     const at::Tensor& weight, // CPU
@@ -420,20 +434,27 @@ Tensor vulkan_clamp(
   VulkanTensor& x = vtensor_from_vulkan(self);
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
   output.allocate_storage();
-  float minValue = min.has_value() ? min.value().to<float>()
-                                   : std::numeric_limits<float>::min();
-  float maxValue = max.has_value() ? max.value().to<float>()
-                                   : std::numeric_limits<float>::max();
-  vulkan::detail::clamp(output, x, minValue, maxValue);
+  vulkan::detail::clamp(
+      output,
+      x,
+      min ? min.value().to<float>() : -std::numeric_limits<float>::infinity(),
+      max ? max.value().to<float>() : std::numeric_limits<float>::infinity());
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
-Tensor& _clamp__vulkan(
+Tensor& vulkan_clamp_(
     Tensor& self,
     c10::optional<Scalar> min,
     c10::optional<Scalar> max) {
-  auto y = vulkan_clamp(self, min, max);
-  self.copy_(y);
+  VulkanTensor& x = vtensor_from_vulkan(self);
+  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  output.allocate_storage();
+  vulkan::detail::clamp(
+      output,
+      x,
+      min ? min.value().to<float>() : -std::numeric_limits<float>::infinity(),
+      max ? max.value().to<float>() : std::numeric_limits<float>::infinity());
+  x = std::move(output);
   return self;
 }
 
@@ -442,7 +463,11 @@ Tensor vulkan_hardtanh(const Tensor& self, Scalar min, Scalar max) {
 }
 
 Tensor& vulkan_hardtanh_(Tensor& self, Scalar min, Scalar max) {
-  return _clamp__vulkan(self, min, max);
+  return vulkan_clamp_(self, min, max);
+}
+
+Tensor& vulkan_relu_(Tensor& self) {
+  return vulkan_clamp_(self, 0, nullopt);
 }
 
 Tensor mean_vulkan(
