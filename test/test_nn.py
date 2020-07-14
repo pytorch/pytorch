@@ -269,6 +269,47 @@ class TestAvgPool(TestCase):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
                                lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
+    def test_avg_pool1d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4))
+        y = torch.nn.functional.avg_pool1d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=1, stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool1d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=1, stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
+    def test_avg_pool2d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4, 4))
+        y = torch.nn.functional.avg_pool2d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
+            padding=(0, 1), stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool2d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
+                padding=(0, 1), stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
+    def test_avg_pool3d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4, 4, 4))
+        y = torch.nn.functional.avg_pool3d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool3d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -8714,6 +8755,21 @@ class TestFusionEval(TestCase):
         Y_hat = conv_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
+
+
+class TestAddRelu(TestCase):
+    def test_add_relu(self):
+        a = torch.rand((7, 11))
+        b = torch.rand((7, 11))
+        a = a.float()
+        b = b.float()
+        a = a * -10
+        a = a + 5
+        add_res = a + b
+        relu_res = torch.relu(add_res)
+        add_relu_res = torch.add_relu(a, b)
+
+        self.assertTrue(torch.allclose(add_relu_res, relu_res))
 
 
 def add_test(test, decorator=None):
