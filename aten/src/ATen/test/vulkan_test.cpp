@@ -706,6 +706,35 @@ TEST(VulkanTest, cat) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanTest, tensor5d) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in = at::rand({2, 2, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto tv_in = t_in.vulkan();
+}
+
+//TEST(VulkanTest, view) {
+//  if (!at::vulkan::is_available())
+//    return;
+//
+//  auto t_in =
+//      at::rand({2, 4, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+//
+//  auto t_out_expected = t_in.view({2, 2, 2, 3, 3});
+//
+//  auto tv_in = t_in.vulkan();
+//  auto tv_out = tv_in.view({2, 2, 2, 3, 3});
+//  auto t_out = tv_out.cpu();
+//
+//  const auto check = almostEqual(t_out, t_out_expected);
+//  if (!check) {
+//    std::cout << "expected:" << t_out_expected << std::endl;
+//    std::cout << "got:" << t_out << std::endl;
+//  }
+//  ASSERT_TRUE(check);
+//}
+
 TEST(VulkanTest, max_pool2d) {
   if (!at::vulkan::is_available())
     return;

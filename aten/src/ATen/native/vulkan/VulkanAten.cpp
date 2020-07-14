@@ -297,6 +297,11 @@ at::Tensor vulkan_cat(TensorList tensors, int64_t dim) {
   return new_with_vtensor_vulkan(std::move(output), tensor.options());
 }
 
+Tensor vulkan_view(const Tensor& self, IntArrayRef size) {
+  //auto inferred_size = at::infer_size(size, self.numel());
+  return self;
+}
+
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
   VulkanTensor& x = vtensor_from_vulkan(xt);
