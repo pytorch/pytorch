@@ -527,6 +527,36 @@ void listSetItem(Stack* stack);
       },                                                           \
       aliasAnalysisFromSchema())
 
+#define DEFINE_SCALAR_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
+  Operator(                                                               \
+      #aten_op ".Scalar_Scalar(Scalar a, Scalar b) -> " #result,          \
+      [](Stack* stack) {                                                  \
+        IValue x, y;                                                      \
+        pop(stack, x, y);                                                 \
+        if (x.isDouble()) {                                               \
+          if (y.isDouble()) {                                             \
+            double a = x.toDouble();                                      \
+            double b = y.toDouble();                                      \
+            push(stack, float_op);                                        \
+          } else {                                                        \
+            double a = x.toDouble();                                      \
+            int64_t b = y.toInt();                                        \
+            push(stack, float_op);                                        \
+          }                                                               \
+        } else {                                                          \
+          if (y.isDouble()) {                                             \
+            int64_t a = x.toInt();                                        \
+            double b = y.toDouble();                                      \
+            push(stack, float_op);                                        \
+          } else {                                                        \
+            int64_t a = x.toInt();                                        \
+            int64_t b = y.toInt();                                        \
+            push(stack, int_op);                                          \
+          }                                                               \
+        }                                                                 \
+      },                                                                  \
+      aliasAnalysisFromSchema())
+
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float),    \

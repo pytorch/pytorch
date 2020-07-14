@@ -78,6 +78,10 @@ def type_argument_translations(arg):
         t = 'double'
     elif t == 'float?':
         t = 'double?'
+    elif t == 'float[]':
+        t = 'ArrayRef<double>'
+    elif t == 'float[]?':
+        t = 'ArrayRef<double>?'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
