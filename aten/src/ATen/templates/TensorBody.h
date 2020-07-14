@@ -530,6 +530,8 @@ class CAFFE2_API Tensor {
 
   /// Return a mutable reference to the gradient. This is conventionally
   /// used as `t.grad() = x` to set a gradient to a completely new tensor.
+  /// Note that this function work with a non-const Tensor and is not
+  /// thread safe.
   Tensor& mutable_grad() {
     return impl_->mutable_grad();
   }
