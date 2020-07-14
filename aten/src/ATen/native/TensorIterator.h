@@ -300,7 +300,6 @@ protected:
 
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
-  void analyze_memory_format();
   void mark_outputs();
   void compute_mem_overlaps(const TensorIteratorConfig&);
   void compute_shape(const TensorIteratorConfig&);
@@ -313,8 +312,14 @@ protected:
   bool fast_set_up(const TensorIteratorConfig&);
   FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
   void compute_names(const TensorIteratorConfig&);
+  void resize_outputs(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
+
+  template <int dim, MemoryFormat memory_format> bool requires_channels_last_nd_output();
+  bool requires_channels_last_2d_output();
+  bool requires_channels_last_3d_output();
+
 
 protected:
 
@@ -396,10 +401,6 @@ protected:
   /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;
   bool final_output_ = true;
-
-  /// Set by analyze_memory_format(), specifies the memory layout of the output.
-  bool requires_channels_last_output_ = false;
-  bool requires_channels_last_3d_output_ = false;
 
   // From TensorIteratorConfig
   bool is_reduction_ = false;
@@ -499,8 +500,8 @@ public:
     return *this;
   }
 
-  TensorIteratorConfig& dont_resize_outputs() {
-    resize_outputs_ = false;
+  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+    resize_outputs_ = resize_outputs;
     return *this;
   }
 
@@ -515,7 +516,7 @@ public:
     // WARNING:
     //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
     //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
     static_shape_ = c10::make_optional(DimVector(shape));
     return *this;
   }

@@ -127,6 +127,28 @@ def div__0_3(self: Tensor, other: number) -> Tensor:
   return self.floor_divide_(other)
 )SCRIPT";
 
+// NOTE: torch.full would historically infer a float dtype for bool and
+//   integral fill values.
+// NOTE: Torchscript does not currently support complex values
+// NOTE: Torchscript does not currently support named tensors, although
+//   torch.full does have a named tensor variant
+auto full = R"SCRIPT(
+def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
+             layout:Optional[int]=None, device:Optional[Device]=None,
+             pin_memory:Optional[bool]=None) -> Tensor:
+  if dtype is None:
+    fill_value = float(fill_value)
+
+  return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT";
+
+// NOTE: the out variant of full works the same, but must be overridden
+//   since the other variant of full is overridden
+auto full_out = R"SCRIPT(
+def full_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
+  return torch.full(size, fill_value, out=out)
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
     const static std::vector<Function*> empty;
@@ -204,6 +226,8 @@ struct BuiltinFunctionRegistry {
     loadSource(div__tensor, "upgraders");
     loadSource(div_tensor_out, "upgraders");
     loadSource(div__scalar, "upgraders");
+    loadSource(full, "upgraders");
+    loadSource(full_out, "upgraders");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods

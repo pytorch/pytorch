@@ -145,6 +145,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
+  auto first_tensor_mem_format = tensors[0].suggest_memory_format();
   for (int i = 0; i < tensors.size(); i++) {
     auto const &tensor = tensors[i];
     if (should_skip(tensor)) {
@@ -155,7 +156,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
     cat_dim_size += tensor.size(dim);
 
-    if (!tensor.is_contiguous()) {
+    if (!tensor.is_contiguous(first_tensor_mem_format)) {
       allContiguous = false;
     }
 
@@ -170,11 +171,14 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  result.resize_(result_size);
+  result.resize_(result_size, first_tensor_mem_format);
+  if (result.numel() == 0) {
+    return result;
+  }
 
   // fast path for single thread when both inputs and result are contiguous and not empty
+  allContiguous = allContiguous && result.is_contiguous(first_tensor_mem_format);
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  allContiguous = allContiguous && result.is_contiguous();
   ScalarType dtype = notSkippedTensor.scalar_type();
   if (use_serial_kernel && allContiguous && no_type_promotion && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
     cat_serial_stub(kCPU, result, tensors, dim);
@@ -182,7 +186,9 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
 
   int64_t offset = 0;
-  if (reuse_iterator && result.is_contiguous() && no_type_promotion) {
+  if (reuse_iterator &&
+      result.is_contiguous(first_tensor_mem_format) &&
+      no_type_promotion) {
     auto source_slice = notSkippedTensor;
     auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
@@ -190,7 +196,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
@@ -216,7 +222,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
-        .dont_resize_outputs()
+        .resize_outputs(false)
         .add_output(result_slice)
         .add_input(tensor)
         .promote_inputs_to_common_dtype(true)
@@ -504,6 +510,25 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
+std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0,
+           "chunk expects at least a 1-dimensional tensor");
+  TORCH_CHECK(chunks > 0,
+           "chunk expects `chunks` to be greater than 0, got: ", chunks);
+
+  std::vector<Tensor> result;
+  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+
+  // See the comment above in chunk(...)
+  if (split_size == 0 && self.size(dim) == 0) {
+    std::vector<int64_t> split_sizes(chunks, split_size);
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    return self.unsafe_split_with_sizes(split_sizes, dim);
+  } else {
+    return self.unsafe_split(split_size, dim);
+  }
+}
+
 Tensor diagflat(const Tensor& self, int64_t offset) {
   return self.contiguous().view(-1).diag(offset);
 }
@@ -756,7 +781,12 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor result = at::empty(target_size, self.options());
+  Tensor result;
+  if (self.is_quantized()) {
+    result = at::empty_quantized(target_size, self);
+  } else {
+    result = at::empty(target_size, self.options());
+  }
 
   // return an empty tensor if one of the repeat dimensions is zero
   if (zero_tensor) {
@@ -1041,6 +1071,14 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
+  auto result = at::native::split(self, split_size, dim);
+  for (auto& t : result) {
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+  }
+  return result;
+}
+
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
@@ -1061,6 +1099,14 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
            "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
            " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
   return splits;
+}
+
+std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+  auto result = at::native::split_with_sizes(self, split_sizes, dim);
+  for (auto& t : result) {
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+  }
+  return result;
 }
 
 // Precondition: tensors is non-empty

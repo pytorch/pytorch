@@ -414,15 +414,21 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(stack);
+    op(&stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
       // its most constrained form.
-      if (stack[i].isTensor())
-        node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+      auto tensor_type = node->outputs()[i]->type()->cast<TensorType>();
+      if (stack[i].isTensor() && tensor_type) {
+        // gradient information isn't always available or part of represenative
+        // inputs, maintain original grad property
+        auto tensor_grad = tensor_type->requiresGrad();
+        node->outputs()[i]->setType(TensorType::create(stack[i].toTensor())
+                                        ->withRequiresGrad(tensor_grad));
+      }
     }
     return true;
   }
@@ -664,6 +670,14 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::grad: {
+        auto tt = node->input()->type()->expect<TensorType>();
+        // grad may be undefined
+        // requires_grad may be required
+        auto grad_type = TensorType::get()->withPossiblyUndefined();
+        node->output()->setType(grad_type);
+        return;
+      }
       case prim::CallFunction:
       case prim::CallMethod:
       case prim::AutogradZero: {
@@ -797,13 +811,14 @@ class ShapePropagator {
             "aten::neg(Tensor self) -> Tensor",
             "aten::t(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
+            "aten::logit(Tensor self, float? eps=None) -> Tensor",
             "aten::tanh(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
             "aten::asin(Tensor self) -> Tensor",
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
+            "aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
@@ -841,7 +856,7 @@ class ShapePropagator {
             "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
             "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
             "aten::permute(Tensor self, int[] dims) -> Tensor",
-            "aten::pin_memory(Tensor self) -> Tensor",
+            "aten::pin_memory(Tensor(a) self) -> Tensor(a)",
             "aten::pinverse(Tensor self, float rcond) -> Tensor",
             "aten::reciprocal(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
@@ -1433,6 +1448,36 @@ class ShapePropagator {
           dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };
 
+    static const auto factory_like_with_ndim = [](Node* node,
+                                                  int dim) -> type_vec_t {
+      auto tt = node->input(0)->type()->expect<TensorType>();
+      auto in_type = tt->scalarType();
+      auto in_dev = tt->device();
+
+      at::optional<IValue> maybe_layout_option = node->get(attr::layout);
+      if (!maybe_layout_option)
+        return {};
+
+      at::optional<IValue> maybe_device_option = node->get(attr::device);
+      if (!maybe_device_option)
+        return {};
+
+      if (!maybe_device_option->isNone()) {
+        in_dev = maybe_device_option->toDevice();
+      }
+
+      at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+      if (!maybe_dtype_option)
+        return {};
+
+      if (!maybe_dtype_option->isNone()) {
+        in_type = maybe_dtype_option->toScalarType();
+      }
+
+      return {TensorType::create(
+          in_type, in_dev, dim, /*requires_grad=*/c10::nullopt)};
+    };
+
     // Requirements:
     //   dims           : preserved
     //   scalar type    : equal to value of dtype
@@ -1456,7 +1501,7 @@ class ShapePropagator {
           if (auto type =
                   node->namedInput(attr::self)->type()->cast<TensorType>()) {
             if (type->dim()) {
-              return factory_with_ndim(node, *type->dim());
+              return factory_like_with_ndim(node, *type->dim());
             }
           }
           return {};
@@ -1563,21 +1608,11 @@ class ShapePropagator {
     };
     if (node->matches(
             "aten::masked_select(Tensor self, Tensor mask) -> Tensor")) {
-      auto type = input_type(0);
-      auto mask_type = input_type(1);
-      if (type && mask_type && type->dim() && mask_type->dim()) {
-        if (*type->dim() == 0 && *mask_type->dim() == 0) {
-          node->output()->setType(type->withDim(0));
-        } else {
-          node->output()->setType(type->withDim(1));
-        }
-        return true;
-      }
       if (auto type = input_type(0)) {
         node->output()->setType(type->withDim(1));
         return true;
       }
-    } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
+    } else if (node->matches("aten::detach(Tensor(a) self) -> Tensor(a)")) {
       if (auto type = input_type(0)) {
         node->output()->setType(type->withRequiresGrad(false));
         return true;
@@ -1704,11 +1739,12 @@ class ShapePropagator {
         return tensor_types.at(0)->withScalarType(
             tensor_types.at(1)->scalarType());
       } else if (
-          node->matches("aten::view_as(Tensor self, Tensor other) -> Tensor") ||
           node->matches(
-              "aten::expand_as(Tensor self, Tensor other) -> Tensor") ||
+              "aten::view_as(Tensor(a) self, Tensor other) -> Tensor(a)") ||
           node->matches(
-              "aten::reshape_as(Tensor self, Tensor other) -> Tensor")) {
+              "aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)") ||
+          node->matches(
+              "aten::reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)")) {
         return tensor_types.at(0)->withDim(tensor_types.at(1)->dim());
       } else if (
           node->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
@@ -1753,8 +1789,9 @@ class ShapePropagator {
           }
         }
         return nullptr;
-      } else if (node->matches(
-                     "aten::reshape(Tensor self, int[] shape) -> Tensor")) {
+      } else if (
+          node->matches(
+              "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")) {
         return reshape_prop(node, attr::shape, tensor_types);
       } else if (node->matches(
                      "aten::repeat(Tensor self, int[] repeats) -> Tensor")) {
@@ -1763,7 +1800,7 @@ class ShapePropagator {
                      "aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
         auto& t = tensor_types.at(0);
         if (!t->dim()) {
-          return nullptr;
+          return t;
         }
         return t->withDim(*t->dim() + 1);
       } else if (
@@ -1827,7 +1864,7 @@ class ShapePropagator {
         if (!t->dim()) {
           return nullptr;
         }
-        return *t->dim() == 0 ? t : t->withDim(*t->dim() + 1);
+        return t->withDim(*t->dim() + 1);
       } else if (node->matches(
                      "aten::polygamma(int n, Tensor self) -> Tensor")) {
         return tensor_types.at(0);
@@ -1928,6 +1965,8 @@ class ShapePropagator {
       broadcastBinary(node, tensor_types, 0, 1);
       return PropagateShapeOnNodeByRunningIt(node);
     } else if (
+        node->matches(
+            "aten::logit(Tensor self, float? eps = None) -> Tensor") ||
         node->matches("aten::neg(Tensor self) -> Tensor") ||
         node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
         node->matches("aten::tanh(Tensor self) -> Tensor")) {
