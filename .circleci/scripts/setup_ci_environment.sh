@@ -7,6 +7,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *cu* ]]; then
   echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
   echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
   echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+else
+  # Explicitly remove nvidia docker apt repositories if not building for cuda
+  sudo rm -rf /etc/apt/sources.list.d/nvidia-docker.list
 fi
 
 # Remove unnecessary sources
