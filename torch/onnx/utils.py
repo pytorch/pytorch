@@ -334,17 +334,16 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _get_module_graph(model, args, example_outputs, propagate, retain_param_name, training):
-
+def _model_to_jit_graph(model, args, example_outputs, propagate, retain_param_name, training, enable_jit_freeze_module):
+    torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            if training is not None and training == TrainingMode.EVAL:
+            if enable_jit_freeze_module and (training is None or training == TrainingMode.EVAL):
                 freezed_m = torch._C._freeze_module(model._c)
                 method_graph = freezed_m._get_method('forward').graph
                 params = []
                 method_graph.eraseInput(0)
-
             else:
                 graph = model.forward.graph
                 torch._C._jit_pass_onnx_function_substitution(graph)
@@ -378,7 +377,7 @@ def _get_module_graph(model, args, example_outputs, propagate, retain_param_name
                     inp.setDebugName(param_names[i - user_input_num])
         torch._C._jit_pass_onnx_function_substitution(graph)
 
-    return graph, params
+    return graph, params, torch_out
 
 
 def _model_to_graph(model, args, verbose=False,
@@ -386,7 +385,8 @@ def _model_to_graph(model, args, verbose=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=True,
-                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None,
+                    enable_jit_freeze_module=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -395,8 +395,8 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(example_outputs, torch.Tensor):
         example_outputs = [example_outputs]
 
-    torch_out = None
-    graph, params = _get_module_graph(model, args, example_outputs, propagate,_retain_param_name, training)
+    graph, params, torch_out = _model_to_jit_graph(model, args, example_outputs, propagate, _retain_param_name, training,
+                                                   enable_jit_freeze_module)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
@@ -509,7 +509,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False):
+            enable_onnx_checker=True, use_external_data_format=False, enable_jit_freeze_module=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -550,7 +550,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             output_names, operator_export_type,
                                                             example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size, training=training)
+                                                            fixed_batch_size=fixed_batch_size, training=training,
+                                                            enable_jit_freeze_module=enable_jit_freeze_module)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
