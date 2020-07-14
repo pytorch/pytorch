@@ -55,14 +55,15 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto origconvNode = *it;
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
-      TORCH_INTERNAL_ASSERT(
-          w_conv_value.size() >= 1,
-          "convolution node expected to have at least one initializer");
+      if (w_conv_value.size() < 1 ||
+          (origconvNode->inputs().size() == 3 && w_conv_value.size() != 2)) {
+        continue;
+      }
 
       auto bn_value = getValues(bnNode, valsToParamsMap);
-      TORCH_INTERNAL_ASSERT(
-          bn_value.size() == 4,
-          "batchnorm node expected to have four initializers");
+      if (bn_value.size() != 4) {
+        continue;
+      }
 
       auto bn_scale = bn_value[0].clone();
       auto bn_B = bn_value[1].clone();
