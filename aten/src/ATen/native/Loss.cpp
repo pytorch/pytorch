@@ -41,18 +41,20 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
+  auto zeros = at::zeros_like(cos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
-  auto output_pos = at::where(target == 1, pos, 0);
-  auto output_neg = at::where(target == -1, neg, 0);
+  auto output_pos = at::where(target == 1, pos, zeros);
+  auto output_neg = at::where(target == -1, neg, zeros);
   auto output = output_pos + output_neg;
   return apply_loss_reduction(output, reduction);
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
+  auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto margin_clamp = (margin - self).clamp_min_(0);
-  auto output_margin = at::where(target != 1, margin_clamp, 0);
-  auto output_self = at::where(target != -1, self, 0);
+  auto output_margin = at::where(target != 1, margin_clamp, zeros);
+  auto output_self = at::where(target != -1, self, zeros);
   auto output = output_margin + output_self;
   return apply_loss_reduction(output, reduction);
 }
@@ -81,7 +83,8 @@ Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t red
 
 Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
   auto output_pos = target * (at::log(target) - input);
-  auto output = at::where(target > 0, output_pos, 0);
+  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output = at::where(target > 0, output_pos, zeros);
   return apply_loss_reduction(output, reduction);
 }
 
