@@ -377,14 +377,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
-/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
-///   that returns multiple views, and unsafe_* version of that function
-///   exists. These are note considered as views for now for the view+inplace
-///   logic! The graph won't be rewritten when an inplace is done, only a
-///   warning will be thrown.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
+                                   NO_GRAD_MODE };
 
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened

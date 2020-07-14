@@ -486,17 +486,6 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def unsafe_chunk(g, self, chunks, dim):
-    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
-    size = self.type().sizes()[dim]
-    splits = [split_size] * (size // split_size)
-    leftover = size % split_size
-    if leftover:
-        splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
-
-
 def split(g, self, split_size_or_sizes, dim):
     if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
@@ -515,18 +504,9 @@ def split(g, self, split_size_or_sizes, dim):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
 
 
-def unsafe_split(g, self, split_size_or_sizes, dim):
-    return split(g, self, split_size_or_sizes, dim)
-
-
 @parse_args('v', 'is', 'i')
 def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
-
-
-@parse_args('v', 'is', 'i')
-def unsafe_split_with_sizes(g, self, split_sizes, dim):
-    return split_with_sizes(g, self, split_sizes, dim)
 
 
 @parse_args('v', 'i')
