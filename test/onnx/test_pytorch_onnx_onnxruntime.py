@@ -53,7 +53,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False):
+                   fixed_batch_size=False, enable_jit_freeze_module=False):
     model.eval()
 
     if input is None:
@@ -79,7 +79,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                            dynamic_axes=dynamic_axes,
                            input_names=input_names, output_names=output_names,
-                           fixed_batch_size=fixed_batch_size)
+                           fixed_batch_size=fixed_batch_size,
+                           enable_jit_freeze_module=enable_jit_freeze_module)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -114,16 +115,17 @@ class TestONNXRuntime(unittest.TestCase):
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
-        def _run_test(m):
+        def _run_test(m, enable_jit_freeze_module=False):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size)
+                                  fixed_batch_size=fixed_batch_size, enable_jit_freeze_module=enable_jit_freeze_module)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
-            _run_test(script_model)
+            _run_test(script_model, enable_jit_freeze_module=True)
+
         _run_test(model)
 
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
