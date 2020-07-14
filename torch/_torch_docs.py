@@ -1186,15 +1186,18 @@ add_docstr(torch.view_as_complex,
            r"""
 view_as_complex(input) -> Tensor
 
-Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
-:attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a new
-complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last dimension of
-the input tensor is expected to represent the real and imaginary components of complex numbers.
+Returns a view of :attr:`input` as a complex tensor. For an input complex
+tensor of :attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a
+new complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last
+dimension of the input tensor is expected to represent the real and imaginary
+components of complex numbers.
 
 .. warning::
-    :func:`view_as_complex` is only supported for tensors with :class:`torch.dtype` ``torch.float64`` and ``torch.float32`.
-    The input is expected to have the last dimension of :attr:`size` 2. In addition, the tensor must have a `stride` of 1
-    for its last dimension. The strides of all other dimensions must be even numbers.
+    :func:`view_as_complex` is only supported for tensors with
+    :class:`torch.dtype` ``torch.float64`` and ``torch.float32``.  The input is
+    expected to have the last dimension of :attr:`size` 2. In addition, the
+    tensor must have a `stride` of 1 for its last dimension. The strides of all
+    other dimensions must be even numbers.
 
 Args:
     {input}
@@ -1720,11 +1723,11 @@ add_docstr(torch.count_nonzero,
 count_nonzero(input, dim=None) -> Tensor
 
 Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
+If no dim is specified then all non-zeros in the tensor are counted.
 
 Args:
     {input}
-    dim  (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
-    Default is None, meaning that non-zeros will be counted along a flattened version of :attr:`input`.
+    dim (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
 
 Example::
 
@@ -5441,6 +5444,37 @@ Example::
     tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
 """.format(**common_args))
 
+add_docstr(torch.logit,
+           r"""
+logit(input, eps=None, out=None) -> Tensor
+
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+
+.. math::
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
+""".format(**common_args))
+
 add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
@@ -7776,8 +7810,8 @@ vander(x, N=None, increasing=False) -> Tensor
 """ + r"""
 Generates a Vandermonde matrix.
 
-The columns of the output matrix are elementwise powers of the input vector :math:`x^(N-1), x^(N-2), ..., x^0`.
-If increasing is true, the order of the columns is reversed :math:`x^0, x^1, ..., x^(N-1)`. Such a
+The columns of the output matrix are elementwise powers of the input vector :math:`x^{{(N-1)}}, x^{{(N-2)}}, ..., x^0`.
+If increasing is True, the order of the columns is reversed :math:`x^0, x^1, ..., x^{{(N-1)}}`. Such a
 matrix with a geometric progression in each row is named for Alexandre-Theophile Vandermonde.
 
 Arguments:
@@ -7788,9 +7822,9 @@ Arguments:
         the powers increase from left to right, if False (the default) they are reversed.
 
 Returns:
-    Tensor: Vandermonde matrix. If increasing is False, the first column is :math:`x^(N-1)`,
-    the second :math:`x^(N-2)` and so forth. If increasing is True, the columns
-    are :math:`x^0, x^1, ..., x^(N-1)`.
+    Tensor: Vandermonde matrix. If increasing is False, the first column is :math:`x^{{(N-1)}}`,
+    the second :math:`x^{{(N-2)}}` and so forth. If increasing is True, the columns
+    are :math:`x^0, x^1, ..., x^{{(N-1)}}`.
 
 Example::
 
