@@ -1,4 +1,5 @@
 import time
+import io
 from typing import Dict, List, Tuple
 
 import torch
@@ -834,6 +835,12 @@ def async_wrong_type() -> Tensor:
     return torch.zeros(2)
 
 
+def load_script_module_with_pickled_rref(pickled_script_module):
+    f = io.BytesIO(pickled_script_module)
+    m = torch.jit.load(f)
+    return m()
+
+
 class JitRpcTest(
     RRefAPITest,
     RRefTypingTest,
@@ -929,6 +936,26 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_load_script_module_with_pickled_rref(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        m1 = MyScriptModuleWithRRefs(dst_name)
+        m2 = MyScriptModuleWithRRefs(dst_name)
+
+        f = io.BytesIO()
+
+        rpc._enable_jit_rref_pickle()
+        torch.jit.save(m1, f)
+        rpc._disable_jit_rref_pickle()
+
+        out1 = rpc.rpc_sync(
+            dst_name,
+            load_script_module_with_pickled_rref,
+            args=(f.getvalue(),)
+        )
+        out2 = m2()
+        self.assertEqual(out1, out2)
 
     @dist_init
     def test_rref_jit_pickle_not_supported(self):
