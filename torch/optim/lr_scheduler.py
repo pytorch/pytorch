@@ -7,7 +7,7 @@ import weakref
 from collections import Counter
 from bisect import bisect_right
 
-from .optimizer import Optimizer
+from optimizer import Optimizer
 
 
 EPOCH_DEPRECATION_WARNING = (
@@ -20,6 +20,49 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
+
+
+class LRScheduler_Compose(object):
+    def __init__(self, scheduler_list):
+        """
+        schduler_list: list of [scheduler, start_epoch, end_epoch]
+        """
+        self.scheduler_list = scheduler_list
+        for l in self.scheduler_list:
+            if l[1]<0: l[1] = 0
+            if l[2]<0: l[2] = math.inf
+
+    def step(self, epoch=None):
+        last_epoch = self.scheduler_list[0][0].last_epoch
+        for scheduler, epoch_s, epoch_e in self.scheduler_list:
+            if epoch_s <= last_epoch and last_epoch <= epoch_e:
+                scheduler.step()
+            else:
+                scheduler.last_epoch += 1
+        self._last_lr = [group['lr'] for group in self.scheduler_list[0][0].optimizer.param_groups]
+
+    def state_dict(self):
+        return {i:l[0].state_dict() for (i, l) in enumerate(self.scheduler_list)}
+
+    def load_state_dict(self, state_dict):
+        for i in range(len(self.scheduler_list)):
+            if i not in state_dict:
+                raise KeyError("Given state dict is not compatible with current scheduler_list")
+            self.state_dict[i].load_state_dict(state_dict[i])
+
+    def get_last_lr(self):
+        """ Return last computed learning rate by current scheduler.
+        """
+        return self._last_lr
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + '('
+        for scheduler, epoch_s, epoch_e in self.scheduler_list:
+            format_string += '\n'
+            format_string += '    {}, start: {}, end: {}'.format(scheduler, epoch_s, epoch_e)
+        format_string += '\n)'
+        return format_string
+
 
 class _LRScheduler(object):
 
@@ -151,6 +194,9 @@ class _LRScheduler(object):
             param_group['lr'] = lr
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
 
 
 class LambdaLR(_LRScheduler):
@@ -311,7 +357,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return list(self.base_lrs)
+            return [group['lr'] for group in self.optimizer.param_groups]
 
 
 class StepLR(_LRScheduler):
