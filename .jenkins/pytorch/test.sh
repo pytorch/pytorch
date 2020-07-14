@@ -247,7 +247,7 @@ test_custom_script_ops() {
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark
-  python bench.py -n 1 -m 2
+  python bench.py -n 1 -m 2 -l 1
   python pyspybench.py Tensor -n 1
   python pyspybench.py SubTensor -n 1
   python pyspybench.py WithTorchFunction -n 1
