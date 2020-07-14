@@ -985,25 +985,16 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
 def atleast_1d(*tensors):
-    if not torch.jit.is_scripting():
-        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_1d(tensors)
 
 def atleast_2d(*tensors):
-    if not torch.jit.is_scripting():
-        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_2d(tensors)
 
 def atleast_3d(*tensors):
-    if not torch.jit.is_scripting():
-        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_3d(tensors)
