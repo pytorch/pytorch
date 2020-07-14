@@ -106,7 +106,7 @@ jit_sources_common = [
 
 libtorch_sources_common = core_sources_common + jit_sources_common
 
-core_sources_full = [
+core_autograd_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -122,6 +122,9 @@ core_sources_full = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+]
+
+core_sources_full = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -254,7 +257,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_autograd_sources)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
