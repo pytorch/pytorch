@@ -369,7 +369,9 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size);
+    VkDeviceSize size,
+    VkDeviceSize srcOffset = 0,
+    VkDeviceSize dstOffset = 0);
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,

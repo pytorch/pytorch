@@ -5224,6 +5224,7 @@
     CPU: _cat_cpu
     CUDA: cat_cuda
     QuantizedCPU: quantized_cat
+    Vulkan: vulkan_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

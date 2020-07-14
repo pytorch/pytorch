@@ -683,6 +683,29 @@ TEST(VulkanTest, reshape2) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanTest, cat) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in0 =
+      at::rand({1, 1, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in1 =
+      at::rand({1, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in2 =
+      at::rand({1, 5, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = at::cat({t_in0, t_in1, t_in2}, 1);
+  auto tv_out = at::cat({t_in0.vulkan(), t_in1.vulkan(), t_in2.vulkan()}, 1);
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanTest, max_pool2d) {
   if (!at::vulkan::is_available())
     return;
