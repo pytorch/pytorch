@@ -61,7 +61,7 @@ def main():
     parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to template directory')
     args = parser.parse_args()
-    gen_autograd(args.declarations, args.out, args.autograd)
+    gen_annotated(args.declarations, args.out, args.autograd)
 
 
 if __name__ == '__main__':
