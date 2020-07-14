@@ -273,7 +273,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto it = dict.begin();
       for (size_t i = 0; i < ndict; ++i) {
         std::stringstream name;
-        name << it->key();
+        name << qn->name() << "." << it->key();
         obj->type()->addAttribute(name.str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
