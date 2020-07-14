@@ -7,7 +7,7 @@ import weakref
 from collections import Counter
 from bisect import bisect_right
 
-from optimizer import Optimizer
+from .optimizer import Optimizer
 
 
 EPOCH_DEPRECATION_WARNING = (
