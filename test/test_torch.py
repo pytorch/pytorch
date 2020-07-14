@@ -18098,7 +18098,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         # Compare sequence input
                         torch_sequence_x = (x,) * random.randint(3, 10)
                         np_sequence_x = tuple(map(lambda x: np.array(x.detach().cpu().numpy()), torch_sequence_x))
-                        torch_res = torch_fn(torch_sequence_x)
+                        torch_res = torch_fn(*torch_sequence_x)
                         np_res = np_fn(*np_sequence_x)
 
                         torch_res = tuple(map(lambda x: x.cpu(), torch_res))
