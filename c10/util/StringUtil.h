@@ -88,8 +88,8 @@ template <typename T>
 inline std::ostream& _error_value(std::ostream& ss, const T& t) {
   // ignore pure string literal
   if (!(std::is_same<T, const char*>::value)) {
-    ss << t;
-    ss << ", ";
+    // ss << t;
+    // ss << ", ";
   }
 
   return ss;
