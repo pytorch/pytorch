@@ -39,19 +39,8 @@ We support two complex dtypes: `torch.cfloat` and `torch.cdouble`
      If the default floating point dtype is torch.float64 then complex numbers are inferred to
      have a dtype of torch.complex128, otherwise they are assumed to have a dtype of torch.complex64.
 
-The following factory functions can be used to create complex tensors:
-
-- :func:`torch.tensor`
-- :func:`torch.as_tensor`
-- :func:`torch.empty`
-- :func:`torch.rand`
-- :func:`torch.randn`
-- :func:`torch.as_strided`
-- :func:`torch.from_numpy`
-- :func:`torch.zeros`
-- :func:`torch.ones`
-- :func:`torch.full`
-- :func:`torch.eye`
+All factory functions apart from :func:`torch.linspace`, :func:`torch.logspace`, and `torch.arange` are
+supported for complex tensors.
 
 Transition from the old representation
 --------------------------------------
@@ -132,55 +121,54 @@ Autograd
 
 PyTorch supports Autograd for Complex Tensors. The autograd APIs can be
 used for both holomorphic and non-holomorphic functions. For non-holomorphic
-functions, the gradient is evaluated as if it were holomorphic.
+functions, the gradient is evaluated as if it were holomorphic. Check out the
+Autograd note :ref:`complex_autograd-doc`.
 
-For more details, check out the Autograd note :ref:`complex_autograd-doc`.
+Gradient calculation can also be easily done for functions not supported for complex tensors
+yet by enclosing the unsupported operations between :func:`torch.view_as_real` and
+:func:`torch.view_as_complex` functions. The example shown below computes the pointwise multiplication
+of two complex tensors, in one case by performing operations on complex tensors, and in the other
+by by performing operations on complex tensors viewed as real tensors. As shown below, the gradients
+computed have same values in both cases.
 
 ::
 
-     x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)>>> x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)
-     >>> y = x.detach().requires_grad_(True)
-     >>> x0 = x.clone()
-     >>> x1 = torch.view_as_complex(x0)
-     >>> x2 = torch.view_as_real(x1)
-     >>> x2.mul_(2)
-     tensor([[[ 4.2425, -0.1076],
-          [ 3.2731,  2.3156]],
+     >>> x = torch.randn(2, dtype=torch.cfloat, requires_grad=True)
+     >>> y = torch.randn(2, dtype=torch.cfloat, requires_grad=True)
+     >>> x_ = x.detach().requires_grsad_(True)
+     >>> y_ = y.detach().requires_grad_(True)
+     >>> z = x[0]*y[0] + x[1]*y[1]
+     >>> z
+     tensor(0.2114-1.1952j, grad_fn=<AddBackward0>)
 
-          [[ 4.1179,  0.7358],
-          [-1.7711, -0.4389]]], dtype=torch.float64,
-          grad_fn=<ViewAsRealBackward>)
-     >>> x2.sum().backward()
-     >>> y0 = y.clone()
-     >>> y0.mul_(2)
-     tensor([[[ 4.2425, -0.1076],
-          [ 3.2731,  2.3156]],
+     >>> x0 = x_.clone()
+     >>> y0 = y_.clone()
+     >>> x1 = torch.view_as_real(x0)
+     >>> y1 = torch.view_as_real(y0)
+     >>> z_ = torch.empty_like(x1)
+     >>> z_[:, 0] = x1[:, 0] * y1[:, 0] - x1[:, 1] * y1[:, 1]
+     >>> z_[:, 1] = x1[:, 0] * y1[:, 1] + x1[:, 1] * y1[:, 0]
+     >>> z1 = torch.view_as_complex(z_)
+     >>> z2 = z1.sum()
+     >>> z2
+     tensor(0.2114-1.1952j, grad_fn=<SumBackward0>)
 
-          [[ 4.1179,  0.7358],
-          [-1.7711, -0.4389]]], dtype=torch.float64, grad_fn=<MulBackward0>)
-     >>> y0.sum().backward()
-     >>> x.grad
-     tensor([[[2., 2.],
-          [2., 2.]],
-
-          [[2., 2.],
-          [2., 2.]]], dtype=torch.float64)
-     >>> y.grad
-     tensor([[[2., 2.],
-          [2., 2.]],
-
-          [[2., 2.],
-          [2., 2.]]], dtype=torch.float64)
+     >>> z.backward()
+     >>> z2.backward()
+     >>> x.grad, y.grad
+     tensor([-0.6815+0.5931j,  0.5333-1.0872j]) tensor([-0.4869+0.9011j,  0.3673+0.2007j])
+     >>> x_.grad, y_.grad
+     tensortensor([-0.6815+0.5931j,  0.5333-1.0872j]) tensor([-0.4869+0.9011j,  0.3673+0.2007j])
 
 We do not support the following subsystems:
 
-Quantization
+* Quantization
 
-JIT
+* JIT
 
-Sparse Tensors
+* Sparse Tensors
 
-Distributed
+* Distributed
 
 If any of these would help your use case, please `search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
 if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
