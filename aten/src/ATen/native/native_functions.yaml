@@ -2458,6 +2458,19 @@
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: logit(Tensor self, float? eps=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: logit
+
+- func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU, CUDA: logit_
+
+- func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: sin(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -6391,6 +6404,15 @@
     CPU, CUDA: sigmoid_backward_out
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+- func: logit_backward.grad_input(Tensor grad_output, Tensor self, float? eps=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU, CUDA: logit_backward_out
+
+- func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
