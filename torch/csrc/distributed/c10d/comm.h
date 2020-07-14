@@ -32,7 +32,7 @@ class GradBucket {
 // be used to implement both Python and CPP hooks.
 struct TORCH_API CommHookInterface {
  public:
-  virtual ~CommHookInterface() {};
+  virtual ~CommHookInterface() {}
 
   // runHook takes a GradBucket type bucket and passses the tensors of
   // this grad bucket to hook's callaback. This function is called once
@@ -60,11 +60,11 @@ class TORCH_API PythonCommHook : public CommHookInterface {
   // user specified and return a Future indicating completion of any async work.
   PythonCommHook(py::object state, py::object hook);
 
-  ~PythonCommHook() {
+  ~PythonCommHook() override {
     pybind11::gil_scoped_acquire ag;
     state_.dec_ref();
     hook_.dec_ref();
-  };
+  }
 
   c10::intrusive_ptr<torch::jit::Future> runHook(
       const GradBucket& bucket) override;
