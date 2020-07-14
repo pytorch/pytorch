@@ -18103,10 +18103,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                 continue
 
                             scalar_1 = scalar_type(random.random())
-                            scalar_2 = scalar_type(random.random())
 
-                            if self.device_type == 'cpu' and dtype == torch.half:
-                                with self.assertRaisesRegex(RuntimeError, "\"where_cpu\" not implemented for 'Half'"):
+                            # For current implementation,
+                            # below are the valid `TensorDtype` and `ScalarType` combinations.
+                            def is_valid(scalar_type, dtype):
+                                if (scalar_type == int and dtype == torch.long):
+                                    return True
+                                elif (scalar_type == float and dtype == torch.double):
+                                    return True
+                                elif (scalar_type == complex and dtype == torch.complex128):
+                                    return True
+                                return False
+
+                            if not is_valid(scalar_type, dtype):
+                                # Note: This should fail once `where` supports type promotion.
+                                with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
                                     torch.where(condition, x, scalar_1)
                             else:
                                 def x_like(scalar, without_dtype=False):
