@@ -39,7 +39,7 @@ We support two complex dtypes: `torch.cfloat` and `torch.cdouble`
      If the default floating point dtype is torch.float64 then complex numbers are inferred to
      have a dtype of torch.complex128, otherwise they are assumed to have a dtype of torch.complex64.
 
-All factory functions apart from :func:`torch.linspace`, :func:`torch.logspace`, and `torch.arange` are
+All factory functions apart from :func:`torch.linspace`, :func:`torch.logspace`, and :func:`torch.arange` are
 supported for complex tensors.
 
 Transition from the old representation
@@ -121,8 +121,8 @@ Autograd
 
 PyTorch supports Autograd for Complex Tensors. The autograd APIs can be
 used for both holomorphic and non-holomorphic functions. For non-holomorphic
-functions, the gradient is evaluated as if it were holomorphic. Check out the
-Autograd note :ref:`complex_autograd-doc`.
+functions, the gradient is evaluated as if it were holomorphic. For more details,
+check out the note :ref:`complex_autograd-doc`.
 
 Gradient calculation can also be easily done for functions not supported for complex tensors
 yet by enclosing the unsupported operations between :func:`torch.view_as_real` and
