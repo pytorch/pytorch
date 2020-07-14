@@ -29,8 +29,10 @@ class LRScheduler_Compose(object):
         """
         self.scheduler_list = scheduler_list
         for l in self.scheduler_list:
-            if l[1]<0: l[1] = 0
-            if l[2]<0: l[2] = math.inf
+            if l[1] < 0: 
+                l[1] = 0
+            if l[2] < 0: 
+                l[2] = math.inf
 
     def step(self, epoch=None):
         last_epoch = self.scheduler_list[0][0].last_epoch
@@ -42,7 +44,7 @@ class LRScheduler_Compose(object):
         self._last_lr = [group['lr'] for group in self.scheduler_list[0][0].optimizer.param_groups]
 
     def state_dict(self):
-        return {i:l[0].state_dict() for (i, l) in enumerate(self.scheduler_list)}
+        return {i: l[0].state_dict() for (i, l) in enumerate(self.scheduler_list)}
 
     def load_state_dict(self, state_dict):
         for i in range(len(self.scheduler_list)):
