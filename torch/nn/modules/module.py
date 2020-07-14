@@ -980,19 +980,21 @@ class Module:
                     if not isinstance(param, UninitializedParameter):
                         raise ValueError('Can\'t load an uninitialized Parameter {} into an initialized one'.format(name))
                 elif isinstance(input_param, UninitializedBuffer):
-                    if not isinstance(param, UninitializedParameter):
+                    if not isinstance(param, UninitializedBuffer):
                         raise ValueError('Can\'t load an uninitialized Buffer {} into an initialized one'.format(name))
                 if isinstance(param, UninitializedParameter): 
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
-                    with torch.no_grad():
-                        param = param.materialize(input_param.shape)
+                    if not isinstance(input_param, UninitializedParameter):
+                        with torch.no_grad():
+                            param = param.materialize(input_param.shape)
                     self.register_parameter(name, param)
                 elif isinstance(param, UninitializedBuffer): 
                     # The current buffer is not initialized but the being loaded one is
                     # create a new buffer based on the existing one
-                    with torch.no_grad():
-                        param = param.materialize(input_param.shape)
+                    if not isinstance(input_param, UninitializedBuffer):
+                        with torch.no_grad():
+                            param = param.materialize(input_param.shape)
                     self.register_buffer(name, param)
 
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+

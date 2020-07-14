@@ -11550,6 +11550,16 @@ class TestLazyModules(TestCase):
         module.load_state_dict(new_module.state_dict())
         self.assertEqual(module.test_param, torch.ones((5, 5))) 
 
+        # Uninitialized parameters are left unchanged
+        module = torch.nn.Module()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+
+        new_module = torch.nn.Module()
+        new_module.register_parameter('test_param', UninitializedParameter())
+        module.load_state_dict(new_module.state_dict())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+
     def test_lazy_module_buffer(self):
         module = torch.nn.Module()
         module.register_buffer('test_buffer', UninitializedBuffer())
@@ -11572,6 +11582,16 @@ class TestLazyModules(TestCase):
         new_module.register_buffer('test_buffer', torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
         self.assertEqual(module.test_buffer, torch.ones((5, 5))) 
+
+        # Uninitialized parameters are left unchanged
+        module = torch.nn.Module()
+        module.register_buffer('test_buffer', UninitializedBuffer())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
+
+        new_module = torch.nn.Module()
+        new_module.register_buffer('test_buffer', UninitializedBuffer())
+        module.load_state_dict(new_module.state_dict())
+        self.assertTrue(module.has_uninitialized_params_or_buffers())
 
     def test_lazy_module_jit(self):
         module = torch.nn.Module()
