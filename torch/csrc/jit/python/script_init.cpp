@@ -115,8 +115,9 @@ struct PythonResolver : public Resolver {
       return registerNamedTuple(obj, loc);
     }
 
-    auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-        py::module::import("torch.jit").attr("_qualified_name")(obj)));
+    auto qualifiedName = c10::QualifiedName(
+        py::cast<std::string>(py::module::import("torch._jit_internal")
+                                  .attr("_qualified_name")(obj)));
 
     return get_python_cu()->get_type(qualifiedName);
   }
@@ -260,7 +261,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
         ErrorReport error(range);
-        error << "Expected a default value of type " << arg.type()->python_str()
+        error << "Expected a default value of type " << arg.type()->repr_str()
               << " on parameter \"" << arg.name() << "\".";
         if (arg.is_inferred_type()) {
           error << "Because \"" << arg.name()
@@ -536,7 +537,8 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       }
       visited.emplace(item.a.internalToPointer());
     }
-    if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
+    if (!unshapedType(item.b.type())
+             ->isSubtypeOf(unshapedType(item.b.type()))) {
       // Since named types are saved and loaded in the test suite, we cannot
       // expect them to be equal. We should still check their slots however.
       if (!item.a.type()->cast<c10::NamedType>()) {
@@ -691,6 +693,20 @@ static constexpr const char* magic_method_names[] = {
     "__ixor__",    "__str__",     "__len__",
 };
 
+struct DeepCopyMemoTable {
+  std::shared_ptr<IValue::HashAliasedIValueMap> map;
+};
+
+IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
+  if (!memo.contains(py::str("__torch_script_memo_table"))) {
+    memo["__torch_script_memo_table"] =
+        DeepCopyMemoTable{std::make_shared<IValue::HashAliasedIValueMap>()};
+  }
+  auto& ivalue_memo =
+      *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+  return ivalue.deepcopy(ivalue_memo);
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -758,6 +774,7 @@ void initJitScriptBindings(PyObject* module) {
                   return method.name();
                 });
               })
+          .def("__copy__", &Object::copy)
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__
@@ -799,7 +816,7 @@ void initJitScriptBindings(PyObject* module) {
                   TORCH_INTERNAL_ASSERT(
                       setstate_schema.arguments().size() == 2,
                       "__setstate__ method for class ",
-                      class_type->python_str(),
+                      class_type->repr_str(),
                       " must have exactly 2 arguments!");
                   auto state_type = setstate_schema.arguments().at(1).type();
                   (*setstate_method)(Stack{toIValue(state, state_type)});
@@ -845,6 +862,15 @@ void initJitScriptBindings(PyObject* module) {
           });
     }
   }
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
+
+  object_class.def(
+      "__deepcopy__", [](const Object& self, const py::dict& memo) {
+        return Object(
+            pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
+      });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -969,35 +995,36 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Module& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             return pp.str();
           })
       .def_property_readonly(
           "code_with_constants",
           [](Module& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
-            std::map<std::string, at::Tensor> consts;
+            std::map<std::string, at::IValue> consts;
             int i = 0;
-            for (auto const& tensor : tensors) {
-              consts["c" + std::to_string(i)] = tensor;
+            for (auto const& constant : constants) {
+              consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
+      .def("__copy__", &Module::copy)
       .def(
-          "_clone",
-          [](Module& self, bool inplace) { return self.clone(inplace); },
-          py::arg("inplace") = false)
-      .def("_clone_instance", &Module::clone_instance)
-      .def("copy", &Module::copy)
-      .def("deepcopy", &Module::deepcopy)
+          "__deepcopy__",
+          [](const Module& self, const py::dict& memo) {
+            return Module(
+                pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
+          })
+      .def("children", &Module::children)
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });
@@ -1006,6 +1033,13 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<
            c10::intrusive_ptr<c10::ivalue::Object>,
            std::shared_ptr<mobile::CompilationUnit>>())
+      .def(
+          "find_method",
+          [](mobile::Module& m, const std::string& method_name) {
+            auto method = m.find_method(method_name);
+            return method != nullptr;
+          },
+          py::arg("method_name"))
       .def(
           "run_method",
           [](mobile::Module& m,
@@ -1055,7 +1089,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& src,
              ResolutionCallback rcb) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
-          });
+          })
+      .def(
+          "get_interface",
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) { return self->get_interface(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1120,10 +1158,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](const StrongFunctionPtr& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
 
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
             return pp.str();
           })
@@ -1165,21 +1203,21 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Method& self) {
-            std::vector<at::Tensor> tensors;
+            std::vector<at::IValue> constants;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps);
+            PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
-        std::vector<at::Tensor> tensors;
+        std::vector<at::IValue> constants;
         std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps);
+        PythonPrint pp(constants, deps);
         pp.printMethod(self.function());
-        std::map<std::string, at::Tensor> consts;
+        std::map<std::string, at::IValue> consts;
         int i = 0;
-        for (auto const& tensor : tensors) {
-          consts["c" + std::to_string(i)] = tensor;
+        for (auto const& constant : constants) {
+          consts["c" + std::to_string(i)] = constant;
           i += 1;
         }
         return std::make_tuple(pp.str(), consts);
@@ -1398,7 +1436,9 @@ void initJitScriptBindings(PyObject* module) {
       .def("check_next", &testing::FileCheck::check_next)
       .def("check_count", &testing::FileCheck::check_count)
       .def("check_dag", &testing::FileCheck::check_dag)
-      .def("check_count", &testing::FileCheck::check_count)
+      .def(
+          "check_source_highlighted",
+          &testing::FileCheck::check_source_highlighted)
       .def(
           "check_count",
           [](testing::FileCheck& f,

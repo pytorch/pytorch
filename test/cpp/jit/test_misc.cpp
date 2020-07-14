@@ -28,6 +28,7 @@
 #include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/liveness.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/pass_manager.h"
@@ -1233,21 +1234,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -1339,6 +1336,244 @@ static void checkShape(
   auto tp = profile->output()->type();
   auto ptp = tp->expect<TensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void count_(
+    Block* block,
+    const std::function<bool(Node* n)>& pred,
+    size_t& count) {
+  for (Node* n : block->nodes()) {
+    if (pred(n)) {
+      count++;
+    }
+
+    for (Block* ib : n->blocks()) {
+      count_(ib, pred, count);
+    }
+  }
+}
+
+size_t countNodes(
+    const std::shared_ptr<Graph>& graph,
+    const std::function<bool(Node* n)>& pred) {
+  size_t count = 0;
+  count_(graph->block(), pred, count);
+  return count;
+}
+
+void testLoopPeeler() {
+  // peel all loops
+  auto true_pred = [](Node* n) { return true; };
+  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
+
+  // do not use an induction variable explicitly
+  {
+    static const auto str_func_def = R"JIT(
+    def test_peel_n_times():
+      sum = 0
+      for i in range(10):
+        sum += 2
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_peel_n_times");
+    auto stack = createStack({});
+    // peeling loop once
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 20);
+    }
+
+    // test peeling more than one iteration
+    {
+      LoopsPeeler peeler(true_pred, 3);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 20);
+    }
+  }
+
+  // uses the induction variable
+  {
+    static const auto str_func_def = R"JIT(
+    def test_peel_n_times():
+      sum = 0
+      for i in range(10):
+        sum += i
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_peel_n_times");
+    auto stack = createStack({});
+    // peeling loop once
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 45);
+    }
+
+    // test peeling more than one iteration
+    {
+      LoopsPeeler peeler(true_pred, 3);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 45);
+    }
+  }
+
+  // tests with explicit termination conditions
+  {
+    static const auto str_func_def = R"JIT(
+    def test_with_cond_times():
+      sum = 0
+      i = 0
+      while (sum < 2):
+        sum += i
+        i += 1
+      return sum
+    )JIT";
+
+    // the peel changes the termination condition to false
+    // so the original loop doesn't run
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_with_cond_times");
+    auto stack = createStack({});
+    // peeling 5 iterations should update the termination
+    // condition to false
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+
+    // the termination condition remains true
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      int num_loops =
+          std::count_if(copy->nodes().begin(), copy->nodes().end(), is_loop);
+      ASSERT_EQ(num_loops, 2);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+  }
+
+  // tests simple nested loops
+  {
+    static const auto str_func_def = R"JIT(
+    def test_nested_loops():
+      sum = 0
+      i = 0
+      for i in range(10):
+        for j in range(10):
+          sum += i + j
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_nested_loops");
+    auto stack = createStack({});
+
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 900);
+    }
+
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 900);
+    }
+  }
+
+  {
+    static const auto str_func_def = R"JIT(
+    def test_nested_loops():
+      sum = 0
+      i = 0
+      for i in range(10):
+        j = 0
+        while sum < 2:
+          sum += i + j
+          j += 1
+      return sum
+    )JIT";
+
+    auto cu = compile(str_func_def);
+    auto& f = cu->get_function("test_nested_loops");
+    auto stack = createStack({});
+    {
+      LoopsPeeler peeler(true_pred, 1);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+
+    {
+      LoopsPeeler peeler(true_pred, 5);
+      auto copy = f.graph()->copy();
+      peeler.run(copy);
+      ASSERT_EQ(countNodes(copy, is_loop), 5);
+      Code code(copy, "");
+      InterpreterState interpreter{code};
+      interpreter.run(stack);
+      ASSERT_EQ(stack.back().toInt(), 3);
+    }
+  }
 }
 
 void testInsertAndEliminateRedundantGuards() {
@@ -1642,11 +1877,13 @@ void testFutures() {
   {
     auto f1 = c10::make_intrusive<Future>(IntType::get());
     ASSERT_FALSE(f1->completed());
+    ASSERT_FALSE(f1->hasValue());
     int32_t sat1 = 0;
     int32_t sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
     f1->markCompleted(43);
     ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasValue());
     ASSERT_FALSE(f1->hasError());
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(f1->constValue().toInt(), 43);
@@ -1666,16 +1903,12 @@ void testFutures() {
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
+    ASSERT_FALSE(f1->hasValue());
     try {
       (void)f1->value();
       ASSERT_TRUE(false); // Supposed to throw.
     } catch (const std::exception& e) {
       ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
-    }
-    try {
-      (void)f1->constValue();
-    } catch (const std::exception& e) {
-      ASSERT_TRUE(false); // Not supposed to throw.
     }
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
@@ -1810,6 +2043,45 @@ void testFutures() {
     ASSERT_EQ(c4->value().toInt(), 7);
     s2->markCompleted(1);
     ASSERT_EQ(c4->value().toInt(), 7);
+  }
+}
+
+void testTLSFutureCallbacks() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  // test running callbacks with propagation of TLS state.
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
+    t.join();
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+          profilerEnabledCb();
+          return at::IValue(1);
+        }),
+        IntType::get());
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    t.join();
+    s2->wait();
+    torch::autograd::profiler::disableProfiler();
   }
 }
 

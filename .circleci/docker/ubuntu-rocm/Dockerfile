@@ -49,7 +49,7 @@ RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
-ARG ROCM
+ARG ROCM_VERSION
 ADD ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
@@ -57,6 +57,7 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
+ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV HIP_PLATFORM hcc
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8

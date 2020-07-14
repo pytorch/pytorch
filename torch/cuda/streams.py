@@ -1,6 +1,13 @@
 import ctypes
 import torch
 
+from ._utils import _dummy_type
+
+
+if not hasattr(torch._C, '_CudaStreamBase'):
+    # Define dummy base classes
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
+    torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -34,7 +41,7 @@ class Stream(torch._C._CudaStreamBase):
            operations are affected.
 
         .. _CUDA Stream documentation:
-           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
+           https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         event.wait(self)
 

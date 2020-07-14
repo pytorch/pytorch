@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
@@ -9,6 +10,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -24,6 +27,7 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
@@ -59,6 +63,17 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
           wrappedRpc, rwa.wrappedMessageType());
       if (pythonRpc) {
         rwa.setWrappedRpc(std::move(pythonRpc));
+      }
+      return nullptr;
+    }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      // Deserialize wrapped RPC if it contains python call
+      auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
+      auto& wrappedRpc = rpcWithProfilingReq.wrappedRpc();
+      auto pythonRpc = deserializePythonRpcCommandReference(
+          wrappedRpc, rpcWithProfilingReq.wrappedMessageType());
+      if (pythonRpc) {
+        rpcWithProfilingReq.setWrappedRpc(std::move(pythonRpc));
       }
       return nullptr;
     }
@@ -185,7 +200,7 @@ void RequestCallbackImpl::processRpc(
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
       if (scriptCall.hasOp()) {
-        scriptCall.op()->getOperation()(stack);
+        scriptCall.op()->getOperation()(&stack);
         TORCH_INTERNAL_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
@@ -325,7 +340,7 @@ void RequestCallbackImpl::processRpc(
       auto& stack = scriptRemoteCall.stackRef();
       if (scriptRemoteCall.hasOp()) {
         try {
-          scriptRemoteCall.op()->getOperation()(stack);
+          scriptRemoteCall.op()->getOperation()(&stack);
         } catch (const std::exception& e) {
           // Don't throw in this call, but rather transfer the exception
           // to the rref.
@@ -344,6 +359,45 @@ void RequestCallbackImpl::processRpc(
         return;
       }
 
+      auto setRRefValue = [ownerRRef, postProcessing](
+                              const c10::intrusive_ptr<c10::ivalue::Future>&
+                                  jitFuture) mutable {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      };
+
+      auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
+      auto asyncPostProcessing =
+          [ownerRRef,
+           postProcessing,
+           setRRefValue{std::move(setRRefValue)},
+           isAsyncExecution](const c10::intrusive_ptr<c10::ivalue::Future>&
+                                 jitFuture) mutable {
+            if (isAsyncExecution) {
+              // The user function will return a JIT future, install
+              // setRRefValue and postProcessing to that valueFuture
+              try {
+                auto valueJitFuture = jitFuture->value().toFuture();
+                valueJitFuture->addCallback(
+                    [valueJitFuture,
+                     setRRefValue{std::move(setRRefValue)}]() mutable {
+                      setRRefValue(valueJitFuture);
+                    });
+              } catch (const std::exception& e) {
+                ownerRRef->setError(e.what());
+                postProcessing();
+              }
+            } else {
+              // The user function will return a value. Set OwnerRRef when that
+              // value is ready.
+              setRRefValue(jitFuture);
+            }
+          };
+
       c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
       try {
         jitFuture = PythonRpcHandler::getInstance()
@@ -351,23 +405,18 @@ void RequestCallbackImpl::processRpc(
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
         if (jitFuture->completed()) { // short-cut.
-          ownerRRef->setValue(jitFuture->value());
-          postProcessing();
+          asyncPostProcessing(jitFuture);
           return;
         }
       } catch (const std::exception& e) {
-        ownerRRef->setError(e.what());
-        postProcessing();
+        asyncPostProcessing(jitFuture);
         return;
       }
-      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
-        }
-        postProcessing();
-      });
+      jitFuture->addCallback(
+          [jitFuture,
+           asyncPostProcessing{std::move(asyncPostProcessing)}]() mutable {
+            asyncPostProcessing(jitFuture);
+          });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
@@ -592,8 +641,8 @@ void RequestCallbackImpl::processRpc(
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
       // Make an overall future for the wrapped response.
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
-      // Kick off processing for the nested future and get a Future<T> to the
-      // result.
+      // Kick off processing for the nested RPC command.
+      // wrappedRpcResponseFuture will be a Future<T> to the result.
       processRpc(
           rpcWithAutograd.wrappedRpc(),
           wrappedMessageType,
@@ -683,6 +732,131 @@ void RequestCallbackImpl::processRpc(
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
       markComplete(std::move(CleanupAutogradContextResp()).toMessage());
+      return;
+    }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
+      auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
+      const auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+      const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
+      auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
+      // Enable the profiler with the config from the sender.
+      std::vector<torch::autograd::profiler::Event> profiledEvents;
+      {
+        torch::autograd::profiler::TLSProfilerGuard g(
+            profilingConfig,
+            [&profiledEvents, profilingConfig](
+                const std::vector<std::vector<
+                    torch::autograd::profiler::Event>>& event_lists) {
+              // Gather all events into a vector
+              for (auto& l : event_lists) {
+                for (auto& e : l) {
+                  profiledEvents.push_back(e);
+                }
+              }
+              // find __start_profile event and __cuda_start_event.
+              bool cuda_profiling_enabled = profilingConfig.state ==
+                  torch::autograd::profiler::ProfilerState::CUDA;
+              bool found_cpu_start = false;
+              const torch::autograd::profiler::Event* profilerStart = nullptr;
+              // Each device has its own cudaProfilerStart, so we must take
+              // care to use the correct one depending on the device the
+              // operation ran on.
+              std::unordered_map<int, const torch::autograd::profiler::Event*>
+                  cudaProfilerStarts;
+              for (auto& e : profiledEvents) {
+                if (!found_cpu_start &&
+                    0 == strcmp(e.name(), "__start_profile")) {
+                  profilerStart = &e;
+                  found_cpu_start = true;
+                }
+                if (cuda_profiling_enabled &&
+                    0 == strcmp(e.name(), "__cuda_start_event")) {
+                  e.setCudaUs(e.cpu_us());
+                  auto device = e.device();
+                  TORCH_CHECK(
+                      device != -1,
+                      "CUDA profiling was enabled but could not find CUDA device.");
+                  TORCH_CHECK(
+                      cudaProfilerStarts.find(device) ==
+                          cudaProfilerStarts.end(),
+                      c10::str(
+                          "Duplicate __cuda_start_event found for ", device));
+                  cudaProfilerStarts[device] = &e;
+                }
+                // TODO: determine no. of CUDA devices and break here if we have
+                // a cudaProfilerStart for all of them, in the case of cuda
+                // profiling.
+                if (found_cpu_start && !cuda_profiling_enabled) {
+                  break;
+                }
+              }
+              // We should always find __start_profile.
+              TORCH_CHECK(
+                  profilerStart != nullptr,
+                  "Expected to find __start_profile event.");
+              // Should have >= 1 CUDA start event.
+              // TODO: we can enhance this assert by ensuring we have found a
+              // start for every available CUDA device.
+              TORCH_CHECK(
+                  !cuda_profiling_enabled || cudaProfilerStarts.size() > 0,
+                  "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
+
+              if (cuda_profiling_enabled) {
+                // Compute and set global time for when this CUDA kernel was
+                // launched/ended, since deserialized event will not have a
+                // corresponding CUDA event.
+                for (auto& e : profiledEvents) {
+                  if (e.has_cuda()) {
+                    auto cuda_device = e.device();
+                    TORCH_CHECK(
+                        cuda_device != -1,
+                        "CUDA profiling was enabled but could not find CUDA device.");
+                    auto it = cudaProfilerStarts.find(cuda_device);
+                    TORCH_CHECK(
+                        it != cudaProfilerStarts.end(),
+                        c10::str(
+                            "Failed to find __cuda_start_event for device ",
+                            cuda_device));
+                    auto cudaProfilerStartEvent = it->second;
+                    double cuda_elapsed_us =
+                        cudaProfilerStartEvent->cuda_elapsed_us(e);
+                    int64_t cuda_us =
+                        cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
+                    e.setCudaUs(cuda_us);
+                  }
+                }
+              }
+            });
+        TORCH_INTERNAL_ASSERT(
+            torch::autograd::profiler::profilerEnabled(),
+            "Expected profiler to be enabled!");
+        // Kick off processing for nested work and get Future<T> result in
+        // wrappedRpcResponseFuture
+        processRpc(
+            rpcWithProfilingReq.wrappedRpc(),
+            wrappedMsgType,
+            messageId,
+            wrappedRpcResponseFuture);
+      }
+      wrappedRpcResponseFuture->addCallback([wrappedRpcResponseFuture,
+                                             responseFuture,
+                                             profiledEvents =
+                                                 std::move(profiledEvents),
+                                             profilingKeyId] {
+        if (wrappedRpcResponseFuture->hasError()) {
+          // Propagate error
+          responseFuture->setError(wrappedRpcResponseFuture->error()->what());
+        } else {
+          auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
+              MessageType::RUN_WITH_PROFILING_RESP,
+              std::move(*wrappedRpcResponseFuture).moveValue(),
+              profiledEvents,
+              profilingKeyId);
+          responseFuture->markCompleted(
+              std::move(*rpcWithProfilingResp).toMessage());
+        }
+      });
       return;
     }
     default: {

@@ -18,7 +18,7 @@ bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
 
 namespace ivalue {
 
-// This is in ivalue.cpp because we need to access Type::python_str, which
+// This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
 void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // NB: doing pointer comparison here
@@ -26,9 +26,9 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // Type's, this needs to be changed!
   TORCH_CHECK(actual_type == expected_type,
               "Tried to convert an IValue of type ",
-              actual_type->python_str(),
+              actual_type->repr_str(),
               " to custom class type ",
-              expected_type->python_str());
+              expected_type->repr_str());
 }
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
@@ -99,6 +99,46 @@ TypePtr IValue::type() const {
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+}
+
+void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+  if (visitor(*this)) {
+    // Short cut.
+    return;
+  }
+  switch (this->tag) {
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.visit(visitor);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().visit(visitor);
+        pair.key().visit(visitor);
+      }
+      break;
+    case Tag::Object: {
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
+        attribute.visit(visitor);
+      }
+      break;
+    }
+    default:
+      break;
+ }
 }
 
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
@@ -291,7 +331,7 @@ std::ostream& printMaybeAnnotatedList(
   auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
-    out << "annotate(" << the_list.type()->python_str() << ", ";
+    out << "annotate(" << the_list.type()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
@@ -332,7 +372,7 @@ std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->cast<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type()->python_str() << ",";
+    out << "annotate(" << the_dict.type()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);
@@ -618,8 +658,8 @@ StrongTypePtr::StrongTypePtr(
   TORCH_INTERNAL_ASSERT(type_);
 }
 
-std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
+ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

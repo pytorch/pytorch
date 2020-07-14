@@ -277,6 +277,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::unchecked_cast,
       prim::tolist,
       prim::rpc_async,
+      prim::Enter,
+      prim::Exit,
   };
 
   // Operators that should not be used by alias analysis

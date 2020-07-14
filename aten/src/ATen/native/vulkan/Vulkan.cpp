@@ -1020,15 +1020,24 @@ void copy_image_to_buffer(
 
 class VulkanTensor::Impl {
  public:
-  Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
+  Impl(std::vector<int64_t> sizes)
+      : sizes_(std::move(sizes)),
+        strides_(std::vector<int64_t>(sizes_.size())),
+        numel_(std::accumulate(
+            std::begin(sizes_),
+            std::end(sizes_),
+            1,
+            std::multiplies<int64_t>())) {
     TORCH_CHECK(
         initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
-    numel_ = std::accumulate(
-        std::begin(sizes_), std::end(sizes_), 1, std::multiplies<int64_t>());
   }
 
   std::vector<int64_t> sizes() const {
     return sizes_;
+  }
+
+  std::vector<int64_t> strides() const {
+    return strides_;
   }
 
   inline int64_t dim() const {
@@ -1147,6 +1156,7 @@ class VulkanTensor::Impl {
 
  private:
   std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
   int64_t numel_;
   std::unique_ptr<VBuffer> buffer_;
   std::unique_ptr<VImage> image_;
@@ -1162,6 +1172,10 @@ std::shared_ptr<const VulkanTensor::Impl> VulkanTensor::impl() const {
 
 std::vector<int64_t> VulkanTensor::sizes() const {
   return impl()->sizes();
+}
+
+std::vector<int64_t> VulkanTensor::strides() const {
+  return impl()->strides();
 }
 
 int64_t VulkanTensor::dim() const {
