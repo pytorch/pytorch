@@ -2873,16 +2873,16 @@ Example::
 
 add_docstr(torch.isreal,
            r"""
-isreal(input) -> (bool)
+isreal(input) -> Tensor
 
-Returns True if the data type of :attr:`input` is a complex data type i.e.,
-one of ``torch.complex64``, and ``torch.complex128`` where the imaginary part is 0.
+Returns a new tensor with boolean elements representing if each element is real-valued or not.
+All real-valued types are considered real. Complex values are considered real when their imaginary part is 0.
 
 Arguments:
     input (Tensor): A tensor to check
 
 Returns:
-    Tensor: A ``torch.BoolTensor`` containing a True at each location of real elements.
+    Tensor: A boolean tensor containing a True at each location of real elements.
 
 Example::
 

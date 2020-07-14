@@ -15,7 +15,6 @@ import glob
 import os
 import shutil
 import torch.testing._internal.common_utils as common
-import numpy as np
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -531,15 +530,6 @@ class TestOperators(TestCase):
     def test_isnan(self):
         x = torch.tensor([1, float('nan'), 2])
         self.assertONNX(lambda x: torch.isnan(x), x)
-
-    def test_isreal(self):
-        # TODO what's the point of the tests here compared to those in test_torch.py?
-        common.TestCase.compare_with_numpy(self, torch_fn=torch.isreal,
-                                           np_fn=np.isreal,
-                                           tensor_like=torch.tensor([1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j]))
-        # assert(torch.all(torch.eq(torch.isreal(x), y)))
-        # assert(torch.all(torch.eq(x.isreal(), y)))
-        # self.assertONNX(lambda x: torch.isreal(x), x)
 
     def test_argmax(self):
         x = torch.randn(4, 4, requires_grad=True)

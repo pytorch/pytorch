@@ -6479,17 +6479,18 @@ class TestTorchDeviceType(TestCase):
         vals = (1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j)
         self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
 
-    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(*torch.testing.get_all_dtypes())
     def test_isreal_noncomplex(self, device, dtype):
-        if dtype is not torch.bfloat16:  # numpy supports all dtypes torch does except bfloat16
-            vals = (1, 2, 3)
-            self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
+        vals = (1, 2, 3)
+        # Manual check here since numpy doesn't support bfloat16
+        result = torch.isreal(torch.tensor(vals, dtype=dtype))
+        expected = torch.ones(result.size(), dtype=torch.bool, device=device)
+        self.assertEqual(result, expected)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @dtypes(torch.float32)
-    def test_isreal_nan(self, device, dtype):
-        vals = (1, np.NaN)
+    @dtypes(torch.complex64)
+    def test_isreal_nan_inf(self, device, dtype):
+        vals = (float('nan'), 1 + float('nan') * 1j, 1 + float('inf') * 1j, 1 - float('inf') * 1j)
         self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
 
     @onlyCPU
@@ -6501,11 +6502,6 @@ class TestTorchDeviceType(TestCase):
     def test_isinf_type(self, device):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
-
-    @onlyCPU
-    def test_isreal_type(self, device):
-        with self.assertRaises(TypeError):
-            torch.isreal(1)  # Parameter must be a tensor
 
     @onlyCPU
     @dtypes(torch.float)
