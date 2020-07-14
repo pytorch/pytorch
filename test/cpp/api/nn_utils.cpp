@@ -67,7 +67,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     auto norm = utils::clip_grad_norm_(l->parameters(), max_norm, norm_type);
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
-    ASSERT_FLOAT_EQ(norm_after, max_norm);
+    ASSERT_NEAR(norm_after, max_norm, 1e-6);
     ASSERT_LE(norm_after, max_norm);
     auto scaled = compare_scaling(grads);
     ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);

@@ -11,12 +11,13 @@
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <tuple>
 #include <vector>
-#include <algorithm>
 
 
 namespace {
@@ -27,6 +28,9 @@ namespace {
 
 namespace at {
 namespace native {
+
+template<typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, const Tensor &indices, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -398,26 +402,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
 }
 
-// embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
-// This is created to save extra `.contiguous()` call in backward.
-// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-embedding_bag(const Tensor &weight, const Tensor &indices,
-              const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse,
-              const Tensor &per_sample_weights,
-              bool include_last_offset) {
-  return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
-                            scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
-  };
 
 // Assumes all input tensors except for `weight` are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-_embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
-                  const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse,
-                  const Tensor &per_sample_weights, bool include_last_offset) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
+    const Tensor& weight,
+    const Tensor& indices,
+    const Tensor& offsets,
+    const int64_t mode,
+    const Tensor& per_sample_weights,
+    bool include_last_offset,
+    bool requires_grad) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -443,7 +438,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     TORCH_CHECK(per_sample_weights.numel() == indices.numel());
   }
 
-  auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());
+  auto bag_size = make_bag_size(offsets, indices, mode, requires_grad);
 
   if (include_last_offset) {
     TORCH_CHECK(
@@ -510,6 +505,62 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
       }
     );
   }
+}
+
+// embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
+// This is created to save extra `.contiguous()` call in backward.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+embedding_bag(const Tensor &weight, const Tensor &indices,
+              const Tensor &offsets, const bool scale_grad_by_freq,
+              const int64_t mode, bool sparse,
+              const Tensor &per_sample_weights,
+              bool include_last_offset) {
+  if (!weight.requires_grad()) {
+    return at::_embedding_bag_forward_only(weight, indices.contiguous(), offsets.contiguous(),
+                              scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
+  }
+
+  return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
+                            scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
+};
+
+// Assumes all input tensors except for `weight` are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
+                  const Tensor &offsets, const bool scale_grad_by_freq,
+                  const int64_t mode, bool sparse,
+                  const Tensor &per_sample_weights, bool include_last_offset) {
+  std::ignore = scale_grad_by_freq;
+  std::ignore = sparse;
+  return _embedding_bag_cpu_impl(
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      /*requires_grad=*/false);
+}
+
+// Assumes all input tensors except for `weight` are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
+                  const Tensor &offsets, const bool scale_grad_by_freq,
+                  const int64_t mode, bool sparse,
+                  const Tensor &per_sample_weights, bool include_last_offset) {
+  std::ignore = scale_grad_by_freq;
+  std::ignore = sparse;
+  return _embedding_bag_cpu_impl(
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      /*requires_grad=*/true);
 }
 
 // Assumes all input tensors are contiguous.
@@ -784,7 +835,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       auto bag_idx = offset2bag_data[sample_idx];
       auto embedding_idx = indices_data[sample_idx];
 
-      output_data[sample_idx] = THBlas_dot<scalar_t>(
+      output_data[sample_idx] = dot_impl<scalar_t>(
           embedding_features,
           grad_data + grad_stride0 * bag_idx, grad_stride1,
           weight_data + weight_stride0 * embedding_idx, weight_stride1);

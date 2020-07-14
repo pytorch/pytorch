@@ -20,7 +20,8 @@
 
 #include <ATen/record_function.h>
 
-typedef struct CUevent_st* CUDAEventStub;
+struct CUevent_st;
+typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
 namespace torch { namespace autograd {
 
@@ -32,7 +33,7 @@ struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
   }
-  virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
+  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) {
     fail();
     return 0.f;
   }
@@ -291,7 +292,7 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* cuda_event = nullptr;
+  CUDAEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;

@@ -16,7 +16,8 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
-                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack)
+                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack,
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -570,30 +571,34 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
-    # TODO: Add ConvTranspose1d and ConvTranspose3d when supported in ORT
-    # TODO : Add test with dilation != 1 when ORT fixed
     def test_conv_transpose(self):
         class TraceModel(torch.nn.Module):
             def __init__(self):
                 super(TraceModel, self).__init__()
-                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+                self.conv1 = torch.nn.ConvTranspose1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.ConvTranspose3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
 
-            def forward(self, input2):
-                return self.conv2(input2)
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
 
         class ScriptModel(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptModel, self).__init__()
-                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+                self.conv1 = torch.nn.ConvTranspose1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.ConvTranspose3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
 
             @torch.jit.script_method
-            def forward(self, input2):
-                return self.conv2(input2)
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
 
+        x1 = torch.randn(20, 16, 50)
         x2 = torch.randn(20, 16, 50, 100)
+        x3 = torch.randn(20, 16, 10, 50, 100)
 
-        self.run_test(TraceModel(), (x2,), atol=10e-5)
-        self.run_test(ScriptModel(), (x2,), atol=10e-5)
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+        self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
@@ -1895,7 +1900,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         num_layers = [1, 1, 2, 3]
         bidirectional = [True, False, True, False]
-        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)]
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
@@ -1960,7 +1965,7 @@ class TestONNXRuntime(unittest.TestCase):
         num_layers = [2, 3]
         batch_size = [3, 4]
         seq_len = [5, 7]
-        bidirectional = [True, False] 
+        bidirectional = [True, False]
         models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
                              for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
         for model, input in models_and_inputs:
@@ -2236,6 +2241,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
 
+    def test_view_dynamic(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view(other.shape)
+
+        x = torch.randn(2, 3, 4)
+        shape = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, shape))
+
+    def test_view_as(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input, other):
+                return input.view_as(other)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(6, 4)
+        self.run_test(ViewModel(), (x, y))
+
     def test_weight_norm(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
@@ -2281,6 +2304,22 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_flatten_dynamic_axes(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.flatten(x, start_dim=2, end_dim=3)
+
+        batch_size = 3
+        x = torch.randn(batch_size, 5, 4, 5)
+        y = torch.randn(5, 5, 4, 5)
+        model = MyModule()
+        self.run_test(model, x, test_with_inputs=[y],
+                      input_names=['input'],
+                      output_names=['output'],
+                      dynamic_axes={'input' : {0 : 'batch_size'},
+                                    'output' : {0 : 'batch_size'}})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_getitem(self):
@@ -2684,8 +2723,28 @@ class TestONNXRuntime(unittest.TestCase):
             # add is used for exporting full
             def forward(self, x):
                 return torch.full((3, 4), x)
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         self.run_test(FullModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full_like(x, 4)
+
+        x = torch.tensor(12)
+        self.run_test(FullLikeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like_value(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x, y):
+                out = y + 2
+                return torch.full_like(x, out)
+
+        x = torch.tensor(12)
+        y = torch.tensor(2)
+        self.run_test(FullLikeModel(), (x, y))
 
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
@@ -2979,6 +3038,26 @@ class TestONNXRuntime(unittest.TestCase):
 
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
+
+    @skipIfUnsupportedMaxOpsetVersion(10)
+    def test_unsupported_pad(self):
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        def run():
+            x = torch.randn(2, 2, 4, 4)
+            y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+            p = Pad()
+            f = io.BytesIO()
+            torch.onnx._export(p, (x, y), f)
+
+        with self.assertRaises(RuntimeError) as cm:
+            run()
+
+        the_exception = cm.exception
+        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
+                         'Please try opset version 11.', the_exception.args[0])
 
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
