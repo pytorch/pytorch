@@ -1347,7 +1347,9 @@ at::Tensor interpolate(
   auto input_dim = input.dim();
   if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors), c10::make_optional(scale_factors_1));
+        input,
+        _output_size(input, 1, size, scale_factors),
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
