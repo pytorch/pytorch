@@ -773,7 +773,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     }
     at::add_out(result1, real_out_var, imag_out_var);
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
@@ -835,9 +835,7 @@ Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value())
-    return trivial_return.value();
-  return at::var(self, IntArrayRef{}, unbiased, false);
+  return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -857,9 +855,7 @@ Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value())
-    return trivial_return.value();
-  return at::std(self, IntArrayRef{}, unbiased, false);
+  return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -872,7 +868,7 @@ Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 }
 
 Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+  return  at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
@@ -956,6 +952,61 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
 
 Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
   return at::norm(self - other, p);
+}
+
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
+  auto mask = (self != 0);
+  return mask.sum(dims);
+}
+
+Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
+  if (dim){
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    return at::count_nonzero(self, IntArrayRef{wrap_dim});
+  }
+  return at::count_nonzero(self, IntArrayRef{});
+}
+
+bool cpu_equal(const Tensor& self, const Tensor& other) {
+  if (!at::namedinference::are_names_equal(
+        self.unsafeGetTensorImpl(), other.unsafeGetTensorImpl())) {
+    return false;
+  }
+  at::NoNamesGuard guard;
+  TORCH_CHECK(self.device() == other.device(), "Cannot compare two tensors on "
+              "different devices. Got: ", self.device(), " and ", other.device());
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  if (!self.is_same_size(other)) {
+    return false;
+  }
+  std::atomic<bool> result{true};
+  auto iter = TensorIteratorConfig()
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .build();
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "equal_cpu", [&] {
+    iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
+      if (!result) {
+          return;
+      }
+      char* self_data = data[0];
+      char* other_data = data[1];
+      for (int64_t i = 0; i < dim_size; ++i) {
+        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+          result = false;
+          return;
+        }
+        self_data += strides[0];
+        other_data += strides[1];
+      }
+    });
+  });
+  return result.load();
 }
 
 }} // namespace at::native

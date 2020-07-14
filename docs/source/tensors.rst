@@ -241,6 +241,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cos_
    .. automethod:: cosh
    .. automethod:: cosh_
+   .. automethod:: count_nonzero
    .. automethod:: acosh
    .. automethod:: acosh_
    .. automethod:: cpu
@@ -377,6 +378,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: logical_or_
    .. automethod:: logical_xor
    .. automethod:: logical_xor_
+   .. automethod:: logit
+   .. automethod:: logit_
    .. automethod:: long
    .. automethod:: lstsq
    .. automethod:: lt

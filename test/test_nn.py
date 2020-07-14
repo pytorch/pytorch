@@ -269,6 +269,47 @@ class TestAvgPool(TestCase):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
                                lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
+    def test_avg_pool1d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4))
+        y = torch.nn.functional.avg_pool1d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=1, stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool1d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=1, stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
+    def test_avg_pool2d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4, 4))
+        y = torch.nn.functional.avg_pool2d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
+            padding=(0, 1), stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool2d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
+                padding=(0, 1), stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
+    def test_avg_pool3d_ceil_mode(self):
+        # Regression test for gh-36977
+        x = 10 * torch.randn((1, 16, 4, 4, 4))
+        y = torch.nn.functional.avg_pool3d(
+            x, ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
+        self.assertTrue(not torch.isnan(y).any())
+
+        if TEST_CUDA:
+            y = torch.nn.functional.avg_pool3d(
+                x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
+            self.assertTrue(not torch.isnan(y).any())
+
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1203,7 +1244,7 @@ class TestNN(NNTestCase):
             'fc4': nn.Linear(5, 5),
             'act3': nn.Sigmoid()
         }
-        modules.update(sorted(next_modules.items()))
+        modules.update(next_modules.items())
         module_dict.update(next_modules)
         check()
 
@@ -8716,6 +8757,21 @@ class TestFusionEval(TestCase):
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
 
 
+class TestAddRelu(TestCase):
+    def test_add_relu(self):
+        a = torch.rand((7, 11))
+        b = torch.rand((7, 11))
+        a = a.float()
+        b = b.float()
+        a = a * -10
+        a = a + 5
+        add_res = a + b
+        relu_res = torch.relu(add_res)
+        add_relu_res = torch.add_relu(a, b)
+
+        self.assertTrue(torch.allclose(add_relu_res, relu_res))
+
+
 def add_test(test, decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
@@ -9394,6 +9450,23 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    @onlyOnCPUAndCUDA
+    def test_ReflectionPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
+                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device))]:
+            self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
+            mod = torch.nn.ReflectionPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            mod = torch.nn.ReflectionPad2d(2)
+            inp = torch.randn(3, 0, 10, 10, device=device)
+            mod(inp)
 
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)

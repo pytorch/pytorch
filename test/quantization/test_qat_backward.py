@@ -4,79 +4,61 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-import torch.nn as nn
-from torch.quantization.qconfig import default_qat_qconfig, _get_default_qat_qconfig_backward
+import copy
+from torch.quantization.fake_quantize import FakeQuantize
+from torch.quantization.fake_quantize_backward import _FakeQuantizeWithBackward
 from torch.testing._internal.common_utils import TestCase
+from .test_workflow_module import to_tensor
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
+TORCH_RANDOM_SEED = 1776
+tolerance = 1e-6
 
 class TestQATBackward(TestCase):
 
     @given(quantize_forward=st.booleans(),
            quantize_backward=st.booleans(),
            device=st.sampled_from(['cpu']),
-           N=st.integers(1000, 1000),
-           D_in=st.sampled_from([10, 100, 1000]),
-           D_out=st.sampled_from([10, 100, 1000]))
-    def test_qat_backward(
-            self,
-            quantize_forward,
-            quantize_backward,
-            device,
-            N,
-            D_in,
-            D_out,
-    ):
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_forward_and_backward(self, quantize_forward, quantize_backward, device, X):
+
+        r"""Tests the forward and backward path of the FakeQuantizeWithBackward module
+        """
         def fake_quantize_tensor(X):
             scale, zero_point = torch._choose_qparams_per_tensor(X, reduce_range=False)
             return torch.fake_quantize_per_tensor_affine(X, scale, zero_point, 0, 255)
 
-        x = torch.randn(N, D_in).to(device)
-        y = torch.randn(N, D_out).to(device)
+        torch.manual_seed(TORCH_RANDOM_SEED)
+        X, (_, _, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
 
-        base_net = nn.Linear(D_in, D_out)
+        fake_with_backward = _FakeQuantizeWithBackward(quant_min=quant_min,
+                                                       quant_max=quant_max,
+                                                       quantize_forward=quantize_forward,
+                                                       quantize_backward=quantize_backward)
 
-        net = nn.Linear(D_in, D_out)
-        net.weight = torch.nn.Parameter(base_net.weight.clone().detach()).to(device)
-        net.bias = torch.nn.Parameter(base_net.bias.clone().detach()).to(device)
+        fake_reference = FakeQuantize(quant_min=quant_min, quant_max=quant_max)
 
-        net.qconfig = _get_default_qat_qconfig_backward(quantize_forward, quantize_backward)
-        torch.quantization.prepare_qat(net, inplace=True)
+        X = to_tensor(X, device)
+        X.requires_grad_()
+        X_ref = copy.deepcopy(X)
+        X_ref.requires_grad_()
 
-        net_ref = nn.Linear(D_in, D_out)
-        net_ref.weight = torch.nn.Parameter(base_net.weight.clone().detach()).to(device)
-        net_ref.bias = torch.nn.Parameter(base_net.bias.clone().detach()).to(device)
+        Y = fake_with_backward(X)
+        Y_ref = fake_reference(X_ref) if quantize_forward else X_ref
 
-        if quantize_forward:
-            net_ref.qconfig = default_qat_qconfig
-            net_ref = torch.quantization.prepare_qat(base_net, inplace=False)
+        self.assertEqual(Y, Y_ref, rtol=tolerance, atol=tolerance)
 
-        loss_fn = torch.nn.MSELoss(reduction='sum')
-        learning_rate = 1e-4
+        dout = torch.rand(X.shape, dtype=torch.float).to(device)
 
-        for _ in range(1):
-            loss = loss_fn(net(x), y)
-            loss_ref = loss_fn(net_ref(x), y)
+        Y.backward(dout)
+        Y_ref.backward(dout)
 
-            print(net(x))
-            print(net_ref(x))
+        dX_ref = fake_quantize_tensor(X_ref.grad) if quantize_backward else X_ref.grad
 
-            net.zero_grad()
-            net_ref.zero_grad()
-
-            loss.backward()
-            loss_ref.backward()
-
-            print(_, loss.item(), loss_ref.item())
-            self.assertEqual(loss.item(), loss_ref.item(), atol=1e-5, rtol=0)
-
-            with torch.no_grad():
-                for param in net.parameters():
-                    param -= learning_rate * param.grad
-                for param in net_ref.parameters():
-                    if quantize_backward:
-                        param.grad = fake_quantize_tensor(param.grad)
-                    param -= learning_rate * param.grad
+        self.assertEqual(X.grad, dX_ref, rtol=tolerance, atol=tolerance)

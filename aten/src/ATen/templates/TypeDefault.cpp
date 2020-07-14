@@ -13,6 +13,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <torch/library.h>
 
 namespace {
