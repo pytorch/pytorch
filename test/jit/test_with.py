@@ -553,21 +553,9 @@ class TestWith(JitTestCase):
         """
         Check that torch.no_grad() works.
         """
-        @torch.jit.script
-        class NoGrad(object):
-            def __init__(self):
-                self.prev: bool = False
-
-            def __enter__(self):
-                self.prev = torch.is_grad_enabled()
-                torch.set_grad_enabled(False)
-
-            def __exit__(self, exc: Any, type: Any, tb: Any):
-                torch.set_grad_enabled(self.prev)
-
         def test_fn(x):
             # type: (Tensor) -> (Tuple[Tensor, bool])
-            with NoGrad():
+            with torch.no_grad():
                 y = x * x
 
             return y, y.requires_grad
