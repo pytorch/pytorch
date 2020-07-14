@@ -177,54 +177,58 @@ PyWarningHandler::PyWarningHandler() noexcept(true):
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
-  if(warning_buffer_.size() > 0) {
-    if(in_exception_) {
-      // An error happened after the warning
-      // Simply handle with the previous handler
-      for(const auto& warning: warning_buffer_) {
-        auto source_location = warning.source_location_;
-        const auto& msg = processErrorMsg(warning.msg_);
-        c10::Warning::warn(source_location, msg, warning.verbatim_);
+  if (warning_buffer_.size() > 0) {
+    PyObject *type, *value, *traceback;
+    pybind11::gil_scoped_acquire gil;
+    auto result = 0;
+    if (in_exception_) {
+      // This (combined with PyErr_Restore below) also works when no python
+      // error has been set yet
+      PyErr_Fetch(&type, &value, &traceback);
+    }
+    for (const auto& warning : warning_buffer_) {
+      auto source_location = warning.source_location_;
+      const auto& msg = processErrorMsg(warning.msg_);
+      if (source_location.file == nullptr) {
+        result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
+      } else if (warning.verbatim_) {
+        // Sets the source location from the warning
+        // Note: PyErr_WarnExplicit will disregard Python's warning filter
+        // and always appear. This is in contrast to PyErr_WarnEx,
+        // which respects the warning filter.
+        result = PyErr_WarnExplicit(
+            /*category=*/PyExc_UserWarning,
+            /*message=*/msg.c_str(),
+            /*filename=*/source_location.file,
+            /*lineno=*/source_location.line,
+            /*module=*/nullptr,
+            /*registry=*/nullptr);
+      } else {
+        // Lets Python set the source location and puts the C++ warning
+        // location into the message.
+        std::ostringstream os;
+        os << msg << " (Triggered internally at  " << source_location.file;
+        os << ":" << source_location.line << ".)";
+        result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
       }
-      warning_buffer_.clear();
-    } else {
-      pybind11::gil_scoped_acquire gil;
-      auto result = 0;
-      for (const auto& warning: warning_buffer_) {
-        auto source_location = warning.source_location_;
-        const auto& msg = processErrorMsg(warning.msg_);
-        if (source_location.file == nullptr) {
-          result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
-        } else if (warning.verbatim_) {
-          // Sets the source location from the warning
-          // Note: PyErr_WarnExplicit will disregard Python's warning filter
-          // and always appear. This is in contrast to PyErr_WarnEx,
-          // which respects the warning filter.
-          result = PyErr_WarnExplicit(
-              /*category=*/PyExc_UserWarning,
-              /*message=*/msg.c_str(),
-              /*filename=*/source_location.file,
-              /*lineno=*/source_location.line,
-              /*module=*/nullptr,
-              /*registry=*/nullptr);
+      if (result < 0) {
+        if (in_exception_) {
+          // PyErr_Print prints the traceback to sys.stderr and
+          // clears the error indicator
+          PyErr_Print();
         } else {
-          // Lets Python set the source location and puts the C++ warning
-          // location into the message.
-          std::ostringstream os;
-          os << msg << " (Triggered internally at  " << source_location.file;
-          os << ":" << source_location.line << ".)";
-          result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
-        }
-        if (result < 0) {
           break;
         }
       }
-      warning_buffer_.clear();
-      if (result < 0) {
-        /// A warning raised an error, we need to force the parent
-        /// function to return an error code.
-        throw python_error();
-      }
+    }
+    warning_buffer_.clear();
+    if ((result < 0) && (!in_exception_)) {
+      /// A warning raised an error, we need to force the parent
+      /// function to return an error code.
+      throw python_error();
+    }
+    if (in_exception_) {
+      PyErr_Restore(type, value, traceback);
     }
   }
 }
