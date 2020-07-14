@@ -55,6 +55,8 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
+    elif t == 'int[]?':
+        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -76,6 +78,10 @@ def type_argument_translations(arg):
         t = 'double'
     elif t == 'float?':
         t = 'double?'
+    elif t == 'float[]':
+        t = 'ArrayRef<double>'
+    elif t == 'float[]?':
+        t = 'ArrayRef<double>?'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'

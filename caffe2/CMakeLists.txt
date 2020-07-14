@@ -897,6 +897,13 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
+  # can only be compiled with USE_TENSORPIPE is set.
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PRIVATE
+      USE_TENSORPIPE
+    )
+  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
@@ -1162,6 +1169,30 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+if(BUILD_MOBILE_BENCHMARK)
+  foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
+    get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
+    add_executable(${benchmark_name} "${benchmark_src}")
+    target_link_libraries(${benchmark_name} torch_library benchmark)
+    target_include_directories(${benchmark_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${benchmark_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${benchmark_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_options(${benchmark_name} PRIVATE "LINKER:--allow-multiple-definition")
+  endforeach()
+endif()
+
+if(BUILD_MOBILE_TEST)
+  foreach(test_src ${ATen_MOBILE_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} torch_library gtest_main)
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+  endforeach()
 endif()
 
 # ---[ Test binaries.
