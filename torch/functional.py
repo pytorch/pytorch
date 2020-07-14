@@ -985,16 +985,90 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
 def atleast_1d(*tensors):
+    r"""
+    atleast_1d(input) -> Tensor
+    Returns a 1-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with one or more dimensions are returned as-is.
+
+    Args:
+        input (Tensor or list of Tensors)
+    Example::
+        >>> x = torch.randn(2)
+        >>> x
+        tensor([1.4584, 0.7583])
+        >>> torch.atleast_1d(x)
+        tensor([1.4584, 0.7583])
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_1d(x)
+        tensor([1.])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_1d((x,y))
+        (tensor([0.5000]), tensor([1.]))
+    """
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_1d(tensors)
 
 def atleast_2d(*tensors):
+    r"""
+    atleast_2d(input) -> Tensor
+    Returns a 2-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with two or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+    Example::
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_2d(x)
+        tensor([[1.]])
+        >>> x = torch.randn(2,2)
+        >>> x
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> torch.atleast_2d(x)
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_2d((x,y))
+        (tensor([[0.5000]]), tensor([[1.]]))
+    """
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_2d(tensors)
 
 def atleast_3d(*tensors):
+    r"""
+    atleast_3d(input) -> Tensor
+    Returns a 3-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with three or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+    Example::
+        >>> x = torch.tensor(0.5)
+        >>> x
+        tensor(0.5000)
+        >>> torch.atleast_3d(x)
+        tensor([[[0.5000]]])
+        >>> x = torch.randn(1,1)
+        >>> x
+        tensor([[1.5484]])
+        >>> torch.atleast_3d(x)
+        tensor([[[1.5484]]])
+        >>> x = torch.randn(1,1,1)
+        >>> x
+        tensor([[[-1.5689]]])
+        >>> torch.atleast_3d(x)
+        tensor([[[-1.5689]]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_3d((x,y))
+        (tensor([[[0.5000]]]), tensor([[[1.]]]))
+    """
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_3d(tensors)
