@@ -368,6 +368,7 @@ def get_testing_overrides():
         torch.logical_not: lambda input, out=None: -1,
         torch.logical_or: lambda input, other, out=None: -1,
         torch.logical_xor: lambda input, other, out=None: -1,
+        torch.logit: lambda input, eps=None: -1,
         torch.logsumexp: lambda input, names, keepdim, out=None: -1,
         torch.lstm: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,
         torch.lstm_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
