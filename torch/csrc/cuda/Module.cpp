@@ -54,6 +54,10 @@ static void poison_fork() {
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
+void CaffeCudaGetDeviceWithTHCudaCheck(int& device_id) {
+  device_id = caffe2::CaffeCudaGetDevice();
+}
+
 void THCPModule_setDevice(int device)
 {
   THCudaCheck(caffe2::CaffeCudaSetDevice(device));
@@ -77,7 +81,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   int device;
   torch::utils::cuda_lazy_init();
-  device = THCudaCheck(caffe2::CaffeCudaGetDevice());
+  THCudaCheck(CaffeCudaGetDeviceWithTHCudaCheck(device));
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -141,7 +145,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
   int device;
-  device = THCudaCheck(caffe2::CaffeCudaGetDevice());
+  THCudaCheck(CaffeCudaGetDeviceWithTHCudaCheck(device));
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
   }
