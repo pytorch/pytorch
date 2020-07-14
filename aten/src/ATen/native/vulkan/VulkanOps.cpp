@@ -59,9 +59,8 @@ void upsample_nearest2d(
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(upsampleNearest2d),
-                          descriptorSetLayout,
-                          workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(upsampleNearest2d), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
@@ -110,9 +109,8 @@ void adaptive_avg_pool2d(
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(adaptive_avg_pool2d),
-                          descriptorSetLayout,
-                          workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(adaptive_avg_pool2d), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
@@ -173,8 +171,8 @@ void add(
   constBuffer.bind(descriptorSet, 3);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{
-      at::native::vulkan::GLSL_SPV(add), descriptorSetLayout, workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(add), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
@@ -307,10 +305,8 @@ void conv2d_depthwise(
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit =
-      ComputeUnit{at::native::vulkan::GLSL_SPV(conv2d_dw_clamp),
-                  descriptorSetLayout,
-                  workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(conv2d_dw_clamp), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
@@ -414,9 +410,8 @@ void conv2d_prepack_weights_to_image(
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{1, 1, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(KO4C4HW_to_image),
-                          descriptorSetLayout,
-                          workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(KO4C4HW_to_image), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   image.addImageMemoryBarrierToGeneral(commandBuffer);
@@ -524,9 +519,8 @@ void conv2d(
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{1, 1, params.OC_4};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(conv2d_nogroup_clamp),
-                          descriptorSetLayout,
-                          workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(conv2d_nogroup_clamp), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
@@ -694,8 +688,8 @@ void clamp(
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{
-      at::native::vulkan::GLSL_SPV(clamp), descriptorSetLayout, workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(clamp), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
@@ -781,8 +775,8 @@ void addmm(
   constBuffer.bind(descriptorSet, 4);
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{
-      at::native::vulkan::GLSL_SPV(addmm), descriptorSetLayout, workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(addmm), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
@@ -834,8 +828,8 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
   constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{1, 1, 1};
-  ComputeUnit computeUnit{
-      at::native::vulkan::GLSL_SPV(mean), descriptorSetLayout, workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(mean), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
