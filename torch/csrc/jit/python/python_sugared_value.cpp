@@ -706,6 +706,31 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   return tt;
 }
 
+//std::shared_ptr<SugaredValue> PythonEnumValue::attr(
+//const SourceRange& loc,
+//      Function& m,
+//      const std::string& field
+//) {
+//  if (field == "name") {
+//    return name_;
+//  }
+//
+//  if (field == "value") {
+//    return value_;
+//  }
+//
+//  TORCH_INTERNAL_ASSERT(false);
+//}
+//
+//bool PythonEnumValue::hasAttr(const SourceRange& loc, Function& m, const std::string& field) {
+//  return field == "name" || field == "value";
+//}
+//
+//Value* PythonEnumValue::asValue(const SourceRange& loc, Function& m) {
+//  std::vector<Value*> values({name_->asValue(loc, m), value_->asValue(loc, m)});
+//  return m.graph()->insertNode(m.graph()->createTuple(values))->output();
+//}
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
@@ -877,7 +902,18 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<PythonValue>(obj, rcb);
   }
 
+//  py::bool_ isEnumValue = py::isinstance(obj, py::module::import("enum").attr("Enum"));
+//  if (py::cast<bool>(isEnumValue)) {
+//    py::str qualified_name =
+//        py::module::import("torch.jit").attr("_qualified_name")(obj);
+//    auto qual_name = c10::QualifiedName(qualified_name);
+//    auto name = toSugaredValue(obj.attr("name"), m, loc, /*is_constant=*/true);
+//    auto value = toSugaredValue(obj.attr("value"), m, loc, /*is_constant=*/true);
+//    return std::make_shared<PythonEnumValue>(qual_name, name, value);
+//  }
+
   return std::make_shared<PythonValue>(obj);
 }
+
 } // namespace jit
 } // namespace torch

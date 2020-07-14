@@ -288,5 +288,30 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
+//struct VISIBILITY_HIDDEN PythonEnumValue : public SugaredValue {
+//  PythonEnumValue(QualifiedName qual_name, SugaredValuePtr name, SugaredValuePtr value) :
+//   qual_name_(std::move(qual_name)),
+//   name_(std::move(name)), value_(std::move(value)) {}
+//
+//  std::string kind() const override {
+//    return "Python Enum type";
+//  }
+//
+//  std::shared_ptr<SugaredValue> attr(
+//      const SourceRange& loc,
+//      Function& m,
+//      const std::string& field) override;
+//
+//  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+//      override;
+//
+//  Value* asValue(const SourceRange& loc, Function& m) override;
+//
+// private:
+//  c10::QualifiedName qual_name_;
+//  SugaredValuePtr name_;
+//  SugaredValuePtr value_;
+//};
+
 } // namespace jit
 } // namespace torch
