@@ -271,7 +271,8 @@ static auto check_tensor_or_overload(PyObject* obj, std::vector<py::handle> &ove
   return false;
 }
 
-  auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
+// argnum is needed for raising the TypeError, it's used in the error message.
+auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {

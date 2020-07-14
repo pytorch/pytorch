@@ -467,13 +467,11 @@ def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
         func_args = []
         if inspect.isbuiltin(func) and func in annotated_args:
-            for arg in annotated_args[func]["arguments"]:
+            for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg['simple_type']
                 if t.endswith('?'):
                     t = t[:-1]
-                if 'default' in arg or arg.get('kwarg_only', False) or arg.get('output', False):
-                    continue
                 if t == 'Tensor':
                     func_args.append(TensorLike())
                 elif t == 'TensorList':
@@ -499,14 +497,9 @@ def generate_tensor_like_override_tests(cls):
                 elif t == 'std::string':
                     func_args.append('')
                 else:
-                    "Unsupported argument type %s for argument %s of function %s"
-                    raise RuntimeError(msg % (t, arg['name'], func))
+                    raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
         else:
-            if torch._six.PY3:
-                args = inspect.getfullargspec(override)
-            else:
-                args = inspect.getargspec(override)
-
+            args = inspect.getfullargspec(override)
             nargs = len(args.args)
             if args.defaults is not None:
                 nargs -= len(args.defaults)
