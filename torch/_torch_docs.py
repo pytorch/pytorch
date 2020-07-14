@@ -7082,6 +7082,12 @@ The operation is defined as:
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
+.. note::
+    Currently valid scalar and tensor combination are
+    1. Scalar of floating dtype and torch.double
+    2. Scalar of integral dtype and torch.long
+    3. Scalar of complex dtype and torch.complex128
+
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
     x (Tensor or Scalar): values selected at indices where :attr:`condition` is ``True``
@@ -7102,7 +7108,7 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
-    >>> torch.where(torch.randn(2,2) > 0.5, torch.randn(2,2), 0)
+    >>> torch.where(torch.randn(2,2) > 0.5, torch.randn(2,2).to(torch.double), 0.)
     tensor([[0.0000, 0.0000],
            [0.0000, 0.2442]])
 
