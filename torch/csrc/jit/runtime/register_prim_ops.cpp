@@ -424,6 +424,18 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
+         [](Stack* stack) {
+           at::Tensor qtensor;
+           pop(stack, qtensor);
+           push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dequantize.any(Any tensors) -> Any",
+         [](Stack* stack) { dequantize(*stack); },
+         aliasAnalysisFromSchema()),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
@@ -489,16 +501,11 @@ RegisterOperators reg(
          float,
          float),
      DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-     DEFINE_SCALAR_BINARY_OP(
+     DEFINE_SCALAR_SCALAR_BINARY_OP(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-     DEFINE_SCALAR_BINARY_OP(
-         aten::pow.Scalar,
-         static_cast<double>(pow(a, b)),
-         static_cast<double>(pow(a, b)),
-         Scalar),
      DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
