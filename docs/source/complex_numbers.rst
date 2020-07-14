@@ -3,23 +3,26 @@
 Complex Numbers
 ===============
 
-Complex Numbers are numbers that can be expressed in the form :math:`a + bi`, where a and b are real numbers,
-and *i* is a solution of the equation :math:`x^2 = −1`. Complex numbers frequently occur in mathematics and
-engineering, especially in signal processing. The aim of introducing tensors of complex dtypes is to provide
-a more natural user experience for users and libraries (eg. TorchAudio) that currently work around the
-lack of complex tensors by using Float Tensors with shape :math:`(..., 2)` where the last dimension contains
-the real and imaginary values.
+Complex numbers are numbers that can be expressed in the form :math:`a + bj`, where a and b are real numbers,
+and *j* is a solution of the equation :math:`x^2 = −1`. Complex numbers frequently occur in mathematics and
+engineering, especially in signal processing. Tensors of complex dtypes provide a more natural user experience
+for users and libraries (eg. TorchAudio) that previously worked around the lack of complex tensors by using
+float tensors with shape :math:`(..., 2)` where the last dimension contained the real and imaginary values.
 
-We support many functions for Complex Tensors eg. :func:`torch.svd`, :func:`torch.qr` etc. Operations on complex tensors are likely to be
-faster than operations on float tensors mimicking them. Operations involving complex numbers in PyTorch are
-optimized to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, CuBlas). Thus using
-functions for complex tensors will provide performance benefits as opposed to users defining their own functions.
+Operations on complex tensors (eg :func:`torch.mv`, :func:`torch.matmul`) are likely to be faster and more
+memory efficient than operations on float tensors mimicking them. Operations involving complex numbers in
+PyTorch are optimized to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, CuBlas).
+Thus using functions for complex tensors will provide performance benefits as opposed to users defining
+their own functions.
+
+.. note::
+     Spectral Ops currently don't use complex tensors but the API would be soon updated to use complex tensors.
 
 .. warning ::
      Complex Tensors is a beta feature and subject to change.
 
 Creating Complex Tensors
-----------------------
+------------------------
 
 We support two complex dtypes: `torch.cfloat` and `torch.cdouble`
 
@@ -55,7 +58,8 @@ Transition from the old representation
 
 Users who currently worked around the lack of complex tensors with real tensors of shape `(..., 2)`
 can easily to switch using the complex tensors in their code using :func:`torch.view_as_complex` and
-- :func:`torch.view_as_real` view functions:
+- :func:`torch.view_as_real`. Note that these functions don't perform any copy and
+return a view of the input Tensor.
 
 ::
 
@@ -88,7 +92,7 @@ The real and imaginary values of a complex tensor can be accessed using the :att
 Angle and abs
 -------------
 
-The angle and absolute values of a complex tensor can be accesses using :func:`torch.angle` and
+The angle and absolute values of a complex tensor can be accessed using :func:`torch.angle` and
 `torch.abs`.
 
 ::
@@ -102,13 +106,14 @@ The angle and absolute values of a complex tensor can be accesses using :func:`t
 Linear Algebra
 --------------
 
-Currently, there is very minimal linear algebraic operation support for complex tensors.
+Currently, there is very minimal linear algebra operation support for complex tensors.
 We currently support :func:`torch.mv`, :func:`torch.svd`, :func:`torch.qr`, and :func:`torch.inverse`
 (the latter three are only supported on CPU). However we are working to add support for more
 functions soon: :func:`torch.matmul`, :func:`torch.solve`, :func:`torch.eig`, :func:`torch.eig`,
-:func:`torch.symeig`. If any of the other ops would help your use case, please search if an issue has
-already been filed (https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22)
-and if not, file one (https://github.com/pytorch/pytorch/issues/new/choose).
+:func:`torch.symeig`. If any of these would help your use case, please
+`search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
+if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
+
 
 Serialization
 -------------
@@ -125,14 +130,9 @@ Complex Tensors can be serialized, allowing data to be saved as complex values.
 Autograd
 --------
 
-PyTorch supports Autograd for Complex Tensors.
-
-1. :func:`torch.functional.backward` can be used for holomorphic :math:`C -> C` functions.
-   For non-holomorphic functions, the gradient is evaluated as if it were holomorphic.
-2. :func:`torch.functional.backward` can be used to optimize :math:`C -> R` functions, like
-   real-values loss functions of complex parameters :math:`x` by taking steps in the direction
-   of conjugate of :math:`x.grad`.
-3. mention the current behavior of backward for spectral ops?
+PyTorch supports Autograd for Complex Tensors. The autograd APIs can be
+used for both holomorphic and non-holomorphic functions. For non-holomorphic
+functions, the gradient is evaluated as if it were holomorphic.
 
 For more details, check out the Autograd note :ref:`complex_autograd-doc`.
 
@@ -182,7 +182,5 @@ Sparse Tensors
 
 Distributed
 
-Multiprocessing
-
-If any of these would help your use case, please search if an issue has already been filed (https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22)
-and if not, file one (https://github.com/pytorch/pytorch/issues/new/choose).
+If any of these would help your use case, please `search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
+if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
