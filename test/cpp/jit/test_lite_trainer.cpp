@@ -91,13 +91,40 @@ void testMobileNamedParameters() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
-  m.save("/Users/annshan/models/testfull.bc");
-  m._save_for_mobile("/Users/annshan/models/test.bc");
-
   std::vector<IValue> mobile_values;
   auto mobile_params = bc.named_parameters();
   for (auto it = mobile_params.begin(); it != mobile_params.end(); it++) {
     mobile_values.push_back(it->value());
+  }
+  AT_ASSERT(values == mobile_values);
+}
+
+void testMobileSaveLoadData() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.register_parameter("foo2", 2 * torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  Module child("m2");
+  child.register_parameter("foo", 4 * torch::ones({}), false);
+  m.register_module("child", child);
+
+  std::vector<IValue> values;
+  for (auto e : m.named_parameters()) {
+    values.emplace_back(e.value);
+  }
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.save_data(ss_data);
+  auto mobile_params = _load_mobile_data(ss_data);
+  std::vector<IValue> mobile_values;
+  for (const auto& e : mobile_params) {
+    mobile_values.emplace_back(e);
   }
   AT_ASSERT(values == mobile_values);
 }
