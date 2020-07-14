@@ -289,6 +289,7 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg

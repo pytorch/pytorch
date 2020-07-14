@@ -54,6 +54,7 @@ DECLARE_DISPATCH(binary_fn, max_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, min_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
+DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
 DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
 DECLARE_DISPATCH(binary_fn, mse_stub);
 DECLARE_DISPATCH(binary_fn, fmod_stub);

@@ -2783,6 +2783,20 @@ sigmoid_() -> Tensor
 In-place version of :meth:`~Tensor.sigmoid`
 """)
 
+add_docstr_all('logit',
+               r"""
+logit() -> Tensor
+
+See :func:`torch.logit`
+""")
+
+add_docstr_all('logit_',
+               r"""
+logit_() -> Tensor
+
+In-place version of :meth:`~Tensor.logit`
+""")
+
 add_docstr_all('sign',
                r"""
 sign() -> Tensor
