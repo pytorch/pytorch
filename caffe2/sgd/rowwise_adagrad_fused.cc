@@ -54,6 +54,60 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         int,
         rowwise_adagrad_update_inlined>);
 
+// Match the GPU Approx op, here Approx and Exact are the same for
+// RowWiseSparseAdagradFusedWithSparseLengthsSumGradient op
+OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox)
+    .NumInputs(6)
+    .NumOutputs(2)
+    .EnforceOneToOneInplace()
+    .SetDoc(R"DOC(
+
+Fused operator of
+SparseLengthsIndicesInGradientSumGradient (gradient of SparseLengthsSum) +
+RowWiseSparseAdagrad.
+
+Given inputs (param, moment, indices, grad, lr), runs the row-wise sparse
+AdaGrad update on (param, grad, moment[indices], lr), and returns (new_param,
+new_moment) as in the dense case. Additional input (lengths) is for fused
+SparseLengthsSumGradient operator.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(
+        2,
+        "indices",
+        "Integer vector containing indices of the first dimension of param for the slices that are being updated")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "lengths",
+        "Non negative vector with sum of elements equal to indices length")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment", "Updated moment")
+    .Arg(
+        "round_option",
+        "rounding option: 0 for nearest rounding, 1 for stochastic rounding")
+    .Arg("epsilon", "Default 1e-5");
+
+REGISTER_CPU_OPERATOR(
+    RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox,
+    RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        rowwise_adagrad_update_inlined>);
+
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox,
+    SIMD,
+    RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        rowwise_adagrad_update_inlined>);
+
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient)
     .NumInputs(7)
     .NumOutputs(3)

@@ -546,6 +546,126 @@ class TestJit(JitTestCase):
         self.run_pass('dce', trace.graph)
         FileCheck().check_not("type_as").run(str(trace.graph))
 
+    def test_add_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(M, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b, c):
+                tmp = torch.add(a, b)
+                x = self.relu_op(tmp)
+                d = torch.add(a, c)
+                return x + d
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
+        m = torch.jit.script(M(torch.relu))
+        orig_res = m(a, b, c)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+
+        # add, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
+        m = torch.jit.script(M(torch.relu_))
+        orig_res = m(a, b, c)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu_(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+
+        class Madd_(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(Madd_, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b):
+                x = a.add_(b)
+                x = self.relu_op(x)
+                return x
+
+        # add_, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        # Because in place add_ will overwrite a
+        a_copy = a.clone()
+        m = torch.jit.script(Madd_(torch.relu_))
+        orig_res = m(a, b)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a_copy, b)
+        FileCheck().check_not("aten::add_(") \
+            .check_not("aten::relu_(") \
+            .check("aten::add_relu_(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
+
+        class Madd_out(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(Madd_out, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b):
+                x = torch.add(a, b, out=a)
+                x = self.relu_op(x)
+                return x
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+
+        # add_out, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        # Because in place add_ will overwrite a
+        a_copy = a.clone()
+        m = torch.jit.script(Madd_out(torch.relu_))
+        orig_res = m(a, b)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a_copy, b)
+        FileCheck().check_not("aten::add(") \
+            .check_not("aten::relu_(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ with out=a does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
+
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
@@ -2039,7 +2159,7 @@ graph(%Ra, %Rb):
         self.assertExpected(cu.foo.code)
 
     def test_import_method(self):
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
                     super(Foo, self).__init__()
@@ -2055,6 +2175,25 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             foo_loaded = torch.jit.load(buffer)
             self.assertExpected(foo_loaded.forward.code)
+
+    @unittest.skip("temporarily disable the test for fwd compatibility")
+    def test_non_ascii_string(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = "Over \u0e55\u0e57 57"
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return self.a + "hi\xA1"
+
+        foo = Foo()
+        buffer = io.BytesIO()
+        torch.jit.save(foo, buffer)
+
+        buffer.seek(0)
+        foo_loaded = torch.jit.load(buffer)
+        self.assertExpected(foo_loaded.forward.code)
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -3457,7 +3596,7 @@ def foo(x):
         mod.ninf = float("-inf")
         mod.nan = float("nan")
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
                     super(Foo, self).__init__()
@@ -8983,7 +9122,7 @@ a")
                 x[seq_lens[b]:, b, :] = 0
 
         eager_seq, eager_lengths = pack_padded_pad_packed_script(x, seq_lens)
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
         script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
         self.assertEqual(eager_seq, script_seq)
@@ -9006,7 +9145,7 @@ a")
 
         lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_script_pad_sequence_pack_sequence(self):
@@ -9026,7 +9165,7 @@ a")
         tensor1 = torch.tensor([1, 2, 3])
         tensor2 = torch.tensor([4, 5])
         tensor3 = torch.tensor([6])
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             self.checkScript(pad_sequence_func,
                              ([ones3, ones4, ones5],))
             self.checkScript(pad_sequence_func,
@@ -9222,7 +9361,7 @@ a")
 
     def test_tuples(self):
         # TODO: jitter issue.
-        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+        with torch._jit_internal._disable_emit_hooks():  # TODO: Python print broadcasting list
             def foo(i):
                 a = (i + 4, i * 2)
                 c = a
@@ -12474,7 +12613,7 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+        with torch._jit_internal._disable_emit_hooks():  # TODO: Python print broadcasting list
             def kwarg_false(x):
                 # type: (Tensor) -> Tensor
                 return F.max_pool1d(x, 1, 1, return_indices=False)
@@ -14098,7 +14237,7 @@ a")
                 # type: (str) -> Tensor
                 return self.table[key] + self.x
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
@@ -15254,7 +15393,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
-                with torch.jit._disable_emit_hooks():
+                with torch._jit_internal._disable_emit_hooks():
                     run_test()
             else:
                 run_test()

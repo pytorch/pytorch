@@ -257,4 +257,24 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     )
                 np.testing.assert_equal(bias_int32[0].dtype, np.int32)
 
+            shapes, types = workspace.InferShapesAndTypes(
+                [init_net, net],
+                blob_dimensions={
+                    "X": [batch_size, input_channels],
+                    "W": [output_channels, input_channels],
+                    "b": [output_channels],
+                    "quant_param": [1],
+                },
+                blob_types={
+                    "X": core.DataType.FLOAT,
+                    "W": core.DataType.FLOAT,
+                    "b": core.DataType.FLOAT,
+                    "quant_param": core.DataType.FLOAT,
+                },
+            )
+            assert (
+                "Y" in shapes and "Y" in types
+            ), "Failed to infer the shape or type of Y"
+            self.assertEqual(shapes["Y"], [batch_size, output_channels])
+            self.assertEqual(types["Y"], core.DataType.FLOAT)
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
