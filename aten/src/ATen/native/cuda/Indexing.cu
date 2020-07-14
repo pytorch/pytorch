@@ -575,7 +575,6 @@ namespace {
 // the number of indices chosen is large, then the
 // indexSelectLargeIndex kernel is a better choice to increase
 // parallelism.
-// TODO: remove
 template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
 __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                       cuda::detail::TensorInfo<T, IndexType> src,
@@ -590,7 +589,6 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
-    // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[cuda::detail::IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
@@ -619,7 +617,6 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
 // the number of indices chosen is small, then the
 // indexSelectSmallIndex kernel is a better choice to reduce memory
 // accesses.
-// TODO: remove
 template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           bool IndexIsMajor>
 __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
@@ -645,7 +642,6 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
       dstIndex = linearIndex % innerSize;
     }
 
-    // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[cuda::detail::IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
@@ -673,7 +669,6 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
   TORCH_CHECK(index.dim() <= 1,
              "Index is supposed to be an empty tensor or a vector");
   TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
-  TORCH_CHECK(selfDims > 0, "Source tensor is empty");
 
   std::vector<int64_t> newSize = self.sizes().vec();
   if (self.dim() > 0) {
@@ -795,7 +790,6 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
               "Input, output and indices must be on the current device");
 
   dim = at::maybe_wrap_dim(dim, self);
-  TORCH_CHECK(out.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
 
