@@ -10,8 +10,6 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-#include <algorithm>
-
 namespace torch {
 namespace jit {
 
