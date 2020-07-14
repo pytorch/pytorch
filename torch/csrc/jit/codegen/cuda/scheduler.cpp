@@ -288,16 +288,13 @@ ReductionParams reductionHeuristic(
   } else {
     rparams.block_dim_x_ = red_outputs;
     rparams.block_dim_y_ = red_elems;
-    // TODO: Remove magic statement
-    rparams.block_dim_x_ /= 4;
   }
 
   // 3. Applying Power of 2 Blocking based on the Maximum Number of threads
 
   constexpr int kMaxNumThreads = 512;
   constexpr int kVectorSize = 4;
-  int num_threads =
-      (rparams.fastest_dim_ ? kMaxNumThreads : kMaxNumThreads / kVectorSize);
+  int num_threads = kMaxNumThreads;
   int device_warp_size = at::cuda::warp_size();
 
   if (rparams.block_dim_x_ < num_threads)
@@ -340,7 +337,7 @@ ReductionParams reductionHeuristic(
 
   // Decision to do a cross-warp reduction per block
   if (red_elems_per_thread >= (rparams.block_dim_y_ * kMinValuesPerThread) ||
-      red_elems_per_thread >= kMaxValuesPerThread) {
+      red_elems_per_thread >= kMaxValuesPerThread || !rparams.fastest_dim_) {
     inputs_consumed_per_block_iter *= rparams.block_dim_y_;
     red_elems_per_thread = ceilDiv(red_elems_per_thread, rparams.block_dim_y_);
     rparams.cross_warp_ = true;
@@ -365,8 +362,6 @@ ReductionParams reductionHeuristic(
   int target_grid_size = device_multiprocessor_count * blocks_per_sm;
 
   // Setting the number of blocks based on the number of outputs
-  // grid_dim_x = ceilDiv(red_outputs / (red_on_fastest_dim ? 1 : 4),
-  // outputs_produced_per_block_iter);
   rparams.grid_dim_x_ = ceilDiv(red_outputs, outputs_produced_per_block_iter);
 
   // Cross-block reductions (if necessary)
@@ -382,9 +377,6 @@ ReductionParams reductionHeuristic(
     // If a cross-block reduction was generated
     if (blks_per_output > 1) {
       rparams.cross_block_ = true;
-      //  inputs_consumed_per_block_iter *= blks_per_output;
-      //  red_elems_per_thread = ceilDiv(red_elems_per_thread,
-      //  inputs_consumed_per_block_iter);
     }
   }
 

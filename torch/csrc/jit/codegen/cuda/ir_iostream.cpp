@@ -286,11 +286,7 @@ void IRPrinter::handle(const UnaryOp* uop) {
   } else {
     if (uop->getUnaryOpType() == UnaryOpType::Cast) {
       c10::optional<std::string> cast_str = cast_func_str(std::make_pair(
-          static_cast<TensorIndex*>(uop->in())->view()->getDataType().value(),
-          static_cast<TensorIndex*>(uop->out())
-              ->view()
-              ->getDataType()
-              .value()));
+          uop->in()->getDataType().value(), uop->out()->getDataType().value()));
       TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
       os << cast_str.value();
     } else {
