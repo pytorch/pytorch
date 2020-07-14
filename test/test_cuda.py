@@ -303,6 +303,14 @@ class TestCuda(TestCase):
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_check_error(self):
+        # Assert this call doesn't raise.
+        torch.cuda.check_error(0)
+
+        with self.assertRaisesRegex(torch.cuda.CudaError,
+                                    "out of memory|hipErrorOutOfMemory"):
+            torch.cuda.check_error(2)
+
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
         current_device = torch.cuda.current_device()

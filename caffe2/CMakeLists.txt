@@ -421,6 +421,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
   endif()
@@ -447,12 +448,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
@@ -462,13 +465,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_meta.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
@@ -891,6 +897,13 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
+  # can only be compiled with USE_TENSORPIPE is set.
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PRIVATE
+      USE_TENSORPIPE
+    )
+  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
@@ -1156,6 +1169,30 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+if(BUILD_MOBILE_BENCHMARK)
+  foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
+    get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
+    add_executable(${benchmark_name} "${benchmark_src}")
+    target_link_libraries(${benchmark_name} torch_library benchmark)
+    target_include_directories(${benchmark_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${benchmark_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${benchmark_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_options(${benchmark_name} PRIVATE "LINKER:--allow-multiple-definition")
+  endforeach()
+endif()
+
+if(BUILD_MOBILE_TEST)
+  foreach(test_src ${ATen_MOBILE_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} torch_library gtest_main)
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+  endforeach()
 endif()
 
 # ---[ Test binaries.
