@@ -286,6 +286,63 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+    def test_mish(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+        X = np.random.rand(n, m).astype(np.float32)
+
+        def mish(X):
+            return [X * np.tanh(np.log(1 + np.exp(X)))]
+
+        op = core.CreateOperator(
+            "Mish",
+            ["X"],
+            ["Z"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=mish,
+            ensure_outputs_are_inferred=True,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2,
+            ensure_outputs_are_inferred=True)
+
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+    def test_mish_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def mish(X):
+            return [X * np.tanh(np.log(1 + np.exp(X)))]
+
+        def mish_gradient(X, Y, dY):
+            w = np.exp(3 * X) + 4 * np.exp(2 * X) + (6 + 4 * X) * np.exp(X) + 4 * (1 + X)
+            sigma2 = np.square(np.square(np.exp(X) + 1) + 1)
+            return [dY * np.exp(X) * w / sigma2]
+            # return [dY * (Y + np.divide(1. - Y, 1. + np.exp(-X)))]
+
+        X = np.random.rand(n, m).astype(np.float32)
+        Y = mish(X)[0]
+        dY = np.random.rand(n, m).astype(np.float32)
+        op = core.CreateOperator(
+            "MishGradient",
+            ["X", "Y", "grad"],
+            "grad"
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, Y, dY],
+            reference=mish_gradient,
+        )
+
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_swish(self, n, m, gc, dc, seed):
         np.random.seed(seed)

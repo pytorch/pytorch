@@ -12,3 +12,5 @@ import builtins
 ${namedtuple_defs}
 
 ${function_hints}
+
+${all_directive}

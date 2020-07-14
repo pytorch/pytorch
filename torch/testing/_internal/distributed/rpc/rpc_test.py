@@ -2,10 +2,11 @@ import concurrent.futures
 import contextlib
 import json
 import sys
+from threading import Lock
 import time
 import unittest
 from collections import namedtuple
-from functools import partial
+from functools import partial, wraps
 from unittest import mock
 
 import torch
@@ -57,6 +58,18 @@ def udf_with_torch_ops(device=-1):
         t = torch.mul(t, t)
         t = t.relu()
         t = t.sigmoid()
+
+# Events (operator invocations) that are expected to be ran as part of the above
+# function.
+EXPECTED_REMOTE_EVENTS = [
+    "ones",
+    "ones",
+    "add",
+    "mul",
+    "relu",
+    "threshold",
+    "sigmoid",
+]
 
 
 def requires_process_group_agent(message=""):
@@ -413,8 +426,7 @@ def async_add_multi_fanout(to, x, num, step):
             futs.append(rpc.rpc_async(to, torch.add, args=(0, step)))
 
     # TODO: use torch.futures.collect_all
-    import threading
-    lock = threading.Lock()
+    lock = Lock()
     state = {"cnt": 0, "ret": torch.zeros_like(x)}
     ret_future = torch.futures.Future()
 
@@ -431,6 +443,25 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
+class AsyncExecutionClass:
+
+    @staticmethod
+    @rpc.functions.async_execution
+    def static_async_add(to, x, y, z):
+        return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: fut.wait() + z
+        )
+
+    @classmethod
+    @rpc.functions.async_execution
+    def class_async_add(cls, to, x, y, z):
+        ret_fut = torch.futures.Future()
+        rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: ret_fut.set_result(fut.wait() + z)
+        )
+        return ret_fut
+
+
 def return_future():
     return torch.futures.Future()
 
@@ -441,14 +472,18 @@ load_tests = load_tests
 
 
 class RpcTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
-        def decorator(self):
-            return unittest.skipIf(
-                self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
-                "This test is not yet supported in the Tensorpipe Agent"
-            )(old_func)
+    def _skip_if_tensorpipe_agent(test_func):  # noqa: B902
+        @wraps(test_func)
+        def wrapped_test_func(self):
+            if self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE:
+                # In theory we should call self.skipTest(reason), but this does
+                # not play well with the test runner, which sees an exception
+                # being raised and marks the test as failed. Thus instead we
+                # make the test a successful no-op.
+                return
+            test_func(self)
 
-        return decorator
+        return wrapped_test_func
 
     @dist_init
     def test_worker_id(self):
@@ -960,7 +995,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(self_worker_name in rpc_event.name)
         self.assertTrue(dst_worker_name in rpc_event.name)
         if isinstance(func, torch.jit.ScriptFunction):
-            self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(func) in rpc_event.name)
         else:
             self.assertTrue(func.__name__ in rpc_event.name)
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
@@ -1035,16 +1070,6 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
-        expected_remote_events = [
-            "ones",
-            "ones",
-            "add",
-            "mul",
-            "relu",
-            "threshold",
-            "sigmoid"
-        ]
-
         events = p.function_events
         with TemporaryFileName() as fname:
             path = fname
@@ -1052,9 +1077,78 @@ class RpcTest(RpcAgentTestFixture):
             with open(path) as f:
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
-                for expected_event_name in expected_remote_events + [RPCExecMode.ASYNC.value]:
+                for expected_event_name in EXPECTED_REMOTE_EVENTS + [RPCExecMode.ASYNC.value]:
                     event_exists = any([expected_event_name in event_name for event_name in event_names])
                     self.assertTrue(event_exists)
+
+    @dist_init
+    def test_profiler_rpc_key_names(self):
+        # tests that remote events are properly prefixed with the RPC profiling key.
+        if self.rank != 1:
+            return
+
+        # Spawn multiple threads that send RPCs to ensure keys are correctly
+        # prefixied when there are multiple RPCs being created/in flight at the
+        # same time.
+        dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
+
+        def rpc_with_profiling(dst_worker):
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+                fut.wait()
+
+            events = prof.function_events
+            remote_event_names = {
+                event.name: event for event in events if event.is_remote
+            }
+            rpc_profiling_key = _build_rpc_profiling_key(
+                RPCExecMode.ASYNC,
+                udf_with_torch_ops.__qualname__,
+                worker_name(self.rank),
+                dst_worker,
+            )
+
+            remote_event_name_set = set(EXPECTED_REMOTE_EVENTS)
+            for name, event in remote_event_names.items():
+                # Ensure that we have the expected key as part of the remote
+                # event.
+                self.assertTrue(name.startswith(rpc_profiling_key))
+                self.assertTrue(event.is_remote)
+                self.assertTrue(event.node_id == rpc.get_worker_info(dst_worker).id)
+                # Ensure that the remote event name also contains the operator.
+                operator_name_substr = name[len(rpc_profiling_key) :]
+                # Note: we don't assert that every remote event needs to be
+                # in the above set, the set is just a representative set of
+                # what we expect to see. The profiler can change and add more
+                # events, but we should always expect to see this representative
+                # set.
+                matching_event = {
+                    remote_event_name
+                    for remote_event_name in remote_event_name_set
+                    if remote_event_name in operator_name_substr
+                }
+                remote_event_name_set -= matching_event
+
+            # The set should be empty, otherwise its contained elements did
+            # not show up in the remote profiler output.
+            self.assertTrue(
+                remote_event_name_set == set(),
+                f"Expected {remote_event_name_set} to be included in remote profiler output.",
+            )
+
+        for dst in dst_ranks:
+            dst_worker = worker_name(dst)
+            num_parallel_rpcs = 2
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=num_parallel_rpcs
+            ) as executor:
+                futs = [
+                    executor.submit(rpc_with_profiling, dst_worker)
+                    for _ in range(num_parallel_rpcs)
+                ]
+                # Wait for workers to finish test
+                for fut in futs:
+                    fut.result()
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
@@ -1080,33 +1174,38 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event,
                 RPCExecMode.ASYNC,
             )
-            expected_remote_events = [
-                "ones",
-                "ones",
-                "add",
-                "mul",
-                "relu",
-                "threshold",
-                "sigmoid"
-            ]
-            remote_events = {
-                event.name: event
-                for event in events
-                if event.name in expected_remote_events
-            }
 
-            for expected_remote_event_name in expected_remote_events:
-                self.assertTrue(expected_remote_event_name in remote_events)
-                remote_event = remote_events[expected_remote_event_name]
+            remote_events = {event.name: event for event in events if event.is_remote}
+            rpc_profiling_key = _build_rpc_profiling_key(
+                RPCExecMode.ASYNC,
+                udf_with_torch_ops.__qualname__,
+                worker_name(self.rank),
+                worker_name(dst),
+            )
+
+            for expected_remote_event_name in EXPECTED_REMOTE_EVENTS:
+                REMOTE_OP_STR = "#remote_op: "
+                expected_key = rpc_profiling_key + REMOTE_OP_STR + expected_remote_event_name
+                self.assertTrue(expected_key in remote_events)
+                remote_event = remote_events[expected_key]
                 # Remote event should have a node ID corresponding to the worker
                 # it ran on.
                 self.assertEqual(remote_event.node_id, dst)
 
             # Validate order remote events show up in profiling output.
+            def convert_remote_to_local(event_name):
+                remote_op_key = rpc_profiling_key + REMOTE_OP_STR
+                return event_name[
+                    event_name.find(remote_op_key)
+                    + len(remote_op_key) :
+                ]
+
             remote_events_list = [
-                event.name for event in events if event.name in expected_remote_events
+                convert_remote_to_local(event.name)
+                for event in events
+                if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, expected_remote_events)
+            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
 
     def run_profiling_workload(self, dst):
         fut = rpc.rpc_async(
@@ -1123,7 +1222,7 @@ class RpcTest(RpcAgentTestFixture):
         events = prof.function_events
 
         rpc_mul_event = get_function_event(
-            events, torch.jit._find_builtin(torch.mul)
+            events, torch.jit._builtins._find_builtin(torch.mul)
         )
 
         remote_events = {
@@ -1386,7 +1485,7 @@ class RpcTest(RpcAgentTestFixture):
             with torch.autograd.profiler.profile() as pf:
                 key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch.jit._qualified_name(my_script_func),
+                    torch._jit_internal._qualified_name(my_script_func),
                     "worker1",
                     "worker0",
                 )
@@ -1403,9 +1502,9 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(result, expected)
             events = pf.function_events
             rpc_event = get_function_event(
-                events, torch.jit._qualified_name(my_script_func)
+                events, torch._jit_internal._qualified_name(my_script_func)
             )
-            self.assertTrue(torch.jit._qualified_name(my_script_func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(my_script_func) in rpc_event.name)
 
     @dist_init
     def test_py_class_constructor(self):
@@ -1712,7 +1811,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # Say C has 2 OwnerRRefs.
         # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
-        # This call is effectively A asking B to share it's 2 UserRRefs.
+        # This call is effectively A asking B to share its 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
 
         self.assertEqual(len(rrefs), 2)
@@ -1950,6 +2049,14 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @_skip_if_tensorpipe_agent
     def test_single_threaded_rref_owner(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
@@ -2015,6 +2122,14 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @_skip_if_tensorpipe_agent
     def test_single_threaded_rref_to_here(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
@@ -3091,6 +3206,29 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_function_nested_remote(self):
         self._test_async_function(async_add_nested, RPCExecMode.REMOTE)
+
+    @dist_init
+    def test_async_static_method(self):
+        self._test_async_function(AsyncExecutionClass.static_async_add)
+
+    @dist_init
+    def test_async_static_method_remote(self):
+        self._test_async_function(
+            AsyncExecutionClass.static_async_add,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
+    def test_async_class_method(self):
+        print(dir(AsyncExecutionClass.class_async_add))
+        self._test_async_function(AsyncExecutionClass.class_async_add)
+
+    @dist_init
+    def test_async_class_method_remote(self):
+        self._test_async_function(
+            AsyncExecutionClass.class_async_add,
+            RPCExecMode.REMOTE
+        )
 
     def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)

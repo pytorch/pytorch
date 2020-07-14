@@ -86,6 +86,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+bool Context::allowTF32CuBLAS() const {
+  return allow_tf32_cublas;
+}
+
+void Context::setAllowTF32CuBLAS(bool b) {
+  allow_tf32_cublas = b;
+}
+
 bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
   return true;

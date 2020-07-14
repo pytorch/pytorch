@@ -62,12 +62,15 @@ For reference, here’s a full list of view ops in PyTorch:
 - :attr:`~torch.Tensor.T`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
+- :func:`~torch.Tensor.view_as_real`
+- :func:`~torch.Tensor.view_as_imag`
 - :meth:`~torch.Tensor.unfold`
 - :meth:`~torch.Tensor.unsqueeze`
 - :meth:`~torch.Tensor.view`
 - :meth:`~torch.Tensor.view_as`
 - :meth:`~torch.Tensor.unbind`
 - :meth:`~torch.Tensor.split`
+- :meth:`~torch.Tensor.split_with_sizes`
 - :meth:`~torch.Tensor.chunk`
 - :meth:`~torch.Tensor.indices` (sparse tensor only)
 - :meth:`~torch.Tensor.values`  (sparse tensor only)
