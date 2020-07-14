@@ -673,17 +673,6 @@ void hashValue(Stack* stack) {
 
 RegisterOperators reg2({
 
-    Operator(
-        "aten::__getitem__.str(str s, int index) -> str",
-        [](Stack* stack) {
-          auto index = pop(stack).toInt();
-          auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
-          char c = string.at(norm_index);
-          push(stack, std::string(&c, 1));
-        },
-        aliasAnalysisFromSchema()),
-
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
         "aten::len.any(Any[] a) -> int",
@@ -836,18 +825,6 @@ RegisterOperators reg2({
           auto norm_index = normalizeIndex(index, string.size());
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::ord(str string) -> int",
-        [](Stack* stack) {
-          auto string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              string.size() == 1,
-              "String for ord() must be 1 character, found ",
-              string.size());
-          uint8_t ord = string.at(0);
-          push(stack, int64_t(ord));
         },
         aliasAnalysisFromSchema()),
     Operator(
