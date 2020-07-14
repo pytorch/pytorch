@@ -474,6 +474,7 @@ RegisterOperators reg(
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
      DEFINE_UNARY_OP(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
