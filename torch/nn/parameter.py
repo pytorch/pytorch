@@ -92,8 +92,9 @@ class UninitializedParameter(Parameter):
 class UninitializedBuffer(torch.Tensor):
     r"""A buffer that is not yet initialized for shape inference support.
     """
-    def __new__(cls):
-        data = torch.Tensor()
+    def __new__(cls, data=None):
+        if data is None:
+            data = torch.Tensor()
         requires_grad = False
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 

@@ -399,7 +399,7 @@ class Module:
         for key, buf in self._buffers.items():
             if buf is not None:
                 if isinstance(buf, UninitializedBuffer):
-                    self._buffers[key].data = fn(buf)
+                    self._buffers[key] = UninitializedBuffer(fn(buf))
                 else:
                     self._buffers[key] = fn(buf)
 

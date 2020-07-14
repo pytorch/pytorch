@@ -21,6 +21,8 @@ These are the basic building block for graphs
     :template: classtemplate.rst
 
     ~parameter.Parameter
+    ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
