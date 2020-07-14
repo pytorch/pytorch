@@ -40,6 +40,7 @@ MODELS = [
     ModelDef("wav2letter", audio_text_models.get_wav2letter, FAST_TASKS, []),
     ModelDef("deepspeech", audio_text_models.get_deepspeech, FAST_TASKS_NO_DOUBLE_BACK, DOUBLE_BACKWARD_TASKS),
     ModelDef("transfo", audio_text_models.get_transformer, FAST_TASKS, []),
+    ModelDef("multiheadattn", audio_text_models.get_multiheadattn, FAST_TASKS, []),
 ]
 
 def run_once(model, inp, task, extra=None):
