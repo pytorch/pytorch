@@ -5453,9 +5453,9 @@ Returns a new tensor with the logit of the elements of :attr:`input`.
 When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
 
 .. math::
-    y_{i} = \log_{e}(\frac{z_{i}}{1 - z_{i}})
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
     z_{i} = \begin{cases}
-        x_{i} & \text{if } \text{eps} is None \\
+        x_{i} & \text{if eps is None} \\
         \text{eps} & \text{if } x_{i} < \text{eps} \\
         x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
         1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
