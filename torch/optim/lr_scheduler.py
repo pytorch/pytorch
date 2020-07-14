@@ -25,6 +25,7 @@ SAVE_STATE_WARNING = "Please also save or load the state of the optimzer when sa
 
 class StepsOnFlag(enum.Flag):
     """A flag which indicates when a _LRScheduler should be stepped and supports standard bitwise logic."""
+    NONE = 0
     BATCH = enum.auto()  # steps at the end of a batch
     EPOCH = enum.auto()  # steps at the end of an epoch
 
