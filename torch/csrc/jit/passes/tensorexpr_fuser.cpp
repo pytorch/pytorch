@@ -148,13 +148,6 @@ bool allShapesAreKnown(Value* v) {
   return v->isCompleteTensor();
 }
 
-bool allShapesAreKnown2(Value* v) {
-  if (!v->type()->cast<TensorType>()) {
-    return true;
-  }
-  return v->isCompleteTensor();
-}
-
 bool allShapesAreKnown(Node* node) {
   // TODO: Relax the checks to support dynamic shapes
   for (torch::jit::Value* output : node->outputs()) {
@@ -181,10 +174,6 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Loop) {
     return false; // TODO
   }
-
-  // if (!allShapesAreKnown(node)) {
-  //   return false;
-  // }
 
   // Don't include nodes whose inputs are tensor constants - we cannot handle
   // them at the moment.
@@ -326,19 +315,6 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void verifyFusionGroupInputsHaveProfilingInformation(Block* b) {
-  for (auto n : b->nodes()) {
-    if (n->kind() == getTensorExprSymbol()) {
-      TORCH_CHECK(std::all_of(
-          n->inputs().begin(), n->inputs().end(), allShapesAreKnown2));
-    }
-
-    for (auto ib : n->blocks()) {
-      verifyFusionGroupInputsHaveProfilingInformation(ib);
-    }
-  }
-}
-
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
@@ -388,11 +364,6 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
 
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
-
-  auto const static NO_VERIFY = std::getenv("NO_VERIFY");
-  if (!NO_VERIFY) {
-    verifyFusionGroupInputsHaveProfilingInformation(graph->block());
-  }
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
