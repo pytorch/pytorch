@@ -718,15 +718,15 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    auto  outInfo = cuda::detail::getTensorInfo<scalar_t, unsigned int>(out, /*positiveDim = */ true);
+    auto outInfo = cuda::detail::getTensorInfo<scalar_t, unsigned int>(out);
     int outSelectDim = outInfo.collapseDims(dim);
     outInfo.reduceDim(outSelectDim);
 
-    auto selfInfo = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self, /*positiveDim = */ true);
+    auto  selfInfo = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
     int selfSelectDim = selfInfo.collapseDims(dim);
     selfInfo.reduceDim(selfSelectDim);
 
-    auto indicesInfo = cuda::detail::getTensorInfo<int64_t, unsigned int>(index, /*positiveDim = */ true);
+    auto indicesInfo = cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
     indicesInfo.collapseDims();
 
     // A reasonable choice for when to have each thread iterate over
@@ -763,15 +763,15 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
       }
     }
   } else {
-    auto outInfo = cuda::detail::getTensorInfo<scalar_t, uint64_t>(out, /*positiveDim = */ true);
+    auto outInfo = cuda::detail::getTensorInfo<scalar_t, uint64_t>(out);
     int outSelectDim = outInfo.collapseDims(dim);
     outInfo.reduceDim(outSelectDim);
 
-    auto selfInfo = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self, /*positiveDim = */ true);
+    auto selfInfo = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
     int selfSelectDim = selfInfo.collapseDims(dim);
     selfInfo.reduceDim(selfSelectDim);
 
-    auto indicesInfo = cuda::detail::getTensorInfo<int64_t, uint64_t>(index, /*positiveDim = */ true);
+    auto indicesInfo = cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
     indicesInfo.collapseDims();
 
     LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
