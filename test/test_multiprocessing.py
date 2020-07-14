@@ -406,7 +406,7 @@ class TestMultiprocessing(TestCase):
         for _ in range(5):
             t.append(q.get())
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(t[0], torch.full([5], 0))
+        self.assertEqualIgnoreType(t[0], torch.full([5], 0.))
         del t
         e.set()
         p.join(1)

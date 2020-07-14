@@ -1,6 +1,8 @@
 import io
 import os
 import sys
+import copy
+
 import torch
 from typing import Optional
 
@@ -187,7 +189,7 @@ class TestTorchbind(JitTestCase):
 
         inst = FooBar4321()
         scripted = torch.jit.script(inst)
-        copied = scripted._c.deepcopy()
+        copied = copy.deepcopy(scripted)
         assert copied.forward() == 7
         for expected in [7, 3, 3, 1]:
             assert copied.f.pop() == expected
@@ -203,7 +205,6 @@ class TestTorchbind(JitTestCase):
                 return self.f.top()
 
         inst = FooBar4321()
-        import copy
         copied = copy.deepcopy(inst)
         assert copied() == 7
         for expected in [7, 3, 3, 1]:

@@ -1007,3 +1007,23 @@ class TestClassType(JitTestCase):
                 return new_obj.a
 
         self.checkModule(ModuleWithMeta(5), ())
+
+    def test_type_annotation(self):
+        """
+        Test that annotating container attributes with types works correctly
+        """
+        @torch.jit.script
+        class CompetitiveLinkingTokenReplacementUtils:
+            def __init__(self):
+                self.my_list : List[Tuple[float, int, int]] = []
+                self.my_dict : Dict[int, int] = {}
+
+        @torch.jit.script
+        def foo():
+            y = CompetitiveLinkingTokenReplacementUtils()
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
+            y.my_dict = new_dict
+
+            new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
+            y.my_list = new_list
+            return y

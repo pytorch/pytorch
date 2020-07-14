@@ -150,11 +150,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
+  # Set ROCM_ARCH to gtx900 and gtx906
+  if [[ -n "$CIRCLECI" ]]; then
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
+
   python tools/amd_build/build_amd.py
   python setup.py install --user
-
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
 
   exit 0
 fi

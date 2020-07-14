@@ -1234,21 +1234,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -2062,7 +2058,7 @@ void testTLSFutureCallbacks() {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    s1->addCallback(profilerEnabledCb, /* propagateTLSState */ true);
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
@@ -2077,12 +2073,11 @@ void testTLSFutureCallbacks() {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        [&profilerEnabledCb]() {
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
           profilerEnabledCb();
           return at::IValue(1);
-        },
-        IntType::get(),
-        /* propagateTLS State */ true);
+        }),
+        IntType::get());
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     t.join();
     s2->wait();

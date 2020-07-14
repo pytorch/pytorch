@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -276,7 +277,8 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::set<MobileOptimizerType>& optimization_blacklist) {
+    const std::set<MobileOptimizerType>& optimization_blacklist,
+    const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
@@ -287,7 +289,7 @@ script::Module optimizeForMobile(
   if (!optimization_blacklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
-    cloned_module = freeze_module(cloned_module);
+    cloned_module = freeze_module(cloned_module, preserved_methods);
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
@@ -299,6 +301,10 @@ script::Module optimizeForMobile(
 
   if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
+  }
+
+  if (!optimization_blacklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    FuseAddRelu(cloned_module);
   }
 
   return cloned_module;
@@ -328,7 +334,8 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::set<MobileOptimizerType>& blacklist) {
+    const std::set<MobileOptimizerType>& blacklist,
+    const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");

@@ -3,7 +3,6 @@
 #include <ATen/core/Formatting.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/ThreadLocalState.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
 
@@ -100,6 +99,46 @@ TypePtr IValue::type() const {
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+}
+
+void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+  if (visitor(*this)) {
+    // Short cut.
+    return;
+  }
+  switch (this->tag) {
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.visit(visitor);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().visit(visitor);
+        pair.key().visit(visitor);
+      }
+      break;
+    case Tag::Object: {
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
+        attribute.visit(visitor);
+      }
+      break;
+    }
+    default:
+      break;
+ }
 }
 
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
@@ -619,8 +658,8 @@ StrongTypePtr::StrongTypePtr(
   TORCH_INTERNAL_ASSERT(type_);
 }
 
-std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
+ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
     return tmap;
 }
 
@@ -629,29 +668,6 @@ getClassConverter() {
   static std::unordered_map<std::string, std::function<PyObject*(void*)>>
       classConverter;
   return classConverter;
-}
-
-void ivalue::Future::addCallback(
-    std::function<void(void)> callback,
-    bool propagateTLSState) {
-  std::function<void(void)> cb;
-  if (propagateTLSState) {
-    // Save thread local state and restore it in the callback.
-    at::ThreadLocalState tls_state;
-    cb = [tls_state = std::move(tls_state), callback = std::move(callback)] {
-      at::ThreadLocalStateGuard g(tls_state);
-      callback();
-    };
-  } else {
-    cb = std::move(callback);
-  }
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (completed()) {
-    lock.unlock();
-    cb();
-    return;
-  }
-  callbacks_.emplace_back(std::move(cb));
 }
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(

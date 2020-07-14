@@ -341,14 +341,9 @@ bool ProcessGroupGloo::SendWork::wait() {
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return sendCompleted;
 }
 
@@ -374,14 +369,9 @@ bool ProcessGroupGloo::RecvWork::wait() {
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return recvCompleted;
 }
 
