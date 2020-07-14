@@ -241,6 +241,18 @@ def process_arguments(arguments, func_variants, declaration, func_return):
              'default': 'c10::nullopt', 'is_nullable': True},
         ]
     )
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': False, 'is_nullable': True},
+        ]
+    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -252,6 +264,9 @@ def process_arguments(arguments, func_variants, declaration, func_return):
     corresponding_topts.append(
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
