@@ -164,7 +164,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     var[i] = sqr[i];
 
     if (var[i] < 0.0) {
-      LOG(WARNING) << "Variance " << var[i] << "negative, resetting to 0.";
+      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << "negative, resetting to 0.";
       var[i] = 0.0;
     }
 
@@ -173,7 +173,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     tmp = var[i] + teps;
     fp16_wrap(&tmp);
     if (tmp < 0) {
-      LOG(WARNING) << "Variance " << var[i] << "negative, resetting to 0.";
+      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << "negative, resetting to 0.";
       tmp = 0.0;
     }
     std[i] = std::sqrt(tmp);

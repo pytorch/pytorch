@@ -2755,6 +2755,20 @@ sigmoid_() -> Tensor
 In-place version of :meth:`~Tensor.sigmoid`
 """)
 
+add_docstr_all('logit',
+               r"""
+logit() -> Tensor
+
+See :func:`torch.logit`
+""")
+
+add_docstr_all('logit_',
+               r"""
+logit_() -> Tensor
+
+In-place version of :meth:`~Tensor.logit`
+""")
+
 add_docstr_all('sign',
                r"""
 sign() -> Tensor
@@ -3619,6 +3633,20 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
+""")
+
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
 """)
 
 add_docstr_all('stft',
