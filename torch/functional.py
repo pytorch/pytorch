@@ -1008,6 +1008,9 @@ def atleast_1d(*tensors):
         >>> torch.atleast_1d((x,y))
         (tensor([0.5000]), tensor([1.]))
     """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_1d(tensors)
@@ -1037,6 +1040,9 @@ def atleast_2d(*tensors):
         >>> torch.atleast_2d((x,y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_2d(tensors)
@@ -1069,6 +1075,9 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d((x,y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_3d(tensors)
