@@ -118,7 +118,7 @@ class PythonHookBinder {
   // register_comm_hook function of the reducer input to register that
   // PythonCommHook object.
   static void register_comm_hook(
-      const py::object ddp_model,
+      py::object& ddp_model,
       py::object state,
       py::object comm_hook) {
     ddp_model.attr("reducer")
