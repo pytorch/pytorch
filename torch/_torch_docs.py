@@ -746,10 +746,10 @@ Example::
 add_docstr(torch.atleast_1d,	
            r"""	
 atleast_1d(input) -> Tensor	
-View input tensors to tensor with at least one dimension.	
-Scalar input tensors are converted to 1-dimensional arrays, whilst higher-dimensional inputs are preserved.	
+Returns a 1-dimensional view of each each input tensor with zero dimensions. Input tensors with one or more dimensions are returned as-is.
+
 Args:	
-    input (Tensor or list of Tensors): the input tensor.	
+    input (Tensor or list of Tensors)
 Example::	
     >>> x = torch.randn(2)	
     >>> x	
@@ -770,9 +770,9 @@ Example::
 add_docstr(torch.atleast_2d,	
            r"""	
 atleast_2d(input) -> Tensor	
-View input tensors to tensor with at least two dimension.	
+Returns a 2-dimensional view of each each input tensor with zero dimensions. Input tensors with two or more dimensions are returned as-is.
 Args:	
-    input (Tensor or list of Tensors): the input tensor.	
+    input (Tensor or list of Tensors)
 Example::	
     >>> x = torch.tensor(1.)	
     >>> x	
@@ -795,9 +795,9 @@ Example::
 add_docstr(torch.atleast_3d,	
            r"""	
 atleast_3d(input) -> Tensor	
-View input tensors to tensor with at least three dimension.	
+Returns a 3-dimensional view of each each input tensor with zero dimensions. Input tensors with three or more dimensions are returned as-is.
 Args:	
-    input (Tensor or list of Tensors): the input tensor.	
+    input (Tensor or list of Tensors)
 Example::	
     >>> x = torch.tensor(0.5)	
     >>> x	
