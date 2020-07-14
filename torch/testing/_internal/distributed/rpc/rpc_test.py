@@ -1220,14 +1220,17 @@ class RpcTest(RpcAgentTestFixture):
 
     def validate_profiling_workload(self, dst, prof):
         REMOTE_OP_STR = "#remote_op: "
+
         def convert_remote_to_local(event_name):
-                remote_op_key = REMOTE_OP_STR
-                return event_name[
-                    event_name.find(remote_op_key)
-                    + len(remote_op_key) :
-                ]
+            remote_op_key = REMOTE_OP_STR
+            return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+
         events = prof.function_events
-        remote_events = {convert_remote_to_local(event.name): event for event in events if event.is_remote}
+        remote_events = {
+            convert_remote_to_local(event.name): event
+            for event in events
+            if event.is_remote
+        }
         self.assertTrue("mul" in remote_events)
         remote_mul_event = remote_events["mul"]
         self.assertEqual(remote_mul_event.node_id, dst)
@@ -1236,7 +1239,7 @@ class RpcTest(RpcAgentTestFixture):
             worker_name(dst),
             torch.mul,
             remote_mul_event,
-            RPCExecMode.ASYNC
+            RPCExecMode.ASYNC,
         )
 
     @dist_init
