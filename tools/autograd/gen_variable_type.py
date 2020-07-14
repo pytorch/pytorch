@@ -1206,7 +1206,8 @@ def emit_body(declaration):
     body.append(declare_returned_variables)
 
     body.append(emit_call(env, tie_return_values))
-    body.extend(emit_increment_version())
+    if strategy == 'use_derived':
+        body.extend(emit_increment_version())
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
