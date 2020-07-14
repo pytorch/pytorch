@@ -6015,7 +6015,7 @@ class TestNN(NNTestCase):
         bceloss = nn.BCELoss()
         a = torch.rand(25)
         b = torch.rand(25, 1)
-        with self.assertRaisesRegex(ValueError, 'Using a target size \('):
+        with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
