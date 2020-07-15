@@ -95,6 +95,8 @@ pool_2d_ops_list = op_bench.op_list(
     attrs=[
         ['MaxPool2d', nn.MaxPool2d],
         ['AvgPool2d', nn.AvgPool2d],
+        ['AdaptiveMaxPool2d', lambda kernel, stride: nn.AdaptiveMaxPool2d(kernel)],
+        ['FractionalMaxPool2d', lambda kernel, stride: nn.FractionalMaxPool2d(kernel, output_size=2)],
     ],
 )
 
@@ -105,6 +107,7 @@ class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
+
 
     def forward(self):
         return self.op_func(self.input)
@@ -152,6 +155,8 @@ pool_3d_ops_list = op_bench.op_list(
     attrs=[
         ['MaxPool3d', nn.MaxPool3d],
         ['AvgPool3d', nn.AvgPool3d],
+        ['AdaptiveMaxPool3d', lambda kernel, stride: nn.AdaptiveMaxPool3d(kernel)],
+        ['FractionalMaxPool3d', lambda kernel, stride: nn.FractionalMaxPool3d(kernel, output_size=2)],
     ],
 )
 

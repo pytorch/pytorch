@@ -1700,6 +1700,29 @@ def bilinear(input1, input2, weight, bias=None):
     """
     return torch.bilinear(input1, input2, weight, bias)
 
+def silu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
+    r"""Applies the silu function, element-wise.
+
+    .. math::
+        \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
+
+    .. note::
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        where the SiLU was experimented with later.
+
+    See :class:`~torch.nn.SiLU` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(silu, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.silu_(input)
+    return torch._C._nn.silu(input)
 
 def hardswish(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
@@ -2469,12 +2492,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     else:
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
-        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()),
-                      stacklevel=2)
-    if input.numel() != target.numel():
-        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.numel(), input.numel()))
+        raise ValueError("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                         "Please ensure they have the same size.".format(target.size(), input.size()))
 
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
@@ -2997,11 +3016,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the `output_size`.  If `recompute_scale_factor` is ```True`` or not specified,
-            a new `scale_factor` will be computed based on the output and input sizes for use in the
-            interpolation computation (i.e. the computation will be identical to if the computed
-            `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
-            be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+            to compute the `output_size`.  If `recompute_scale_factor` is ```False`` or not specified,
+            the passed-in `scale_factor` will be used in the interpolation computation.
+            Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
+            use in the interpolation computation (i.e. the computation will be identical to if the computed
+            `output_size` were passed-in explicitly).  Note that when `scale_factor` is floating-point,
             the recomputed scale_factor may differ from the one passed in due to rounding and precision
             issues.
 
@@ -3023,10 +3042,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     .. warning::
         When scale_factor is specified, if recompute_scale_factor=True,
         scale_factor is used to compute the output_size which will then
-        be used to infer new scales for the interpolation. This is the current
-        default behavior when recompute_scale_factor is not specified.
-        The default behavior for recompute_scale_factor will change to False
-        in 1.6.0, and scale_factor will be used in the interpolation
+        be used to infer new scales for the interpolation.
+        The default behavior for recompute_scale_factor changed to False
+        in 1.6.0, and scale_factor is used in the interpolation
         calculation.
 
     Note:
@@ -3055,8 +3073,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     scale_factor_len = input.dim() - 2
     scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
-    if scale_factor is not None and recompute_scale_factor is False:
-        if isinstance(scale_factor, list):
+    # default value of recompute_scale_factor is False
+    if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
+        if isinstance(scale_factor, (list, tuple)):
             _scale_factor_repeated = scale_factor
         else:
             _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
