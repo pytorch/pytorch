@@ -334,7 +334,7 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph_freeze_module(model, args, example_outputs, propagate):
+def _model_to_jit_freeze_module_graph(model, args, example_outputs, propagate):
     torch_out = None
     assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
     try:
@@ -360,11 +360,9 @@ def _model_to_jit_graph(model, args, example_outputs, propagate, retain_param_na
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
             method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
-
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
-
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.ScriptFunction):
@@ -408,7 +406,7 @@ def _model_to_graph(model, args, verbose=False,
 
     if enable_jit_freeze_module and isinstance(model, torch.jit.ScriptModule) and \
             (training is None or training == TrainingMode.EVAL):
-        graph, params, torch_out = _model_to_jit_graph_freeze_module(model, args, example_outputs, propagate)
+        graph, params, torch_out = _model_to_jit_freeze_module_graph(model, args, example_outputs, propagate)
     else:
         graph, params, torch_out = _model_to_jit_graph(model, args, example_outputs, propagate, _retain_param_name)
 
