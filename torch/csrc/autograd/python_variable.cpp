@@ -157,7 +157,7 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   }
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   return THPVariable_NewWithVar((PyTypeObject*)cls, self->cdata.alias());
   END_HANDLE_TH_ERRORS
@@ -172,7 +172,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
@@ -586,6 +586,17 @@ PyObject *THPVariable_is_quantized(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_meta(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_meta");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_meta());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_complex(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -651,6 +662,26 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto self_real = at::real(self_);
+  self_real.copy_(real->cdata);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto self_imag = at::imag(self_);
+  self_imag.copy_(imag->cdata);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
 static struct PyGetSetDef THPVariable_properties[] = {
@@ -675,13 +706,14 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
+  {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
-  {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
-  {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
+  {"real", (getter)THPVariable_get_real, (setter)THPVariable_set_real, nullptr, nullptr},
+  {"imag", (getter)THPVariable_get_imag, (setter)THPVariable_set_imag, nullptr, nullptr},
   {nullptr}
 };
 

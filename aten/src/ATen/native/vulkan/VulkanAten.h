@@ -26,6 +26,9 @@ at::Tensor vulkan_convolution_prepacked(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups);
+    int64_t groups,
+    const float output_min,
+    const float output_max);
+
 } // namespace native
 } // namespace at

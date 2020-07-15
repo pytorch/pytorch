@@ -124,6 +124,22 @@ enum pytorch_qnnp_status qnnpackConv(
     uint8_t* output,
     pthreadpool_t threadpool);
 
+enum pytorch_qnnp_status qnnpackDeConv(
+    const conv_param_t& deconv_p,
+    void* packed_weights,
+    const size_t batch_size,
+    const size_t input_height,
+    const size_t input_width,
+    const uint8_t input_zero_point,
+    const uint8_t* input,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
+    const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
+    uint8_t* output,
+    pthreadpool_t threadpool);
+
 enum pytorch_qnnp_status qnnpackLinearDynamic(
     const size_t batch_size,
     const size_t input_channels,

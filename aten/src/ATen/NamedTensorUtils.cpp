@@ -384,16 +384,17 @@ void propagate_names_for_addmv(
 }
 
 void propagate_names_for_addmm(
-    TensorImpl* result,
-    TensorImpl* m1,
-    TensorImpl* m2,
-    TensorImpl* bias) {
-  if (!impl::has_names(m1) && !impl::has_names(m2) &&
-      !impl::has_names(bias) && !impl::has_names(result)) {
+    Tensor& result,
+    const Tensor& m1,
+    const Tensor& m2,
+    const Tensor& bias) {
+  if (!m1.has_names() && !m2.has_names() &&
+      !bias.has_names() && !result.has_names()) {
     return;
   }
-  auto mm_outnames = compute_matmul_outnames(impl::get_names(m1), impl::get_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+
+  auto mm_outnames = compute_matmul_outnames(m1.names(), m2.names());
+  auto add_outnames = unify_from_right(mm_outnames, bias.names());
   propagate_names(result, add_outnames);
 }
 

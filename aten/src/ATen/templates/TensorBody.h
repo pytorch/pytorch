@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
 class Tensor;
@@ -295,7 +296,7 @@ class CAFFE2_API Tensor {
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
@@ -321,6 +322,10 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
+
+  /// Returns if a `Tensor` is a meta tensor.  Meta tensors can
+  /// also have other designations.
+  bool is_meta() const;
 
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
@@ -544,6 +549,18 @@ class CAFFE2_API Tensor {
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
 
+  // Special C++ only overloads for std()-like functions (See gh-40287)
+  // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+  // So, for example std(0) would select the std(unbiased=False) overload
+
+  Tensor var(int dim) const {
+    return var(IntArrayRef{dim});
+  }
+
+  Tensor std(int dim) const {
+    return std(IntArrayRef{dim});
+  }
+
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.
   // Before that change, we make this method to maintain BC for C++ usage like
@@ -668,6 +685,24 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+int64_t get_device(Tensor self);
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  std::function<void(Tensor)> fn(hook);
+  return _register_hook([fn](const Tensor& grad) {
+    fn(grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  return _register_hook(hook);
+}
 
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass

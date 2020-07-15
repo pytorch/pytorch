@@ -43,7 +43,8 @@ List<T>::List(TypePtr elementType)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     std::move(elementType))) {
-  static_assert(std::is_same<T, IValue>::value, "This constructor is only valid for c10::impl::GenericList.");
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
+                "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
 
 namespace impl {

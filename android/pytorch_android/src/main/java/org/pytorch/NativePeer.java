@@ -9,6 +9,7 @@ import com.facebook.soloader.nativeloader.NativeLoader;
 class NativePeer implements INativePeer {
   static {
     NativeLoader.loadLibrary("pytorch_jni");
+    PyTorchCodegenLoader.loadNativeLibs();
   }
 
   private final HybridData mHybridData;

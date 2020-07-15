@@ -34,6 +34,7 @@ namespace jit {
   _(IRPrinterBasicValueTest)                \
   _(IRPrinterBasicValueTest02)              \
   _(IRPrinterCastTest)                      \
+  _(IRPrinterFunctionName)                  \
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
@@ -64,6 +65,7 @@ namespace jit {
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceRepeatedInternalRfactor)          \
   _(ReduceSplitTail)                        \
   _(ReduceSplitNoTail)                      \
   _(ReduceOverSplitTail)                    \
@@ -127,6 +129,7 @@ namespace jit {
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
+  _(HashForLoopOptions)                     \
   _(SimplifyAdd)                            \
   _(SimplifySub)                            \
   _(SimplifyMultiLayer)                     \
@@ -154,6 +157,7 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)    \
   _(SimplifyConstantBranches)               \
   _(SimplifyConstantCond)                   \
+  _(SimplifyEliminateEmptyCond)             \
   _(SimplifyEliminateZeroLengthFor)         \
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
@@ -161,6 +165,7 @@ namespace jit {
   _(SimplifyForCleansUp)                    \
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
+  _(SimplifyEliminateZeroLengthAlloc)       \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \

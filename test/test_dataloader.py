@@ -10,6 +10,7 @@ import signal
 import unittest
 import itertools
 import warnings
+import tempfile
 from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
@@ -320,8 +321,6 @@ def set_faulthander_if_available(_=None):
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
-
-
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
         if not IS_WINDOWS:
@@ -666,6 +665,8 @@ def test_worker_info_init_fn(worker_id):
         worker_info.a = 3
     except RuntimeError as e:
         assert str(e) == "Cannot assign attributes to WorkerInfo objects"
+    for k in ['id', 'num_workers', 'seed', 'dataset']:
+        assert "{}=".format(k) in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 
 
@@ -770,8 +771,9 @@ class TestDataLoader(TestCase):
         found_data = {i: 0 for i in range(self.data.size(0))}
         found_labels = {i: 0 for i in range(self.labels.size(0))}
         batch_size = loader.batch_size
-        for i, (batch_samples, batch_targets) in enumerate(loader):
-            for sample, target in zip(batch_samples, batch_targets):
+        if batch_size is None:
+            for i, (batch_samples, batch_targets) in enumerate(loader):
+                sample, target = (batch_samples, batch_targets)
                 for data_point_idx, data_point in enumerate(self.data):
                     if data_point.eq(sample).all():
                         self.assertFalse(found_data[data_point_idx])
@@ -779,9 +781,22 @@ class TestDataLoader(TestCase):
                         break
                 self.assertEqual(target, self.labels[data_point_idx])
                 found_labels[data_point_idx] += 1
-            self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
-            self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
-        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
+                self.assertEqual(sum(found_data.values()), (i + 1))
+                self.assertEqual(sum(found_labels.values()), (i + 1))
+            self.assertEqual(i, (len(self.dataset) - 1))
+        else:
+            for i, (batch_samples, batch_targets) in enumerate(loader):
+                for sample, target in zip(batch_samples, batch_targets):
+                    for data_point_idx, data_point in enumerate(self.data):
+                        if data_point.eq(sample).all():
+                            self.assertFalse(found_data[data_point_idx])
+                            found_data[data_point_idx] += 1
+                            break
+                    self.assertEqual(target, self.labels[data_point_idx])
+                    found_labels[data_point_idx] += 1
+                self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
+                self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
+            self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_error(self, loader):
         it = iter(loader)
@@ -805,6 +820,16 @@ class TestDataLoader(TestCase):
         loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
+
+    def test_typing(self):
+        from typing import List
+        # Make sure there is no TypeError
+
+        class SomeDatasetClass(Dataset[List[torch.Tensor]]):
+            pass
+
+        def _create_dataloader(is_train: bool) -> DataLoader[List[torch.Tensor]]:
+            pass
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
@@ -942,9 +967,6 @@ except RuntimeError as e:
             DataLoader(self.dataset, timeout=-1)
 
         # disable auto-batching
-        with self.assertRaisesRegex(ValueError,
-                                    "batch_size=None option disables auto-batching and is mutually exclusive"):
-            DataLoader(self.dataset, batch_size=None, shuffle=True)
         with self.assertRaisesRegex(ValueError,
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
             DataLoader(self.dataset, batch_size=None, drop_last=True)
@@ -1203,6 +1225,15 @@ except RuntimeError as e:
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
+    def test_worker_seed_reproducibility(self):
+        def get_dataloader():
+            return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, generator=torch.Generator().manual_seed(42))
+
+        num_workers = 6
+        batch_size = 1
+        dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
+        self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
@@ -1224,8 +1255,18 @@ except RuntimeError as e:
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
 
+    def test_shuffle_batch_none(self):
+        self._test_shuffle(DataLoader(self.dataset, batch_size=None, shuffle=True))
+
     def test_shuffle_batch(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
+
+    def test_shuffle_reproducibility(self):
+        for fn in (
+            lambda: DataLoader(self.dataset, shuffle=True, num_workers=0, generator=torch.Generator().manual_seed(42)),
+            lambda: DataLoader(self.dataset, shuffle=True, num_workers=2, generator=torch.Generator().manual_seed(42)),
+        ):
+            self.assertEqual(list(fn()), list(fn()))
 
     def test_sequential_workers(self):
         self._test_sequential(DataLoader(self.dataset, num_workers=4))
@@ -1239,7 +1280,7 @@ except RuntimeError as e:
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
-    def test_RandomSampler(self):
+    def test_random_sampler(self):
 
         from collections import Counter
         from torch.utils.data import RandomSampler
@@ -1268,6 +1309,10 @@ except RuntimeError as e:
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
+
+        # raise error when replacement is non-boolean
+        with self.assertRaisesRegex(TypeError, "replacement should be a boolean value, but got replacement=0"):
+            RandomSampler(self.dataset, replacement=0)
 
     def test_random_sampler_len_with_replacement(self):
         from torch.utils.data import RandomSampler
@@ -1311,6 +1356,20 @@ except RuntimeError as e:
                 scanned_data = torch.cat((scanned_data, data), 0)
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
+
+    def test_sampler_reproducibility(self):
+        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
+
+        weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
+        for fn in (
+            lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+            lambda: RandomSampler(self.dataset, replacement=False, generator=torch.Generator().manual_seed(42)),
+            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
+            lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
+        ):
+            self.assertEqual(list(fn()), list(fn()))
+
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
@@ -1530,8 +1589,8 @@ except RuntimeError as e:
                             fail(fail_reason + ', and had no exception')
                     _, alive = psutil.wait_procs(worker_psutil_ps, timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT))
                     if len(alive) > 0:
-                        self.fail(get_fail_msg('worker process (pid(s) {}) did not terminate'.format(
-                            ', '.join(str(p.pid) for p in alive))))
+                        fail('worker process (pid(s) {}) did not terminate'.format(
+                            ', '.join(str(p.pid) for p in alive)))
                     if exit_method is None:
                         if loader_p.exitcode != 0:
                             fail('loader process had nonzero exitcode {}'.format(loader_p.exitcode))
@@ -1669,6 +1728,19 @@ except RuntimeError as e:
 
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_numpy_memmap(self):
+        import numpy as np
+
+        with tempfile.TemporaryFile() as f:
+            arr = np.array([[0, 1], [2, 3], [4, 5], [6, 7]])
+            arr_memmap = np.memmap(f, dtype=arr.dtype, mode='w+', shape=arr.shape)
+            arr_memmap[:] = arr[:]
+            arr_new = np.memmap(f, dtype=arr.dtype, mode='r', shape=arr.shape)
+            tensor = _utils.collate.default_collate(list(arr_new))
+
+        self.assertTrue((tensor == tensor.new_tensor([[0, 1], [2, 3], [4, 5], [6, 7]])).all().item())
 
     def test_default_collate_bad_sequence_type(self):
         batch = [['X'], ['X', 'X']]
@@ -1955,6 +2027,7 @@ class TestSetAffinity(TestCase):
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
             self.assertEqual(sample, [2])
+
 
 
 if __name__ == '__main__':

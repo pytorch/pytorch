@@ -22,7 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja
-if "%REBUILD%"=="" ( pip install -q ninja )
+if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" )
 
 git submodule sync --recursive
 git submodule update --init --recursive

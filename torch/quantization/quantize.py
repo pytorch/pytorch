@@ -73,7 +73,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def add_observer_(module):
+def add_observer_(module, non_leaf_module_list=None, device=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -81,18 +81,20 @@ def add_observer_(module):
 
     Args:
         module: input module with qconfig attributes for all the leaf modules that we want to quantize
+        device: parent device, if any
+        non_leaf_module_list: list of non-leaf modules we want to add observer
 
     Return:
         None, module is modified inplace with added observer modules and forward_hooks
     """
     # respect device affinity when adding observers
-    # devices = {p.device for p in module.parameters()}
-    devices = get_unique_devices_(module)
-    assert len(devices) <= 1, (
-        "add_observer_ only works with cpu or single-device CUDA modules, "
-        "but got devices {}".format(devices)
-    )
-    device = next(iter(devices)) if len(devices) > 0 else None
+    if device is None:
+        devices = get_unique_devices_(module)
+        assert len(devices) <= 1, (
+            "add_observer_ only works with cpu or single-device CUDA modules, "
+            "but got devices {}".format(devices)
+        )
+        device = next(iter(devices)) if len(devices) > 0 else None
 
     for child in module.children():
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
@@ -101,8 +103,12 @@ def add_observer_(module):
                 if device is not None:
                     activation.to(device)
                 child.activation_post_process = activation
+        elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
+            if hasattr(child, 'qconfig') and child.qconfig is not None:
+                child.add_module('activation_post_process', child.qconfig.activation())
+                child.register_forward_hook(_observer_forward_hook)
         else:
-            add_observer_(child)
+            add_observer_(child, non_leaf_module_list, device)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -113,7 +119,10 @@ def add_observer_(module):
         if device is not None:
             activation.to(device)
         module.add_module('activation_post_process', activation)
-        module.register_forward_hook(_observer_forward_hook)
+        # Register observer as the first entry in the hook list
+        # All post forward hooks are preserved and will be executed after the observer before convert
+        handle = module.register_forward_hook(_observer_forward_hook)
+        module._forward_hooks.move_to_end(handle.id, last=False)
 
 def get_unique_devices_(module):
     return {p.device for p in module.parameters()} | \
@@ -141,7 +150,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST, observer_non_leaf_module_list=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -153,6 +162,8 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     Args:
         model: input model to be modified in-place
         inplace: carry out model transformations in-place, the original module is mutated
+        white_list: list of quantizable modules
+        observer_non_leaf_module_list: list of non-leaf modules we want to add observer
     """
     if not inplace:
         model = copy.deepcopy(model)
@@ -162,7 +173,7 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
-    add_observer_(model)
+    add_observer_(model, observer_non_leaf_module_list)
     return model
 
 def _remove_qconfig(module):
@@ -179,17 +190,15 @@ def _remove_qconfig(module):
         del module.qconfig
 
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
-    r"""Converts a float model to quantized model.
+    r"""Quantize the input float model with post training static quantization.
 
-    First it will prepare the model for calibration or training, then it calls
-    `run_fn` which will run the calibration step or training step,
-    after that we will call `convert` which will convert the model to a
-    quantized model.
+    First it will prepare the model for calibration, then it calls
+    `run_fn` which will run the calibration step, after that we will
+    convert the model to a quantized model.
 
     Args:
-        model: input model
-        run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+        model: input float model
+        run_fn: a calibration function for calibrating the prepared model
         run_args: positional arguments for `run_fn`
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: correspondence between original module types and quantized counterparts
@@ -231,7 +240,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
               need to be QConfigDynamic instances.
 
             - A set of types and/or submodule names to apply dynamic quantization to,
-              in which case the `dtype` argument is used to specifiy the bit-width
+              in which case the `dtype` argument is used to specify the bit-width
 
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
@@ -243,11 +252,19 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             qconfig_spec = {
                 nn.Linear : default_dynamic_qconfig,
                 nn.LSTM : default_dynamic_qconfig,
+                nn.GRU : default_dynamic_qconfig,
+                nn.LSTMCell : default_dynamic_qconfig,
+                nn.RNNCell : default_dynamic_qconfig,
+                nn.GRUCell : default_dynamic_qconfig,
             }
         elif dtype == torch.float16:
             qconfig_spec = {
                 nn.Linear : float16_dynamic_qconfig,
                 nn.LSTM : float16_dynamic_qconfig,
+                nn.GRU : float16_dynamic_qconfig,
+                nn.LSTMCell : float16_dynamic_qconfig,
+                nn.RNNCell : float16_dynamic_qconfig,
+                nn.GRUCell : float16_dynamic_qconfig,
             }
         else:
             raise ValueError(
@@ -275,7 +292,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
 def prepare_qat(model, mapping=None, inplace=False):
     r"""
     Prepares a copy of the model for quantization calibration or
-    quantization-aware training and convers it to quantized version.
+    quantization-aware training and converts it to quantized version.
 
     Quantization configuration should be assigned preemptively
     to individual submodules in `.qconfig` attribute.
@@ -321,7 +338,7 @@ def convert(module, mapping=None, inplace=False):
     Args:
         module: calibrated module with observers
         mapping: a dictionary that maps from float module type to quantized
-                 module type, can be overwrritten to allow swapping user defined
+                 module type, can be overwritten to allow swapping user defined
                  Modules
         inplace: carry out model transformations in-place, the original module
                  is mutated
@@ -379,6 +396,14 @@ def swap_module(mod, mapping):
             )
             device = next(iter(devices)) if len(devices) > 0 else None
             new_mod = mapping[type(mod)].from_float(mod)
+            # Preserve module's pre forward hooks. They'll be called on quantized input
+            for pre_hook_fn in mod._forward_pre_hooks.values():
+                new_mod.register_forward_pre_hook(pre_hook_fn)
+            # Preserve module's post forward hooks except _observer_forward_hook
+            # After convert they'll work with quantized output
+            for hook_fn in mod._forward_hooks.values():
+                if hook_fn is not _observer_forward_hook:
+                    new_mod.register_forward_hook(hook_fn)
             if device:
                 new_mod.to(device)
     return new_mod

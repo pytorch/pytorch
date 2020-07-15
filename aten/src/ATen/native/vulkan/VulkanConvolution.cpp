@@ -47,9 +47,9 @@ c10::intrusive_ptr<vulkan::Conv2dOpContext> createConv2dClampPrePackOpContext(
       output_max);
 }
 
-Tensor Conv2dClampRun::operator()(
+Tensor conv2d_clamp_run(
     const Tensor& input,
-    const c10::intrusive_ptr<vulkan::Conv2dOpContext>& op_context) {
+    const c10::intrusive_ptr<at::native::vulkan::Conv2dOpContext>& op_context) {
   return op_context->run(input);
 }
 
@@ -66,18 +66,19 @@ ContextConv2D create(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded =
       expand_param_if_needed(dilation, "dilation", 2);
-  const Tensor weight_nchw = weight.contiguous();
+  Tensor weight_nchw = weight.contiguous();
+  auto ws = weight_nchw.sizes();
   return ContextConv2D{
-      at::native::vulkan_convolution_prepack_weights(weight),
+      groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
+                  : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
-      {weight_nchw.sizes()[0],
-       weight_nchw.sizes()[1],
-       weight_nchw.sizes()[2],
-       weight_nchw.sizes()[3]},
+      {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},
       {dilation_expanded[0], dilation_expanded[1]},
-      groups};
+      groups,
+      output_min,
+      output_max};
 }
 
 Tensor run(const ContextConv2D& context, const Tensor& input) {
@@ -89,7 +90,9 @@ Tensor run(const ContextConv2D& context, const Tensor& input) {
       context.padding_,
       context.stride_,
       context.dilation_,
-      context.groups_);
+      context.groups_,
+      context.output_min_,
+      context.output_max_);
 }
 
 } // namespace convolution2d

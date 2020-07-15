@@ -6,7 +6,6 @@ from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
 import weakref
-from torch._six import imap
 from torch._C import _add_docstr
 from numbers import Number
 import functools
@@ -181,8 +180,10 @@ class Tensor(torch._C._TensorBase):
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
-        This function accumulates gradients in the leaves - you might need to
-        zero them before calling it.
+        This function accumulates gradients in the leaves - you might need to zero
+        ``.grad`` attributes or set them to ``None`` before calling it.
+        See :ref:`Default gradient layouts<default-grad-layouts>`
+        for details on the memory layout of accumulated gradients.
 
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
@@ -567,7 +568,7 @@ class Tensor(torch._C._TensorBase):
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '
                           'incorrect results).', category=RuntimeWarning)
-        return iter(imap(lambda i: self[i], range(self.size(0))))
+        return iter(self.unbind(0))
 
     def __hash__(self):
         relevant_args = (self,)
