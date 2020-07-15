@@ -80,9 +80,9 @@ the saved tensor is written to a file:
 Instead of saving only the five values in the `small` tensor to 'small.pt,'
 the 999 values in the storage shared with `large` were saved and loaded.
 
-In cases like the above, the size of the saved file can be reduced by first
-cloning the tensors to be saved. Cloning a tensor produces a new tensor with a
-new storage containing only its values:
+When saving tensors smaller than their storage(s), the size of the saved file
+can be reduced by first cloning the tensors to be saved. Cloning a tensor
+produces a new tensor with a new storage containing only its values:
 
 ::
 
@@ -95,8 +95,9 @@ new storage containing only its values:
 
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
-view relationships are important then care must be taken to construct and view
-the appropriate storages before saving.
+view relationships are important when saving tensors smaller than their
+storage(s), then care must be taken to construct new storages and tensors with
+the desired relationships before saving.
 
 Saving and loading Python modules
 ---------------------------------
@@ -188,8 +189,8 @@ and attributes, and it allows the serialized program to be loaded in C++
 The distinction between :func:`torch.jit.save` and :func:`torch.save` may not
 be immediately clear. :func:`torch.save` saves Python objects with pickle.
 This is especially useful for prototyping, researching, and training.
-:func:`torch.jit.save`, on the other hand, serializes modules to a format that
-can be loaded in Python or C++. This is useful when saving and loading C++
+:func:`torch.jit.save`, on the other hand, serializes ScriptModules to a format
+that can be loaded in Python or C++. This is useful when saving and loading C++
 modules or for running modules trained in Python with C++, a common practice
 when deploying PyTorch models.
 
