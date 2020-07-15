@@ -26,6 +26,10 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
+}
+
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
@@ -409,11 +413,11 @@ RegisterOperators reg({
     Operator(
         "aten::is_grad_enabled() -> bool",
         [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
-        aliasAnalysisFromSchema()),
+        aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
-        aliasAnalysisFromSchema()),
+        aliasAnalysisConservative()),
 });
 } // namespace
 } // namespace jit

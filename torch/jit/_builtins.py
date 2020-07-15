@@ -115,7 +115,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _is_special_functional_bound_op(v) and not "no_grad" in name:
+            if callable(v) and not _is_special_functional_bound_op(v) and "no_grad" not in name:
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)

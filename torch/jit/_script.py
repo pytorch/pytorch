@@ -921,27 +921,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _set_jit_function_cache(obj, fn)
         return fn
 
-def is_scripting():
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
-    .. testcode::
-
-        import torch
-
-        @torch.jit.unused
-        def unsupported_linear_op(x):
-            return x
-
-        def linear(x):
-           if not torch.jit.is_scripting():
-              return torch.linear(x)
-           else:
-              return unsupported_linear_op(x)
-    """
-    return False
-
 
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
