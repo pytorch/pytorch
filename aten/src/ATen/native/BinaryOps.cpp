@@ -1,5 +1,6 @@
-#include <type_traits>
 #include <ATen/native/BinaryOps.h>
+
+#include <type_traits>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -34,6 +35,7 @@ DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
+DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
@@ -287,6 +289,28 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& logit_backward_out(
+    Tensor& result,
+    const Tensor& grad_output,
+    const Tensor& input,
+    c10::optional<double> eps) {
+  auto iter = TensorIterator::binary_op(result, grad_output, input);
+  logit_backward_stub(
+      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
+  return result;
+}
+
+Tensor logit_backward(
+    const Tensor& grad_output,
+    const Tensor& input,
+    c10::optional<double> eps) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, input);
+  logit_backward_stub(
+      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
   return iter.output();
 }
 
@@ -874,5 +898,5 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
   m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
-
-}}  // at::native
+} // namespace native
+} // namespace at
