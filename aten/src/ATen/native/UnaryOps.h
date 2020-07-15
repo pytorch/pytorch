@@ -48,6 +48,7 @@ DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
 DECLARE_DISPATCH(unary_fn, rsqrt_stub);
 DECLARE_DISPATCH(unary_fn, sigmoid_stub);
+DECLARE_DISPATCH(unary_fn_with_scalar, logit_stub);
 DECLARE_DISPATCH(unary_fn, sign_stub);
 DECLARE_DISPATCH(unary_fn, sin_stub);
 DECLARE_DISPATCH(unary_fn, sinh_stub);
