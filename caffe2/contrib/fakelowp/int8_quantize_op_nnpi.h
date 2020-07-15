@@ -50,6 +50,8 @@ void Int8QuantizeNNPI(
   fbgemm::RoundToFloat16(
       in, in_fp16.data(), N, false /* no clamping */);
 
+  LOG(INFO) << "scales " << inv_scale_fp16 << " " << offset_tmp;
+
   std::vector<float> inv_scalev(N, inv_scale_fp16);
   std::vector<float> offsetv(N, -offset_tmp);
   fake_fp16::fma_fp16(N, in_fp16.data(), inv_scalev.data(), offsetv.data());
@@ -73,6 +75,7 @@ void Int8QuantizeNNPI(
     if (halfRes < qmin) {
       halfRes = qmin;
     }
+    LOG_FIRST_N(WARNING, 10) << "out " << i  <<  " " << offsetv[i] << " " << halfRes;
     out[i] = static_cast<uint8_t>(halfRes);
   }
 }
@@ -88,7 +91,7 @@ class Int8QuantizeNNPIOp final : public Operator<CPUContext> {
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     Y->t.ResizeLike(X);
     int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);
-    auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
+    float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
     Int8QuantizeNNPI(

@@ -247,6 +247,8 @@ class Int8OpsTest(serial.SerializedTestCase):
                 in_scale=X_scale,
             )
         )
+        print(X_fp32, X_scale, X_zero_point)
+
 
         ref_net = core.Net("net")
         ref_net.Int8QuantizeNNPI(
