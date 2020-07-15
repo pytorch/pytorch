@@ -4280,6 +4280,44 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
+add_docstr(torch.moveaxis,
+           r"""
+moveaxis(input, src, dst) -> Tensor
+
+Move axes of an array to new positions.
+Other axes remain in their original order.
+
+Args:
+    input (Tensor)
+    src (int or tuple of ints): Original positions of the axes to move. These must be unique.
+    dst (int or tuple of ints): Destination positions for each of the original axes. These must also be unique.
+
+Example::
+
+    >>> a = torch.randn(3,2,1)
+    >>> a
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.moveaxis(a, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.moveaxis(a, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""")
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
