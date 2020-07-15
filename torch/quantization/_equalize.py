@@ -1,26 +1,36 @@
 import torch
 import copy
 
+def max_over_ndim(input, axis_list, keepdim=False):
+    ''' Applies 'torch.max' over the given axises
+    '''
+    axis_list.sort(reverse=True)
+    reduced_input = input
+    for axis in axis_list:
+        reduced_input, _ = reduced_input.max(axis, keepdim)
+    return reduced_input
+
+def min_over_ndim(input, axis_list, keepdim=False):
+    ''' Applies 'torch.min' over the given axises
+    '''
+    axis_list.sort(reverse=True)
+    reduced_input = input
+    for axis in axis_list:
+        reduced_input, _ = reduced_input.min(axis, keepdim)
+    return reduced_input
+
 def channel_range(input, axis=0):
     ''' finds the range of weights associated with a specific channel
-
     '''
     size_of_tensor_dim = len(input.size())
     mins = input
     maxs = input
 
-    # reshape input to make specified axis the last axis in input
-    temp = list(range(size_of_tensor_dim))
-    temp[size_of_tensor_dim - 1] = axis
-    temp[axis] = size_of_tensor_dim - 1
+    axis_list = list(range(size_of_tensor_dim))
+    axis_list.remove(axis)
 
-    mins = mins.permute(temp)
-    maxs = maxs.permute(temp)
-
-    # minimizing over all axises except the last axis
-    for i in range(size_of_tensor_dim - 1):
-        mins = torch.min(mins, 0)[0]
-        maxs = torch.max(maxs, 0)[0]
+    mins = min_over_ndim(mins, axis_list)
+    maxs = max_over_ndim(maxs, axis_list)
 
     assert(mins.size()[0] == input.size()[axis])
     return maxs - mins
@@ -48,9 +58,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     # producing scaling factors to applied
     weight2_range += 1e-9
     scaling_factors = torch.sqrt(weight1_range / weight2_range)
-    r_scaling_factors = torch.reciprocal(scaling_factors)
+    inverse_scaling_factors = torch.reciprocal(scaling_factors)
 
-    bias = bias * r_scaling_factors
+    bias = bias * inverse_scaling_factors
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
     # pads axis to (1D) tensors to then be broadcasted
@@ -60,9 +70,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     size2[input_axis] = weight2.size(input_axis)
 
     scaling_factors = torch.reshape(scaling_factors, size2)
-    r_scaling_factors = torch.reshape(r_scaling_factors, size1)
+    inverse_scaling_factors = torch.reshape(inverse_scaling_factors, size1)
 
-    weight1 = weight1 * r_scaling_factors
+    weight1 = weight1 * inverse_scaling_factors
     weight2 = weight2 * scaling_factors
 
     module1.weight = torch.nn.Parameter(weight1)
@@ -82,7 +92,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
         model = copy.deepcopy(model)
 
     name_to_module = {}
-    previous_name_to_module = {}
+    previous_name_to_module: Dict[str, torch.nn.modules.module] = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
     for name, module in model.named_modules():
@@ -109,12 +119,12 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
 
     '''
     if len(curr_modules) != len(prev_modules):
-        raise TypeError("in compatiables modules in convergence condition")
+        raise TypeError("incompatiable modules in convergence condition")
 
     summed_norms = 0
+    if None in prev_modules.values():
+        return False
     for name in curr_modules.keys():
-        if prev_modules[name] is None:
-            return False
         difference = curr_modules[name].weight.sub(prev_modules[name].weight)
         summed_norms += torch.norm(difference)
     return summed_norms < threshold
