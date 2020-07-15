@@ -871,6 +871,19 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_forward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_forward_per_channel_cuda(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, axis, _) = X
+        X_base = torch.tensor(X).to('cuda')
+        channel_size = X_base.size(axis)
+        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        self._test_learnable_forward_per_channel(
+            X_base, 'cuda', scale_base, zero_point_base, axis)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -924,6 +937,7 @@ class TestFakeQuantizePerChannel(TestCase):
             dScale_actual = scale_curr.to(device).grad.detach()
             dZeroPoint_expected = dZeroPoint.to(device).detach()
             dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
+            tolerance = 1e-3
 
             self.assertTrue(
                 torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -946,6 +960,19 @@ class TestFakeQuantizePerChannel(TestCase):
         zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
+
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_backward_per_channel_cuda(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, axis, _) = X
+        X_base = torch.tensor(X).to('cuda')
+        channel_size = X_base.size(axis)
+        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        self._test_learnable_backward_per_channel(
+            X_base, 'cuda', scale_base, zero_point_base, axis)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
