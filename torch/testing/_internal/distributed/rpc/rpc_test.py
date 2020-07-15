@@ -1222,7 +1222,7 @@ class RpcTest(RpcAgentTestFixture):
         events = prof.function_events
 
         rpc_mul_event = get_function_event(
-            events, torch.jit._find_builtin(torch.mul)
+            events, torch.jit._builtins._find_builtin(torch.mul)
         )
 
         remote_events = {
