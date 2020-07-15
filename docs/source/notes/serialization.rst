@@ -56,17 +56,17 @@ Saving tensors preserves their view relationships:
 
 Behind the scenes, these tensors share the same "storage." See
 `Tensor Views <https://pytorch.org/docs/master/tensor_view.html>`_ for more
-on views and storages.
+on views and storage.
 
-When PyTorch saves one or more tensors it saves their storages and tensor
+When PyTorch saves tensors it saves their storage objects and tensor
 metadata separately. This is an implementation detail that may change in the
 future, but it typically saves space and lets PyTorch easily
 reconstruct the view relationships between the loaded tensors. In the above
 snippet, for example, only a single storage is written to 'tensors.pt'.
 
-In some cases, however, saving storages may be unecessary and create
-prohibitively large files. In the following snippet a storage much larger than
-the saved tensor is written to a file:
+In some cases, however, saving the current storage objects may be unnecessary
+and create prohibitively large files. In the following snippet a storage much
+larger than the saved tensor is written to a file:
 
 ::
 
@@ -78,11 +78,12 @@ the saved tensor is written to a file:
     999
 
 Instead of saving only the five values in the `small` tensor to 'small.pt,'
-the 999 values in the storage shared with `large` were saved and loaded.
+the 999 values in the storage it shares with `large` were saved and loaded.
 
-When saving tensors smaller than their storage(s), the size of the saved file
-can be reduced by first cloning the tensors to be saved. Cloning a tensor
-produces a new tensor with a new storage containing only its values:
+When saving tensors with fewer elements than their storage objects, the size of
+the saved file can be reduced by first cloning the tensors. Cloning a tensor
+produces a new tensor with a new storage object containing only the values
+in the tensor:
 
 ::
 
@@ -96,8 +97,8 @@ produces a new tensor with a new storage containing only its values:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage(s), then care must be taken to construct new storages and tensors with
-the desired relationships before saving.
+storage objects, then care must be taken to construct new storage objects and
+tensors with the desired view relationships before saving.
 
 Saving and loading Python modules
 ---------------------------------
