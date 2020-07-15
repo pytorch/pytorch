@@ -18159,7 +18159,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 x2 = scalar_type_2(random.random() * random.randint(20, 30))
                 condition = torch.randn(height, width, device=device) > 0.5
                 if scalar_type_1 != scalar_type_2:
-                    self.assertRaisesRegex(RuntimeError, "Expected x and y", lambda: torch.where(condition, x1, x2))
+                    self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
                 else:
                     def get_dtype(scalar_type):
                         type_map = {int: torch.long, float: torch.float64, complex: torch.complex128}

@@ -164,9 +164,6 @@ Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
 }
 
 Tensor where(const Tensor& condition, Scalar self, Scalar other) {
-  TORCH_CHECK(self.type() == other.type(),
-            "Expected x and y to have same ScalarType, but got ",
-            toString(self.type()), " and ", toString(other.type()), " respectively");
   const auto device = condition.device();
   const Tensor& other_t = wrapped_scalar_tensor(other, device);
   const Tensor& self_t = wrapped_scalar_tensor(self, device);
