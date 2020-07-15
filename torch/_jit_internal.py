@@ -126,6 +126,8 @@ def createResolutionCallbackFromFrame(frames_up=0):
                 return f_locals[key]
             elif key in f_globals:
                 return f_globals[key]
+            elif key in dir(builtins):
+                return getattr(builtins, key)
 
     return createResolutionCallbackFromEnv(env())
 
@@ -820,3 +822,8 @@ def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
 
     def __exit__(self, *args):
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
+
+def _is_exception(obj):
+    if not inspect.isclass(obj):
+        return False
+    return issubclass(obj, Exception)

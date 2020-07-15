@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -704,5 +705,46 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
+
+// This is not a SimpleValue so it can not pass through the code paths that
+// expect a SimpleValue as a sugared value.
+struct TORCH_API ExceptionMessageValue : public SugaredValue {
+  ExceptionMessageValue(Value* value) : value_(value) {}
+
+  std::string kind() const override {
+    return "exception message";
+  }
+
+  Value* getValue() {
+    return value_;
+  }
+
+  Value* value_;
+};
+
+struct TORCH_API ExceptionValue : public SugaredValue {
+  ExceptionValue(const std::string& message) : message_(std::move(message)) {}
+
+  std::string kind() const override {
+    return "exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
+    for (auto& input : inputs) {
+      exception_message = emitBuiltinCall(
+          loc, *m.graph(), aten::add, {exception_message, input}, attributes);
+    }
+    return std::make_shared<ExceptionMessageValue>(exception_message);
+  }
+
+  std::string message_;
+};
+
 } // namespace jit
 } // namespace torch
