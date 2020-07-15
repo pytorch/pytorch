@@ -40,8 +40,7 @@ Tensor ${function_name}(${method_formals}) {
     .findSchemaOrThrow("aten::${name}", "${overload_name}")
     .typed<${function_cpp_signature}>();
   ${dispatch_key_init}
-  // do not use RecordFunction with BackendSelect key
-  return op.callWithDispatchKey(_dk, false, ${function_actuals});
+  return op.callWithDispatchKey(_dk, ${function_actuals});
 }
 """)
 

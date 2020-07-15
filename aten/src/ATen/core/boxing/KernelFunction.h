@@ -86,7 +86,6 @@ public:
   template<class Return, class... Args>
   Return call(const OperatorHandle& opHandle, Args... args) const;
 
-
   /**
    * Like call, but with the stack of the already boxed inputs, in addition to the same
    * inputs in the parameter pack

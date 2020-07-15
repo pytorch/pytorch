@@ -122,7 +122,7 @@ public:
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
-  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, bool useRecordFunction, Args... args) const;
+  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -201,6 +201,13 @@ public:
   RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
   void checkInvariants() const;
+
+  /* Check if operator calls with a given dispatch key
+   * need to be observed with RecordFunction.
+   */
+  inline bool shouldRecord(DispatchKey dispatch_key) const {
+    return dispatch_key != DispatchKey::BackendSelect;
+  }
 
 private:
   Dispatcher();
@@ -314,8 +321,8 @@ public:
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  Return callWithDispatchKey(DispatchKey dispatchKey, bool useRecordFunction, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, useRecordFunction, std::forward<Args>(args)...);
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
 private:
@@ -329,19 +336,19 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, bool useRecordFunction, Args... args) const {
+inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
-  if (useRecordFunction && op.operatorIterator_->op.isObserved()) {
-    // Check if we need to run callbacks registered with RecordFunction
-    // If true and callbacks need inputs, we box the arguments and pass
-    // them into the callbacks and also into the kernel call
+  // Check if we need to run callbacks registered with RecordFunction
+  // If true and callbacks need inputs, we box the arguments and pass
+  // them into the callbacks and also into the kernel call
 
-    // Note: for perf reasons we wouldn't want to pass arguments into
-    // the function call or prematurely box them
-    at::RecordFunction guard(at::RecordScope::FUNCTION);
-    if (C10_UNLIKELY(guard.active)) {
+  // Note: for perf reasons we wouldn't want to pass arguments into
+  // the function call or prematurely box them
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
       if (guard.needs_inputs) {
         std::vector<c10::IValue> stack;
         stack.reserve(sizeof...(Args));
@@ -357,10 +364,8 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
         guard.before(op.schema().name(), at::sequence_number::peek());
       }
     }
-    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
-  } else {
-    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
   }
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -371,7 +376,7 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, true, args...);
+  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
@@ -383,7 +388,8 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
       args...
     );
   // do not use RecordFunction on redispatch
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, false, args...);
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
@@ -392,20 +398,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKey);
 
-  if (entry.isObserved()) {
-    // using already existing stack to record function execution in observers
-    at::RecordFunction guard(at::RecordScope::FUNCTION);
-    if (C10_UNLIKELY(guard.active)) {
+  // using already existing stack to record function execution in observers
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && entry.isObserved()) {
       if (guard.needs_inputs) {
         guard.before(op.schema().name(), *stack, at::sequence_number::peek());
       } else {
         guard.before(op.schema().name(), at::sequence_number::peek());
       }
     }
-    kernel.callBoxed(op, stack);
-  } else {
-    kernel.callBoxed(op, stack);
   }
+  kernel.callBoxed(op, stack);
 }
 
 } // namespace c10
