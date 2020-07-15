@@ -88,9 +88,6 @@ class SubgraphSlicer {
       }
       curNode = prevNode;
     }
-    // Run CSE one more time to eliminate duplicates that may have occurred
-    // while re-inlining subgraphs.
-    EliminateCommonSubexpression(graph_);
   }
 
  private:
@@ -231,6 +228,9 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
+  // Run CSE to eliminate duplicates that may have occurred
+  // while inlining subgraphs.
+  EliminateCommonSubexpression(graph);
   return diff_nodes;
 }
 } // namespace jit
