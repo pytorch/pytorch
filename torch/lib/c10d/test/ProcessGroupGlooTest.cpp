@@ -19,7 +19,7 @@
 using namespace c10d::test;
 
 constexpr auto kSendDelay = std::chrono::milliseconds(100);
-constexpr auto kWaitDelay = std::chrono::milliseconds(1);
+constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
 
 class SignalTest {
  public:
@@ -300,7 +300,7 @@ void testWaitDelay(const std::string& path) {
   };
   auto& pg = tests[selfRank].getProcessGroup();
   auto sendWork = pg.send(tensors, dstRank, tag);
-  EXPECT_THROW(sendWork->wait(kWaitDelay), std::exception);
+  EXPECT_THROW(sendWork->wait(kWaitTimeout), std::exception);
 }
 
 void testSend(const std::string& path) {
