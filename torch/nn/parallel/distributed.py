@@ -1,10 +1,11 @@
 from contextlib import contextmanager
 import copy
 import itertools
+import os
 
 import torch
 
-import torch.cuda.comm
+from . import comm
 import torch.distributed as dist
 
 if dist.is_available():
@@ -14,7 +15,7 @@ from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather
 from .parallel_apply import parallel_apply
-from torch.cuda._utils import _get_device_index
+from torch._utils import _get_device_index, _get_all_device_indices
 
 
 def _find_tensors(obj):
@@ -28,6 +29,62 @@ def _find_tensors(obj):
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
     return []
+
+def _dump_DDP_relevant_env_vars():
+    relevant_env_vars = [
+        "RANK",
+        "LOCAL_RANK",
+        "WORLD_SIZE",
+        "MASTER_PORT",
+        "MASTER_ADDR",
+        "CUDA_VISIBLE_DEVICES",
+        "GLOO_SOCKET_IFNAME",
+        "GLOO_DEVICE_TRANSPORT",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_BLOCKING_WAIT",
+        "NCCL_DEBUG",
+        "NCCL_DEBUG_SUBSYS",
+        "NCCL_IB_DISABLE",
+        # More NCCL env vars:
+        "NCCL_P2P_DISABLE",
+        "NCCL_P2P_LEVEL",
+        "NCCL_SHM_DISABLE",
+        "NCCL_SOCKET_NTHREADS",
+        "NCCL_NSOCKS_PERTHREAD",
+        "NCCL_BUFFSIZE",
+        "NCCL_NTHREADS",
+        "NCCL_RINGS",
+        "NCCL_MAX_NCHANNELS",
+        "NCCL_MIN_NCHANNELS",
+        "NCCL_CHECKS_DISABLE",
+        "NCCL_CHECK_POINTERS",
+        "NCCL_LAUNCH_MODE",
+        "NCCL_IB_HCA",
+        "NCCL_IB_TIMEOUT",
+        "NCCL_IB_RETRY_CNT",
+        "NCCL_IB_GID_INDEX",
+        "NCCL_IB_SL",
+        "NCCL_IB_TC",
+        "NCCL_IB_AR_THRESHOLD",
+        "NCCL_IB_CUDA_SUPPORT",
+        "NCCL_NET_GDR_LEVEL",
+        "NCCL_NET_GDR_READ",
+        "NCCL_SINGLE_RING_THRESHOLD",
+        "NCCL_LL_THRESHOLD",
+        "NCCL_TREE_THRESHOLD",
+        "NCCL_ALGO",
+        "NCCL_PROTO",
+        "NCCL_IGNORE_CPU_AFFINITY",
+        "NCCL_DEBUG_FILE",
+        "NCCL_COLLNET_ENABLE",
+        "NCCL_TOPO_FILE",
+        "NCCL_TOPO_DUMP_FILE",
+    ]
+    formatted_output = ""
+    for var in relevant_env_vars:
+        value = os.environ[var] if var in os.environ else "N/A"
+        formatted_output += "env:%s=%s\n" % (var, value)
+    print(formatted_output)
 
 
 class DistributedDataParallel(Module):
@@ -67,6 +124,10 @@ class DistributedDataParallel(Module):
 
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``
+
+    .. note ::
+        Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+        for a brief introduction to all features related to distributed training.
 
     .. note:: ``nccl`` backend is currently the fastest and
         highly recommended backend to be used with Multi-Process Single-GPU
@@ -268,21 +329,26 @@ class DistributedDataParallel(Module):
         )
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
-        self.is_cuda = all([p.device.type == 'cuda' for p in module.parameters()])
+        distinct_device_types = {p.device.type for p in module.parameters()}
+        assert len(distinct_device_types) == 1, (
+            "DistributedDataParallel's input module must be on "
+            "the same type of devices, but input module parameters locate in {}."
+        ).format(distinct_device_types)
+        self.device_type = list(distinct_device_types)[0]
 
-        if not self.is_cuda or self.is_multi_device_module:
+        if self.device_type == "cpu" or self.is_multi_device_module:
             assert not device_ids and not output_device, (
                 "DistributedDataParallel device_ids and output_device arguments "
-                "only work with single-device CUDA modules, but got "
+                "only work with single-device GPU modules, but got "
                 "device_ids {}, output_device {}, and module parameters {}."
             ).format(device_ids, output_device, {p.device for p in module.parameters()})
 
             self.device_ids = None
             self.output_device = None
         else:
-            # Use all devices by default for single-device CUDA modules
+            # Use all devices by default for single-device GPU modules
             if device_ids is None:
-                device_ids = list(range(torch.cuda.device_count()))
+                device_ids = _get_all_device_indices()
 
             self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
 
@@ -290,12 +356,6 @@ class DistributedDataParallel(Module):
                 output_device = device_ids[0]
 
             self.output_device = _get_device_index(output_device, True)
-
-        if self.is_multi_device_module:
-            assert self.is_cuda, (
-                "DistributedDataParallel with multi-device module only works "
-                "with CUDA devices, but module parameters locate in {}."
-            ).format({p.device for p in module.parameters()})
 
         if process_group is None:
             self.process_group = _get_default_group()
@@ -551,7 +611,7 @@ class DistributedDataParallel(Module):
             # CUDA modules
             if self.device_ids and len(self.device_ids) > 1:
                 # intra-node parameter sync
-                result = torch.cuda.comm.broadcast_coalesced(
+                result = comm.broadcast_coalesced(
                     self.modules_params[0],
                     self.device_ids,
                     self.broadcast_bucket_size)
@@ -584,7 +644,7 @@ class DistributedDataParallel(Module):
                 # CUDA modules
                 if self.device_ids and len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = torch.cuda.comm.broadcast_coalesced(
+                    result = comm.broadcast_coalesced(
                         self.modules_buffers[0],
                         self.device_ids,
                         self.broadcast_bucket_size)
@@ -597,6 +657,6 @@ class DistributedDataParallel(Module):
         for dev_idx, module in enumerate(module_copies):
             for layer in module.modules():
                 if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                    assert self.is_cuda, "SyncBatchNorm layers only work with CUDA modules"
+                    assert self.device_type != 'cpu', "SyncBatchNorm layers only work with GPU modules"
                     layer._specify_ddp_gpu_num(
                         len(self.device_ids) if self.device_ids else 1)
