@@ -341,9 +341,9 @@ def _model_to_jit_freeze_module_graph(model, args, example_outputs, propagate):
         freezed_m = torch._C._freeze_module(model._c)
         method_graph = freezed_m._get_method('forward').graph
         params = []
-        method_graph.eraseInput(0)
-
-        in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+        method_graph.eraseInput(0)  # Remove 'self' from model inputs
+        # TODO: replace by # in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params) once issue #39613 fixed
+        in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = _propagate_and_assign_input_shapes(
             method_graph, tuple(in_vars), False, propagate)
 
