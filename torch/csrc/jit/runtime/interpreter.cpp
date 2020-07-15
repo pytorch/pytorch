@@ -457,7 +457,6 @@ struct CodeImpl {
 
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
-  std::vector<std::unique_ptr<Function>> bailout_functions_;
   size_t remaining_bailout_depth_;
 
   CodeImpl(
@@ -717,7 +716,7 @@ struct CodeImpl {
     // note, guaded input is already loaded onto the stack
     // for GUARD instruction
     emitLoadInputs(node->inputs().slice(2));
-    insertInstruction(TAIL_CALL, function_table_.size());
+    insertInstruction(CALL, function_table_.size());
     TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
     auto bailout_index = node->i(attr::index);
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
@@ -731,7 +730,6 @@ struct CodeImpl {
     auto func = torch::make_unique<GraphFunction>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
-    bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
   }
 
@@ -1127,8 +1125,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+        std::cout << "RUNNING ";
+        frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case ENTER: {
@@ -1225,6 +1223,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             Function* fn = af.functions[inst.X];
+            fn->ensure_defined();
             if (!fn->isGraphFunction()) {
               runBuiltinFunction(stack, fn, &af);
             } else {

@@ -49,6 +49,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "ATen/core/interned_strings.h"
+#include "jit/passes/bailout_graph.h"
 
 namespace torch {
 namespace jit {
@@ -753,6 +755,36 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
+void InsertGuardsOnInputs(std::shared_ptr<Graph> graph) {
+  auto dummy = graph->insertConstant(1);
+  for (auto gi : graph->inputs()) {
+    if (gi->type()->cast<TensorType>()) {
+      auto pn = graph->create(prim::Guard, 1); 
+      graph->prependNode(pn);
+      pn->addInput(dummy);
+      pn->output()->setType(gi->type());
+      gi->replaceAllUsesWith(pn->output());
+      dummy->replaceAllUsesWith(gi);
+    }
+  }
+}
+
+void InsertBailoutsOnTEGroups(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    auto n = *it;
+    if (n->kind() == Symbol::fromQualString("tensorexpr::Group")) {
+
+      auto subgraph = n->g(attr::Subgraph);
+      InsertGuardsOnInputs(subgraph);
+      InsertBailOuts(subgraph);
+    } else {
+      for (auto ib : n->blocks()) {
+        InsertBailoutsOnTEGroups(ib);
+      }
+    }
+  }
+}
+
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
@@ -777,6 +809,7 @@ void runNondiffOptimization(
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
       FuseTensorExprs(graph);
+      InsertBailoutsOnTEGroups(graph->block());
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
