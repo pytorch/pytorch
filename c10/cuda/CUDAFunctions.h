@@ -35,14 +35,8 @@ inline DeviceIndex device_count() noexcept {
   return static_cast<DeviceIndex>(count);
 }
 
-inline DeviceIndex current_device() {
-  int cur_device;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
-  return static_cast<DeviceIndex>(cur_device);
-}
+DeviceIndex current_device();
 
-inline void set_device(DeviceIndex device) {
-  C10_CUDA_CHECK(cudaSetDevice(static_cast<int>(device)));
-}
+void set_device(DeviceIndex device);
 
 }} // namespace c10::cuda
