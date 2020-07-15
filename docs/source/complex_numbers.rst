@@ -126,39 +126,37 @@ check out the note :ref:`complex_autograd-doc`.
 
 Gradient calculation can also be easily done for functions not supported for complex tensors
 yet by enclosing the unsupported operations between :func:`torch.view_as_real` and
-:func:`torch.view_as_complex` functions. The example shown below computes the pointwise multiplication
-of two complex tensors, in one case by performing operations on complex tensors, and in the other
-by by performing operations on complex tensors viewed as real tensors. As shown below, the gradients
-computed have same values in both cases.
+:func:`torch.view_as_complex` functions. The example shown below computes the dot product
+of two complex tensors, by performing operations on complex tensors viewed as real tensors.
+As shown below, the gradients computed have the same value as you would get if you were to perform
+the operations on complex tensors.
 
 ::
+     >>> # computes the complex dot product for complex vectors
+     >>> # represented as float vectors
+     >>> # math: for complex numbers a and b vdot(a, b) = a.conj() * b
+     >>> def vdot(x, y):
+     >>>      z = torch.empty_like(x)
+     >>>      z[:, 0] = x[:, 0] * y[:, 0] + x[:, 1] * y[:, 1]
+     >>>      z[:, 1] = x[:, 0] * y[:, 1] - x[:, 1] * y[:, 0]
+     >>>      return z
 
      >>> x = torch.randn(2, dtype=torch.cfloat, requires_grad=True)
      >>> y = torch.randn(2, dtype=torch.cfloat, requires_grad=True)
-     >>> x_ = x.detach().requires_grsad_(True)
-     >>> y_ = y.detach().requires_grad_(True)
-     >>> z = x[0]*y[0] + x[1]*y[1]
-     >>> z
-     tensor(0.2114-1.1952j, grad_fn=<AddBackward0>)
 
-     >>> x0 = x_.clone()
-     >>> y0 = y_.clone()
-     >>> x1 = torch.view_as_real(x0)
-     >>> y1 = torch.view_as_real(y0)
-     >>> z_ = torch.empty_like(x1)
-     >>> z_[:, 0] = x1[:, 0] * y1[:, 0] - x1[:, 1] * y1[:, 1]
-     >>> z_[:, 1] = x1[:, 0] * y1[:, 1] + x1[:, 1] * y1[:, 0]
-     >>> z1 = torch.view_as_complex(z_)
-     >>> z2 = z1.sum()
-     >>> z2
-     tensor(0.2114-1.1952j, grad_fn=<SumBackward0>)
+     >>> x1 = torch.view_as_real(x.clone())
+     >>> y1 = torch.view_as_real(y.clone())
+     >>> z = torch.view_as_complex(vdot(x1, y1))
+     >>> z.sum().backward()
 
-     >>> z.backward()
-     >>> z2.backward()
-     >>> x.grad, y.grad
-     tensor([-0.6815+0.5931j,  0.5333-1.0872j]) tensor([-0.4869+0.9011j,  0.3673+0.2007j])
-     >>> x_.grad, y_.grad
-     tensortensor([-0.6815+0.5931j,  0.5333-1.0872j]) tensor([-0.4869+0.9011j,  0.3673+0.2007j])
+     >>> x.grad                                                       # equals y.conj()
+     tensor([0.5560+0.2285j, 1.5326-0.4576j])
+     >>> y
+     tensor([0.5560-0.2285j, 1.5326+0.4576j], requires_grad=True)
+     >>> y.grad                                                       # equals x.conj()
+     tensor([ 0.0766-1.0273j, -0.4325+0.2226j])
+     >>> x
+     tensor([ 0.0766+1.0273j, -0.4325-0.2226j], requires_grad=True)
 
 We do not support the following subsystems:
 
