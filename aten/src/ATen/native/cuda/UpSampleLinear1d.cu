@@ -257,6 +257,8 @@ Tensor& upsample_linear1d_backward_out_cuda(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<double> scales) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_linear1d_backward_out_cuda");
   upsample_linear1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales);
   return grad_input;
@@ -268,6 +270,8 @@ Tensor upsample_linear1d_backward_cuda(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<double> scales) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_linear1d_backward_cuda");
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_linear1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales);
