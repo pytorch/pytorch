@@ -5,18 +5,18 @@ Complex Numbers
 
 Complex numbers are numbers that can be expressed in the form :math:`a + bj`, where a and b are real numbers,
 and *j* is a solution of the equation :math:`x^2 = −1`. Complex numbers frequently occur in mathematics and
-engineering, especially in signal processing. Tensors of complex dtypes provide a more natural user experience
-for users and libraries (eg. TorchAudio) that previously worked around the lack of complex tensors by using
-float tensors with shape :math:`(..., 2)` where the last dimension contained the real and imaginary values.
+engineering, especially in signal processing. Traditionally many libraries (e.g., TorchAudio) have handled
+complex numbers by representing the data in float tensors with shape :math:`(..., 2)` where the last
+dimension contains the real and imaginary values.
 
-Operations on complex tensors (eg :func:`torch.mv`, :func:`torch.matmul`) are likely to be faster and more
-memory efficient than operations on float tensors mimicking them. Operations involving complex numbers in
-PyTorch are optimized to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, CuBlas).
-Thus using functions for complex tensors will provide performance benefits as opposed to users defining
-their own functions.
+Tensors of complex dtypes provide a more natural user experience for working with complex numbers. Operations on
+complex tensors (e.g., :func:`torch.mv`, :func:`torch.matmul`) are likely to be faster and more memory efficient
+than operations on float tensors mimicking them. Operations involving complex numbers in PyTorch are optimized
+to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, cuBlas).
 
 .. note::
-     Spectral Ops currently don't use complex tensors but the API would be soon updated to use complex tensors.
+     Spectral operations (e.g., :func:`torch.fft`, :func:`torch.stft` etc.) currently don't use complex tensors but
+     the API will be soon updated to use complex tensors.
 
 .. warning ::
      Complex Tensors is a beta feature and subject to change.
@@ -36,8 +36,8 @@ We support two complex dtypes: `torch.cfloat` and `torch.cdouble`
 .. note::
 
      The default dtype for complex tensors is determined by the default floating point dtype.
-     If the default floating point dtype is torch.float64 then complex numbers are inferred to
-     have a dtype of torch.complex128, otherwise they are assumed to have a dtype of torch.complex64.
+     If the default floating point dtype is `torch.float64` then complex numbers are inferred to
+     have a dtype of `torch.complex128`, otherwise they are assumed to have a dtype of `torch.complex64`.
 
 All factory functions apart from :func:`torch.linspace`, :func:`torch.logspace`, and :func:`torch.arange` are
 supported for complex tensors.
@@ -48,7 +48,7 @@ Transition from the old representation
 Users who currently worked around the lack of complex tensors with real tensors of shape `(..., 2)`
 can easily to switch using the complex tensors in their code using :func:`torch.view_as_complex` and
 - :func:`torch.view_as_real`. Note that these functions don't perform any copy and
-return a view of the input Tensor.
+return a view of the input tensor.
 
 ::
 
@@ -69,7 +69,12 @@ Accessing real and imag
 -----------------------
 
 The real and imaginary values of a complex tensor can be accessed using the :attr:`real` and
-:attr:`imag` views.
+:attr:`imag`.
+
+.. note::
+     Accessing `real` and `imag` attributes doesn't allocate any memory, and in-place updates on the
+     `real` and `imag` tensors will update the original complex tensor. Also, the
+     returned `real` and `imag` tensors are not contiguous.
 
 ::
 
@@ -77,11 +82,17 @@ The real and imaginary values of a complex tensor can be accessed using the :att
      tensor([ 0.6125, -0.3773, -0.0861])
      >>> y.imag
      tensor([-0.1681,  1.3487, -0.7981])
+     >>> y.real.mul_(2)
+     tensor([ 1.2250, -0.7546, -0.1722])
+     >>> y
+     tensor([ 1.2250-0.1681j, -0.7546+1.3487j, -0.1722-0.7981j])
+     >>> y.real.stride()
+     (2,)
 
 Angle and abs
 -------------
 
-The angle and absolute values of a complex tensor can be accessed using :func:`torch.angle` and
+The angle and absolute values of a complex tensor can be computed using :func:`torch.angle` and
 `torch.abs`.
 
 ::
@@ -107,7 +118,7 @@ if an issue has already been filed and if not, `file one <https://github.com/pyt
 Serialization
 -------------
 
-Complex Tensors can be serialized, allowing data to be saved as complex values.
+Complex tensors can be serialized, allowing data to be saved as complex values.
 
 ::
 
@@ -119,10 +130,10 @@ Complex Tensors can be serialized, allowing data to be saved as complex values.
 Autograd
 --------
 
-PyTorch supports Autograd for Complex Tensors. The autograd APIs can be
+PyTorch supports autograd for complex tensors. The autograd APIs can be
 used for both holomorphic and non-holomorphic functions. For non-holomorphic
-functions, the gradient is evaluated as if it were holomorphic. For more details,
-check out the note :ref:`complex_autograd-doc`.
+functions, the gradient is evaluated assuming the input function is holomorphic.
+For more details, check out the note :ref:`complex_autograd-doc`.
 
 Gradient calculation can also be easily done for functions not supported for complex tensors
 yet by enclosing the unsupported operations between :func:`torch.view_as_real` and
