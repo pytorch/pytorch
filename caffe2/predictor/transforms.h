@@ -6,6 +6,10 @@
 
 namespace caffe2 {
 
-void RemoveOpsByType(InferenceGraph& graph_, const std::string& op_type);
+
+// Make all operators of a given type inplace when possible
+void InPlaceOps(const InferenceGraph& graph_, const std::string& op_type);
+
+void RemoveOpsByType(const InferenceGraph& graph_, const std::string& op_type);
 
 } // namespace caffe2
