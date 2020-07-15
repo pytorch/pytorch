@@ -9983,7 +9983,7 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         issue_35202()
 
-        def issue_24823_1(dtype, grad_atol=1e-3):
+        def issue_24823_1(dtype):
             image = torch.arange(27, 0, -1, dtype=dtype, device=device).view(1, 1, 3, 3, 3)
             image.requires_grad_()
             grid = torch.nn.functional.affine_grid(
@@ -9998,12 +9998,9 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
             expected_grad[0, 0, 1, 1, 1] = 0
-            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=grad_atol))
+            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=0.005))
         issue_24823_1(torch.half)
-        if torch.backends.cudnn.allow_tf32 and tf32_is_not_fp32():
-            issue_24823_1(torch.float, 0.005)
-        else:
-            issue_24823_1(torch.float)
+        issue_24823_1(torch.float)
         issue_24823_1(torch.double)
 
         def issue_24823_2():
