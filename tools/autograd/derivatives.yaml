@@ -1353,6 +1353,9 @@
 - name: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: hardshrink_backward(grad, self, lambd)
 
+- name: _sparse_hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  self: _sparse_hardshrink_backward(grad, self, lambd)
+
 - name: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   grad_out: hardshrink_backward(grad, self, lambd)
   self: zeros_like(grad)

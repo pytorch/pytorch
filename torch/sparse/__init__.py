@@ -201,3 +201,7 @@ def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tenso
           overflows. Default: None
     """
     return torch._sparse_log_softmax(input, dim, dtype=dtype)
+
+
+def hardshrink(input: Tensor, lambd: float = 0.5) -> Tensor:
+    return torch._sparse_hardshrink(input, lambd)
