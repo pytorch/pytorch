@@ -677,7 +677,7 @@ void hashValue(Stack* stack) {
 // special halfway case. For positive 'x', round(x/2)*2 =
 // round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
 // x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetric, it also applies to
+// result will always be a even number. Due to symmetricity, it also applies to
 // negative cases.
 double round_to_even(double a) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
