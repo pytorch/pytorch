@@ -213,7 +213,8 @@ TEST(BoundShapeInference, LengthsRangeFill) {
       TensorProto_DataType_INT32);
 }
 
-TEST(BoundShapeInference, Reshape) {
+// https://github.com/pytorch/pytorch/issues/40861
+TEST(BoundShapeInference, DISABLED_ON_WINDOWS(Reshape)) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};
   std::vector<int> new_shape2{2, 8};
@@ -626,7 +627,8 @@ TEST(BoundShapeInference, Split) {
       {spec.max_batch_size, 48});
 }
 
-TEST(BoundShapeInference, FC) {
+// https://github.com/pytorch/pytorch/issues/41471
+TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
   NetDef net;
   net.add_op()->CopyFrom(
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"Out0"}, {}));
