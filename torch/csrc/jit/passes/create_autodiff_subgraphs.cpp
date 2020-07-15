@@ -51,13 +51,13 @@ class SubgraphSlicer {
 
     // see [workblocks]
     auto workblocks = buildWorkBlocks();
-    for (auto& workblocks : workblocks) {
+    for (auto& workblock : workblocks) {
       bool any_changed = true;
       while (any_changed) {
         AliasDb aliasDb(graph_);
         any_changed = false;
-        for (auto it = workblocks.end()->reverseIterator();
-             it != workblocks.begin()->reverseIterator();) {
+        for (auto it = workblock.end()->reverseIterator();
+             it != workblock.begin()->reverseIterator();) {
           bool changed;
           std::tie(it, changed) = scanNode(*it, aliasDb);
           any_changed |= changed;
