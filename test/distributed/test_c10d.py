@@ -3151,10 +3151,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result(bucket.get_tensors())
             return fut
 
-        dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
+        model._register_comm_hook(None, dummy_hook)
 
         with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
-            dist.PythonHookBinder.register_comm_hook(model, None, dummy_hook)
+            model._register_comm_hook(None, dummy_hook)
 
 
 class ReducerModule(nn.Module):

@@ -972,7 +972,6 @@ void Reducer::finalize_backward() {
       // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
         bucket.replicas[i].bucket_views.clear();
-
         initialize_bucketviews(bucket.replicas[i], future_result[i]);
       }
     }

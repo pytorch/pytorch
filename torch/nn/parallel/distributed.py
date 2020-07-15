@@ -646,7 +646,7 @@ class DistributedDataParallel(Module):
         Example::
             Below is an example of a noop hook that returns back the same tensors:
 
-            >>> ddp.register_comm_hook(state = None, hook = noop)
+            >>> ddp._register_comm_hook(state = None, hook = noop)
 
             >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
@@ -655,7 +655,7 @@ class DistributedDataParallel(Module):
 
         """
         self._check_comm_hook(hook)
-        dist.PythonHookBinder.register_comm_hook(self, state, hook)
+        dist._register_comm_hook(self.reducer, state, hook)
 
     def _distributed_broadcast_coalesced(self, tensors, buffer_size):
         dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
