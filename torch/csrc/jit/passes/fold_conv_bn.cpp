@@ -239,7 +239,6 @@ void FoldConvBatchNormHelper::analyze(
   const auto& vmap = pattern.vmap;
   Value* pattern_conv_out = vmap.at("conv_out");
   Value* pattern_bn_out = vmap.at("bn_out");
-  Value* pattern_conv_submodule = vmap.at("conv");
   Value* pattern_bn_submodule = vmap.at("batchnorm");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();
