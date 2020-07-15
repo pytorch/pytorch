@@ -921,7 +921,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _set_jit_function_cache(obj, fn)
         return fn
 
-
 def is_scripting():
     r"""
     Function that returns True when in compilation and False otherwise. This

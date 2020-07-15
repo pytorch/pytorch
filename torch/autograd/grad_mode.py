@@ -62,7 +62,8 @@ class no_grad(_DecoratorContextManager):
         False
     """
     def __init__(self):
-        # super().__init__()
+        if not torch._jit_internal.is_scripting():
+            super().__init__()
         self.prev = False
 
     def __enter__(self):
