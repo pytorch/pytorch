@@ -1,3 +1,4 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -15,7 +16,8 @@ void div_kernel_cuda(TensorIterator& iter) {
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      auto inv_b = scalar_t(1.0) / iter.scalar_value<scalar_t>(2);
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      auto inv_b = accscalar_t(1.0) / iter.scalar_value<accscalar_t>(2);
       iter.remove_operand(2);
       gpu_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
         return a * inv_b;
