@@ -97,9 +97,9 @@ class SubgraphSlicer {
   std::vector<WorkBlock> buildWorkBlocks() {
     // [workblocks]
     // the IR has many nodes which can never be reordered around, such as a
-    // prim::Bailout if a node N is surrounded by two nodes which cannot be
+    // prim::Bailout. if a node N is surrounded by two nodes which cannot be
     // reordered, A and B, then a differentiable subgraph that is created from N
-    // can only contain nodes from [A, B] The nodes from A to B represent one
+    // can only contain nodes from (A, B) The nodes from A to B represent one
     // work block for the subgraph slicer to work on. By creating these up
     // front, we avoid retraversing the whole graph block any time scanNode
     // returns, and we can also avoid attempting to create differentiable
