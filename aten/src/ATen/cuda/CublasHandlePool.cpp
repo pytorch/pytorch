@@ -41,6 +41,16 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+#if CUDA_VERSION >= 11000
+  // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
+  // FP32 data type calculations based on the value of the allow_tf32 flag.
+  // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
+  if (at::globalContext().allowTF32CuBLAS()) {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  }
+#endif
   return handle;
 }
 
