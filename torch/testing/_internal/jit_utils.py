@@ -159,7 +159,7 @@ class JitTestCase(TestCase):
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             try:
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
