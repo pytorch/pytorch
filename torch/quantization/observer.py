@@ -116,10 +116,10 @@ class _ObserverBase(ObserverBase):
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
 
-    @torch.jit._overload
+    @torch.jit._overload_method
     def _calculate_qparams(self, min_val: torch.Tensor, max_val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]: ...
 
-    @torch.jit._overload
+    @torch.jit._overload_method
     def _calculate_qparams(self, min_val: List[torch.Tensor], max_val: List[torch.Tensor]) -> List[Tuple[torch.Tensor, torch.Tensor]]: ...
 
     @torch.jit.export
@@ -877,9 +877,9 @@ class HistogramObserver(_ObserverBase):
         self.histogram.resize_(histogram.shape)
         self.histogram.copy_(histogram)
 
-    @torch.jit._overload
+    @torch.jit._overload_method
     def forward(self, x_orig: List[torch.Tensor]) -> List[torch.Tensor]: ...
-    @torch.jit._overload
+    @torch.jit._overload_method
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor: ...
 
     def forward(self, x_orig):  # noqa: F811
