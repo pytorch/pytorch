@@ -2203,7 +2203,6 @@ class _DistTestBase(object):
     @require_world_size(2)
     def test_DistributedDataParallel_SingleProcessMultiGPU_ParamListDict(self):
         group, group_id, rank = self._init_global_test()
-        print(group, group_id, rank)
 
         class TestNetWithParamListDict(nn.Module):
 
