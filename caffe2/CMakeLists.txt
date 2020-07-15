@@ -256,8 +256,8 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
-set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
-set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
+set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
+set(TORCH_ROOT "${PROJECT_SOURCE_DIR}")
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)

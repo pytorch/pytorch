@@ -106,6 +106,20 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
+// This method is called from DDP's Python API. Its inputs are
+// a c10d reducer object, state, and callable comm_hook. State and
+// comm_hook inputs are Python objects and this function creates a
+// c10d PythonCommHook object using these inputs. It later calls
+// register_comm_hook function of the reducer input to register that
+// PythonCommHook object.
+void _register_comm_hook(
+    ::c10d::Reducer& reducer,
+    py::object state,
+    py::object comm_hook) {
+  reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
+      std::move(state), std::move(comm_hook)));
+};
+
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -114,6 +128,20 @@ PyObject* c10d_init(PyObject* _unused) {
   }
 
   auto module = py::handle(c10d_module).cast<py::module>();
+
+  module.def(
+      "_register_comm_hook",
+      &_register_comm_hook,
+      py::arg("ddp_model"),
+      py::arg("state"),
+      py::arg("comm_hook"));
+
+  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          "get_tensors",
+          &::c10d::GradBucket::getTensors,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
