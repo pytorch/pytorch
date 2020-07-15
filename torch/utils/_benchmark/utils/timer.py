@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import numpy as np
 import torch
-import utils.common as common
+import torch.utils._benchmark.utils.common as common
 
 
 __all__ = ["Timer"]
