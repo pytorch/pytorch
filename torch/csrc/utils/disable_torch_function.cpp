@@ -2,9 +2,18 @@
 
 namespace torch {
   static thread_local bool enable_torch_function = true;
+  PyObject* disabled_torch_function = nullptr;
 
   bool torch_function_enabled() {
       return enable_torch_function;
+  }
+
+  PyObject* disabled_torch_function_impl() {
+    return disabled_torch_function;
+  }
+
+  void set_disabled_torch_function_impl(PyObject* value) {
+    disabled_torch_function = value;
   }
 }
 
@@ -87,4 +96,27 @@ PyObject* THPModule_DisableTorchFunctionType() {
   }
 
   return (PyObject *)(&DisableTorchFunctionType);
+}
+
+PyObject* THPModule_disable_torch_function(PyObject *s, PyObject *a) {
+  PyObject *self=nullptr, *func=nullptr, *type=nullptr, *args=nullptr, *kwargs=nullptr;
+  if (!PyArg_Parse(a, "OOO|OO", &self, &func, &type, &args, &kwargs)) {
+    return nullptr;
+  }
+  if (args == nullptr) {
+    args = PyTuple_Pack(0);
+  }
+  else {
+    Py_INCREF(args);
+  }
+  // These are all C-API calls so no exceptions will be raised
+  // and therefore no need for RAII approach to storing
+  // the old value.
+  bool old_value = torch::enable_torch_function;
+  torch::enable_torch_function = false;
+  // kwargs can safely be nullptr here.
+  PyObject *result = PyObject_Call(func, args, kwargs);
+  torch::enable_torch_function = old_value;
+  Py_DECREF(args);
+  return result;
 }

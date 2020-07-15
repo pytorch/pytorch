@@ -718,7 +718,7 @@ static auto check_has_torch_function(PyObject* obj) -> bool
     return false;
   }
   py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method.ptr() != nullptr && method.ptr() != Py_None){
+  if(method.ptr() != nullptr && method.ptr() != disabled_torch_function_impl()){
     return true;
   }
   return false;

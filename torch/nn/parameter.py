@@ -1,5 +1,5 @@
 import torch
-from torch._C import DisableTorchFunction
+from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
 
 
@@ -43,4 +43,4 @@ class Parameter(torch.Tensor):
             (self.data, self.requires_grad, OrderedDict())
         )
 
-    __torch_function__ = None
+    __torch_function__ = _disabled_torch_function_impl
