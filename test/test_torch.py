@@ -12682,13 +12682,6 @@ class TestTorchDeviceType(TestCase):
         # Complex Tensor
         src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
         idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
-
-        # index_select not supported for complex on cuda
-        if device.startswith('cuda'):
-            with self.assertRaises(RuntimeError):
-                torch.index_select(src, 0, idx)
-            return
-
         dest = torch.index_select(src, 0, idx)
         self.assertEqual(dest.shape, (5, 4, 5))
         for i in range(idx.size(0)):
