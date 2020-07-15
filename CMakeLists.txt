@@ -138,7 +138,7 @@ option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CLANG_CODE_COVERAGE "Compile C/C++ with clang code coverage flags" OFF)
+option(CLANG_CODE_COVERAGE "Compile C++ with clang code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -598,8 +598,7 @@ endif()
 
 # invoke clang code coverage flags
 if(CLANG_CODE_COVERAGE)
-  list(APPEND CMAKE_C_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
-  list(APPEND CMAKE_CXX_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
 endif()
 
 if(APPLE)
