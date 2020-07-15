@@ -7566,7 +7566,7 @@ class TestTorchDeviceType(TestCase):
             mat = torch.randn(n, n, dtype=dtype, device=device)
             q, _ = torch.qr(mat)
             ref_det, ref_logabsdet = reference_slogdet(q)
-            test_single_det(q, ref_det, ref_logabsdet, 'orthogonal')
+            test_single_det(q, (ref_det, ref_logabsdet), 'orthogonal')
 
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
