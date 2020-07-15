@@ -67,7 +67,6 @@ def tf32_is_not_fp32():
 def tf32_on_and_off(tf32_precision=1e-5):
     def call_with_tf32_on_and_off(self, function_call):
         old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-        old_allow_tf32_cudnn = torch.backends.cudnn.allow_tf32
         old_precison = self.precision
 
         def with_tf32_disabled():
