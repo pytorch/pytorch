@@ -177,6 +177,11 @@ struct TORCH_API RecordFunction {
   /// Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
 
+  // In cases when RecordFunction might be active but we chose not to
+  // use the observers (e.g. operator is not observed), this boolean
+  // flag is used to check whether the start callbacks were called
+  bool called_start_callbacks_ = false;
+
  private:
   StringView name_;
   int64_t sequence_nr_ = -1;

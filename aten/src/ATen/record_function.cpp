@@ -128,6 +128,7 @@ class CallbackManager {
         rf.sorted_active_tls_handles_,
         /* is_start */ true,
         rf);
+    rf.called_start_callbacks_ = true;
   }
 
   void runEndCallbacks(RecordFunction& rf) {
@@ -379,10 +380,10 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::end() {
-  if (active) {
+  if (active && called_start_callbacks_) {
     manager().runEndCallbacks(*this);
-    active = false;
   }
+  active = false;
 }
 
 } // namespace at

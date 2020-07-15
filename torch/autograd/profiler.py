@@ -896,9 +896,9 @@ def parse_cpu_trace(thread_records):
             elif record.kind() == 'pop':
                 assert (
                     record_key in range_starts
-                ), """Expected record (name={}) with key {} to exist in range_starts.
+                ), """Expected record with key {} to exist in range_starts.
                     This means that the pop event did not have a corresponding push.""".format(
-                    record.name(), record_key
+                    record_key
                 )
 
                 start = range_starts[record_key]
