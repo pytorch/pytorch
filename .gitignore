@@ -55,6 +55,7 @@ torch/_C/_VariableFunctions.pyi
 torch/nn/functional.pyi
 torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
+torch/testing/_internal/generated/*
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
