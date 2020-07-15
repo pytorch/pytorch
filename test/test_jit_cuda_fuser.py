@@ -8,10 +8,12 @@ import os
 
 import torch
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
+import itertools
+import numpy as np
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
@@ -321,14 +323,14 @@ class TestCudaFuser(JitTestCase):
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, x, y, cond)
 
-        def lerp(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def lerp(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.rand_like(x)
             o = o * torch.lerp(x, y, z)
             return o
         lerp_jit = torch.jit.script(lerp)
         self._run_helper(lerp_jit, lerp, x, y, z)
 
-        def lerp_scale(x : torch.Tensor, y : torch.Tensor, z: float):
+        def lerp_scale(x: torch.Tensor, y: torch.Tensor, z: float):
             o = torch.rand_like(x)
             o = o * torch.lerp(x, y, z)
             return o
@@ -342,21 +344,21 @@ class TestCudaFuser(JitTestCase):
         y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
         z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
 
-        def addcmul(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, value : float):
+        def addcmul(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, value: float):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z, value=value)
             return o
         addcmul_jit = torch.jit.script(addcmul)
         self._run_helper(addcmul_jit, addcmul, x, y, z, 2.0)
 
-        def addcmul_no_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def addcmul_no_alpha(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z)
             return o
         addcmul_no_alpha_jit = torch.jit.script(addcmul_no_alpha)
         self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, x, y, z)
 
-        def addcmul_const_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def addcmul_const_alpha(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z, value=0.75)
             return o
@@ -392,6 +394,109 @@ class TestCudaFuser(JitTestCase):
     def test_random_topo(self):
         os.environ["PYTORCH_CUDA_FUSER_DISABLE_FALLBACK"] = "1"
         self.assertTrue(runDefaultTestWithSeed(28449))
+
+    def _compare(self, desc, inp1, inp2, error):
+        a = inp1.clone().detach().cpu().numpy()
+        b = inp2.clone().detach().cpu().numpy()
+        close = np.allclose(a, b, error, error)
+        if not close:
+            print(desc, close)
+            z = a - b
+            index = (np.abs(z) >= error + error * np.abs(b)).nonzero()
+            print("dif    : ", z[index])
+            print("inp1   : ", a[index])
+            print("inp2   : ", b[index])
+        return close
+
+    def _reduction_helper(self, sizes, reduction_axis, dtype, device):
+        class MyReduction(torch.nn.Module):
+            __constants__ = ['reduction_axis']
+
+            def __init__(self):
+                super(MyReduction, self).__init__()
+                self.reduction_axis = reduction_axis
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.sum(o, dim=self.reduction_axis)
+                return o
+
+        t = MyReduction()
+        x = torch.randn(sizes, dtype=dtype, device=device)
+        y = torch.randn(sizes, dtype=dtype, device=device)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            # numerical issues here due to our scheduling.
+            # can't use `self.assertEqual(oo, jit_oo)`
+            self.assertTrue(self._compare("comparing output failed", oo, jit_oo, 1e-4))
+        self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_reduction(self):
+        for x in ([7, 8, 12], [12, 8, 7, 9, 15], [128, 16, 8, 32]):
+            # note that num_dim is exclusive from len(x), so we are not reducing
+            # to single element (codegen limitation at this moment)
+            for num_reduce_dim in range(1, len(x)):
+                for axes in itertools.combinations(range(len(x)), num_reduce_dim):
+                    self._reduction_helper((12, 8, 7, 4, 8), axes, torch.float32, "cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_pw_single_reduction_partition(self):
+        sizes = [8, 8, 8]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device)
+        y = torch.randn(sizes, dtype=dtype, device=device)
+        z = torch.randn(sizes, dtype=dtype, device=device)
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+            o = torch.add(x, y)
+            o = torch.sum(o, dim=[0])
+            o = torch.add(o, z)
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_single_reduction_broadcast(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn([7, 4, 8], dtype=dtype, device=device)
+        y = torch.randn([4, 8], dtype=dtype, device=device)
+        z = torch.randn([1, 4, 8], dtype=dtype, device=device)
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+            o = torch.add(x, y)
+            o = torch.add(o, z)
+            o = torch.sum(o, dim=[0])
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
 
 
 class TestPassManagerCudaFuser(JitTestCase):
@@ -440,6 +545,7 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
+
 
 if __name__ == '__main__':
     run_tests()

@@ -190,6 +190,22 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
+Tensor silu(const Tensor& self) {
+  return self * at::sigmoid(self);
+}
+
+Tensor& silu_(Tensor& self) {
+  return self.mul_(at::sigmoid(self));
+}
+
+Tensor& silu_out(Tensor& result, const Tensor& self) {
+  return at::mul_out(result, self, at::sigmoid(self));
+}
+
+Tensor silu_backward(const Tensor& grad, const Tensor& self) {
+  auto self_sigmoid = at::sigmoid(self);
+  return grad * (self_sigmoid * (1 + self * (1 - self_sigmoid)));
+}
 
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
