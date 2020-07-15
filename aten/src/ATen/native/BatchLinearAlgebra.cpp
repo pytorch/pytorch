@@ -572,98 +572,129 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
 }
 
 template<typename scalar_t>
-static void  apply_cholesky_mod(const Tensor& self, Tensor & out, Tensor & err, bool upper, std::vector<int64_t>& infos) {
+static void  apply_cholesky_mod(const Tensor& self, Tensor & out, const Tensor & jitter_in, Tensor & jitter_out, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("cholesky: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
-  Tensor outTag =  out;
+  Tensor outTag;
   Tensor selfTag = self;
 
-  double* err_data = err.data_ptr<double>();
+  double* jitter_in_data = NULL;
+  auto jitter_n = 0;
+  if (jitter_in.defined()) {
+    if ((jitter_in.ndimension() > 0) && (jitter_in.size(0) > 0)){
+      jitter_n = jitter_in.size(0);
+      jitter_in_data = jitter_in.data_ptr<double>();
+    }
+  }
+
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
-  auto n = self.size(-2);
+  // self.size(-1) == self.size(-2)
   auto m = self.size(-1);
 
   if (batch_size > 1) {
     outTag =  out.flatten(0, -3);
     selfTag = self.flatten(0, -3);
   }
-  
-  scalar_t* self_data = selfTag.data_ptr<scalar_t>();
+  else {
+    outTag = out;
+  }
+
   scalar_t* out_data = outTag.data_ptr<scalar_t>();
   /* TODO: do this in parallel */
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* out_working_ptr = &out_data[i * self_matrix_stride];
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    double err_val = 1e-8;
+    double jitter_val = 0;
     int info;
-    lapackCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
-    for (int64_t j=0; j<8; j++)
+    lapackCholesky<scalar_t>(uplo, m, out_working_ptr, m, &info);
+    for (int64_t j=0; j<jitter_n; j++)
     {
       if (info == 0) {
         break;
       }
-      // lapackChelesky failed. Copy current 2D matrix to out
+      jitter_val = jitter_in_data[j];
+      // lapackCholesky failed. Copy current 2D matrix to out
       if (batch_size > 1) {
         outTag[i].copy_(selfTag[i]);
+        jitter_out[i] = jitter_val;
       } else {
         outTag.copy_(selfTag);
+        at::fill_(jitter_out, jitter_val);
       }
       for (int64_t mm=0; mm<m; mm++)
       {
         // Add err_val to the diagonal
-        out_working_ptr[(mm * m) + mm] += err_val;
+        out_working_ptr[(mm * m) + mm] += jitter_val;
       }
-      err_data[i] = err_val;
-      err_val *= 100.0;
-      lapackCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
+      lapackCholesky<scalar_t>(uplo, m, out_working_ptr, m, &info);
     }
     infos[i] = info;
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, bool upper) {
+std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, bool upper, const Tensor& jitter) {
   std::vector<int64_t> infos(batchCount(self), 0);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
   req_size.pop_back();
-  auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
+  auto jitter_out = at::zeros(req_size, self.options().dtype(ScalarType::Double));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_mod_cpu", [&]{
-    apply_cholesky_mod<scalar_t>(self, self_working_copy, err, upper, infos);
+    apply_cholesky_mod<scalar_t>(self, self_working_copy, jitter, jitter_out, upper, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "cholesky_mod_cpu");
   } else {
     singleCheckErrors(infos[0], "cholesky_mod_cpu");
   }
-  return std::make_tuple(self_working_copy, err);
+  return std::make_tuple(self_working_copy, jitter_out);
 }
 
-std::tuple<Tensor, Tensor> cholesky_mod(const Tensor &self, bool upper) {
+std::tuple<Tensor, Tensor> cholesky_mod(const Tensor &self, bool upper, const Tensor& jitter) {
   if (self.size(-1) == 0) {
       auto req_size = self.sizes().vec();
       req_size.pop_back();
-      auto err = at::empty(req_size, self.options().dtype(ScalarType::Double));
-    return std::make_tuple(at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), err);
+      auto jitter_out = at::empty(req_size, self.options().dtype(ScalarType::Double));
+    return std::make_tuple(at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), jitter_out);
   }
   squareCheckInputs(self);
-
-  auto helper_out = at::_cholesky_mod_helper(self, upper);
+  if (jitter.defined()) {
+    if (jitter.ndimension() > 1) {
+        AT_ERROR("cholesky_mod: Expected 1d jitter, got", jitter.ndimension());
+    }
+  }
+  auto helper_out = at::_cholesky_mod_helper(self, upper, jitter);
   auto raw_cholesky_output = std::get<0>(helper_out);
-  auto err_output = std::get<1>(helper_out);
+  auto jitter_out = std::get<1>(helper_out);
   if (upper) {
     auto U = raw_cholesky_output.triu_();
-    return std::make_tuple(U, err_output);
+    return std::make_tuple(U, jitter_out);
   } else {
     auto L = raw_cholesky_output.tril_();
-    return std::make_tuple(L, err_output);
+    return std::make_tuple(L, jitter_out);
   }
 }
+
+/* For this to work the parser must be able to figure out the signature in
+   native_functions.yaml
+
+std::tuple<Tensor, Tensor> cholesky_mod_out(Tensor &result, const Tensor &self, bool upper, const Tensor & jitter) {
+  if (self.size(-1) == 0) {
+    auto req_size = self.sizes().vec();
+    req_size.pop_back();
+    auto jitter_out = at::empty(req_size, self.options().dtype(ScalarType::Double));
+    return std::make_tuple(result.resize_as_(self), jitter_out);
+    return result.resize_as_(self);
+  }
+  auto helper_out = native::cholesky_mod(self, upper, jitter);
+  result.copy_(std::get<0>(helper_out));
+  return helper_out;
+}
+*/
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1079,7 +1110,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
-    
+
     // Compute S, U (optionally) and VT (optionally)
     lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
                         S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
@@ -1095,7 +1126,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
-  
+
   char jobz = compute_uv ? (some ? 'S' : 'A') : 'N';
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;

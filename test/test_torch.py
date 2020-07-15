@@ -8062,21 +8062,26 @@ class TestTorchDeviceType(TestCase):
         D = torch.eye(n, dtype=dtype, device=device) * d
         A = x @ D @ x.t()
 
-        # make sure the regular cholesky fails
-        self.assertRaises(RuntimeError, lambda: torch.cholesky(A))
+        # make sure cholesky_mod with no jitter fails for this A
+        self.assertRaises(RuntimeError, lambda: torch.cholesky_mod(A))
 
+        jitter = torch.as_tensor([1e-8, 1e-6, 1e-4, 1e-2, 1, 100], dtype=torch.float64)
+        # make sure cholesky_mod does not accept a 2d jitter
+        self.assertRaises(RuntimeError,
+                          lambda: torch.cholesky_mod(A, jitter=jitter.reshape(-1, 3)))
         # default
-        C, e = torch.cholesky_mod(A)
+        C, e = torch.cholesky_mod(A, jitter=jitter)
+        print(e)
         B = torch.mm(C, C.t()) - (torch.eye(n, dtype=dtype, device=device) * e)
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
         # test Upper Triangular
-        U, e = torch.cholesky_mod(A, True)
+        U, e = torch.cholesky_mod(A, True, jitter=jitter)
         B = torch.mm(U.t(), U) - (torch.eye(n, dtype=dtype, device=device) * e)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
-        L, e = torch.cholesky_mod(A, False)
+        L, e = torch.cholesky_mod(A, False, jitter=jitter)
         B = torch.mm(L, L.t()) - (torch.eye(n, dtype=dtype, device=device) * e)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (lower) did not allow rebuilding the original matrix')
 
@@ -8104,22 +8109,24 @@ class TestTorchDeviceType(TestCase):
         D = torch.eye(n, dtype=dtype, device=device) * d
         A = x @ D @ x.transpose(-2, -1)
 
-        # make sure the regular cholesky fails
-        self.assertRaises(RuntimeError, lambda: torch.cholesky(A))
+        # make sure cholesky with no jitter fails
+        self.assertRaises(RuntimeError, lambda: torch.cholesky_mod(A))
 
         # default
-        C, e = torch.cholesky_mod(A)
+        jitter = torch.as_tensor([1e-8, 1e-6, 1e-4, 1e-2, 1, 100], dtype=torch.float64)
+        C, e = torch.cholesky_mod(A, jitter=jitter)
+        print(e)
 
         B = (C @ C.transpose(-2, -1)) - make_batch_eye(n, e)
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
         # test Upper Triangular
-        U, e = torch.cholesky_mod(A, True)
+        U, e = torch.cholesky_mod(A, True, jitter=jitter)
         B = (U.transpose(-2, -1) @ U) - make_batch_eye(n, e)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
-        L, e = torch.cholesky_mod(A, False)
+        L, e = torch.cholesky_mod(A, False, jitter=jitter)
         B = (L @ L.transpose(-2, -1)) - make_batch_eye(n, e)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (lower) did not allow rebuilding the original matrix')
 

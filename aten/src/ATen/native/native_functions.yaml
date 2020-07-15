@@ -4892,11 +4892,16 @@
     CPU: _cholesky_helper_cpu
     CUDA: _cholesky_helper_cuda
 
-- func: cholesky_mod(Tensor self, bool upper=False) -> (Tensor result, Tensor err)
-  use_c10_dispatcher: full
+# This signature doesn't work. The parser wants each of the output arguments to
+# be present in the input arguments, but input `jitter` is 1d and output jitter
+# is self.size[:-2]
+# - func: cholesky_mod.out(Tensor self, bool upper=False, *, Tensor(a!) out, Tensor? jitter=None) -> (Tensor(a!) out, Tensor jitter)
+
+- func: cholesky_mod(Tensor self, bool upper=False, *, Tensor? jitter=None) -> (Tensor result, Tensor jitter)
+  use_c10_dispatcher: with_codegenerated_unboxing_wrapper
   variants: method, function
 
-- func: _cholesky_mod_helper(Tensor self, bool upper) -> (Tensor, Tensor)
+- func: _cholesky_mod_helper(Tensor self, bool upper, Tensor jitter) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
   dispatch:

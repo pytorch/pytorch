@@ -242,6 +242,7 @@ _(aten, chain_matmul) \
 _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
+_(aten, cholesky_mod) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \

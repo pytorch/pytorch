@@ -761,7 +761,7 @@ See :func:`torch.cholesky`
 
 add_docstr_all('cholesky_mod',
                r"""
-cholesky_mod(upper=False) -> (Tensor, Tensor)
+cholesky_mod(upper=False, jitter=None) -> (Tensor, Tensor)
 
 See :func:`torch.cholesky_mod`
 """)

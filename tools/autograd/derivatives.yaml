@@ -297,7 +297,7 @@
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
 
-- name: cholesky_mod(Tensor self, bool upper=False) -> (Tensor result, Tensor err)
+- name: cholesky_mod(Tensor self, bool upper=False, *, Tensor? jitter=None) -> (Tensor result, Tensor jitter)
   self: cholesky_backward(grad, upper, result)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor

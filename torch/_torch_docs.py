@@ -1326,10 +1326,12 @@ Example::
 """)
 
 add_docstr(torch.cholesky_mod, r"""
-cholesky_mod(input, upper=False, out=None) -> (Tensor, Tensor)
+cholesky_mod(input, upper=False, out=None, jitter=None) -> (Tensor, Tensor)
 
 Computes the modified Cholesky decomposition of a symmetric positive-semidefinite
-matrix :math:`A` or for batches of symmetric positive-semidefinite matrices.
+matrix :math:`A` or for batches of symmetric positive-semidefinite matrices. It
+is modified to add a (scalar) jitter :math:`e` to the diagonal of :math:`A` to
+allow semidefinite matrices.
 
 If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
 the decomposition has the form:
@@ -1352,15 +1354,22 @@ tensor will be composed of lower-triangular Cholesky factors of each of the indi
 matrices.
 
 Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of symmetric positive-definite matrices.
-    upper (bool, optional): flag that indicates whether to return a
-                            upper or lower triangular matrix. Default: ``False``
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where
+        `*` is zero or more batch dimensions consisting of symmetric
+        positive-definite matrices.
+    upper (bool, optional): flag that indicates whether to return a upper or
+        lower triangular matrix. Default: ``False``
     out (Tensor, optional): the output matrix
+    jitter (Tensor, optional): the value to add to the diagonal. If it is
+        missing, this is equivalent to the normal `cholesky`. Each value of
+        `jitter` will be tried sequentially until the decompostition succeeds.
+        They should be increasing in value, from a very small multiple of the
+        largest eigenvalue. The value used will be returned.
 
 Returns:
     out (Tensor): the output matrix
-    err (Tensor): the minimal error, that when added to `A` will make it positive-definite
+    jitter (Tensor): the first value from the `jitter` input, that when added
+        to `A` will make it positive-definite, or ``0`` if jitter is not needed.
 
 Example::
 
@@ -1383,7 +1392,10 @@ Example::
             [ 1.4551,  0.1294,  1.6724]])
     >>> a = torch.randn(3, 2, 2)
     >>> a = torch.matmul(a, a.transpose(-1, -2))
-    >>> l = torch.cholesky_mod(a)
+    >>> jitter = torch.as_tensor([1.0], dtype=torch.float64)
+    >>> l, jitter = torch.cholesky_mod(a, jitter=jitter)
+    >>> jitter
+    tensor(0.0)
     >>> z = torch.matmul(l, l.transpose(-1, -2))
     >>> torch.max(torch.abs(z - a)) # Max non-zero
     tensor(2.3842e-07)
