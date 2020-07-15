@@ -40,6 +40,7 @@ def initialize_cuda_context_rng():
 # - CUDA >= 11
 # - arch >= Ampere
 def tf32_is_not_fp32():
+    return True
     if not torch.cuda.is_available():
         return False
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
@@ -71,21 +72,20 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         def with_tf32_disabled():
             torch.backends.cuda.matmul.allow_tf32 = False
-            torch.backends.cudnn.allow_tf32 = False
-            function_call()
+            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+                function_call()
 
         def with_tf32_enabled():
             torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
             self.precision = tf32_precision
-            function_call()
+            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+                function_call()
 
         try:
             with_tf32_disabled()
             with_tf32_enabled()
         finally:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-            torch.backends.cudnn.allow_tf32 = old_allow_tf32_cudnn
             self.precision = old_precison
 
     def wrapper(f):
