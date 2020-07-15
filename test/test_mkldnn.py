@@ -318,6 +318,22 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
+    def test_batch_norm3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(N, C, 30, 30, 30, dtype=torch.float32) * 10
+
+        # TODO: support training
+        for train in [False]:
+            bn = torch.nn.BatchNorm3d(C).float().train(train)
+            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+            self.assertEqual(
+                bn(x),
+                mkldnn_bn(x.to_mkldnn()).to_dense())
+
+            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
