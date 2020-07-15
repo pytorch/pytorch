@@ -882,10 +882,8 @@ class HistogramObserver(_ObserverBase):
     def _forward(self, x_orig, min_val, max_val, histogram, initialized):
         # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tuple[Tensor, Tensor, Tensor]
         x = x_orig.detach()
-        min_val = self.min_val
-        max_val = self.max_val
         same_values = False
-        if min_val.numel() > 0 and max_val.numel() > 0:
+        if initialized:
             same_values = min_val.item() == max_val.item()
 
         if not initialized or same_values:
