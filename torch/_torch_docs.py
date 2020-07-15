@@ -1030,6 +1030,36 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
+add_docstr(torch.unsafe_chunk,
+           r"""
+unsafe_chunk(input, chunks, dim=0) -> List of Tensors
+
+Works like :func:`torch.chunk` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
+""")
+
+add_docstr(torch.unsafe_split,
+           r"""
+unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
+
+Works like :func:`torch.split` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
+""")
+
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
@@ -5453,9 +5483,9 @@ Returns a new tensor with the logit of the elements of :attr:`input`.
 When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
 
 .. math::
-    y_{i} = \log_{e}(\frac{z_{i}}{1 - z_{i}})
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
     z_{i} = \begin{cases}
-        x_{i} & \text{if } \text{eps} is None \\
+        x_{i} & \text{if eps is None} \\
         \text{eps} & \text{if } x_{i} < \text{eps} \\
         x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
         1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
