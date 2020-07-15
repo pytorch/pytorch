@@ -253,6 +253,10 @@ TORCH_API void addInputs(
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,

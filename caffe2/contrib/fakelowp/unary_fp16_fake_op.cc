@@ -2,7 +2,7 @@
 #include "unary_fp16_fake_op.h"
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/utils/eigen_utils.h"
-#include "caffe2/caffe2/contrib/fakelowp/fp16_fma.h"
+#include "caffe2/contrib/fakelowp/fp16_fma.h"
 
 namespace caffe2 {
 
