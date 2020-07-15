@@ -28,8 +28,10 @@ from  mobilenet_classes import (
     ConvBNReLU,
     InvertedResidual,
     MobileNetV2,
-    ChainModule
+    ChainModule,
+    ChainModule2
 )
+
 
 def get_module(model, name):
     curr = model
@@ -37,140 +39,6 @@ def get_module(model, name):
     for subname in name:
         curr = curr._modules[subname]
     return curr
-
-def local_prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
-    r"""Prepare the model by attaching the float module to its matching quantized
-    module as the shadow if the float module type is in module_swap_list.
-
-    Example usage:
-        prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
-        q_model(data)
-        ob_dict = get_logger_dict(q_model, Logger)
-
-    Args:
-        float_module: float module used to generate the q_module
-        q_module: module quantized from float_module
-        module_swap_list: list of float module types to attach the shadow
-        Logger: type of logger to be used in shadow module to process the outputs of
-            quantized module and its float shadow module
-    """
-
-    float_module_children = {}
-    for name, mod in float_module.named_children():
-        float_module_children[name] = mod
-
-    reassign = {}
-    for name, mod in q_module.named_children():
-        if name not in float_module_children:
-            continue
-
-        float_mod = float_module_children[name]
-
-        if type(float_mod) not in module_swap_list:
-            local_prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
-
-        if type(float_mod) in module_swap_list:
-            reassign[name] = LocalShadow(mod, float_mod, Logger)
-
-    for key, value in reassign.items():
-        float_module._modules[key] = value
-
-class LocalShadow(nn.Module):
-    r"""Shadow module attaches the float module to its matching quantized module
-    as the shadow. Then it uses Logger module to process the outputs of both
-    modules.
-
-    Args:
-        q_module: module quantized from float_module that we want to shadow
-        float_module: float module used to shadow q_module
-        Logger: type of logger used to process the outputs of q_module and
-            float_module. ShadowLogger or custom loggers can be used.
-    """
-
-    def __init__(self, q_module, float_module, Logger):
-        super(LocalShadow, self).__init__()
-        self.orig_module = q_module
-        self.shadow_module = float_module
-        self.dequant = nnq.DeQuantize()
-        self.logger = Logger()
-
-    def forward(self, *x):
-        xl = ns._convert_tuple_to_list(x)
-        output = self.orig_module(*xl)
-        xl_float = ns._dequantize_tensor_list(xl)
-        shadow_output = self.shadow_module(*xl_float)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def add(self, x, y):
-        output = self.orig_module.add(x, y)
-        x = x.dequantize()
-        y = y.dequantize()
-        shadow_output = self.shadow_module.add(x, y)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def add_scalar(self, x, y):
-        output = self.orig_module.add_scalar(x, y)
-        x = x.dequantize()
-        shadow_output = self.shadow_module.add_scalar(x, y)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def mul(self, x, y):
-        output = self.orig_module.mul(x, y)
-        x = x.dequantize()
-        y = y.dequantize()
-        shadow_output = self.shadow_module.mul(x, y)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def mul_scalar(self, x, y):
-        output = self.orig_module.mul_scalar(x, y)
-        x = x.dequantize()
-        shadow_output = self.shadow_module.mul_scalar(x, y)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def cat(self, x, dim=0):
-        output = self.orig_module.cat(x, dim)
-        x = [y.dequantize() for y in x]
-        shadow_output = self.shadow_module.cat(x, dim)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-    def add_relu(self, x, y):
-        output = self.orig_module.add_relu(x, y)
-        x = x.dequantize()
-        y = y.dequantize()
-        shadow_output = self.shadow_module.add_relu(x, y)
-        self.logger(output, shadow_output)
-        return shadow_output
-
-class LocalShadowLogger(ns.Logger):
-    r"""Class used in Shadow module to record the outputs of the original and
-    shadow modules.
-    """
-
-    def __init__(self):
-        super(LocalShadowLogger, self).__init__()
-        self.stats["float"] = None
-        self.stats["quantized"] = None
-
-    def forward(self, x, y):
-        if len(x) > 1:
-            x = x[0]
-        if len(y) > 1:
-            y = y[0]
-        if self.stats["quantized"] is None:
-            self.stats["quantized"] = x.detach()
-        else:
-            self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
-
-        if self.stats["float"] is None:
-            self.stats["float"] = y.detach()
-        else:
-            self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
 
 module_swap_list = [torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
                     torch.nn.Conv2d,
@@ -183,57 +51,30 @@ module_swap_list = [torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
                     torch.nn.modules.conv.Conv2d,
                     ]
 
-def print_hooks(model):
-    for name, module in model.named_modules():
-        print(module._forward_hooks)
-class OutputLogger(ns.Logger):
-    r"""Class used to log the outputs of the module
-    """
-
-    def __init__(self):
-        super(OutputLogger, self).__init__()
-        self.stats["tensor_val"] = None
-
-    def forward(self, x):
-        if self.stats["tensor_val"] is None:
-            self.stats["tensor_val"] = x
-        else:
-            self.stats["tensor_val"] = torch.cat((self.stats["tensor_val"], x))
-        return x
-
 class MeanLogger(ns.Logger):
+    id =0
     def __init__(self):
         super(MeanLogger, self).__init__()
         self.stats["tensor_val"] = None
         self.count = 0
         self.sum = None
-        self.quantized = None
+        self.id = MeanLogger.id
+        MeanLogger.id += 1
 
     def forward(self, x):
+        y = copy.deepcopy(x)
+        if x.is_quantized:
+            x = x.dequantize()
+
         if self.stats["tensor_val"] is None:
             self.stats["tensor_val"] = x
             self.sum = x
             self.count = 1
         else:
-            if self.quantized is None:
-                try:
-                    self.sum = self.sum + x
-                    self.count += 1
-                    self.stats["tensor_val"] = self.sum / self.count
-                    self.quantized = False
-                except:
-                    self.count += 1
-                    self.stats["tensor_val"] = ops.quantized.mul_scalar(self.sum, 1/self.count)
-                    self.quantized = True
-            elif self.quantized:
-                self.sum = ops.quantized.add(self.sum, x, 1, 0)
-                self.count += 1
-                self.stats["tensor_val"] = ops.quantized.mul_scalar(self.sum, 1/self.count)
-            else:
-                self.sum = self.sum + x
-                self.count += 1
-                self.stats["tensor_val"] = self.sum / self.count
-        return x
+            torch.Tensor.add_(self.sum, x)
+            self.count += 1
+            self.stats["tensor_val"] = self.sum / self.count
+        return y
 
 def correct_quantized_bias(output_dict, float_model, qmodel):
     ''' Inplace functino to modify the weights of the qmodel based off the
@@ -242,7 +83,41 @@ def correct_quantized_bias(output_dict, float_model, qmodel):
     '''
     for key in output_dict:
         q_mod = get_module(qmodel, key[:-6])  #.orig_module
-        # print(key[:-6])
+        # print(key[:-6], type(q_mod))
+    ###################
+    # todo
+        if hasattr(q_mod, 'bias') and not isinstance(q_mod, torch.nn.intrinsic.quantized.ConvReLU2d): # get rid of linear later
+            print(type(q_mod))
+            if (isinstance(q_mod.bias, torch.nn.parameter.Parameter) and (q_mod.bias is not None)) or \
+                (q_mod.bias() is not None):
+                bias = None
+                if isinstance(q_mod.bias, torch.nn.parameter.Parameter):
+                    bias = q_mod.bias
+                else:
+                    bias = q_mod.bias()
+                if output_dict[key]['quantized'].is_quantized:
+                    output_dict[key]['quantized'] = output_dict[key]['quantized'].dequantize()
+
+                difference = output_dict[key]['float'] - output_dict[key]['quantized']
+                dims_to_mean_over = [i for i in range(difference.dim())]
+                dims_to_mean_over.remove(1)
+                difference = torch.mean(difference, dims_to_mean_over)
+
+                updated_bias = bias.data - difference
+
+                if isinstance(q_mod.bias, torch.nn.parameter.Parameter):
+                    q_mod.bias.data = updated_bias
+                else:
+                    q_mod.bias().data = updated_bias
+
+def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmodel):
+    ''' Inplace functino to modify the weights of the qmodel based off the
+    recorded differences in weights provided by output_dict
+
+    '''
+    for key in expected_output:
+        q_mod = get_module(qmodel, key)
+        print(key)
 
         if hasattr(q_mod, 'bias'):
             if (isinstance(q_mod.bias, torch.nn.parameter.Parameter) and (q_mod.bias is not None)) or \
@@ -252,15 +127,24 @@ def correct_quantized_bias(output_dict, float_model, qmodel):
                     bias = q_mod.bias
                 else:
                     bias = q_mod.bias()
+                if expected_output[key]['quantized'].is_quantized:
+                    expected_output[key]['quantized'] = expected_output[key]['quantized'].dequantize()
 
-                difference = output_dict[key]['float'] - output_dict[key]['quantized'].dequantize()
-                dims_to_mean_over = [i for i in range(difference.dim())]
-                dims_to_mean_over.remove(1)
-                print(dims_to_mean_over)
-                print("difference: ", difference.size())
-                difference = torch.mean(difference, dims_to_mean_over)
-                print("difference: ", difference.size())
-                print()
+                float_submodule = get_module(float_model, key)
+                quantized_submodule = get_module(qmodel, key)
+
+                error_matrix = float_submodule.weight() - quantized_submodule.weight()
+                expected_input_to_submodule = expected_input[key]['float']
+
+                try: # should auto distinguish between conv2d and others?
+                    error_matrix = torch.sum(error_matrix, (2,3))
+
+                except:
+                    pass
+
+                biased_output = error_matrix * expected_input_to_submodule
+                # biased_output is the biased expected output, so its already meaned
+                difference = expected_output[key]['float'] - biased_output
 
                 updated_bias = bias.data - difference
 
@@ -268,19 +152,12 @@ def correct_quantized_bias(output_dict, float_model, qmodel):
                     q_mod.bias.data = updated_bias
                 else:
                     q_mod.bias().data = updated_bias
-    # print(qmodel)
+
 def bias_absorption(float_model, qmodel, paired_modules_list, output_dict):
     #max(0, mean - 3*std)
     pass
 
-def load_model(model_file):
-    model = MobileNetV2()
-    state_dict = torch.load(model_file)
-    model.load_state_dict(state_dict)
-    model.to('cpu')
-    return model
-
-def loading_running_mobilenet_img():
+def get_local_modilenet():
     saved_model_dir = '/home/edmundjr/local/pytorch/torch/quantization/data/'
     float_model_file = 'mobilenet_pretrained_float.pth'
     # float_model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)  # mobilenet_v2, resnet18
@@ -291,99 +168,86 @@ def loading_running_mobilenet_img():
 
     img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                             for _ in range(30)]
-    # qmodel = quantize(float_model, default_eval_fn, img_data, inplace=False)
-    # qmodel = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)
-    qmodel = copy.deepcopy(float_model)
-    for data in img_data:
-        float_model(data[0])
-        qmodel(data[0])
-    print(qmodel)
-    print('#'*30)
-    torch.quantization.prepare(qmodel, inplace=True)
-    for data in img_data:
-        float_model(data[0])
-        qmodel(data[0])
-    print(qmodel)
-    print('#'*30)
-    torch.quantization.convert(qmodel, inplace=True)
-    print(qmodel)
-    print('#'*30)
+    # lost code on how to get local data loaders
 
-    for data in img_data:
-        float_model(data[0])
-        qmodel(data[0])  # problems
-
-def loading_running_chainmodule_img():
-    ''' adding the qconfig allowed the quantization to execute and added the activation_post_process
-
-    '''
-    float_model = ChainModule(True)
-    float_model.to('cpu')
-    float_model.eval()
-    float_model.qconfig = torch.quantization.default_qconfig
-    img_data = [torch.rand(10, 3, dtype=torch.float) for _ in range(30)]
-
-    qmodel = copy.deepcopy(float_model)
-    # qmodel = quantize(float_model, default_eval_fn, img_data, inplace=False)
-    for data in img_data:
-        float_model(data)
-        qmodel(data)
-    print(qmodel)
-    # print(qmodel.linear1.__dict__)
-    # print(qmodel.quant.__dict__)
-    # print_hooks(qmodel)
-    # print('#'*30)
-
-    torch.quantization.prepare(qmodel, inplace=True)
-    for data in img_data:
-        float_model(data)
-        qmodel(data)
-    print(qmodel)
-    # print(qmodel.linear1.__dict__)
-    # print(qmodel.quant.__dict__)
-    # print_hooks(qmodel)
-    # print('#'*30)
-
-    torch.quantization.convert(qmodel, inplace=True)
-    print(qmodel)
-    # print(qmodel.linear1.__dict__)
-    # print(qmodel.quant.__dict__)
-    # print_hooks(qmodel)
-    # print('#'*30)
-    for data in img_data:
-        float_model(data)
-        qmodel(data)
-
-
-def setup(Logger=ns.OutputLogger):
+def get_online_mobilenet():
     float_model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)  # mobilenet_v2, resnet18
-    # float_model = nn.Conv2d(3,2,10)
     float_model.to('cpu')
     float_model.eval()
     float_model.fuse_model()
     float_model.qconfig = torch.quantization.default_qconfig
-    img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+
+    img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                             for _ in range(30)]
-    print(len(img_data))
-    print(img_data[0][0].size())
-    print(img_data[0][1].size())
 
     qmodel = copy.deepcopy(float_model)
-    qmodel = quantize(qmodel, default_eval_fn, img_data, inplace=False)
-    # for data in img_data:
-    #     float_model(data[0])
-    #     qmodel(data[0])
+    quantize(qmodel, default_eval_fn, img_data, inplace=True)
 
-    ns.prepare_model_outputs(float_model, qmodel, Logger)  # ns.OutputLogger)
-    # print(qmodel)
+    return float_model, qmodel, img_data
+
+def get_local_linear_chain():
+    float_model = ChainModule(True)
+    img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                            for _ in range(30)]
+    float_model.qconfig = torch.quantization.default_qconfig
+    qmodel = quantize(float_model, default_eval_fn, img_data, inplace=False)
+
+    return float_model, qmodel, img_data
+
+def get_local_conv_chain():
+    float_model = ChainModule2(True)
+    img_data = [(torch.rand(100, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                            for _ in range(30)]
+    float_model.qconfig = torch.quantization.default_qconfig
+    qmodel = quantize(float_model, default_eval_fn, img_data, inplace=False)
+
+    return float_model, qmodel, img_data
+
+def setup_foward_hook(logger=ns.OutputLogger, dataset=get_local_linear_chain):
+    float_model, qmodel, img_data = dataset()
+
+    ns.prepare_model_outputs(float_model, qmodel, logger)
     for data in img_data:
         with torch.no_grad():
             float_model(data[0])
             qmodel(data[0])
+
+    act_compare_dict = ns.get_matching_activations(float_model, qmodel)
+    return act_compare_dict, float_model, qmodel, img_data
+
+def setup_forward_pre_hook(logger=ns.OutputLogger, dataset=get_local_linear_chain):
+    # debugged/hacked around a bunch, don't particularly remember the reason for
+    # the second round of deleting qconfigs
+    float_model, qmodel, img_data = dataset()
+
+    def _remove_qconfig(model_prime):
+        for child in model_prime.children():
+            _remove_qconfig(child)
+        if hasattr(model_prime, "qconfig"):
+            del model_prime.qconfig
+
+    _remove_qconfig(qmodel)
+    _remove_qconfig(float_model)
+
+    torch.quantization.prepare(float_model, inplace=True, prehook=MeanLogger)
+    torch.quantization.prepare(qmodel, inplace=True, prehook=MeanLogger)
+
+    _remove_qconfig(qmodel)
+    _remove_qconfig(float_model)
+
+    for data in img_data:
+        with torch.no_grad():
+            print("what if")
+            float_model(data[0])
+            qmodel(data[0])
     compare_dict = ns.get_matching_activations(float_model, qmodel)
-    '''
-    before convert, the activation_post thingy already exists
-    '''
+
+    # print(get_module(float_model, 'features.0.0')._modules['0'].activation_pre_process.stats["tensor_val"].size())
+    # print(get_module(float_model, 'features.0.0')._modules['1'].activation_pre_process.stats["tensor_val"].size())
+    # print(get_module(qmodel, 'features.0.0').activation_pre_process.stats["tensor_val"].size())
+    # print("welp")
+    # print(get_module(float_model, 'features.0.0'))
+    # print(get_module(qmodel, 'features.0.0'))
 
     return compare_dict, float_model, qmodel
 
@@ -391,114 +255,177 @@ def compute_error(x,y):
     Ps = torch.norm(x)
     Pn = torch.norm(x-y)
     return 20*torch.log10(Ps/Pn)
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self, name, fmt=':f'):
-        self.name = name
-        self.fmt = fmt
-        self.reset()
 
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-    def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-        return fmtstr.format(**self.__dict__)
+def sanity_checks_sqnr():
+    x = setup_foward_hook(MeanLogger, get_online_mobilenet)
 
 
-def accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
+    correct_quantized_bias(*x[:-1])
+    act_compare_dict, float_model, qmodel, img_data = x
 
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
+    print(act_compare_dict.keys())
+    for key in act_compare_dict:
+        # print(key, type(get_module(float_model, key)))
+        print(key, type(act_compare_dict[key]['quantized']))
+    print("BREAK    ")
+    for key in act_compare_dict:
+        q_mod = get_module(qmodel, key[:-6])  #.orig_module
 
-        res = []
-        for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
+        if hasattr(q_mod, 'bias'):
+            print(key[:-6])
+            print(type(q_mod))
+            print(compute_error(act_compare_dict[key]['float'], act_compare_dict[key]['quantized']))
+
+def sanity_checks_accuracy():
+    x = setup_foward_hook(MeanLogger, get_local_conv_chain)
+    correct_quantized_bias(*x[:-1])
+    act_compare_dict, float_model, qmodel, img_data = x
+    # need to verify that qmodel did get changed by correct_quantized_bias
+
+    results = []
+    total = 0
+    for data in img_data:
+        with torch.no_grad():
+            results.append(float_model(data[0]))
+            total += data[0].size()[0]
+
+    index = 0
+    for data in img_data:
+        with torch.no_grad():
+            output = qmodel(data[0])
+            #hm i want to loop over different imgs in single batch
+            output = torch.split(output,1)
+            expected = torch.split(results[index], 1)
+            index += 1
+
+            for indx in range(len(output)):
+                print(compute_error(output[indx],expected[indx]))
 
 
-def evaluate(model, criterion, data_loader, neval_batches):
-    model.eval()
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    top5 = AverageMeter('Acc@5', ':6.2f')
-    cnt = 0
-    with torch.no_grad():
-        for image, target in data_loader:
-            output = model(image)
-            loss = criterion(output, target)
-            cnt += 1
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
-            print('.', end = '')
-            top1.update(acc1[0], image.size(0))
-            top5.update(acc5[0], image.size(0))
-            if cnt >= neval_batches:
-                 return top1, top5
-
-    return top1, top5
 
 def main():
-    eval_batch_size = 2
-    num_eval_batches = 10
-    num_calibration_batches = 10
-    float_model = ChainModule(True)
-    input_img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                            for _ in range(30)]
-    output_img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                            for _ in range(30)]
-    float_model.qconfig = torch.quantization.default_qconfig
-    qmodel = quantize(float_model, default_eval_fn, input_img_data, inplace=False)
-    criterion = nn.CrossEntropyLoss()
+    float_model, qmodel, img_data = get_local_linear_chain()
 
-    top1, top5 = evaluate(qmodel, criterion, output_img_data, neval_batches=num_eval_batches)
-    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    # running data and logging entries
+    logger_data = double_hook_dictionaries(float_model, qmodel, img_data)
 
-    ns.prepare_model_outputs(float_model, qmodel, MeanLogger)
-    # print(qmodel)
-    for data in output_img_data:
-        float_model(data[0])
-        qmodel(data[0])
+    print(logger_data.keys())
+
+    for key in logger_data:
+        print(key)
+        print(logger_data[key]['float']['stats'].size())
+        print(logger_data[key]['float']['id'])
+        print(logger_data[key]['quantized']['stats'].size())
+        print(logger_data[key]['quantized']['id'])
+        print()
+        # print(compute_error(logger_data[key]['float'], logger_data[key]['quantized']))
+
+    output_dict, input_dict = split_dictionaries(logger_data)
+    print("log keys: ", logger_data.keys())
+    print("output keys: ", output_dict.keys())
+    print("input keys: ", input_dict.keys())
+    print("bruh")
+
+    correct_quantized_bias_V2(output_dict, input_dict, float_model, qmodel)
+
+def split_dictionaries(logger_data):
+    input_dict = {}
+    output_dict = {}
+    for key in logger_data:
+        if 'activation_pre_process' in key:
+            input_dict[key] = logger_data[key]
+        if 'activation_post_process' in key:
+            output_dict[key] = logger_data[key]
+
+    return output_dict, input_dict
 
 
-    compare_dict = ns.get_matching_activations(float_model, qmodel, MeanLogger)
 
-    correct_quantized_bias(compare_dict, float_model, qmodel)
+def double_hook_dictionaries(float_model, qmodel, input_img_data):
+    # setting up forward hook and forward  prehook
+    qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
+    float_model.qconfig = qconfig_debug
+    qmodel.qconfig = qconfig_debug
+    white_list = {nn.Linear: nnq.Linear, nnq.Linear: nnq.Linear}
 
+    torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
+    for name, module in float_model.named_modules():
+        if isinstance(module, ns.Logger):
+            print("grabbing id's: ", module.id)
+    torch.quantization.prepare(qmodel, inplace=True, white_list=white_list, prehook=MeanLogger)
+    # fix up white_list to have quantized modules in the non-lead-mod-  whitelist
 
-    top1, top5 = evaluate(qmodel, criterion, output_img_data, neval_batches=num_eval_batches)
-    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    # logging and calibration under the hood here
+    for data in input_img_data:
+        with torch.no_grad():
+            float_model(data[0])
+            qmodel(data[0])
+    for name, module in float_model.named_modules():
+        if isinstance(module, ns.Logger):
+            print("grabbing id's: ", module.id)
 
+    return get_matching_activations(float_model, qmodel)
 
+def get_logger_entries(mod, target_dict = {}, prefix=""):
+    r"""This is the helper function for get_logger_dict
+
+    Args:
+        mod: module we want to save all logger stats
+        prefix: prefix for the current module
+        target_dict: the dictionary used to save all logger stats
+    """
+
+    def get_prefix(prefix):
+        return prefix if prefix == "" else prefix + "."
+
+    for name, child in mod.named_children():
+        if isinstance(child, ns.Logger):
+            target_dict[get_prefix(prefix) + str(name)] = {'stats': child.stats["tensor_val"], 'id':child.id}
+
+    for name, child in mod.named_children():
+        module_prefix = get_prefix(prefix) + name if prefix else name
+        get_logger_entries(child, target_dict, module_prefix)
+
+def get_matching_activations(float_module, q_module):
+    r"""Find the matching activation between float and quantized modules.
+
+    Args:
+        float_module: float module used to generate the q_module
+        q_module: module quantized from float_module
+
+    Return:
+        act_dict: dict with key corresponding to quantized module names and each
+        entry being a dictionary with two keys 'float' and 'quantized', containing
+        the matching float and quantized activations
+    """
+    float_dict = {}
+    get_logger_entries(float_module, float_dict)
+    for key in float_dict:
+        pass
+    quantized_dict = {}
+    get_logger_entries(q_module, quantized_dict)
+    act_dict = {}
+    for key in quantized_dict:
+        match_key = ns._find_match(sorted(float_dict, reverse=False), key, "activation_post_process")
+        if match_key is not None:
+            act_dict[key] = {}
+            act_dict[key]["float"] = float_dict[match_key] #['stats']["tensor_val"]
+            act_dict[key]["quantized"] = quantized_dict[key] #['stats']["tensor_val"]
+        match_key = ns._find_match(sorted(float_dict, reverse=False), key, "activation_pre_process")
+        if match_key is not None:
+            act_dict[key] = {}
+            act_dict[key]["float"] = float_dict[match_key] #['stats']["tensor_val"]
+            act_dict[key]["quantized"] = quantized_dict[key] #['stats']["tensor_val"]
+    return act_dict
 
 if __name__ == "__main__":
-    # correct_quantized_bias(*setup())
-    compare_dict, float_model, qmodel = setup(ns.OutputLogger)
-    for key in compare_dict:
-        print(key)
-    for key in compare_dict:
-        if hasattr(compare_dict[key]['float'], 'size'):
-            print(compare_dict[key]['float'].size())
-            print(compare_dict[key]['quantized'].size())
-    compare_dict, float_model, qmodel = setup(MeanLogger)
-    for key in compare_dict:
-        if hasattr(compare_dict[key]['float'], 'size'):
-            print(compare_dict[key]['float'].size())
-            print(compare_dict[key]['quantized'].size())
-    correct_quantized_bias(*setup(MeanLogger))
-    # main()
+    # act_compare_dict, float_model, qmodel, img_data = setup_foward_hook(MeanLogger, get_online_mobilenet)
+    # print(qmodel)
+
+    # sanity_checks_sqnr()
+    # sanity_checks_accuracy()
+    # correct_quantized_bias(*setup_foward_hook(MeanLogger))
+    main()
+    # double_hook_dictionaries()
     # loading_running_mobilenet_img()
     # loading_running_chainmodule_img()

@@ -164,6 +164,7 @@ class ChainModule(nn.Module):
         self.linear1 = nn.Linear(3, 4)
         self.linear2 = nn.Linear(4, 5)
         self.linear3 = nn.Linear(5, 6)
+        # self.conv2d = nn.Conv2d(1,6,1,1)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.quantizable = quantizable
@@ -179,6 +180,38 @@ class ChainModule(nn.Module):
         x = self.linear1(x)
         x = self.linear2(x)
         x = self.linear3(x)
+        # x = self.conv2d(x)
+        if self.quantizable:
+            x = self.dequant(x)
+        return x
+
+class ChainModule2(nn.Module):
+    def __init__(self, quantizable):
+        """
+        In the constructor we instantiate three nn.Linear modules and assign them as
+        member variables.
+        """
+        super(ChainModule2, self).__init__()
+        self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
+        self.conv2d2 = nn.Conv2d(4, 5, 5, 5)
+        self.conv2d3 = nn.Conv2d(5, 6, 5, 5)
+        # self.conv2d = nn.Conv2d(1,6,1,1)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.quantizable = quantizable
+
+    def forward(self, x):
+        """
+        In the forward function we accept a Tensor of input data and we must return
+        a Tensor of output data. We can use Modules defined in the constructor as
+        well as arbitrary operators on Tensors.
+        """
+        if self.quantizable:
+            x = self.quant(x)
+        x = self.conv2d1(x)
+        x = self.conv2d2(x)
+        x = self.conv2d3(x)
+        # x = self.conv2d(x)
         if self.quantizable:
             x = self.dequant(x)
         return x
