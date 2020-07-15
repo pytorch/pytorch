@@ -315,7 +315,14 @@ void RequestCallbackImpl::processRpc(
                          .type();
       }
 
-      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      c10::intrusive_ptr<OwnerRRef> ownerRRef;
+      if (rrefId == forkId) {
+        // Creating an owner RRef on self, should already exist in owners map
+        ownerRRef =
+            ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
+      } else {
+        ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      }
       auto postProcessing = [rrefId, forkId, messageId, responseFuture]() {
         if (rrefId != forkId) {
           // Caller is a user and callee is the owner, add fork
@@ -426,7 +433,13 @@ void RequestCallbackImpl::processRpc(
       const auto& forkId = uprc.forkId();
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
+      c10::intrusive_ptr<OwnerRRef> ownerRRef;
+      if (rrefId == forkId) {
+        ownerRRef =
+            ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
+      } else {
+        ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
+      }
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
 
       if (rrefId != forkId) {
