@@ -279,6 +279,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
     "torch/csrc/distributed/rpc/python_resp.cpp",
     "torch/csrc/distributed/rpc/request_callback.cpp",
+    "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
     "torch/csrc/distributed/rpc/rref_context.cpp",
     "torch/csrc/distributed/rpc/rref_proto.cpp",
