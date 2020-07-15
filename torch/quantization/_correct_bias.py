@@ -77,7 +77,7 @@ class MeanLogger(ns.Logger):
         return y
 
 def correct_quantized_bias(output_dict, float_model, qmodel):
-    ''' Inplace functino to modify the weights of the qmodel based off the
+    ''' Inplace function to modify the weights of the qmodel based off the
     recorded differences in weights provided by output_dict
 
     '''
@@ -145,6 +145,45 @@ def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmod
                 biased_output = error_matrix * expected_input_to_submodule
                 # biased_output is the biased expected output, so its already meaned
                 difference = expected_output[key]['float'] - biased_output
+
+                updated_bias = bias.data - difference
+
+                if isinstance(q_mod.bias, torch.nn.parameter.Parameter):
+                    q_mod.bias.data = updated_bias
+                else:
+                    q_mod.bias().data = updated_bias
+
+def correct_quantized_bias_V3(output_dict, float_model, qmodel):
+    # approach without having to do the fuse modules
+    for key in output_dict:
+        q_mod = get_module(qmodel, key[:-6])
+        if hasattr(q_mod, 'bias') and not isinstance(q_mod, torch.nn.intrinsic.quantized.ConvReLU2d):
+            if (isinstance(q_mod.bias, torch.nn.parameter.Parameter) and (q_mod.bias is not None)) or \
+                (q_mod.bias() is not None):
+                bias = None
+                if isinstance(q_mod.bias, torch.nn.parameter.Parameter):
+                    bias = q_mod.bias
+                else:
+                    bias = q_mod.bias()
+                if output_dict[key]['quantized'].is_quantized:
+                    output_dict[key]['quantized'] = output_dict[key]['quantized'].dequantize()
+
+                float_values = output_dict[key]['float']
+                quantized_values = output_dict[key]['quantized']
+
+                difference = float_values - quantized_values
+                # element wise x>0
+                positive_pre_activations_float = torch.gt(float_values, torch.zeros(float_values.size()))
+                positive_pre_activations_quantized = torch.gt(quantized_values, torch.zeros(quantized_values.size()))
+                mask = torch.mul(positive_pre_activations_float, positive_pre_activations_quantized)
+                # converting bool values to 0's and 1's
+                mask = mask.to(torch.float)
+                masked_difference = torch.mul(difference, mask)
+
+                counts = torch.sum(mask, (2,3))
+                sum = torch.sum(masked_difference, (2,3))
+                avg = sum/counts
+                avg_over_batches =
 
                 updated_bias = bias.data - difference
 
