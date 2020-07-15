@@ -231,9 +231,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
-
   return diff_nodes;
 }
-
 } // namespace jit
 } // namespace torch
