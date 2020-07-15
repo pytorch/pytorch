@@ -48,36 +48,55 @@ Saving tensors preserves their view relationships:
 
     >>> numbers = torch.arange(1, 10)
     >>> evens = numbers[1::2]
-    >>> torch.save([numbers, events], 'tensors.pt')
+    >>> torch.save([numbers, evens], 'tensors.pt')
     >>> loaded_numbers, loaded_evens = torch.load('tensors.pt')
     >>> loaded_evens *= 2
     >>> loaded_numbers
     tensor([ 1,  4,  3,  8,  5, 12,  7, 16,  9])
 
-`loaded_numbers` and `loaded_evens` share storage just like `numbers` and
-`evens` do.
+Behind the scenes, these tensors share the same "storage." See
+`Tensor Views <https://pytorch.org/docs/master/tensor_view.html>`_ for more
+on views and storages.
 
-Behind the scenes, PyTorch saves storage objects and tensor metadata separately,
-and it reuses the storage object where possible. In the above case, for example,
-the values [1, 2, 3, 4, 5, 6, 7, 8, 9] are only saved once. This typically saves
-space, but if small views of a much larger storage are saved then size of
-the saved file may become prohibitively large, as in the following example:
+When PyTorch saves one or more tensors it saves their storages and tensor
+metadata separately. This is an implementation detail that may change in the
+future, but it typically saves space and lets PyTorch easily
+reconstruct the view relationships between the loaded tensors. In the above
+snippet, for example, only a single storage is written to 'tensors.pt'.
+
+In some cases, however, saving storages may be unecessary and create
+prohibitively large files. In the following snippet a storage much larger than
+the saved tensor is written to a file:
 
 ::
 
-    >>> numbers = torch.arange(1, 1e5)
-    >>> one_hand = numbers[0:5]
-    >>> two_hands = numbers[5:10]
-    >>> torch.save([one_hand, two_hands], 'tensors.pt')
+    >>> large = torch.arange(1, 1000)
+    >>> small = large[0:5]
+    >>> torch.save(small, 'small.pt')
+    >>> loaded_small = torch.load('small.pt')
+    >>> loaded_small.storage().size()
+    999
 
+Instead of saving only the five values in the `small` tensor to 'small.pt,'
+the 999 values in the storage shared with `large` were saved and loaded.
 
-`one_hand` and `two_hands` are both (tiny) views of `numbers`, and when saved
-their storage, `numbers`, is saved. So instead of saving ten numbers
-([1, 2, 3, 4, 5], [6, 7, 8, 9, 10]) PyTorch will save 99,999!
+In cases like the above, the size of the saved file can be reduced by first
+cloning the tensors to be saved. Cloning a tensor produces a new tensor with a
+new storage containing only its values:
 
-Tensors cloned using :meth:`~torch.Tensor.clone` have their own storage, so
-cloning a tensor before saving it will avoid this latter issue at the cost of
-losing the view relationships of the original tensors.
+::
+
+    >>> large = torch.arange(1, 1000)
+    >>> small = large[0:5]
+    >>> torch.save(small.clone(), 'small.pt')  # saves a clone of small
+    >>> loaded_small = torch.load('small.pt')
+    >>> loaded_small.storage().size()
+    5
+
+Since the cloned tensors are independent of each other, however, they have
+none of the view relationships the original tensors did. If both file size and
+view relationships are important then care must be taken to construct and view
+the appropriate storages before saving.
 
 Saving and loading Python modules
 ---------------------------------
