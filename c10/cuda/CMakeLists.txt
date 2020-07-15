@@ -22,6 +22,7 @@ configure_file(
 set(C10_CUDA_SRCS
     CUDAStream.cpp
     CUDACachingAllocator.cpp
+    CUDAFunctions.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
 )
