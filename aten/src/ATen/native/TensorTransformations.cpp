@@ -149,6 +149,11 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   auto normalized_dst = dst.vec();
   maybe_wrap_dims(normalized_dst, self.dim());
 
+  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
+  TORCH_CHECK(it_src == normalized_src.end(), "repeated axis in `src` argument");
+  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
+  TORCH_CHECK(it_dst == normalized_dst.end(), "repeated axis in `dst` argument");
+
   std::vector<int64_t> order, source_dims, destination_dims;
   order.resize(self.dim());
   source_dims.resize(self.dim());
