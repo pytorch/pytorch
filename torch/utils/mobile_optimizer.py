@@ -5,7 +5,7 @@ This module contains utility method for mobile model optimization and lint.
 import torch
 from enum import Enum
 from torch._C import MobileOptimizerType
-from typing import Set
+from typing import Set, List, AnyStr
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -13,15 +13,19 @@ class LintCode(Enum):
     DROPOUT = 3
     BATCHNORM = 4
 
-def optimize_for_mobile(script_module, optimization_blacklist: Set[MobileOptimizerType] = None):
+def optimize_for_mobile(
+        script_module,
+        optimization_blacklist: Set[MobileOptimizerType] = None,
+        preserved_methods: List[AnyStr] = None):
     """
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
-        optimization_blacklist: A set with type of MobileOptimizerType.
-        When set is not passed, optimization method will run all the optimizer pass; otherwise, optimizer
-        method will run the optimization pass that is not included inside optimization_blacklist.
+        script_module: An instance of torch script module with type of ScriptModule.
+        optimization_blacklist: A set with type of MobileOptimizerType. When set is not passed,
+            optimization method will run all the optimizer pass; otherwise, optimizer
+            method will run the optimization pass that is not included inside optimization_blacklist.
+        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked.
     Returns:
-        script_module: A new optimized torch script module
+        A new optimized torch script module
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
@@ -30,7 +34,10 @@ def optimize_for_mobile(script_module, optimization_blacklist: Set[MobileOptimiz
     if optimization_blacklist is None:
         optimization_blacklist = set()
 
-    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blacklist)
+    if preserved_methods is None:
+        preserved_methods = []
+
+    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blacklist, preserved_methods)
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
 
 
