@@ -6446,6 +6446,8 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
+        self.compare_with_numpy(torch.isposinf, np.isposinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isneginf, np.isneginf, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.long)
@@ -6455,6 +6457,8 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
+        self.compare_with_numpy(torch.isposinf, np.isposinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isneginf, np.isneginf, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)

@@ -13,6 +13,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(min_stub);
+DEFINE_DISPATCH(isposinf_stub);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -104,6 +105,55 @@ Tensor isinf(const Tensor &self) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
+}
+
+static inline TensorIterator build_is_infinity_op_iterator(Tensor& result, const Tensor& self) {
+  return at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self)
+    .cast_common_dtype_to_outputs(true)
+    .build();
+}
+
+Tensor isposinf(const Tensor &self) {
+  Tensor result = at::empty({0}, self.options().dtype(at::kBool));
+  at::native::isposinf_out(result, self);
+  return result;
+}
+
+Tensor& isposinf_(Tensor &self) {
+  return at::native::isposinf_out(self, self);
+}
+
+Tensor& isposinf_out(Tensor& result, const Tensor& self) {
+  result.resize_(self.sizes());
+  auto iter = build_is_infinity_op_iterator(result, self);
+  isposinf_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor isneginf(const Tensor &self) {
+  Tensor result = at::empty({0}, self.options());
+  at::native::isneginf_out(result, self);
+  return result;
+}
+
+Tensor& isneginf_(Tensor &self) {
+  return at::native::isneginf_out(self, self);
+}
+
+Tensor& isneginf_out(Tensor& result, const Tensor& self) {
+  result.resize_(self.sizes());
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result = at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  } else {
+    result = AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isneginf", [&]() {
+      return self == -std::numeric_limits<scalar_t>::infinity();
+    });
+  }
+  return result;
 }
 
 Tensor isfinite(const Tensor& self) {
