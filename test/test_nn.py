@@ -11045,7 +11045,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyCUDA   # TODO: fix CPU adaptive_maxpool_2d
+    @onlyOnCPUAndCUDA  # TODO: Fails on XLA
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
@@ -11063,7 +11063,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @onlyCUDA   # TODO: fix CPU fractional_maxpool_2d
+    @onlyOnCPUAndCUDA  # TODO: Fails on XLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
             fn_name = 'FractionalMaxPool{}d'.format(num_dim)
