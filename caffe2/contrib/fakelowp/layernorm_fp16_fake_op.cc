@@ -19,17 +19,19 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
   ConstEigenVectorArrayMap<float> std_arr(std, M);
   EigenArrayMap<float> Y_arr(Y, N, M);
 
+  std::vector<float> normalized(N);
   for (int i = 0; i < M; ++i) {
     float normFactor = float(1.0f / std_arr[i]);
     fp16_wrap(&normFactor);
 
     for (int j = 0; j < N; ++j) {
-      float normalized = float(X_arr.col(i)[j] - mean[i]);
-      fp16_wrap(&normalized);
-      normalized *= normFactor;
-      fp16_wrap(&normalized);
-      Y_arr.col(i)[j] = normalized;
+      normalized[j] = X_arr.col(i)[j] - mean[i];
     }
+    fbgemm::RoundToFloat16(normalized.data(), normalized.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    for (int j = 0; j < N; ++j) {
+      normalized[j] *= normFactor;
+    }
+    fbgemm::RoundToFloat16(normalized.data(), &Y_arr.col(i)[0], N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   }
 
   if (gamma != nullptr && beta != nullptr) {
@@ -52,28 +54,17 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
 template <>
 float LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<float>& vec) {
   constexpr int VEC_SIZE = 32;
-  std::vector<float> v(VEC_SIZE);
-  for (int i = 0; i < VEC_SIZE; ++i) { // 32
-    v[i] = vec[i];
+  std::vector<float> v(vec.begin(), vec.end());
+
+  for (int factor = 2; factor <=32; factor *=2) {
+    int range = VEC_SIZE / factor;
+
+    for (int i = 0; i < range; ++i) { // 16
+      v[i] = v[2 * i] + v[2 * i + 1];
+    }
+    fbgemm::RoundToFloat16(v.data(), v.data(), range, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   }
-  for (int i = 0; i < VEC_SIZE / 2; ++i) { // 16
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 4; ++i) { // 8
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 8; ++i) { // 4
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 16; ++i) { // 2
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  v[0] = v[0] + v[1];
-  fp16_wrap(&v[0]);
+
   return v[0];
 }
 
