@@ -16604,11 +16604,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
@@ -16759,6 +16759,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              torch.tensor([2.1, 3.1], dtype=dtype, device=device),
                              atol=0.01, rtol=0)
             self.assertEqual(a1.div(a2), a1 / a2)
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    def test_div_scalar(self, device, dtype):
+        x = torch.tensor(3388., device=device, dtype=dtype)
+        x_ref = x.float()
+        scale = 524288.
+        res = x.div(scale)
+        expected = x_ref.div(scale)
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
 
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
