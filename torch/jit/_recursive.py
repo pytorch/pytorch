@@ -445,19 +445,21 @@ def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
     overloads = {}
 
-    for name in dir(type(mod)):
-        item = getattr(mod, name, None)
-        if not callable(item):
-            continue
+    # iterate through type hierarchy starting at the base so inherited overloaded
+    # methods will work
+    for mod_class in reversed(type(mod).mro()):
+        for name in dir(type(mod)):
+            item = getattr(mod, name, None)
+            if not callable(item):
+                 continue
+            # builtin functions like repr() in python 2 do not have __module__ defined
+            if hasattr(item, "__module__") and item.__module__ is not None:
+                method_overloads = _jit_internal._get_overloaded_methods(item, mod_class)
+                if method_overloads is None:
+                    continue
 
-        # builtin functions like repr() in python 2 do not have __module__ defined
-        if hasattr(item, "__module__") and item.__module__ is not None:
-            method_overloads = _jit_internal._get_overloaded_methods(item, mod.__class__)
-            if method_overloads is None:
-                continue
-
-            names = [name + "__" + str(i) for i in range(len(method_overloads))]
-            overloads[item] = list(zip(names, method_overloads))
+                names = [name + "__" + str(i) for i in range(len(method_overloads))]
+                overloads[item] = list(zip(names, method_overloads))
 
     return overloads
 
