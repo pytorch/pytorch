@@ -105,6 +105,7 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
+        fn = inspect.unwrap(fn)
         return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
