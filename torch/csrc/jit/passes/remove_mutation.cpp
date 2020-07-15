@@ -36,23 +36,22 @@ struct MutationRemover {
   }
 
   bool isSpecialMappedOp(Node* n) {
-    return n->kind() == aten::fill_ || n->kind() == aten::zero_;
+    return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
+        n->matches(
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
   }
 
   Node* replaceSpecialMappedOp(Node* n) {
     WithInsertPoint guard(n);
     TORCH_INTERNAL_ASSERT(isSpecialMappedOp(n));
+    auto inputs = n->inputs();
     Node* new_node;
-    if (n->kind() == aten::fill_) {
-      // just need to copy over the tensor input, and the scalar fill value
+    if (n->matches(
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
       new_node =
-          n->owningGraph()
-              ->insert(aten::full_like, {n->inputs().at(0), n->inputs().at(1)})
-              ->node();
-    } else if (n->kind() == aten::zero_) {
-      new_node = n->owningGraph()
-                     ->insert(aten::zeros_like, {n->inputs().at(0)})
-                     ->node();
+          graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
+    } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
+      new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
