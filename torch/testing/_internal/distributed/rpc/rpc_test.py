@@ -1219,30 +1219,28 @@ class RpcTest(RpcAgentTestFixture):
         fut.wait()
 
     def validate_profiling_workload(self, dst, prof):
+        REMOTE_OP_STR = "#remote_op: "
+
+        def convert_remote_to_local(event_name):
+            remote_op_key = REMOTE_OP_STR
+            return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+
         events = prof.function_events
-
-        rpc_mul_event = get_function_event(
-            events, torch.jit._builtins._find_builtin(torch.mul)
-        )
-
         remote_events = {
-            event for event in events if event.name in ["mul"]
-        } - {rpc_mul_event}
-
-        for remote_event in remote_events:
-            self.assertEqual(remote_event.node_id, dst)
-
+            convert_remote_to_local(event.name): event
+            for event in events
+            if event.is_remote
+        }
+        self.assertTrue("mul" in remote_events)
+        remote_mul_event = remote_events["mul"]
+        self.assertEqual(remote_mul_event.node_id, dst)
         self.check_profiling_info(
             worker_name(self.rank),
             worker_name(dst),
             torch.mul,
-            rpc_mul_event,
+            remote_mul_event,
             RPCExecMode.ASYNC,
         )
-        # Validate that the invocations of the RPC events themselves have
-        # the current rank as the node id.
-        for evt in [rpc_mul_event]:
-            self.assertEqual(evt.node_id, self.rank)
 
     @dist_init
     def test_profiler_with_autograd_context(self):
