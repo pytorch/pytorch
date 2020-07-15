@@ -51,6 +51,7 @@ from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_cuda import tf32_on_and_off
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -9970,6 +9971,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @onlyCUDA
+    @tf32_on_and_off(0.005)
     def test_grid_sample_large(self, device):
         def issue_35202():
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
