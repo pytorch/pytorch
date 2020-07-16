@@ -7,7 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 
 
@@ -64,8 +64,7 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        image_path = gen_docker_image_path(base_build_env_name,
-                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
+        image_path = gen_docker_image_path(base_build_env_name)
         return miniutils.quote(image_path)
 
     def get_build_job_name_pieces(self, build_or_test):
