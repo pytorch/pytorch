@@ -1,6 +1,6 @@
 import torch
 import copy
-from typing import Dict
+from typing import Dict, Union
 
 _supported_types = [torch.nn.Conv2d, torch.nn.Linear]
 
@@ -88,7 +88,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
         model = copy.deepcopy(model)
 
     name_to_module = {}
-    previous_name_to_module: Dict[str, torch.nn.Module] = {}
+    previous_name_to_module: Dict[str, Union(torch.nn.Module, type(None))] = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
     for name, module in model.named_modules():
