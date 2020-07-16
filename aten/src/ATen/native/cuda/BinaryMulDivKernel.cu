@@ -38,8 +38,19 @@ void mul_kernel_cuda(TensorIterator& iter) {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
+  } else if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && (iter.is_cpu_scalar(1) ||
+iter.is_cpu_scalar(2))) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
+    auto b = iter.scalar_value<accscalar_t>(scalar_arg);
+    iter.remove_operand(scalar_arg);
+    gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a * b;
+    });
+  });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
