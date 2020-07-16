@@ -51,6 +51,31 @@ def tf32_is_not_fp32():
     return True
 
 
+@contextlib.contextmanager
+def tf32_off():
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = False
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            yield 
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+
+
+@contextlib.contextmanager
+def tf32_on(self, tf32_precision=1e-5):
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_precison = self.precision
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        self.precision = tf32_precision
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            yield 
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        self.precision = old_precison
+
+
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
 # allow_tf32=True, it will use reduced precision as pecified by the
@@ -66,27 +91,13 @@ def tf32_is_not_fp32():
 # TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
 # precision to check values.
 def tf32_on_and_off(tf32_precision=1e-5):
-    def call_with_tf32_on_and_off(self, function_call):
-        old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-        old_precison = self.precision
+    def with_tf32_disabled(self, function_call):
+        with tf32_off(self):
+            function_call()
 
-        def with_tf32_disabled():
-            torch.backends.cuda.matmul.allow_tf32 = False
-            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-                function_call()
-
-        def with_tf32_enabled():
-            torch.backends.cuda.matmul.allow_tf32 = True
-            self.precision = tf32_precision
-            with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-                function_call()
-
-        try:
-            with_tf32_disabled()
-            with_tf32_enabled()
-        finally:
-            torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-            self.precision = old_precison
+    def with_tf32_enabled(self, function_call):
+        with tf32_on(self, tf32_precision):
+            function_call()
 
     def wrapper(f):
         nargs = len(inspect.signature(f).parameters)
@@ -94,7 +105,8 @@ def tf32_on_and_off(tf32_precision=1e-5):
             @functools.wraps(f)
             def wrapped(self, device):
                 if self.device_type == 'cuda' and tf32_is_not_fp32():
-                    call_with_tf32_on_and_off(self, lambda: f(self, device))
+                    with_tf32_disabled(self, lambda: f(self, device))
+                    with_tf32_enabled(self, lambda: f(self, device))
                 else:
                     f(self, device)
         else:
@@ -103,31 +115,10 @@ def tf32_on_and_off(tf32_precision=1e-5):
             @functools.wraps(f)
             def wrapped(self, device, dtype):
                 if self.device_type == 'cuda' and dtype in {torch.float32, torch.complex64} and tf32_is_not_fp32():
-                    call_with_tf32_on_and_off(self, lambda: f(self, device, dtype))
+                    with_tf32_disabled(self, lambda: f(self, device, dtype))
+                    with_tf32_enabled(self, lambda: f(self, device, dtype))
                 else:
                     f(self, device, dtype)
 
         return wrapped
     return wrapper
-
-
-@contextlib.contextmanager
-def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield 
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-
-
-@contextlib.contextmanager
-def tf32_on():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield 
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul

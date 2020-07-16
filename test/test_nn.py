@@ -8790,13 +8790,13 @@ def add_test(test, decorator=None):
         kwargs['extra_args'] = test.extra_args
 
     if 'dtype' in get_function_arglist(test.test_cuda):
-        if tf32_is_not_fp32():
+        if tf32_is_not_fp32() and test.with_tf32:
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
                     test.test_cuda(self, dtype=torch.float, **kwargs)
             add(cuda_test_name + '_fp32', with_tf32_off)
             def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on():
+                with tf32_on(self, test.tf32_precison):
                     test.test_cuda(self, dtype=torch.float, **kwargs)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
@@ -8816,13 +8816,13 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
 
     else:
-        if tf32_is_not_fp32():
+        if tf32_is_not_fp32() and test.with_tf32:
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
                     test.test_cuda(self, **kwargs)
             add(cuda_test_name + '_fp32', with_tf32_off)
             def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on():
+                with tf32_on(self, test.tf32_precison):
                     test.test_cuda(self, **kwargs)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
