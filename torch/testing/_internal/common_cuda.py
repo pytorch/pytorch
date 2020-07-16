@@ -91,7 +91,7 @@ def tf32_on(self, tf32_precision=1e-5):
 # precision to check values.
 def tf32_on_and_off(tf32_precision=1e-5):
     def with_tf32_disabled(self, function_call):
-        with tf32_off(self):
+        with tf32_off():
             function_call()
 
     def with_tf32_enabled(self, function_call):
