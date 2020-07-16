@@ -4378,7 +4378,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan', 'sqrt', '__rdiv__', 'conj',
+                          'pow', 'rsqrt']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -4387,15 +4388,16 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__rmul__', 'sum', 'transpose', 'round', 'add', 'roll',
                 '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
-                'rot90'] + separate_complex_tests
+                'rot90', 'exp', 'mean'] + separate_complex_tests
 
 def add_test(
         name,
         self_size,
         args,
         variant_name='',
+        run_for_real_complex = (True, False),
         check_ad=(),  # only used in test_jit
         dim_args_idx=(),
         skipTestIf=(),
@@ -4406,11 +4408,6 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
-    if name in separate_complex_tests and 'complex' in variant_name:
-        run_only_complex = True
-    else:
-        run_only_complex = False
-
     for dtype in [torch.double, torch.cdouble]:
         for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
             test_name = basic_test_name
@@ -4419,14 +4416,12 @@ def add_test(
 
             if dtype.is_complex:
                 # TODO: remove this. this is temporary while we ramp up the complex support.
-                if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
-                    if name in separate_complex_tests and 'complex' not in variant_name:
-                        continue
-                    if not run_only_complex:
-                        test_name = test_name + '_complex'
+                print(test_name, run_for_real_complex, check_ad)
+                if run_for_real_complex[1]:
+                    test_name = test_name + '_complex'
                 else:
                     continue
-            elif run_only_complex:
+            elif not run_for_real_complex[0]:
                 continue
 
             new_args = tuple(new_args)

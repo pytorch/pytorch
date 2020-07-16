@@ -63,9 +63,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        is_complex = x_tensor.dtype.is_complex
-        if is_complex:
-            eps *= (1 + 1j)
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
