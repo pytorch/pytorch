@@ -1209,7 +1209,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
+        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1, device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -1231,7 +1231,7 @@ graph(%Ra, %Rb):
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):
-          # CHECK: Float(*) = aten::masked_select
+          # CHECK: Float(*, requires_grad=0, device=cpu) = aten::masked_select
           %2 : Tensor = aten::masked_select(%0, %1) # test/test_jit.py:15261:0
           return (%2)"""
         graph = parse_ir(input_str)
@@ -5371,7 +5371,7 @@ a")
 
         x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
         graph = _propagate_shapes(fn.graph, (x, y), False)
-        FileCheck().check('Double(*, *) = aten::add').run(graph)
+        FileCheck().check('Double(*, *, device=cpu) = aten::add').run(graph)
 
     def test_shape_prop_promote_scalar_arg(self):
         @torch.jit.script
@@ -5382,9 +5382,9 @@ a")
         graph = _propagate_shapes(fn.graph, (x,), False)
         default = torch.get_default_dtype()
         if(default == torch.float):
-            FileCheck().check('Float(*, *) = aten::add').run(graph)
+            FileCheck().check('Float(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
         else:
-            FileCheck().check('Double(*, *) = aten::add').run(graph)
+            FileCheck().check('Double(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -7977,7 +7977,7 @@ a")
         raise RuntimeError('dtype not handled')
 
     def _dtype_to_expect(self, dtype, dim=0):
-        param = ', '.join(['*'] * dim)
+        param = ', '.join(['*'] * dim + ['device=cpu'])
         param = '(' + param + ')'
         jit_type = self._dtype_to_jit_name(dtype)
         if dim >= 0:
@@ -9473,9 +9473,9 @@ a")
 
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
-        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
-        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *)")
-        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *)")
+        self.assertTrue(if_outputs[0].type().str() == "Float(*, *, requires_grad=0, device=cpu)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *, requires_grad=0, device=cpu)")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *, requires_grad=0, device=cpu)")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -9526,7 +9526,7 @@ a")
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1:3, 3:1)").run(cm.forward.graph)
+        FileCheck().check("Double(1:3, 3:1, requires_grad=0, device=cpu)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
@@ -10070,7 +10070,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2:4, 4:1)").run(str(foo.graph))
+        FileCheck().check("Double(2:4, 4:1, requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
