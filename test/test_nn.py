@@ -8778,7 +8778,7 @@ def add_test(test, decorator=None):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         if test.with_tf32:
-            fn = tf32_on_and_off(fn)
+            fn = tf32_on_and_off()(fn)
         if decorator is not None:
             fn = decorator(fn)
         setattr(TestNN, test_name, fn)
