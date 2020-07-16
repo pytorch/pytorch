@@ -486,8 +486,8 @@ class emit_nvtx(object):
     Example:
         >>> with torch.cuda.profiler.profile():
         ...     model(x) # Warmup CUDA memory allocator and profiler
-        ...     with torch.autograd.profiler.emit_nvtx():
-        ...         model(x)
+        ... with torch.autograd.profiler.emit_nvtx():
+        ...     model(x)
 
     **Forward-backward correlation**
 
@@ -991,6 +991,7 @@ def parse_nvprof_trace(path):
     for row in conn.execute(marker_query):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
+                            node_id=0,
                             name=strings[row['name']],
                             cpu_start=row['start_time'],
                             cpu_end=row['end_time'],
