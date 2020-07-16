@@ -97,8 +97,8 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new storage objects and
-tensors with the desired view relationships before saving.
+storage objects, then care must be taken to construct new tensors with the desired 
+view relationships before saving, such that the storage object sizes are minimized.
 
 Saving and loading Python modules
 ---------------------------------
@@ -141,7 +141,7 @@ to instead save only its state dict. Python modules even have a function,
     >>> new_bn.load_state_dict(bn_state_dict)
     <All keys matched successfully>
 
-Note that the state dict is first loaded from its file with func:`torch.load`
+Note that the state dict is first loaded from its file with :func:`torch.load`
 and the state then restored with :meth:`~torch.nn.Module.load_state_dict`.
 
 Even custom modules and modules containing other modules have state dicts and
@@ -149,16 +149,17 @@ can use this pattern:
 
 ::
 
+    # A module with two linear layers
     >>> class MyModule(torch.nn.Module):
-      def __init__(self):
-        super(MyModule, self).__init__()
-        self.l0 = torch.nn.Linear(4, 2)
-        self.l1 = torch.nn.Linear(2, 1)
+          def __init__(self):
+            super(MyModule, self).__init__()
+            self.l0 = torch.nn.Linear(4, 2)
+            self.l1 = torch.nn.Linear(2, 1)
 
-      def forward(self, input):
-        out0 = self.l0(input)
-        out0_relu = torch.nn.functional.relu(out0)
-        return self.l1(out0_relu)
+          def forward(self, input):
+            out0 = self.l0(input)
+            out0_relu = torch.nn.functional.relu(out0)
+            return self.l1(out0_relu)
 
     >>> m = MyModule()
     >>> m.state_dict()
@@ -213,19 +214,20 @@ this:
 
 ::
 
+    # A module with control flow
     >>> class ControlFlowModule(torch.nn.Module):
-      def __init__(self):
-        super(ControlFlowModule, self).__init__()
-        self.l0 = torch.nn.Linear(4, 2)
-        self.l1 = torch.nn.Linear(2, 1)
+          def __init__(self):
+            super(ControlFlowModule, self).__init__()
+            self.l0 = torch.nn.Linear(4, 2)
+            self.l1 = torch.nn.Linear(2, 1)
 
-      def forward(self, input):
-        if input.dim() > 1:
-        return torch.tensor(0)
+          def forward(self, input):
+            if input.dim() > 1:
+            return torch.tensor(0)
 
-        out0 = self.l0(input)
-        out0_relu = torch.nn.functional.relu(out0)
-        return self.l1(out0_relu)
+            out0 = self.l0(input)
+            out0_relu = torch.nn.functional.relu(out0)
+            return self.l1(out0_relu)
 
     >>> traced_module = torch.jit.trace(ControlFlowModule(), torch.randn(4))
     >>> torch.jit.save(traced_module, 'controlflowmodule_traced.pt')
