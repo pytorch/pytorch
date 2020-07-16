@@ -998,8 +998,7 @@ class TestDistributions(TestCase):
             def ref_log_prob(idx, x, log_prob):
                 p = probs.view(-1)[idx].item()
                 expected = scipy.stats.binom(total_count, p).logpmf(x)
-                self.assertAlmostEqual(log_prob, expected, places=3)
-
+                self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
             self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
@@ -1023,7 +1022,7 @@ class TestDistributions(TestCase):
                                     (torch.tensor([1, 2, 10]), torch.tensor([0., 1., 9.]))]:
             log_prob = Binomial(total_count, probs).log_prob(sample)
             expected = scipy.stats.binom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
-            self.assertAlmostEqual(log_prob, expected, places=4)
+            self.assertEqual(log_prob, expected, atol=1e-4, rtol=0)
 
     def test_binomial_enumerate_support(self):
         examples = [
@@ -1037,11 +1036,11 @@ class TestDistributions(TestCase):
         total_count = 100
         bin0 = Binomial(total_count, 0)
         self.assertEqual(bin0.sample(), 0)
-        self.assertAlmostEqual(bin0.log_prob(torch.tensor([0.]))[0], 0, places=3)
+        self.assertEqual(bin0.log_prob(torch.tensor([0.]))[0], 0, atol=1e-3, rtol=0)
         self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0)
         bin1 = Binomial(total_count, 1)
         self.assertEqual(bin1.sample(), total_count)
-        self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
+        self.assertEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, atol=1e-3, rtol=0)
         self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0)
         zero_counts = torch.zeros(torch.Size((2, 2)))
         bin2 = Binomial(zero_counts, 1)
@@ -1076,7 +1075,7 @@ class TestDistributions(TestCase):
             def ref_log_prob(idx, x, log_prob):
                 p = probs.view(-1)[idx].item()
                 expected = scipy.stats.nbinom(total_count, 1 - p).logpmf(x)
-                self.assertAlmostEqual(log_prob, expected, places=3)
+                self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
             self._check_log_prob(NegativeBinomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
@@ -1089,7 +1088,7 @@ class TestDistributions(TestCase):
                                     (torch.tensor([1, 2, 10]), torch.tensor([0., 1., 9.]))]:
             log_prob = NegativeBinomial(total_count, probs).log_prob(sample)
             expected = scipy.stats.nbinom(total_count.cpu().numpy(), 1 - probs.cpu().numpy()).logpmf(sample)
-            self.assertAlmostEqual(log_prob, expected, places=4)
+            self.assertEqual(log_prob, expected, atol=1e-4, rtol=0)
 
     def test_multinomial_1d(self):
         total_count = 10
@@ -1238,7 +1237,7 @@ class TestDistributions(TestCase):
         def ref_log_prob(idx, x, log_prob):
             l = rate.view(-1)[idx].detach()
             expected = scipy.stats.poisson.logpmf(x, l)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         set_rng_seed(0)
         self._check_log_prob(Poisson(rate), ref_log_prob)
@@ -1500,7 +1499,7 @@ class TestDistributions(TestCase):
         def ref_log_prob(idx, x, log_prob):
             s = std.view(-1)[idx].detach()
             expected = scipy.stats.halfnorm(scale=s).logpdf(x)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(HalfNormal(std), ref_log_prob)
 
@@ -1550,7 +1549,7 @@ class TestDistributions(TestCase):
             m = mean.view(-1)[idx].detach()
             s = std.view(-1)[idx].detach()
             expected = scipy.stats.lognorm(s=s, scale=math.exp(m)).logpdf(x)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(LogNormal(mean, std), ref_log_prob)
 
@@ -1681,7 +1680,7 @@ class TestDistributions(TestCase):
             mix = scipy.stats.multinomial(1, p)
             comp = scipy.stats.norm(m, s)
             expected = scipy.special.logsumexp(comp.logpdf(x) + np.log(mix.p))
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(
             MixtureSameFamily(Categorical(probs=probs),
@@ -1754,7 +1753,7 @@ class TestDistributions(TestCase):
             s = scale.view(-1)[idx]
             expected = (math.exp(-(x - m) ** 2 / (2 * s ** 2)) /
                         math.sqrt(2 * math.pi * s ** 2))
-            self.assertAlmostEqual(log_prob, math.log(expected), places=3)
+            self.assertEqual(log_prob, math.log(expected), atol=1e-3, rtol=0)
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
@@ -1828,7 +1827,7 @@ class TestDistributions(TestCase):
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
 
-        self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
+        self.assertEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
         mean = torch.randn(5, 3, requires_grad=True)
@@ -1844,7 +1843,7 @@ class TestDistributions(TestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
+        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lowrank_multivariate_normal_sample(self):
@@ -1965,9 +1964,9 @@ class TestDistributions(TestCase):
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
 
-        self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
-        self.assertAlmostEqual(0.0, np.mean((dist2.log_prob(x).detach().numpy() - expected)**2), places=3)
-        self.assertAlmostEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), places=3)
+        self.assertEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
+        self.assertEqual(0.0, np.mean((dist2.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
+        self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
         mean = torch.randn(5, 3, requires_grad=True)
@@ -1982,7 +1981,7 @@ class TestDistributions(TestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
+        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
@@ -2048,7 +2047,7 @@ class TestDistributions(TestCase):
         def ref_log_prob(idx, x, log_prob):
             m = rate.view(-1)[idx]
             expected = math.log(m) - m * x
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
 
@@ -2099,7 +2098,7 @@ class TestDistributions(TestCase):
             m = loc.view(-1)[idx]
             s = scale.view(-1)[idx]
             expected = (-math.log(2 * s) - abs(x - m) / s)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
@@ -2128,7 +2127,7 @@ class TestDistributions(TestCase):
             a = alpha.view(-1)[idx].detach()
             b = beta.view(-1)[idx].detach()
             expected = scipy.stats.gamma.logpdf(x, a, scale=1 / b)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
@@ -2150,7 +2149,7 @@ class TestDistributions(TestCase):
             a = alpha.view(-1)[idx].detach().cpu()
             b = beta.view(-1)[idx].detach().cpu()
             expected = scipy.stats.gamma.logpdf(x.cpu(), a, scale=1 / b)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
@@ -2192,7 +2191,7 @@ class TestDistributions(TestCase):
             s = scale.view(-1)[idx].detach()
             a = alpha.view(-1)[idx].detach()
             expected = scipy.stats.pareto.logpdf(x, a, scale=s)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Pareto(scale, alpha), ref_log_prob)
 
@@ -2221,7 +2220,7 @@ class TestDistributions(TestCase):
             l = loc.view(-1)[idx].detach()
             s = scale.view(-1)[idx].detach()
             expected = scipy.stats.gumbel_r.logpdf(x, loc=l, scale=s)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
 
@@ -2252,7 +2251,7 @@ class TestDistributions(TestCase):
             f1 = df1.view(-1)[idx].detach()
             f2 = df2.view(-1)[idx].detach()
             expected = scipy.stats.f.logpdf(x, f1, f2)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
 
@@ -2279,7 +2278,7 @@ class TestDistributions(TestCase):
         def ref_log_prob(idx, x, log_prob):
             d = df.view(-1)[idx].detach()
             expected = scipy.stats.chi2.logpdf(x, d)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Chi2(df), ref_log_prob)
 
@@ -2309,7 +2308,7 @@ class TestDistributions(TestCase):
         def ref_log_prob(idx, x, log_prob):
             d = df.view(-1)[idx].detach()
             expected = scipy.stats.t.logpdf(x, d)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(StudentT(df), ref_log_prob)
 
@@ -2331,7 +2330,7 @@ class TestDistributions(TestCase):
             actual_log_prob = dist.log_prob(x)
             for i in range(num_samples):
                 expected_log_prob = scipy.stats.t.logpdf(x[i], df=df, loc=loc, scale=scale)
-                self.assertAlmostEqual(float(actual_log_prob[i]), float(expected_log_prob), places=3)
+                self.assertEqual(float(actual_log_prob[i]), float(expected_log_prob), atol=1e-3, rtol=0)
 
     def test_dirichlet_shape(self):
         alpha = torch.randn(2, 3).exp().requires_grad_()
@@ -2350,7 +2349,7 @@ class TestDistributions(TestCase):
         actual_log_prob = dist.log_prob(x)
         for i in range(num_samples):
             expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
-            self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
+            self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_sample(self):
@@ -2382,7 +2381,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
-            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3)
+            self.assertEqual(float(actual_log_prob), float(expected_log_prob), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
