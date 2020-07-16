@@ -56,7 +56,7 @@ static void poison_fork() {
 
 void THCPModule_setDevice(int device)
 {
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
+  c10::cuda::set_device(static_cast<DeviceIndex>(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
