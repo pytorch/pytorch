@@ -5,37 +5,38 @@
 namespace caffe2 {
 
 template <>
-template <typename T>
 void LayerNormFakeFp16Op<CPUContext>::calcY(
     const int M,
     const int N,
-    const T* X,
-    const T* mean,
-    const T* std,
-    const T* gamma,
-    const T* beta,
-    T* Y) {
-  ConstEigenArrayMap<T> X_arr(X, N, M);
-  ConstEigenVectorArrayMap<T> mean_arr(mean, M);
-  ConstEigenVectorArrayMap<T> std_arr(std, M);
-  EigenArrayMap<T> Y_arr(Y, N, M);
-  T tmp = T(0);
+    const float* X,
+    const float* mean,
+    const float* std,
+    const float* gamma,
+    const float* beta,
+    float* Y) {
+  ConstEigenArrayMap<float> X_arr(X, N, M);
+  ConstEigenVectorArrayMap<float> mean_arr(mean, M);
+  ConstEigenVectorArrayMap<float> std_arr(std, M);
+  EigenArrayMap<float> Y_arr(Y, N, M);
 
+  std::vector<float> normalized(N);
   for (int i = 0; i < M; ++i) {
-    T normFactor = T(T(1) / std_arr[i]);
+    float normFactor = float(1.0f / std_arr[i]);
     fp16_wrap(&normFactor);
+
     for (int j = 0; j < N; ++j) {
-      T normalized = T(X_arr.col(i)[j] - mean[i]);
-      fp16_wrap(&normalized);
-      normalized *= normFactor;
-      fp16_wrap(&normalized);
-      Y_arr.col(i)[j] = normalized;
+      normalized[j] = X_arr.col(i)[j] - mean[i];
     }
+    fbgemm::RoundToFloat16(normalized.data(), normalized.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    for (int j = 0; j < N; ++j) {
+      normalized[j] *= normFactor;
+    }
+    fbgemm::RoundToFloat16(normalized.data(), &Y_arr.col(i)[0], N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   }
 
   if (gamma != nullptr && beta != nullptr) {
-    ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
-    ConstEigenVectorArrayMap<T> beta_arr(beta, N);
+    ConstEigenVectorArrayMap<float> gamma_arr(gamma, N);
+    ConstEigenVectorArrayMap<float> beta_arr(beta, N);
 
     for (int i = 0; i < M; ++i) {
       vector<float> res(N);
@@ -51,66 +52,53 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
 }
 
 template <>
-template <typename T>
-T LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<T>& vec) {
+float LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<float>& vec) {
   constexpr int VEC_SIZE = 32;
-  std::vector<T> v(VEC_SIZE, T(0));
-  for (int i = 0; i < VEC_SIZE; ++i) { // 32
-    v[i] = vec[i];
+  std::vector<float> v(vec.begin(), vec.end());
+
+  for (int factor = 2; factor <=32; factor *=2) {
+    int range = VEC_SIZE / factor;
+
+    for (int i = 0; i < range; ++i) { // 16
+      v[i] = v[2 * i] + v[2 * i + 1];
+    }
+    fbgemm::RoundToFloat16(v.data(), v.data(), range, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   }
-  for (int i = 0; i < VEC_SIZE / 2; ++i) { // 16
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 4; ++i) { // 8
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 8; ++i) { // 4
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  for (int i = 0; i < VEC_SIZE / 16; ++i) { // 2
-    v[i] = v[2 * i] + v[2 * i + 1];
-    fp16_wrap(&v[i]);
-  }
-  v[0] = v[0] + v[1];
-  fp16_wrap(&v[0]);
+
   return v[0];
 }
 
 template <>
-template <typename T>
 void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     const int M,
     const int N,
     const float eps,
-    const T* X,
-    T* mean,
-    T* std) {
-  ConstEigenArrayMap<T> X_arr(X, N, M);
+    const float* X,
+    float* mean,
+    float* std) {
+  ConstEigenArrayMap<float> X_arr(X, N, M);
 
-  T sqr[M];
-  T var[M];
-  T inv_N_val = T(1) / N;
+  float sqr[M];
+  float var[M];
+  float inv_N_val = 1.0f / N;
   fp16_wrap(&inv_N_val);
-  T tmp = T(0);
+  float tmp = 0.0f;
 
   constexpr int VEC_SIZE = 32;
-  std::vector<T> inv_N_vec(VEC_SIZE, inv_N_val);
-  std::vector<T> inv_N_prod_vec(VEC_SIZE, 0);
-  std::vector<T> avgVec(VEC_SIZE, T(0));
-  std::vector<T> sqrVec(VEC_SIZE, T(0));
+  std::vector<float> inv_N_vec(VEC_SIZE, inv_N_val);
+  std::vector<float> inv_N_prod_vec(VEC_SIZE, 0);
+  std::vector<float> avgVec(VEC_SIZE, 0.0f);
+  std::vector<float> sqrVec(VEC_SIZE, 0.0f);
   int numVecs = N / VEC_SIZE;
   int tailSize = N - (numVecs * VEC_SIZE);
 
-  vector<T> X_fp16(M * N);
+  vector<float> X_fp16(M * N);
   fbgemm::RoundToFloat16(
       X, X_fp16.data(), M * N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
   for (int i = 0; i < M; ++i) {
-    std::fill(avgVec.begin(), avgVec.end(), T(0));
-    std::fill(sqrVec.begin(), sqrVec.end(), T(0));
+    std::fill(avgVec.begin(), avgVec.end(), 0.0f);
+    std::fill(sqrVec.begin(), sqrVec.end(), 0.0f);
     for (int j = 0; j < numVecs; ++j) {
       fake_fp16::fma_fp16(
           VEC_SIZE,
@@ -164,7 +152,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     var[i] = sqr[i];
 
     if (var[i] < 0.0) {
-      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << "negative, resetting to 0.";
+      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << " negative, resetting to 0.";
       var[i] = 0.0;
     }
 
@@ -173,7 +161,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     tmp = var[i] + teps;
     fp16_wrap(&tmp);
     if (tmp < 0) {
-      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << "negative, resetting to 0.";
+      LOG_EVERY_N(WARNING, 1000) << "Variance " << var[i] << " negative, resetting to 0.";
       tmp = 0.0;
     }
     std[i] = std::sqrt(tmp);

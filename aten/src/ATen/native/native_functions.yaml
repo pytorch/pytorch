@@ -157,7 +157,7 @@
   dispatch:
     CUDA: _cudnn_rnn_backward
 
-- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CUDA: _cudnn_init_dropout_state
@@ -1314,6 +1314,24 @@
   dispatch:
     CPU: from_file
 
+- func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: gcd(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
+
+- func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: lcm(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
+
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
 # `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
@@ -2458,6 +2476,19 @@
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: logit(Tensor self, float? eps=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: logit
+
+- func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU, CUDA: logit_
+
+- func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: sin(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3364,7 +3395,7 @@
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
-- func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3378,12 +3409,12 @@
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
 
-- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
 
-- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
@@ -3550,6 +3581,13 @@
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_reorder_conv2d_weight
+
+- func: mkldnn_reorder_conv3d_weight(Tensor self, int[3] padding=0, int[3] stride=1, int[3] dilation=1, int groups=1) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_reorder_conv3d_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
@@ -4541,14 +4579,14 @@
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: index_select_out_cpu_
-    CUDA: legacy::cuda::_th_index_select_out
+    CUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: index_select_cpu_
-    CUDA: legacy::cuda::_th_index_select
+    CUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
@@ -6391,6 +6429,15 @@
     CPU, CUDA: sigmoid_backward_out
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+- func: logit_backward.grad_input(Tensor grad_output, Tensor self, float? eps=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU, CUDA: logit_backward_out
+
+- func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
