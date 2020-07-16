@@ -428,6 +428,7 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
+_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
@@ -607,6 +608,7 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
