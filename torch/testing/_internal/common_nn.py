@@ -3268,6 +3268,7 @@ for padding_mode, cpp_padding_mode in zip(
                 output_size=output_size,
                 cudnn=True,
                 desc='{}_stride2_pad2'.format(padding_mode),
+                with_tf32=True,
             ),
         )
 
@@ -4660,6 +4661,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.skip_double = kwargs.get('skip_double', False)
+        self.with_tf32 = kwargs.get('with_tf32', False)
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()

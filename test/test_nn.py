@@ -8777,6 +8777,8 @@ def add_test(test, decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
+        if test.with_tf32:
+            fn = tf32_on_and_off(fn)
         if decorator is not None:
             fn = decorator(fn)
         setattr(TestNN, test_name, fn)
@@ -8946,7 +8948,8 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
 add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'), decorator=tf32_on_and_off)
+    fullname='AdaptiveLogSoftmax',
+    with_tf32=True))
 
 
 # The following are helpers for TestNN.test_affine_*
