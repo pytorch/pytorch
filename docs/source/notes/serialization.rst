@@ -97,8 +97,8 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new storage objects and
-tensors with the desired view relationships before saving.
+storage objects, then care must be taken to construct new tensors with the desired 
+view relationships before saving, such that the storage object sizes are minimized.
 
 Saving and loading Python modules
 ---------------------------------
