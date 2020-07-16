@@ -27,7 +27,6 @@ from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
-    requires_gloo,
     simple_sparse_reduce_tests,
     skip_if_rocm,
     skip_if_small_worldsize,
@@ -2252,12 +2251,12 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
-    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
     def test_DistributedSampler_padding(self):
         # Tests padding of distributed sampler.
         world_size = dist.get_world_size()
         dataset_size = 100 + world_size + 1
-        dataset = [torch.ones(1) * i for i in range(dataset_size)]
+        dataset = [torch.ones(1).to(self.rank) * i for i in range(dataset_size)]
 
         # Specifying drop_last=True will cause the tail of the data to be dropped.
         dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)
@@ -2281,9 +2280,9 @@ class _DistTestBase(object):
         def validate_global_samples(local_num_samples):
             # Ensure that each rank processes the same number of samples.
             world_samples = [
-                torch.LongTensor([0]) for _ in range(world_size)
+                torch.LongTensor([0]).to(self.rank) for _ in range(world_size)
             ]
-            dist.all_gather(world_samples, torch.tensor([local_num_samples]))
+            dist.all_gather(world_samples, torch.tensor([local_num_samples]).to(self.rank))
             world_samples = [sample.item() for sample in world_samples]
             self.assertEqual(len(set(world_samples)), 1)
 
