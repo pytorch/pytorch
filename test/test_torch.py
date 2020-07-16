@@ -13981,11 +13981,11 @@ class TestTorchDeviceType(TestCase):
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
-            x = torch.arange(2 * L + 1, dtype=dtype)
+            x = torch.arange(2 * L + 1, device=device, dtype=dtype)
             original = amplitude * torch.sin(2 * math.pi / L * x * n)
             # stft = torch.stft(original, L, hop_length=L, win_length=L,
             #                   window=torch.ones(L), center=False, normalized=False)
-            stft = torch.zeros((L // 2 + 1, 2, 2), dtype=dtype)
+            stft = torch.zeros((L // 2 + 1, 2, 2), device=device, dtype=dtype)
             stft_largest_val = (amplitude * L) / 2.0
             if n < stft.size(0):
                 stft[n, :, 1] = -stft_largest_val
@@ -13996,7 +13996,7 @@ class TestTorchDeviceType(TestCase):
 
             inverse = torch.istft(
                 stft, L, hop_length=L, win_length=L,
-                window=torch.ones(L, dtype=dtype), center=False, normalized=False)
+                window=torch.ones(L, device=device, dtype=dtype), center=False, normalized=False)
             # There is a larger error due to the scaling of amplitude
             original = original[..., :inverse.size(-1)]
             self.assertEqual(inverse, original, atol=1e-3, rtol=0)
