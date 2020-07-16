@@ -4,6 +4,8 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
+import contextlib
+import collections
 import inspect
 import weakref
 import warnings
@@ -767,3 +769,45 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
+
+
+def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
+    return boolean_dispatched.get(fn)
+
+
+def _get_named_tuple_properties(obj):
+    assert issubclass(obj, tuple) and hasattr(obj, '_fields')
+    fields = list(obj._fields)
+    annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
+            annotations.append(the_type)
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return type(obj).__name__, fields, annotations
+
+
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
+    return TupleType(*t)
+
+
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])

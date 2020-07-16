@@ -289,6 +289,7 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg
@@ -409,8 +410,10 @@ Other Operations
     fliplr
     flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave

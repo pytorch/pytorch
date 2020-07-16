@@ -87,13 +87,13 @@ if(USE_TBB)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
-  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
   set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
@@ -557,7 +557,7 @@ endif()
 
 
 # ---[ Googletest and benchmark
-if(BUILD_TEST)
+if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
@@ -636,6 +636,15 @@ if(BUILD_TEST)
       RESULT_VARIABLE _exitcode)
     if(NOT ${_exitcode} EQUAL 0)
       message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
+
+  # Cacheing variables to enable incremental build.
+  # Without this is cross compiling we end up having to blow build directory
+  # and rebuild from scratch.
+  if(CMAKE_CROSSCOMPILING)
+    if(COMPILE_HAVE_STD_REGEX)
+      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
     endif()
   endif()
 endif()
@@ -810,8 +819,13 @@ endif()
 
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
 if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  # PSIMD is required by FP16
+  if(NOT DEFINED PSIMD_SOURCE_DIR)
+    set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+  endif()
   if(NOT DEFINED FP16_SOURCE_DIR)
-    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+    set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   endif()
 
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
@@ -1275,7 +1289,7 @@ if(USE_GLOO)
     # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(USE_NCCL AND NOT USE_ROCM)
+    if(NOT USE_SYSTEM_NCCL AND USE_NCCL AND NOT USE_ROCM)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA
@@ -1722,7 +1736,7 @@ endif()
 # End ATen checks
 #
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
 #
