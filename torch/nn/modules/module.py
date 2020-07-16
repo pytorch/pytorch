@@ -158,6 +158,12 @@ def register_module_backward_hook(
     return handle
 
 
+def _check_initialization_call(module, input):
+    if module.has_uninitialized_params_or_buffers():
+        raise RuntimeError('module {} has not been fully initialized'.format(module._get_name()))
+    module._error_params_hook.remove()
+    module.__delattr__('_error_params_hook')
+
 class Module:
     r"""Base class for all neural network modules.
 
@@ -290,6 +296,15 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
+        if isinstance(tensor, UninitializedBuffer):
+            # We set the attribute here because
+            # otherwise, we will need to expose it to the Jit
+            # and users will need to explicitly set and restore it in their
+            # module __setstate__
+            if not hasattr(self, '_error_params_hook'):
+                self._error_params_hook = self.register_forward_pre_hook(
+                    _check_initialization_call)
+
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
@@ -328,6 +343,16 @@ class Module:
                 "the forward() method.".format(name))
         else:
             self._parameters[name] = param
+
+        if isinstance(param, UninitializedParameter):
+            # We set the attribute here because
+            # otherwise, we will need to expose it to the Jit
+            # and users will need to explicitly set and restore it in their
+            # module __setstate__
+            if not hasattr(self, '_error_params_hook'):
+                self._error_params_hook = self.register_forward_pre_hook(
+                    _check_initialization_call)
+
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
@@ -723,9 +748,6 @@ class Module:
                 if not isinstance(result, tuple):
                     result = (result,)
                 input = result
-
-        if self.has_uninitialized_params_or_buffers():
-            raise RuntimeError('Module {} has not been correctly initialized'.format(self._get_name()))
 
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
@@ -1469,6 +1491,9 @@ class Module:
 
         def set_hooks(module):
             if module.has_uninitialized_params_or_buffers():
+                # Remove the error hook as we will detect uninitialization errors ourselves
+                module._error_params_hook.remove()
+                module.__delattr__('_error_params_hook')
                 hook = module.register_forward_pre_hook(initialize_hook)
                 initialize_hooks.append(hook)
 
