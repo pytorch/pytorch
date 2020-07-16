@@ -23,7 +23,7 @@ import __future__
 import collections
 import torch
 import types
-from torch._C import _is_torch_function_enabled
+from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
 def get_ignored_functions():
     """Return public functions that cannot be overrided by __torch_function__
@@ -166,7 +166,7 @@ def get_ignored_functions():
         Tensor.new_full,
         Tensor._make_subclass,
     }
-        
+
 
 def get_testing_overrides():
     """Return a dict containing dummy overrides for all overridable functions
@@ -861,11 +861,11 @@ def get_testing_overrides():
     for k, v in ret.items():
         # Generate methods like __add__ and add_ by default from add
         names = [
-            k.__name__, # Default method
-            k.__name__ + "_", # Inplace variant
-            "__" + k.__name__ + "__", # Dunder method
-            "__i" + k.__name__ + "__", # Inplace dunder method
-            "__r" + k.__name__ + "__" # Reverse dunder method
+            k.__name__,  # Default method
+            k.__name__ + "_",  # Inplace variant
+            "__" + k.__name__ + "__",  # Dunder method
+            "__i" + k.__name__ + "__",  # Inplace dunder method
+            "__r" + k.__name__ + "__",  # Reverse dunder method
         ]
 
         if k.__name__.startswith("bitwise_"):
@@ -1012,7 +1012,7 @@ def has_torch_function(relevant_args):
     True if any of the elements of relevant_args have __torch_function__
     implementations, False otherwise.
     """
-    return _is_torch_function_enabled() and any(type(a) is not torch.Tensor and getattr(a, '__torch_function__', None) is not None for a in relevant_args)
+    return _is_torch_function_enabled() and any(type(a) is not torch.Tensor and getattr(a, '__torch_function__', _disabled_torch_function_impl) is not _disabled_torch_function_impl for a in relevant_args)
 
 def get_overridable_functions():
     """List functions that are overridable via __torch_function__

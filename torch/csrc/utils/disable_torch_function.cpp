@@ -1,4 +1,6 @@
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/Exceptions.h>
 
 namespace torch {
   static thread_local bool enable_torch_function = true;
@@ -98,25 +100,28 @@ PyObject* THPModule_DisableTorchFunctionType() {
   return (PyObject *)(&DisableTorchFunctionType);
 }
 
-PyObject* THPModule_disable_torch_function(PyObject *s, PyObject *a) {
-  PyObject *self=nullptr, *func=nullptr, *type=nullptr, *args=nullptr, *kwargs=nullptr;
-  if (!PyArg_Parse(a, "OOO|OO", &self, &func, &type, &args, &kwargs)) {
+PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
+  HANDLE_TH_ERRORS
+  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  if (!PyArg_ParseTuple(a, "OO|OO", &func, &types, &args, &kwargs)) {
     return nullptr;
   }
+  py::tuple py_args;
   if (args == nullptr) {
-    args = PyTuple_Pack(0);
+    py_args = py::make_tuple();
   }
   else {
-    Py_INCREF(args);
+    py_args = py::reinterpret_borrow<py::tuple>(args);
   }
+
   // These are all C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing
   // the old value.
   bool old_value = torch::enable_torch_function;
   torch::enable_torch_function = false;
   // kwargs can safely be nullptr here.
-  PyObject *result = PyObject_Call(func, args, kwargs);
+  PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
   torch::enable_torch_function = old_value;
-  Py_DECREF(args);
   return result;
+  END_HANDLE_TH_ERRORS
 }
