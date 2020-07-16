@@ -1441,9 +1441,9 @@ class Module:
         """
         # This is to avoid the JIT to track this parameter and force
         # custom modules __setstate__ to add it
-        params_and_buffers = dict(self.named_parameters(recurse=False))
-        params_and_buffers.update(self.named_buffers(recurse=False))
-        for name, param in params_and_buffers.items():
+        params = self._parameters.values()
+        buffers = self._buffers.values()
+        for param in itertools.chain(params, buffers):
             if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
                 return True
         return False
