@@ -3507,13 +3507,6 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         args = (2,)
         self._test_remote_message_dropped_timeout(func, args, dst=0)
 
-    @dist_init(faulty_messages=[], messages_to_delay={})
-    def test_owner_rref(self):
-        if self.rank != 0:
-            return
-        rref = rpc.remote(worker_name(0), torch.add, args=(1, 1))
-        rref.to_here()
-
     def _test_remote_message_delay_timeout(self, func, args, dst=None):
         if self.rank != 0:
             return
