@@ -6489,6 +6489,16 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    def test_moveaxis(self, device):
+        x = torch.randn(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
+
+        # Positive axis
+        gradcheck(lambda x: torch.moveaxis(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+        gradgradcheck(lambda x: torch.moveaxis(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+
+        # Negative axis
+        gradcheck(lambda x: torch.moveaxis(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+        gradgradcheck(lambda x: torch.moveaxis(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
