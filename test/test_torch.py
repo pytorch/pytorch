@@ -18096,13 +18096,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.moveaxis(x, 0, 5)
 
         # Mismatch in size of `src` and `dst`
-        with self.assertRaisesRegex(RuntimeError, "Invalid Source or Destination Axes"):
+        with self.assertRaisesRegex(RuntimeError, "moveaxis: Invalid source or destination dims:"):
             torch.moveaxis(x, (1, 0), (0, ))
 
-        with self.assertRaisesRegex(RuntimeError, "repeated axis in `src` argument"):
+        with self.assertRaisesRegex(RuntimeError, "moveaxis: repeated axis in `src`"):
             torch.moveaxis(x, (0, 0), (0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "repeated axis in `dst` argument"):
+        with self.assertRaisesRegex(RuntimeError, "moveaxis: repeated axis in `dst`"):
             torch.moveaxis(x, (0, 1), (1, 1))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

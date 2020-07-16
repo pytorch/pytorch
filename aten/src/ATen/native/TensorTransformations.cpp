@@ -142,45 +142,4 @@ Tensor flipud(const Tensor& self) {
   return self.flip({0});
 }
 
-Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
-  TORCH_CHECK(src.size() == dst.size(), "Invalid Source or Destination Axes");
-  auto normalized_src = src.vec();
-  maybe_wrap_dims(normalized_src, self.dim());
-  auto normalized_dst = dst.vec();
-  maybe_wrap_dims(normalized_dst, self.dim());
-
-  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "repeated axis in `src` argument");
-  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "repeated axis in `dst` argument");
-
-  std::vector<int64_t> order, source_dims, destination_dims;
-  order.resize(self.dim());
-  source_dims.resize(self.dim());
-  destination_dims.resize(self.dim());
-
-  std::iota(source_dims.begin(), source_dims.end(), 0);
-  std::iota(destination_dims.begin(), destination_dims.end(), 0);
-
-  for (int64_t i = 0; i < src.size(); ++i) {
-      order[normalized_dst[i]] = normalized_src[i];
-      source_dims[normalized_src[i]] = -1;
-      destination_dims[normalized_dst[i]] = -1;
-  }
-
-  auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
-  auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
-
-  int64_t rest_dim = self.dim() - src.size();
-  for (int64_t i = 0; i < rest_dim; ++i) {
-      order[destination_dims[i]] = source_dims[i];
-  }
-
-  return self.permute(order);
-}
-
-Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
-  return at::moveaxis(self, IntArrayRef{src}, IntArrayRef{dst});
-}
-
 }} // namespace at::native
