@@ -27,6 +27,7 @@ from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
+    requires_gloo,
     simple_sparse_reduce_tests,
     skip_if_rocm,
     skip_if_small_worldsize,
@@ -2251,6 +2252,7 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
+    @requires_gloo()
     def test_DistributedSampler_padding(self):
         # Tests padding of distributed sampler.
         world_size = dist.get_world_size()
