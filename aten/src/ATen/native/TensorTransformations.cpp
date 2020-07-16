@@ -180,7 +180,7 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 }
 
 Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
-  return at::native::moveaxis(self, IntArrayRef{src}, IntArrayRef{dst});
+  return at::moveaxis(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
 }} // namespace at::native
