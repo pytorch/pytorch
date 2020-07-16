@@ -486,6 +486,17 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
+@parse_args('v', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim):
+    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
+    size = self.type().sizes()[dim]
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+
+
 def split(g, self, split_size_or_sizes, dim):
     if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
@@ -504,9 +515,18 @@ def split(g, self, split_size_or_sizes, dim):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
 
 
+def unsafe_split(g, self, split_size_or_sizes, dim):
+    return split(g, self, split_size_or_sizes, dim)
+
+
 @parse_args('v', 'is', 'i')
 def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
+
+
+@parse_args('v', 'is', 'i')
+def unsafe_split_with_sizes(g, self, split_sizes, dim):
+    return split_with_sizes(g, self, split_sizes, dim)
 
 
 @parse_args('v', 'i')
@@ -1992,6 +2012,11 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    if dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
+
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
@@ -2000,22 +2025,8 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=start_dim)
     if start_dim == 0 and end_dim == dim - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    p = _reshape_from_tensor(g, input, shape)
-    return p
 
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
 @parse_args('v')
 def nonzero(g, input):
