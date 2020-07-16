@@ -21,10 +21,10 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 // the same issue as mentioned above in CUDA 11 CI.
 //   - @zasdfgbnm
 //
-// #ifdef NO_CUDNN_DESTROY_HANDLE
-// #else
-//   cudnnDestroy(handle);
-// #endif
+#ifdef NO_CUDNN_DESTROY_HANDLE
+#else
+  cudnnDestroy(handle);
+#endif
 }
 
 using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>;
