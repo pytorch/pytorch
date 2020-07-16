@@ -1834,6 +1834,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_depthwise_with_multiplier',
@@ -1841,6 +1842,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 8, {3, 3}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_depthwise_strided',
@@ -1848,6 +1850,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).stride({2, 2}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_depthwise_padded',
@@ -1855,6 +1858,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).padding({1, 1}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_depthwise_dilated',
@@ -1862,6 +1866,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {2, 2}).dilation({2, 2}).groups(4)',
         input_size=(2, 4, 5, 5),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='MaxPool2d',
@@ -3327,7 +3332,7 @@ for padding_mode, cpp_padding_mode in zip(
                 cudnn=True,
                 desc='{}_stride2_pad2'.format(padding_mode),
                 with_tf32=True,
-                tf32_precision=0.005
+                tf32_precision=0.05
             ),
         )
 
