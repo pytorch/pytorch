@@ -1,5 +1,6 @@
 import torch
 import copy
+from typing import Dict
 
 _supported_types = [torch.nn.Conv2d, torch.nn.Linear]
 
