@@ -1,5 +1,4 @@
 from torch.testing._internal.jit_utils import JitTestCase
-import io
 import os
 import sys
 
@@ -11,10 +10,12 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
 
 
 def to_test_backend(module, method_compile_spec):
@@ -25,9 +26,13 @@ def to_test_backend_multi(module, method_compile_spec):
     return torch._C._jit_to_backend("test_backend", module, method_compile_spec)
 
 
-class MyModule(torch.nn.Module):
+class BasicModule(torch.nn.Module):
+    """
+    A simple Module used to test to_backend lowering machinery.
+    """
+
     def __init__(self):
-        super(MyModule, self).__init__()
+        super().__init__()
 
     def forward(self, x, h):
         return self.accum(x, h), self.sub_accum(x, h)
@@ -39,26 +44,28 @@ class MyModule(torch.nn.Module):
         return x - h
 
 
-class TestBackends(JitTestCase):
+class JitBackendTestCase(JitTestCase):
+    """
+    A common base class for JIT backend tests that contains common utility
+    functions for output comparison and serialization/deserialization.
+    """
+
     def setUp(self):
         super().setUp()
+        # Subclasses are expected to set up three variables in their setUp methods:
+        # module - a regular, Python version of the module being tested
+        # scripted_module - a scripted version of module
+        # lowered_modle - a version of module lowered to a backend
 
-        if not TEST_WITH_ROCM:
-            # Create Python, JIT and backend versions of MyModule.
-            self.module = MyModule()
-            self.scripted_module = torch.jit.script(MyModule())
-            self.lowered_module = to_test_backend_multi(
-                self.scripted_module._c, {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}})
-
-    def compare_py_jit_backend(self, name, input):
+    def check_function(self, function_name, input):
         """
-        This is a helper function for comparing the outputs of self.module (Python), self.scripted_module (JIT)
-        and self.lowered_module (backend) when the method named 'name' is invoked using 'input'.
+        Check that the function named 'function_name' produces the same output using
+        Python, regular JIT and the backend for the given 'input'.
         """
         # Get handles for Python, JIT and backend methods.
-        python_method = self.module.__getattribute__(name)
-        jit_method = self.scripted_module.__getattr__(name)
-        backend_method = self.lowered_module.__getattr__(name)
+        python_method = self.module.__getattribute__(function_name)
+        jit_method = self.scripted_module.__getattr__(function_name)
+        backend_method = self.lowered_module.__getattr__(function_name)
 
         # Run methods.
         python_output = python_method(input, input)
@@ -69,36 +76,47 @@ class TestBackends(JitTestCase):
         self.assertEqual(python_output, backend_output)
         self.assertEqual(jit_output, backend_output)
 
-    @skipIfRocm
-    def test_simple(self):
+    def save_load(self):
         """
-        This is a simple test that compiles MyModule for the test backend and ensures it produces the correct
-        answers for each method.
+        Save and load the lowered module.
         """
+        self.lowered_module = self.getExportImportCopy(self.lowered_module)
+
+
+class BasicModuleTest(JitBackendTestCase):
+    """
+    Tests for BasicModule.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Create Python, JIT and backend versions of BasicModule.
+        self.module = BasicModule()
+        self.scripted_module = torch.jit.script(BasicModule())
+        self.lowered_module = to_test_backend_multi(
+            self.scripted_module._c,
+            {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}},
+        )
+
+    def test_execution(self):
         # Test execution with backend against Python and JIT.
         input = torch.randn(5)
 
         # Test all three module methods.
-        self.compare_py_jit_backend("accum", input)
-        self.compare_py_jit_backend("sub_accum", input)
-        self.compare_py_jit_backend("forward", input)
+        self.check_function("accum", input)
+        self.check_function("sub_accum", input)
+        self.check_function("forward", input)
 
     @skipIfRocm
     def test_save_load(self):
-        """
-        This method tests that a lowered module till produces the same output as a Python module and ScriptModule after
-        saving and loading.
-        """
-        # Save the lowered module.
-        buffer = io.BytesIO()
-        torch.jit.save(self.lowered_module, buffer)
+        # Lowered module should produce the same outputs.
+        self.test_execution()
 
         # Save the compile spec to compare against the version retrieved after loading.
         pre_compile_spec = self.lowered_module.__getattr__("__method_compile_spec")
 
-        # Load the lowered module.
-        buffer.seek(0)
-        self.lowered_module = torch.jit.load(buffer)
+        # Save and load the lowered module.
+        self.save_load()
 
         # Get the compile spec after loading.
         post_compile_spec = self.lowered_module.__getattr__("__method_compile_spec")
@@ -106,10 +124,82 @@ class TestBackends(JitTestCase):
         # Compile specs should match.
         self.assertEqual(pre_compile_spec, post_compile_spec)
 
+        # Loaded module should produce the same outputs.
+        self.test_execution()
+
+
+class NestedModuleTest(JitBackendTestCase):
+    """
+    Tests for NestedModule that check that a module lowered to a backend can be used
+    as a submodule.
+    """
+    class NestedModule(torch.nn.Module):
+        """
+        A Module with one submodule that is used to test that lowered Modules
+        can be used as submodules.
+        """
+
+        def __init__(self, submodule):
+            super().__init__()
+            self.submodule = submodule
+
+        def forward(self, x, h):
+            return self.submodule.forward(x, h)
+
+    def setUp(self):
+        super().setUp()
+        # Create Python, JIT and backend versions of NestedModule.
+        # Both modules in self.module are regular Python modules.
+        self.module = NestedModuleTest.NestedModule(BasicModule())
+        # Both modules in self.scripted_module are ScriptModules.
+        self.scripted_module = torch.jit.script(NestedModuleTest.NestedModule(BasicModule()))
+        lowered_module = to_test_backend_multi(
+            self.scripted_module._c, {"forward": {"": ""}}
+        )
+        # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
+        self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(lowered_module))
+
+    def test_execution(self):
         # Test execution with backend against Python and JIT.
         input = torch.randn(5)
 
-        # Test all three module methods.
-        self.compare_py_jit_backend("accum", input)
-        self.compare_py_jit_backend("sub_accum", input)
-        self.compare_py_jit_backend("forward", input)
+        # Test forward.
+        self.check_function("forward", input)
+
+    def test_save_load(self):
+        # Lowered module should produce the same outputs.
+        self.test_execution()
+
+        # Save and load the lowered module.
+        self.save_load()
+
+        # Loaded module should produce the same outputs.
+        self.test_execution()
+
+
+class TestBackends(JitTestCase):
+    """
+    This class wraps and invokes all subclasses of JitBackendTestCase so that each one
+    does not have to be individually imported in test_jit.py.
+    """
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.basic_module_test = BasicModuleTest(name)
+        self.nested_module_test = NestedModuleTest(name)
+
+    def setUp(self):
+        super().setUp()
+        if not TEST_WITH_ROCM:
+            self.basic_module_test.setUp()
+            self.nested_module_test.setUp()
+
+    @skipIfRocm
+    def test_execution(self):
+        self.basic_module_test.test_execution()
+        self.nested_module_test.test_execution()
+
+    @skipIfRocm
+    def test_save_load(self):
+        self.basic_module_test.test_save_load()
+        self.nested_module_test.test_save_load()
