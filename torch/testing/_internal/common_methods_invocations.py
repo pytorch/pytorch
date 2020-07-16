@@ -5,8 +5,7 @@ from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
 from torch.testing import make_non_contiguous
-from torch.testing._internal.common_device_type import (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
-                                                        expectedAlertNondeterministic)
+from torch.testing._internal.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
 from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
                                                   random_symmetric_matrix, random_symmetric_psd_matrix,
                                                   random_symmetric_pd_matrix, make_nonzero_det,
@@ -878,6 +877,24 @@ def method_tests():
         ('split', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'size_list',
             (True, True), (True, 'aten::split_with_sizes')),
         ('split', (S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2), 'size_list_dim',
+<<<<<<< HEAD
+            (True, 'aten::split_with_sizes'), [1]),
+        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True,)),
+        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, )),
+        ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'dim', (True, ), [1]),
+        ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', (), [0]),
+        ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', (), [0]),
+        ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', (), [0]),
+        ('gather', (S,), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_index', (), [0]),
+        ('gather', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_both', (), [0]),
+        ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
+        ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
+        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalartensor_all_dim0', (), [0]),
+        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), 2.5), 'scalar_all_dim0', (), [0]),
+        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
+        ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
+        ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
+=======
             (True, True), (True, 'aten::split_with_sizes'), [1]),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True, True), (True,)),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, True), (True, )),
@@ -896,6 +913,7 @@ def method_tests():
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (True, False), (), [0]),
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (True, False), (), [0],
             [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
+>>>>>>> Generalize autograd test fn
         ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
         ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),

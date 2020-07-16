@@ -3691,6 +3691,19 @@ class TestONNXRuntime(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fake_quantize_per_tensor(self):
+        class FakeQuantizePerTensorModel(torch.nn.Module):
+            def forward(self, input):
+                scale = 1. / 127
+                zero_point = 0
+                quant_min = -128
+                quant_max = 127
+                return torch.fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max)
+
+        x = torch.randn(6, 4, 3, 3)
+        self.run_test(FakeQuantizePerTensorModel(), (x))
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
