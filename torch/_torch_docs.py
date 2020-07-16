@@ -2535,11 +2535,12 @@ Computes the element-wise greatest common divisor (GCD) of :attr:`input` and :at
 
 Both :attr:`input` and :attr:`other` must have integer types.
 
-Note that we define the GCD(0, 0) to be 0.
+.. note::
+    This defines :math:`gcd(0, 0) = 0`.
 
 Args:
-    input (Tensor)
-    other (Tensor)
+    {input}
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
@@ -3033,9 +3034,12 @@ Computes the element-wise least common multiple (LCM) of :attr:`input` and :attr
 
 Both :attr:`input` and :attr:`other` must have integer types.
 
+.. note::
+    This defines :math:`lcm(0, 0) = 0` and :math:`lcm(0, a) = 0`.
+
 Args:
-    input (Tensor)
-    other (Tensor)
+    {input}
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
