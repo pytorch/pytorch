@@ -303,6 +303,14 @@ class TestCuda(TestCase):
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_check_error(self):
+        # Assert this call doesn't raise.
+        torch.cuda.check_error(0)
+
+        with self.assertRaisesRegex(torch.cuda.CudaError,
+                                    "out of memory|hipErrorOutOfMemory"):
+            torch.cuda.check_error(2)
+
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
         current_device = torch.cuda.current_device()
@@ -520,6 +528,13 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
+
+    def test_allow_tf32_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_tf32
+        self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
+        torch.backends.cuda.matmul.allow_tf32 = not orig
+        self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
+        torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -1017,7 +1032,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10)
         s1.synchronize()
-        s1.record_event(e_tok)
+        e_tok.record()
+        e_tok.synchronize()
 
         self.assertTrue(s0.query())
         self.assertTrue(s1.query())
