@@ -8819,11 +8819,11 @@ def add_test(test, decorator=None):
         if tf32_is_not_fp32():
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+                    test.test_cuda(self, **kwargs)
             add(cuda_test_name + '_fp32', with_tf32_off)
             def with_tf32_on(self, test=test, kwargs=kwargs):
                 with tf32_on():
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+                    test.test_cuda(self, **kwargs)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
