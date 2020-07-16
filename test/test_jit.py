@@ -6870,7 +6870,9 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)", "Double(*, device=cpu)", "Double(device=cpu)", "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
+        expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
+                          "Double(*, device=cpu)", "Double(device=cpu)",
+                          "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
@@ -10331,7 +10333,8 @@ a")
         g = fn.graph_for()
         # Testing shape analysis correctly setting type
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)").check_not("Float(*, *, requires_grad=0, device=cpu)").run(g)
+            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(g)
 
         @torch.jit.script
         def randint():
@@ -10341,7 +10344,8 @@ a")
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)").check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the original version of test_rand")
     def test_rand_profiling(self):
@@ -10353,7 +10357,8 @@ a")
         out = fn()
         self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)").check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
+        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
+                   .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
 
         @torch.jit.script
         def randint():
@@ -10363,7 +10368,8 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(1:2, 2:1, requires_grad=0, device=cpu)").check_not("Float(1:2, 2:1, requires_grad=0, device=cpu)").run(randint.graph_for())
+        FileCheck().check("Double(1:2, 2:1, requires_grad=0, device=cpu)") \
+                   .check_not("Float(1:2, 2:1, requires_grad=0, device=cpu)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
