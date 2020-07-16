@@ -36,8 +36,11 @@ def generate_code(ninja_global=None,
     from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
-    install_dir = install_dir or 'torch/csrc'
-    python_install_dir = install_dir or 'torch/testing/_internal/generated'
+    if install_dir is None:
+        install_dir = 'torch/csrc'
+        python_install_dir = 'torch/testing/_internal/generated'
+    else:
+        python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
     for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
