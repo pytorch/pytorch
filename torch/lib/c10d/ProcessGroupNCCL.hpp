@@ -68,7 +68,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -109,6 +109,8 @@ class ProcessGroupNCCL : public ProcessGroup {
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
    private:
+    // Helper function for synchronize
+    void synchronizeInternal(std::chrono::milliseconds timeout);
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
