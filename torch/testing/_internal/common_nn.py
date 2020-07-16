@@ -2066,7 +2066,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2088,7 +2088,7 @@ new_module_tests = [
         desc='stride_padding',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Conv3d',
