@@ -15225,8 +15225,8 @@ class TestTorchDeviceType(TestCase):
         if dtype == torch.double:
             # double precision
             a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
-            self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
+            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
+            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self, device):
@@ -16605,11 +16605,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
