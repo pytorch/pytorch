@@ -529,6 +529,13 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
+    def test_allow_tf32_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_tf32
+        self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
+        torch.backends.cuda.matmul.allow_tf32 = not orig
+        self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
+        torch.backends.cuda.matmul.allow_tf32 = orig
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -1025,7 +1032,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10)
         s1.synchronize()
-        s1.record_event(e_tok)
+        e_tok.record()
+        e_tok.synchronize()
 
         self.assertTrue(s0.query())
         self.assertTrue(s1.query())

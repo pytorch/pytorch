@@ -271,7 +271,14 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
                 print("correcting bias?")
 
 
-                ns.prepare_model_outputs(unquantized_model, model, _correct_bias.MeanLogger)
+                # ns.prepare_model_outputs(unquantized_model, model, _correct_bias.MeanLogger)
+                qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
+                float_model.qconfig = qconfig_debug
+                qmodel.qconfig = qconfig_debug
+                white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
+
+                torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
+                torch.quantization.prepare(qmodel, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
                 count =0
                 for data in data_loader_test:
                     with torch.no_grad():
@@ -287,8 +294,10 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
                         # if count == 30:
                         #     break
                 print("finished bias calibrating")
-                compare_dict = ns.get_matching_activations(unquantized_model, model)
-                _correct_bias.correct_quantized_bias(compare_dict, unquantized_model, model)
+                # compare_dict = ns.get_matching_activations(unquantized_model, model)
+                output_logger, input_logger = get_matching_activations(float_model, qmodel)
+
+                _correct_bias.correct_quantized_bias_V2(output_logger, input_logger, unquantized_model, model)
 
 
         top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)

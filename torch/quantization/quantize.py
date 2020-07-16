@@ -74,7 +74,6 @@ def _observer_forward_hook(self, input, output):
     return self.activation_post_process(output)
 
 def _observer_forward_pre_hook(self, input):
-    # print(input[0].size())
     self.activation_pre_process(input[0])
     return None
 
@@ -112,6 +111,9 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
                 child.register_forward_hook(_observer_forward_hook)
+                if prehook is not None:
+                    child.add_module('activation_pre_process', prehook())
+                    child.register_forward_pre_hook(_observer_forward_pre_hook)
         else:
             add_observer_(child, non_leaf_module_list, device, prehook)
 
@@ -128,6 +130,9 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
         # All post forward hooks are preserved and will be executed after the observer before convert
         handle = module.register_forward_hook(_observer_forward_hook)
         module._forward_hooks.move_to_end(handle.id, last=False)
+        if prehook is not None:
+            module.add_module('activation_pre_process', prehook())
+            module.register_forward_pre_hook(_observer_forward_pre_hook)
 
 def get_unique_devices_(module):
     return {p.device for p in module.parameters()} | \
