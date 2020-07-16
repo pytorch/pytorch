@@ -463,6 +463,9 @@ _(aten, max_pool3d) \
 _(aten, max_pool3d_with_indices) \
 _(aten, max_pool3d_with_indices_backward) \
 _(aten, max_pool3d_with_indices_forward) \
+_(aten, max_unpool1d) \
+_(aten, max_unpool1d_backward) \
+_(aten, max_unpool1d_forward) \
 _(aten, max_unpool2d) \
 _(aten, max_unpool2d_backward) \
 _(aten, max_unpool2d_forward) \

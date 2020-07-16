@@ -1384,6 +1384,10 @@
   self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
   output_differentiability: [True, False]
 
+- name: max_unpool1d(Tensor self, Tensor indices, int[1] output_size, int[1] stride, int[1] padding) -> Tensor
+  self: max_unpool1d_backward(grad, self, indices, output_size, stride, padding)
+  indices: non_differentiable
+
 - name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, int[2] stride, int[2] padding) -> Tensor
   self: max_unpool2d_backward(grad, self, indices, output_size, stride, padding)
   indices: non_differentiable
@@ -1527,6 +1531,11 @@
 
 - name: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 3)
+  self: zeros_like(self)
+  indices: non_differentiable
+
+- name: max_unpool1d_backward(Tensor grad_output, Tensor self, Tensor indices, int[1] output_size, int[1] stride, int[1] padding) -> Tensor
+  grad_output: max_unpool1d(grad, indices, output_size, stride, padding)
   self: zeros_like(self)
   indices: non_differentiable
 

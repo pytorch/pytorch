@@ -226,7 +226,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
             owidth,
             output.data_ptr<scalar_t>());
       }));
-  AT_CUDA_CHECK(cudaGetLastError()); 
+  AT_CUDA_CHECK(cudaGetLastError());
   if (self.ndimension() == 3) {
     output.resize_({numChannels, oheight, owidth});
   }
@@ -242,6 +242,136 @@ Tensor max_unpooling2d_forward_cuda(
   auto output = at::empty({0}, self.options());
   max_unpooling2d_forward_out_cuda(output, self, indices, output_size, stride, padding);
   return output;
+}
+
+static void max_unpooling1d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto owidth = output_size[0];
+  TORCH_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
+  TORCH_CHECK(
+      output_size.size() == 1,
+      "There should be exactly one elements in output_size");
+  TORCH_CHECK(
+      stride.size() == 1,
+      "There should be exactly one elements in stride");
+  TORCH_CHECK(
+      padding.size() == 1,
+      "There should be exactly one elements in padding");
+  TORCH_CHECK(
+      (input.ndimension() == 3),
+      "Input to max_unpooling1d should be a 3d Tensor");
+  TORCH_CHECK(
+      input.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+
+  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(
+      stride[0] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+
+  int dimw = 2;
+
+  if (gradOutput.defined()) {
+    if (owidth != gradOutput.size(dimw)) {
+      AT_ERROR(
+          "Inconsistent gradOutput size. oW= ",
+          owidth,
+          ". gradOutput: ",
+          gradOutput.size(dimw));
+    }
+    TORCH_CHECK(
+        gradOutput.ndimension() == input.ndimension(),
+        "gradOutput and input Tensors should have same number of dimensions");
+  }
+}
+
+Tensor& max_unpooling1d_forward_out_cuda(
+    Tensor& output,
+    const Tensor& self_,
+    const Tensor& indices_,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
+  auto oheight = output_size[0];
+  auto owidth = 1;
+  max_unpooling1d_shape_check(
+      self_, Tensor(), indices_, output_size, stride, padding);
+
+  TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
+      indices_arg{indices_, "indices_", 3};
+  checkAllSameGPU(
+      "max_unpooling1d_forward_out_cuda", {output_arg, self_arg, indices_arg});
+
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t numBatch = 1;
+
+  int64_t numChannels;
+  int64_t inputHeight;
+  int64_t inputWidth;
+
+  /* extend one dimension for tensor so that it can use max_unpooling2d_backward_out_cpu_frame method. */
+  auto self = self_.contiguous().unsqueeze(3);
+  auto indices = indices_.contiguous().unsqueeze(3);
+
+  if (self.ndimension() == 4) {
+    numBatch = self.size(0);
+    dimw++;
+    dimh++;
+  }
+  numChannels = self.size(dimh - 1);
+  inputHeight = self.size(dimh);
+  inputWidth = self.size(dimw);
+
+  output.resize_({numBatch, numChannels, oheight, owidth});
+
+  output.zero_();
+
+  auto count = self.numel();
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+      self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
+        max_unpooling2d_forward_kernel<<<
+            GET_BLOCKS(count),
+            CUDA_NUM_THREADS,
+            0,
+            at::cuda::getCurrentCUDAStream()>>>(
+            self.numel(),
+            self.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
+            numChannels,
+            inputHeight,
+            inputWidth,
+            oheight,
+            owidth,
+            output.data_ptr<scalar_t>());
+      }));
+  AT_CUDA_CHECK(cudaGetLastError());
+  if (self.ndimension() == 3) {
+    output.resize_({numChannels, oheight, owidth});
+  }
+  return output;
+}
+
+Tensor max_unpooling1d_forward_cuda(
+    const Tensor& self,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto output = at::empty({0}, self.options());
+  max_unpooling1d_forward_out_cuda(output, self, indices, output_size, stride, padding);
+  /* reduce one dimension */
+  return output.squeeze(3);
 }
 
 static void max_unpooling3d_shape_check(
@@ -497,6 +627,87 @@ at::Tensor max_unpooling2d_backward_cuda(
   max_unpooling2d_backward_out_cuda(
       grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
+}
+
+at::Tensor& max_unpooling1d_backward_out_cuda(
+    Tensor& grad_input,
+    const Tensor& grad_output_,
+    const Tensor& self_,
+    const Tensor& indices_,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  int64_t oheight = output_size[0];
+  int64_t owidth = 1;
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  max_unpooling1d_shape_check(
+      self_, grad_output_, indices_, output_size, stride, padding);
+  TensorArg grad_input_arg{grad_input, "grad_input", 1},
+      grad_output_arg{grad_output_, "grad_output_", 2},
+      self_arg{self_, "self_", 3}, indices_arg{indices_, "indices_", 4};
+  checkAllSameGPU(
+      "max_unpooling2d_backward_out_cuda",
+      {grad_input_arg, grad_output_arg, self_arg, indices_arg});
+
+  int64_t nInputCols, nInputRows, nInputPlane;
+
+  int dimw = 2;
+  int dimh = 1;
+
+  /* extend one dimension for tensor so that it can use max_unpooling2d_backward_kernel method. */
+  auto self = self_.contiguous().unsqueeze(3);
+  auto indices = indices_.contiguous().unsqueeze(3);
+  auto grad_output = grad_output_.contiguous().unsqueeze(3);
+
+  if (self.ndimension() == 3) {
+    nInputPlane = self.size(0);
+  } else {
+    ++dimw;
+    ++dimh;
+    nInputPlane = self.size(1);
+  }
+
+  nInputCols = self.size(dimw);
+  nInputRows = self.size(dimh);
+
+  grad_input.resize_as_(self);
+  grad_input.zero_();
+
+  int count = self.numel();
+
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+      self.scalar_type(), "max_unpooling2d_backward_kernel", ([&] {
+        max_unpooling2d_backward_kernel<<<
+            GET_BLOCKS(count),
+            CUDA_NUM_THREADS,
+            0,
+            at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            grad_output.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
+            nInputPlane,
+            nInputRows,
+            nInputCols,
+            oheight,
+            owidth,
+            grad_input.data_ptr<scalar_t>());
+      }));
+  AT_CUDA_CHECK(cudaGetLastError());
+  return grad_input;
+}
+
+at::Tensor max_unpooling1d_backward_cuda(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  max_unpooling1d_backward_out_cuda(
+      grad_input, grad_output, self, indices, output_size, stride, padding);
+  /* reduce one dimension */
+  return grad_input.squeeze(3);
 }
 
 at::Tensor& max_unpooling3d_backward_out_cuda(

@@ -188,6 +188,100 @@ Tensor max_unpooling2d_forward_cpu(
   return output;
 }
 
+static void max_unpooling1d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto owidth = output_size[0];
+  TORCH_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
+  TORCH_CHECK(
+      output_size.size() == 1,
+      "There should be exactly one elements in output_size");
+  TORCH_CHECK(
+      stride.size() == 1,
+      "There should be exactly one elements in stride");
+  TORCH_CHECK(
+      padding.size() == 1,
+      "There should be exactly one elements in padding");
+  TORCH_CHECK(
+      (input.ndimension() == 3),
+      "Input to max_unpooling1d should be a 3d Tensor");
+  TORCH_CHECK(
+      input.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+
+  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(
+      stride[0] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+
+  int dimw = 2;
+
+  if (gradOutput.defined()) {
+    if (owidth != gradOutput.size(dimw)) {
+      AT_ERROR(
+          "Inconsistent gradOutput size. oW= ",
+          owidth,
+          ". gradOutput: ",
+          gradOutput.size(dimw));
+    }
+    TORCH_CHECK(
+        gradOutput.ndimension() == input.ndimension(),
+        "gradOutput and input Tensors should have same number of dimensions");
+  }
+}
+
+Tensor& max_unpooling1d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self_,
+    const Tensor& indices_,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto oheight = output_size[0];
+  auto owidth = 1;
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
+  max_unpooling1d_shape_check(
+      self_, Tensor(), indices_, output_size, stride, padding);
+  /* extend one dimension for tensor so that it can use max_unpooling2d_backward_out_cpu_frame method. */
+  auto self = self_.contiguous().unsqueeze(3);
+  auto indices = indices_.contiguous().unsqueeze(3);
+  if (self.ndimension() == 3) {
+    int64_t numChannels = self.size(0);
+    output.resize_({numChannels, oheight, owidth});
+  } else {
+    int64_t numBatch = self.size(0);
+    int64_t numChannels = self.size(1);
+    output.resize_({numBatch, numChannels, oheight, owidth});
+  }
+  output.zero_();
+
+  AT_DISPATCH_FLOATING_TYPES(
+      self.scalar_type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
+        max_unpooling2d_forward_out_cpu_frame<scalar_t>(
+            output, self, indices, oheight, owidth);
+      }));
+  return output;
+}
+
+Tensor max_unpooling1d_forward_cpu(
+    const Tensor& self,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto output = at::empty({0}, self.options());
+  max_unpooling1d_forward_out_cpu(output, self, indices, output_size, stride, padding);
+  /* reduce one dimension */
+  return output.squeeze(3);
+}
+
 template <typename scalar_t>
 Tensor max_unpooling3d_forward_out_cpu_frame(
     Tensor& output,
@@ -512,6 +606,82 @@ Tensor max_unpooling2d_backward_cpu(
   max_unpooling2d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
+}
+
+Tensor& max_unpooling1d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output_,
+    const Tensor& self,
+    const Tensor& indices_,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  int64_t oheight = output_size[0];
+  int64_t owidth = 1;
+  int dimw = 2;
+  int dimh = 1;
+  int nbatch = 1;
+  int nslices;
+  int iheight;
+  int iwidth;
+
+  max_unpooling1d_shape_check(
+      self, grad_output_, indices_, output_size, stride, padding);
+  /* get contiguous gradOutput and indices and extend on dimension */
+  auto grad_output = grad_output_.contiguous().unsqueeze(3);
+
+  /* extend one dimension for tensor so that it can use max_unpooling2d_backward_out_cpu_frame method. */
+  auto indices = indices_.contiguous().unsqueeze(3);
+  auto self_ = self.contiguous().unsqueeze(3);
+
+  /* resize */
+  grad_input.resize_as_(self_);
+  grad_input.zero_();
+
+  if (self_.ndimension() == 4) {
+    nbatch = self_.size(0);
+    dimw++;
+    dimh++;
+  }
+
+  /* sizes */
+  nslices = self_.size(dimh - 1);
+  iheight = self_.size(dimh);
+  iwidth = self_.size(dimw);
+
+  AT_DISPATCH_FLOATING_TYPES(
+      self_.scalar_type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
+        int p;
+        for (p = 0; p < nbatch; p++) {
+          auto inputOffset = p * nslices * iheight * iwidth;
+          auto outputOffset = p * nslices * oheight * owidth;
+          max_unpooling2d_backward_out_cpu_frame<scalar_t>(
+              grad_input.data_ptr<scalar_t>() + inputOffset,
+              grad_output.data_ptr<scalar_t>() + outputOffset,
+              indices.data_ptr<int64_t>() + inputOffset,
+              nslices,
+              iheight,
+              iwidth,
+              oheight,
+              owidth);
+        }
+      }));
+  return grad_input;
+}
+
+Tensor max_unpooling1d_backward_cpu(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  max_unpooling1d_backward_out_cpu(
+      grad_input, grad_output, self, indices, output_size, stride, padding);
+  /* reduce one dimension */
+  return grad_input.squeeze(3);
 }
 
 template <typename scalar_t>
