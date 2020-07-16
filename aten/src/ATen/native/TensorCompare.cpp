@@ -132,10 +132,33 @@ bool is_nonzero(const Tensor& self) {
 
 namespace {
 
+inline at::Tensor scalar_to_tensor_default_dtype(
+    Scalar s,
+    const Device device = at::kCPU) {
+  if (s.isFloatingPoint()) {
+    return at::scalar_tensor(
+        s, at::device(device).dtype(at::get_default_dtype()));
+  } else if (s.isBoolean()) {
+    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
+  } else if (s.isComplex()) {
+    return at::scalar_tensor(
+        s, at::device(device).dtype(at::get_default_complex_dtype()));
+  } else {
+    AT_ASSERT(s.isIntegral(false));
+    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
+  }
+}
+
 static Tensor wrapped_scalar_tensor(
     Scalar scalar,
-    Device device) {
-  auto tensor = scalar_to_tensor(scalar, device);
+    Device device,
+    bool use_default_dtype = false) {
+  at::Tensor tensor;
+  if (use_default_dtype) {
+    tensor = scalar_to_tensor_default_dtype(scalar, device);
+  } else {
+    tensor = scalar_to_tensor(scalar, device);
+  }
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
@@ -165,8 +188,8 @@ Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
 
 Tensor where(const Tensor& condition, Scalar self, Scalar other) {
   const auto device = condition.device();
-  const Tensor& other_t = wrapped_scalar_tensor(other, device);
-  const Tensor& self_t = wrapped_scalar_tensor(self, device);
+  const Tensor& other_t = wrapped_scalar_tensor(other, device, /*use_default_dtype=*/true);
+  const Tensor& self_t = wrapped_scalar_tensor(self, device, /*use_default_dtype=*/true);
   return at::where(condition, self_t, other_t);
 }
 

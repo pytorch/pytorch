@@ -18153,22 +18153,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Scalar-Scalar Version
         height = 5
         width = 5
-        for scalar_type_1 in [int, float, complex]:
-            for scalar_type_2 in [int, float, complex]:
-                x1 = scalar_type_1(random.random() * random.randint(10, 20))
-                x2 = scalar_type_2(random.random() * random.randint(20, 30))
-                condition = torch.randn(height, width, device=device) > 0.5
-                if scalar_type_1 != scalar_type_2:
-                    self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
-                else:
-                    def get_dtype(scalar_type):
-                        type_map = {int: torch.long, float: torch.float64, complex: torch.complex128}
-                        return type_map[scalar_type]
-                    expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
-                    expected[condition] = x1
-                    expected[~condition] = x2
-                    result = torch.where(condition, x1, x2)
-                    self.assertEqual(expected, result)
+        default_dtype = torch.get_default_dtype()
+        for test_default_dtype in [torch.float, torch.double]:
+            torch.set_default_dtype(test_default_dtype)
+            for scalar_type_1 in [int, float, complex]:
+                for scalar_type_2 in [int, float, complex]:
+                    x1 = scalar_type_1(random.random() * random.randint(10, 20))
+                    x2 = scalar_type_2(random.random() * random.randint(20, 30))
+                    condition = torch.randn(height, width, device=device) > 0.5
+                    if scalar_type_1 != scalar_type_2:
+                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
+                    else:
+                        def get_dtype(scalar_type):
+                            complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
+                            type_map = {int: torch.long, float: torch.get_default_dtype(), complex: complex_dtype}
+                            return type_map[scalar_type]
+                        expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
+                        expected[condition] = x1
+                        expected[~condition] = x2
+                        result = torch.where(condition, x1, x2)
+                        self.assertEqual(expected, result)
+
+        # Reset the original dtype
+        torch.set_default_dtype(default_dtype)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
