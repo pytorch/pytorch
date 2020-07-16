@@ -287,7 +287,6 @@ class Vectorizer : public IRMutator {
 
   bool vectorize_inputs(std::vector<const Expr*>& inputs) {
     bool any_vectorized = false;
-    bool all_vectorized = true;
     std::vector<const Expr*> new_inputs;
 
     // Attempt to vectorize each input.
@@ -296,8 +295,6 @@ class Vectorizer : public IRMutator {
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
-      } else {
-        all_vectorized = false;
       }
     }
 
@@ -1145,12 +1142,6 @@ void LoopNest::reorderAxis(For* a, For* b) {
     }
   }
 
-  // If the top level is now empty, eliminate it.
-  if (before->body()->nstmts() == 0) {
-    root->remove_stmt(before);
-    before = nullptr;
-  }
-
   // now we can actually reorder the chosen axes.
   std::swap(internal_axes.front(), internal_axes.back());
 
@@ -1160,9 +1151,15 @@ void LoopNest::reorderAxis(For* a, For* b) {
   }
 
   // Append the new statements to the root of the tree.
-  root->append_stmt(newInner);
+  if (before->body()->nstmts() == 0) {
+    // If the top level is now empty, eliminate it.
+    root->replace_stmt(before, newInner);
+  } else {
+    root->insert_stmt_after(newInner, before);
+  }
+
   if (after) {
-    root->append_stmt(after);
+    root->insert_stmt_after(after, newInner);
   }
 } // namespace tensorexpr
 
@@ -1467,18 +1464,22 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
 class SwapReduce : public IRMutator {
  public:
-  SwapReduce(ReduceOp* new_reduce) : new_reduce_(new_reduce) {}
+  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce)
+      : old_reduce_(old_reduce), new_reduce_(new_reduce) {}
 
   Stmt* mutate(const Store* v) override {
-    if (dynamic_cast<const ReduceOp*>(v->value())) {
-      auto buf = new_reduce_->accumulator();
-      return new Store(
-          buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+    if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
+      if (op == old_reduce_) {
+        auto buf = new_reduce_->accumulator();
+        return new Store(
+            buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+      }
     }
     return IRMutator::mutate(v);
   }
 
  private:
+  const ReduceOp* old_reduce_;
   ReduceOp* new_reduce_;
 };
 
@@ -1524,18 +1525,18 @@ void LoopNest::rfactor(
                                       reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
-  std::vector<const For*> init_loops;
+  std::vector<const For*> output_loops;
 
   while (st) {
     if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
       } else {
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
 
       if (reduce_args.empty()) {
@@ -1626,8 +1627,7 @@ void LoopNest::rfactor(
   // variables) with a reduce over only its var by replacing the reduction op
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
-  SwapReduce sr(first_reduce);
-  auto root_block = dynamic_cast<Block*>(root_stmt());
+  SwapReduce sr(reduce_op, first_reduce);
   auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
@@ -1654,11 +1654,11 @@ void LoopNest::rfactor(
         new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
 
     // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* il : init_loops) {
-      init_stmt = il->cloneWithNewBody(init_stmt);
+    for (auto* ol : output_loops) {
+      init_stmt = ol->cloneWithNewBody(init_stmt);
     }
 
-    parent_block->prepend_stmt(init_stmt);
+    parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
     // We may support this but not possible now.
     throw std::runtime_error("can't rfactor reduction with no initializer\n");
@@ -1672,16 +1672,16 @@ void LoopNest::rfactor(
     insertion_point->append_stmt(
         new Store(second_buf, second_indices, second_reduce, new IntImm(1)));
   } else {
-    For* new_for = new For(
-        target_for->var(),
-        target_for->start(),
-        target_for->stop(),
-        new Store(second_buf, second_indices, second_reduce, new IntImm(1)),
-        target_for->loop_options());
+    Stmt* body_stmt =
+        new Store(second_buf, second_indices, second_reduce, new IntImm(1));
+
+    for (auto* il : output_loops) {
+      body_stmt = il->cloneWithNewBody(body_stmt);
+    }
     if (insertion_point) {
-      insertion_point->append_stmt(new_for);
+      insertion_point->append_stmt(body_stmt);
     } else {
-      parent_block->append_stmt(new_for);
+      parent_block->insert_stmt_after(body_stmt, new_root_for);
     }
   }
 

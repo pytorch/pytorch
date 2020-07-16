@@ -6,6 +6,34 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+#  NATIVE - using native thread pool for intra- and inter-op parallelism
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+else()
+  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+endif()
+
+set(AT_PARALLEL_OPENMP 0)
+set(AT_PARALLEL_NATIVE 0)
+set(AT_PARALLEL_NATIVE_TBB 0)
+
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if("${ATEN_THREADING}" STREQUAL "OMP")
+  set(AT_PARALLEL_OPENMP 1)
+elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
+  set(AT_PARALLEL_NATIVE 1)
+elseif("${ATEN_THREADING}" STREQUAL "TBB")
+  if(NOT USE_TBB)
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
+  endif()
+  set(AT_PARALLEL_NATIVE_TBB 1)
+else()
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
+endif()
+
 # ---[ Declare source file lists
 
 # ---[ ATen build
@@ -59,7 +87,6 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
 if(NOT MSVC AND USE_XNNPACK)
   if(NOT TARGET fxdiv)
     set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
@@ -67,10 +94,6 @@ if(NOT MSVC AND USE_XNNPACK)
     add_subdirectory(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
-  endif()
-  if(NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
-    set_source_files_properties(
-        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -233,8 +256,8 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
-set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
-set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
+set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
+set(TORCH_ROOT "${PROJECT_SOURCE_DIR}")
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -251,7 +274,12 @@ endif()
 
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
+  if(USE_DISTRIBUTED)
+    add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+    target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
+    add_dependencies(process_group_agent torch c10d)
+    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
+  endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -286,6 +314,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     )
   endif()
 
@@ -333,6 +366,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
+    "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
@@ -392,6 +426,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
   endif()
@@ -418,11 +453,15 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
@@ -431,13 +470,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_meta.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
@@ -530,6 +572,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
@@ -543,10 +586,48 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
+# NOTE [ Linking AVX and non-AVX files ]
+#
+# Regardless of the CPU capabilities, we build some files with AVX and AVX2
+# instruction set. If the host CPU doesn't support those, we simply ignore their
+# functions at runtime during dispatch.
+#
+# We must make sure that those files are at the end of the input list when
+# linking the torch_cpu library. Otherwise, the following error scenario might
+# occur:
+# 1. A non-AVX and an AVX file both call a function defined with the `inline`
+#    keyword
+# 2. The compiler decides not to inline this function
+# 3. Two different versions of the machine code are generated for this function:
+#    one without AVX instructions and one with AVX.
+# 4. When linking, the AVX version is found earlier in the input object files,
+#    so the linker makes the entire library use it, even in code not guarded by
+#    the dispatcher.
+# 5. A CPU without AVX support executes this function, encounters an AVX
+#    instruction and crashes.
+#
+# Thus we organize the input files in the following order:
+# 1. All files with no AVX support
+# 2. All files with AVX support (conveniently, they all have names ending with
+#    'AVX.cpp')
+# 3. All files with AVX2 support ('*AVX2.cpp')
+set(Caffe2_CPU_SRCS_NON_AVX)
+set(Caffe2_CPU_SRCS_AVX)
+set(Caffe2_CPU_SRCS_AVX2)
+foreach(input_filename ${Caffe2_CPU_SRCS})
+  if(${input_filename} MATCHES "AVX\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX ${input_filename})
+  elseif(${input_filename} MATCHES "AVX2\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX2 ${input_filename})
+  else()
+    list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
+  endif()
+endforeach(input_filename)
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
+
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
-
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
@@ -783,7 +864,7 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu INTERFACE ${OpenMP_CXX_FLAGS})
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
@@ -821,6 +902,13 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
+  # can only be compiled with USE_TENSORPIPE is set.
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PRIVATE
+      USE_TENSORPIPE
+    )
+  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
@@ -887,30 +975,6 @@ elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
 endif()
 
-
-# ATen parallelism settings
-#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
-#  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
-else()
-  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
-endif()
-
-message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
-if("${ATEN_THREADING}" STREQUAL "OMP")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif("${ATEN_THREADING}" STREQUAL "TBB")
-  if(NOT USE_TBB)
-    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
-  endif()
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
-else()
-  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
-endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
@@ -1110,6 +1174,30 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+if(BUILD_MOBILE_BENCHMARK)
+  foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
+    get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
+    add_executable(${benchmark_name} "${benchmark_src}")
+    target_link_libraries(${benchmark_name} torch_library benchmark)
+    target_include_directories(${benchmark_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${benchmark_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${benchmark_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_options(${benchmark_name} PRIVATE "LINKER:--allow-multiple-definition")
+  endforeach()
+endif()
+
+if(BUILD_MOBILE_TEST)
+  foreach(test_src ${ATen_MOBILE_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} torch_library gtest_main)
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+  endforeach()
 endif()
 
 # ---[ Test binaries.

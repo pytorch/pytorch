@@ -12,12 +12,12 @@ namespace {
 using namespace at;
 
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
-  at::TensorIterator iter;
-  iter.add_output(grad_input);
-  iter.add_input(grad);
-  iter.add_input(input);
-  iter.add_input(target);
-  iter.build();
+  at::TensorIterator iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(grad)
+      .add_input(input)
+      .add_input(target)
+      .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "binary_cross_entropy_backward_out_cuda", [&] {
       at::native::gpu_kernel(iter, [] GPU_LAMBDA (
@@ -47,11 +47,11 @@ namespace at { namespace native {
 Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   auto grad_input = at::empty_like(input);
   if (!log_target) {
-    TensorIterator iter;
-    iter.add_output(grad_input);
-    iter.add_input(target);
-    iter.add_input(grad);
-    iter.build();
+    TensorIterator iter = TensorIteratorConfig()
+        .add_output(grad_input)
+        .add_input(target)
+        .add_input(grad)
+        .build();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
       scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
       gpu_kernel(iter,
@@ -78,11 +78,11 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
   Tensor loss_squeezed = at::squeeze(loss);
 
-  TensorIterator iter;
-  iter.add_output(loss_squeezed);
-  iter.add_input(at::squeeze(input));
-  iter.add_input(at::squeeze(target));
-  iter.build();
+  TensorIterator iter = TensorIteratorConfig()
+      .add_output(loss_squeezed)
+      .add_input(at::squeeze(input))
+      .add_input(at::squeeze(target))
+      .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "binary_cross_entropy_out_cuda", [&] {
       gpu_kernel(iter,

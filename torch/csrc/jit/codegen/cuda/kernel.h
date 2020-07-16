@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -29,22 +30,21 @@ namespace cuda {
 // Interfacing object allows kernel to return whether a given input
 // configuration could/should be handled.
 struct KernelArgsReq {
-  virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs) = 0;
+  virtual bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) = 0;
   virtual ~KernelArgsReq() = default;
 };
 
 // naive P-wise kernel only requires same dimensionality for input tensors.
 struct NaivePWKernelArgsReq : KernelArgsReq {
-  bool matchKernelSize(const at::ArrayRef<IValue> inputs) override;
+  bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) override;
   std::vector<int> dims_;
 };
 
 class CudaKernel {
  public:
-  std::deque<Val*> inputs;
-  std::deque<Val*> outputs;
-
-  CudaKernel() = default;
+  CudaKernel() {
+    fusion_ = std::make_unique<Fusion>();
+  }
 
   CUmodule& getModule() {
     return module_;
@@ -59,6 +59,8 @@ class CudaKernel {
   CUfunction function_;
   int max_blocks_;
   int unroll_factor_ = 1;
+  // mark reduction axes;
+  std::vector<int> reduction_axes_;
 
   // WARNING:
   // Block and Grid dimension setting is here for testing purposes only
@@ -74,26 +76,29 @@ class CudaKernel {
   dim3 block_;
   dim3 grid_;
   bool has_random_;
+
+  std::unique_ptr<Fusion> fusion_;
 };
 
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
 // 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
+TORCH_CUDA_API void compileKernel(CudaKernel* entry);
 
 // run loaded kernel through Function.
 // inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
 // wraps IO data structure for tensors on host.
 TORCH_CUDA_API void runKernel(
     CudaKernel* entry,
-    const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs);
+    const at::ArrayRef<c10::IValue> inputs,
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<int64_t>& broadcasted_shape);
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(
     CudaKernel* entry,
-    const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs);
+    const at::ArrayRef<c10::IValue> inputs,
+    const std::vector<at::Tensor>& outputs);
 
 } // namespace cuda
 } // namespace fuser

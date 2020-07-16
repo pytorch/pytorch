@@ -245,12 +245,15 @@ Pointwise Ops
     abs
     absolute
     acos
+    acosh
     add
     addcdiv
     addcmul
     angle
     asin
+    asinh
     atan
+    atanh
     atan2
     bitwise_not
     bitwise_and
@@ -261,6 +264,7 @@ Pointwise Ops
     conj
     cos
     cosh
+    deg2rad
     div
     digamma
     erf
@@ -279,15 +283,19 @@ Pointwise Ops
     log10
     log1p
     log2
+    logaddexp
+    logaddexp2
     logical_and
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder
@@ -326,6 +334,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -397,9 +406,13 @@ Other Operations
     einsum
     flatten
     flip
+    fliplr
+    flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave
@@ -412,6 +425,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations

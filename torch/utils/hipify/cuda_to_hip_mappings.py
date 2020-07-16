@@ -583,6 +583,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("cub/device/device_radix_sort.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("nvToolsExt.h", ("roctx.h", CONV_INCLUDE, API_ROCTX)),
@@ -2890,7 +2891,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cuOccupancyMaxActiveBlocksPerMultiprocessor",
             (
-                "hipOccupancyMaxActiveBlocksPerMultiprocessor",
+                "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor",
                 CONV_OCCUPANCY,
                 API_DRIVER,
             ),
@@ -2898,7 +2899,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
             (
-                "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+                "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
                 CONV_OCCUPANCY,
                 API_DRIVER,
                 HIP_UNSUPPORTED,
@@ -2906,12 +2907,12 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cuOccupancyMaxPotentialBlockSize",
-            ("hipOccupancyMaxPotentialBlockSize", CONV_OCCUPANCY, API_DRIVER),
+            ("hipModuleOccupancyMaxPotentialBlockSize", CONV_OCCUPANCY, API_DRIVER),
         ),
         (
             "cuOccupancyMaxPotentialBlockSizeWithFlags",
             (
-                "hipOccupancyMaxPotentialBlockSizeWithFlags",
+                "hipModuleOccupancyMaxPotentialBlockSizeWithFlags",
                 CONV_OCCUPANCY,
                 API_DRIVER,
                 HIP_UNSUPPORTED,
@@ -7994,6 +7995,8 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
         ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),
         ("/math/reduce.cuh", ("/math/hip/reduce.cuh", API_CAFFE2)),
+        ("/sgd/adagrad_fused_op_gpu.cuh", ("/sgd/hip/adagrad_fused_op_gpu.cuh", API_CAFFE2)),
+        ("/operators/segment_reduction_op_gpu.cuh", ("/operators/hip/segment_reduction_op_gpu.cuh", API_CAFFE2)),
         ("/gather_op.cuh", ("/hip/gather_op.cuh", API_CAFFE2)),
         ("caffe2/core/common_cudnn.h", ("caffe2/core/hip/common_miopen.h", API_CAFFE2)),
         ("REGISTER_CUDA_OPERATOR", ("REGISTER_HIP_OPERATOR", API_CAFFE2)),
@@ -8010,6 +8013,10 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("curandGenerateUniform", ("hiprandGenerateUniform", API_CAFFE2)),
         ("curand_generator", ("hiprand_generator", API_CAFFE2)),
         ("CaffeCudaGetDevice", ("CaffeHipGetDevice", API_CAFFE2)),
+        # do not rename CUDA_KERNEL_ASSERT, lazyInitCUDA in caffe2 sources
+        # the ordered dict guarantees this pattern will match first, before "CUDA"
+        ("CUDA_KERNEL_ASSERT", ("CUDA_KERNEL_ASSERT", API_CAFFE2)),
+        ("lazyInitCUDA", ("lazyInitCUDA", API_CAFFE2)),
         ("CUDA", ("HIP", API_CAFFE2)),
         ("Cuda", ("Hip", API_CAFFE2)),
         ("cuda_", ("hip_", API_CAFFE2)),

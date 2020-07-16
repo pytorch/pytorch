@@ -87,9 +87,8 @@ Tensor isinf(const Tensor &self) {
 
   // Note: a complex value is infinite when either part is infinite
   if (self.is_complex()) {
-    const auto float_type = c10::toValueType(self.scalar_type());
-    return at::isinf(self.copy_real().to(float_type)).__ior__
-          (at::isinf(self.copy_imag().to(float_type)));
+    return at::isinf(at::real(self)).__ior__
+          (at::isinf(at::imag(self)));
   }
 
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
@@ -122,7 +121,7 @@ bool is_nonzero(const Tensor& self) {
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
   } else if (localScalar.isComplex()) {
-     return localScalar.to<std::complex<double>>() != std::complex<double>(0.0, 0.0);
+     return localScalar.to<c10::complex<double>>() != c10::complex<double>(0.0, 0.0);
   } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
   } else if (localScalar.isBoolean()) {
@@ -151,14 +150,14 @@ std::vector<Tensor> where(const Tensor& condition) {
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(ret);
-  iter.add_input(condition);
-  iter.add_input(self);
-  iter.add_input(other);
-  iter.dont_compute_common_dtype();
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(ret)
+    .add_input(condition)
+    .add_input(self)
+    .add_input(other)
+    .build();
   where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;
 }
@@ -189,20 +188,6 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
     namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
     return result;
   }
-}
-
-std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
-                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  max_stub(kCPU, max, max_indices, self, dim, keepdim);
-  return std::tuple<Tensor &,Tensor &>{max, max_indices};
-}
-
-std::tuple<Tensor, Tensor> _max_cpu(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor max = at::empty({0}, self.options());
-  return at::native::_max_out_cpu(max, max_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
@@ -238,7 +223,8 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
     max_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(max, max_indices);
   } else {
-    return at::_max_out(max, max_indices, self, dim, keepdim);
+    max_stub(self.device().type(), max, max_indices, self, dim, keepdim);
+    return std::tuple<Tensor &,Tensor &>{max, max_indices};
   }
 }
 

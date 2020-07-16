@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <sstream>
 
@@ -16,30 +17,62 @@ void confirmPendingUser(
     const FutureMessage& futureMessage,
     const ForkId& expectedForkId) {
   if (!futureMessage.hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
+  } else {
+    // Handle errors, such as timeouts, by invoking the error handler on the
+    // rref.
+    // Note [Best Effort Error handling for Remote calls]:
+    // When remote calls initiated by rpc.remote() fail, such as with a timeout
+    // error, we take a best-effort approach to error handling. We handle errors
+    // when callbacks corresponding to the remote call run, and set the error
+    // information on the RRef. If the RRef has not been used by the application
+    // before this process (such as to_here or fork call), then future uses of
+    // the RRef will appropriately raise errors. However, it is possible that
+    // the user application will use the RRef before the errors are handled. In
+    // this case, errors may not be raised as they have not yet been handled.
+    auto rref_ptr = RRefContext::getInstance().getPendingUser(expectedForkId);
+    auto errorType = getRPCErrorType(futureMessage);
+    rref_ptr->handleError(errorType, futureMessage);
   }
   RRefContext::getInstance().delPendingUser(expectedForkId);
-  // Potentially propagate to the userRRef?
-  RRefContext::handleException(futureMessage);
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
-    const FutureMessage& futureMessage) {
-  RRefContext::handleException(futureMessage);
-  auto rr = RemoteRet::fromMessage(futureMessage.constValue());
-  TORCH_INTERNAL_ASSERT(
-      rr->rrefId() == rr->forkId(),
-      "Expecting an OwnerRRef as RemoteRet but got a fork.");
-  auto& ctx = RRefContext::getInstance();
-  auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
-  return deletedRRef;
+    const FutureMessage& futureMessage,
+    const RRefId& rrefId) {
+  if (futureMessage.hasError()) {
+    auto& ctx = RRefContext::getInstance();
+    // We expect to run this callback only after the OwnerRRef has been created,
+    // since this is only invoked when sending to self.
+    auto rref_ptr =
+        ctx.getOwnerRRef(rrefId, /* ensure created */ true)->constValue();
+    auto errorType = getRPCErrorType(futureMessage);
+    rref_ptr->handleError(errorType, futureMessage);
+    // OwnerRRefs do not have a forkId, so don't need to assert here.
+    auto deletedRRef =
+        ctx.delForkOfOwner(rref_ptr->rrefId(), rref_ptr->rrefId());
+    return deletedRRef;
+  } else {
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
+    TORCH_INTERNAL_ASSERT(
+        rr->rrefId() == rr->forkId(),
+        "Expecting an OwnerRRef as RemoteRet but got a fork.");
+    auto& ctx = RRefContext::getInstance();
+    auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+    return deletedRRef;
+  }
 }
 
 } // namespace callback
 
 // Keys for RRef-related debug information.
 const std::string kNumOwnerRRefs = "num_owner_rrefs";
+const std::string kNumPendingFutures = "num_pending_futures";
 const std::string kNumPendingUsers = "num_pending_users";
 const std::string kNumForks = "num_forks";
 
@@ -71,7 +104,6 @@ std::vector<c10::intrusive_ptr<RRef>> RRefContext::destroyInstance(
 
 void RRefContext::handleException(const FutureMessage& fm) {
   if (fm.hasError()) {
-    // TODO: allow users to register an error handler and call it here.
     VLOG(1) << "Got exception: " << fm.error()->what();
     throw std::runtime_error(fm.error()->what());
   }
@@ -99,6 +131,7 @@ std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
   }
   lock.unlock();
   info[kNumOwnerRRefs] = c10::to_string(ownerSize);
+  info[kNumPendingFutures] = c10::to_string(numPendingFutures_.load());
   info[kNumPendingUsers] = c10::to_string(numPendingUsers);
   info[kNumForks] = c10::to_string(numForks);
   return info;
@@ -175,11 +208,15 @@ void RRefContext::delUser(
       // Sending an RRefUserDelete causes the receiver to run delForkOfOwner,
       // which is now idempotent. See the comment at RRefContext::delForkOfOwner
       // for more details.
+      ++numPendingFutures_;
       auto fm = agent_->sendWithRetries(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
 
-      fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
+      fm->addCallback([this](const FutureMessage& fm) {
+        handleException(fm);
+        --numPendingFutures_;
+      });
     }
   }
 
@@ -187,7 +224,8 @@ void RRefContext::delUser(
   confirmedUsers_.erase(forkId);
 }
 
-void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
+void RRefContext::delAllUsersAndUnforkedOwners(
+    std::chrono::milliseconds timeoutMillis) {
   // First, wait for all pending UserRRefs to be confirmed,
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
@@ -218,7 +256,31 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     rref_ptr->tryDel();
   }
 
-  // Wait for Owners to process all delete UserRRef messages.
+  // If an rref in the owners_ map has never been forked, we will never get a
+  // corresponding message from the forking node(s) telling us to delete the
+  // RRef. Hence we delete the RRef here. This can occur when a remote call is
+  // sent to self and times out.
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    std::vector<RRefId> unforkedOwners;
+    for (const auto& it : owners_) {
+      auto rrefId = it.first;
+      if (forks_.find(rrefId) == forks_.end()) {
+        // Successful fork of owner was never processed.
+        unforkedOwners.push_back(rrefId);
+      }
+    }
+    for (auto& rrefId : unforkedOwners) {
+      LOG(INFO) << "Removing unforked OwnerRRef with RRefId: " << rrefId;
+      auto iter = owners_.find(rrefId);
+      TORCH_CHECK(
+          iter != owners_.end(),
+          c10::str("Did not find OwnerRRef with RRefId: ", rrefId));
+      owners_.erase(iter);
+    }
+  }
+  // Wait for this node to process all delete UserRRef messages it may get for
+  // the OwnerRRefs that exist on this node.
   {
     std::unique_lock<std::mutex> lock(mutex_);
     bool noOwner = deleteAllUsersCV_.wait_for(
@@ -283,14 +345,14 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
       TORCH_INTERNAL_ASSERT(
           ownerRRef->type()->isSubtypeOf(TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
-          ownerRRef->type()->python_str());
+          ownerRRef->type()->repr_str());
     } else {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type() == type,
+          *ownerRRef->type() == *type,
           "OwnerRRef type is ",
-          ownerRRef->type()->python_str(),
+          ownerRRef->type()->repr_str(),
           ", expected type is ",
-          type);
+          type->repr_str());
     }
     return ownerRRef;
   }
@@ -307,10 +369,15 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
 }
 
 std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
-    getOwnerRRef(const RRefId& rrefId) {
+    getOwnerRRef(const RRefId& rrefId, bool forceCreated) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
+    if (forceCreated) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          c10::str("Expected OwnerRRef with id ", rrefId, " to be created."));
+    }
     // Scenario (1) RRef is used before it is created
     const auto pendingOwnerIter = pendingOwners_.find(rrefId);
     if (pendingOwnerIter == pendingOwners_.end()) {
@@ -334,6 +401,13 @@ std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> RRefContext::
 
 RRefForkData RRefContext::prepareChildFork(
     const c10::intrusive_ptr<RRef>& rref) {
+  // If we know that rref creation on the owner has timed out, raise it to the
+  // user here, otherwise continue with pickling.
+
+  TORCH_CHECK(
+      !rref->getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   auto rrefForkData = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]
@@ -408,10 +482,15 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // In this case, the owner is the caller, and it does not add the fork id
     // into forks_. Because, there will be no real `UserRRef` associated
     // with this fork ID.
+    ++numPendingFutures_;
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
+    fm->addCallback([this](const FutureMessage& fm) {
+      handleException(fm);
+      --numPendingFutures_;
+    });
   } else {
+    ++numPendingFutures_;
     auto fm = agent_->sendWithRetries(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
@@ -420,6 +499,9 @@ void RRefContext::notifyOwnerAndParentOfFork(
     fm->addCallback([this, forkId, parent](const FutureMessage& fm) {
       handleException(fm);
       this->finishForkRequest(forkId, parent);
+      // Decrease after calling finishForkRequest because, as that creates a new
+      // future, it might otherwise cause the count to briefly go to zero.
+      --numPendingFutures_;
     });
   }
 }
@@ -547,6 +629,16 @@ void RRefContext::addConfirmedUser(
       std::forward_as_tuple(rref));
 }
 
+c10::intrusive_ptr<RRef> RRefContext::getPendingUser(const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = pendingUsers_.find(forkId);
+  if (it == pendingUsers_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false, "Pending user with forkId ", forkId, " not found");
+  }
+  return it->second->rref_;
+}
+
 void RRefContext::recordThreadLocalPendingRRefs() {
   TORCH_INTERNAL_ASSERT(
       userTable_.empty(),
@@ -583,10 +675,14 @@ void RRefContext::clearRecordedPendingRRefsOnError() {
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
+  ++numPendingFutures_;
   auto fm = agent_->sendWithRetries(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const FutureMessage& fm) { handleException(fm); });
+  fm->addCallback([this](const FutureMessage& fm) {
+    handleException(fm);
+    --numPendingFutures_;
+  });
 }
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {

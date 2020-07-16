@@ -172,6 +172,11 @@ void initTreeViewBindings(PyObject* module) {
     return Delete::create(expr);
   }));
 
+  py::class_<WithItem, Expr>(m, "WithItem")
+      .def(py::init([](const SourceRange& range, const Expr& target, Var* var) {
+        return WithItem::create(range, target, wrap_maybe(range, var));
+      }));
+
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
         auto li = wrap_list(rhs.range(), std::move(lhs));
@@ -235,6 +240,15 @@ void initTreeViewBindings(PyObject* module) {
                        const Expr& cond,
                        std::vector<Stmt> body) {
         return While::create(range, cond, wrap_list(range, std::move(body)));
+      }));
+  py::class_<With, Stmt>(m, "With").def(
+      py::init([](const SourceRange& range,
+                  std::vector<WithItem> targets,
+                  std::vector<Stmt> body) {
+        return With::create(
+            range,
+            wrap_list(range, std::move(targets)),
+            wrap_list(range, std::move(body)));
       }));
   py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange range,
                                                   std::vector<Expr>& targets,

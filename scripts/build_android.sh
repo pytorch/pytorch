@@ -84,9 +84,18 @@ fi
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
 
+if [ -z "$BUILD_MOBILE_BENCHMARK" ]; then
+  BUILD_MOBILE_BENCHMARK=0
+fi
+
+if [ -z "$BUILD_MOBILE_TEST" ]; then
+  BUILD_MOBILE_TEST=0
+fi
 # Don't build artifacts we don't need
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
+CMAKE_ARGS+=("-DBUILD_MOBILE_TEST=$BUILD_MOBILE_TEST")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
 if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
@@ -112,9 +121,15 @@ CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
 CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
-
+if [ "${ANDROID_STL_SHARED:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_STL=c++_shared")
+fi
 if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
   CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
+
+if [ -n "${USE_VULKAN}" ]; then
+  CMAKE_ARGS+=("-DUSE_VULKAN=ON")
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults

@@ -55,7 +55,7 @@ template <typename Value>
 struct DivMod {
   Value div, mod;
 
-  __host__ __device__ DivMod(Value div, Value mod) : div(div), mod(mod) { }
+  C10_HOST_DEVICE DivMod(Value div, Value mod) : div(div), mod(mod) { }
 };
 
 // Base case: we only have an implementation for uint32_t for now.  For
@@ -65,9 +65,9 @@ struct IntDivider {
   IntDivider() { }  // Dummy constructor for arrays.
   IntDivider(Value d) : divisor(d) { }
 
-  __host__ __device__ inline Value div(Value n) const { return n / divisor; }
-  __host__ __device__ inline Value mod(Value n) const { return n % divisor; }
-  __host__ __device__ inline DivMod<Value> divmod(Value n) const {
+  C10_HOST_DEVICE inline Value div(Value n) const { return n / divisor; }
+  C10_HOST_DEVICE inline Value mod(Value n) const { return n % divisor; }
+  C10_HOST_DEVICE inline DivMod<Value> divmod(Value n) const {
     return DivMod<Value>(n / divisor, n % divisor);
   }
 
@@ -93,7 +93,7 @@ struct IntDivider<unsigned int> {
     assert(m1 > 0 && m1 == magic);  // m1 must fit in 32 bits.
   }
 
-  __host__ __device__ inline unsigned int div(unsigned int n) const {
+  C10_HOST_DEVICE inline unsigned int div(unsigned int n) const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     // 't' is the higher 32-bits of unsigned 32-bit multiplication of 'n' and
     // 'm1'.
@@ -106,11 +106,11 @@ struct IntDivider<unsigned int> {
 #endif
   }
 
-  __host__ __device__ inline unsigned int mod(unsigned int n) const {
+  C10_HOST_DEVICE inline unsigned int mod(unsigned int n) const {
     return n - div(n) * divisor;
   }
 
-  __host__ __device__ inline DivMod<unsigned int> divmod(unsigned int n) const {
+  C10_HOST_DEVICE inline DivMod<unsigned int> divmod(unsigned int n) const {
     unsigned int q = div(n);
     return DivMod<unsigned int>(q, n - q * divisor);
   }

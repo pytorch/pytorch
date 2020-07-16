@@ -44,7 +44,7 @@ class BazelJob:
             "build_environment": build_env_name,
             "docker_image": DOCKER_IMAGE_GCC7,
             "name": full_job_name,
-            "requires": ["setup"] + extra_requires,
+            "requires": extra_requires,
         }
 
         props_dict.update(self.extra_props)

@@ -31,9 +31,7 @@ endif()
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 14)
-if(NOT MSVC)
-  set(CMAKE_C_STANDARD 11)
-endif()
+set(CMAKE_C_STANDARD 11)
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
@@ -134,10 +132,13 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
+option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
+option(CLANG_CODE_COVERAGE "Compile C/C++ with clang code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -330,6 +331,14 @@ if(MSVC)
   endforeach(flag_var)
 
   foreach(flag_var
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+
+  foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
     # Switch off incremental linking in debug builds
@@ -381,7 +390,7 @@ endif()
 # When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  if(NOT BUILD_SHARED_LIBS)
+  if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_EXPORT")
   endif()
   set(BUILD_PYTHON OFF)
@@ -475,7 +484,7 @@ if(USE_PYTORCH_QNNPACK)
 endif()
 
 if(USE_XNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
 endif()
 
 if(USE_VULKAN)
@@ -525,6 +534,10 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-psabi")
   endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=pedantic")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=redundant-decls")
@@ -581,6 +594,12 @@ endif()
 if(USE_ASAN)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
+
+# invoke clang code coverage flags
+if(CLANG_CODE_COVERAGE)
+  list(APPEND CMAKE_C_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
+  list(APPEND CMAKE_CXX_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 if(APPLE)

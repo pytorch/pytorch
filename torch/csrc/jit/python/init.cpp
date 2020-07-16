@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -42,16 +43,20 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -179,35 +184,45 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
+          "_jit_pass_fuse_quantized_add_relu",
+          [](std::shared_ptr<Graph>& g) {
+            return FuseQuantizedAddRelu(g); // overload resolution
+          })
+      .def(
           "_jit_pass_insert_observers",
           [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
              bool inplace,
-             bool is_dynamic) {
+             int quant_type_int) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertObservers(
-                module, method_name, dict, inplace, is_dynamic);
+                module, method_name, dict, inplace, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false,
-          py::arg("is_dynamic") = false)
+          py::arg("inplace"),
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
              const std::string& method_name,
              bool inplace,
-             bool is_dynamic) {
-            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
+             bool debug,
+             int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false,
-          py::arg("is_dynamic") = false)
+          py::arg("inplace"),
+          py::arg("debug"),
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -217,15 +232,20 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
+      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
-          [](Module& module) { return freeze_module(module); },
-          py::arg("module"))
+          [](Module& module, std::vector<std::string>& preservedAttrs) {
+            return freeze_module(module, preservedAttrs);
+          },
+          py::arg("module"),
+          py::arg("preservedAttrs") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def(
+          "_jit_pass_fuse_add_relu",
+          [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
-      .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
@@ -234,11 +254,12 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, bool is_dynamic) {
-            return Finalize(module, is_dynamic);
+          [](Module& module, int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return Finalize(module, quant_type);
           },
           py::arg("module"),
-          py::arg("is_dynamic") = false)
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -400,8 +421,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
-      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
+      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -522,7 +543,37 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
           "_jit_pass_optimize_for_mobile",
-          [](script::Module& module) { return optimizeForMobile(module); })
+          [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blacklist,
+             std::vector<std::string>& preserved_methods) {
+            return optimizeForMobile(
+                module, optimization_blacklist, preserved_methods);
+          })
+      .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return vulkanInsertPrePackedOps(graph);
+          })
+      .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](script::Module& module) {
+            return vulkanInsertPrePackedOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fuse_clamp_w_prepacked_conv",
+          [](script::Module& module) {
+            return vulkanFusePrePackedConvWithClamp(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fold_prepacking_ops",
+          [](script::Module& module) {
+            return vulkanFoldPrePackingOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_optimize_for_mobile",
+          [](script::Module& module) {
+            return vulkanOptimizeForMobile(module);
+          })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
@@ -653,6 +704,15 @@ void initJITBindings(PyObject* module) {
                 name, reinterpret_cast<const char*>(data), size);
           });
 
+  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+      .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
+      .value(
+          "INSERT_FOLD_PREPACK_OPS",
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
+      .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .value("FUSE_ADD_RELU", MobileOptimizerType::FUSE_ADD_RELU)
+      .export_values();
+
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
   class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
@@ -694,7 +754,7 @@ void initJITBindings(PyObject* module) {
         auto res =
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
-          int i = PyInt_AsLong(res);
+          int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
           if (i > 0) {
             return i;
           }
@@ -729,6 +789,29 @@ void initJITBindings(PyObject* module) {
             size_t size;
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def(
+          "get_storage_from_record",
+          [](PyTorchStreamReader& self,
+             const std::string& key,
+             size_t numel,
+             py::object data_type_obj) {
+            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            c10::Storage storage(
+                c10::Storage::use_byte_size_t(),
+                numel * elementSize(scalar_type),
+                std::move(data),
+                /*allocator=*/nullptr,
+                /*resizable=*/false);
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+            return at::Tensor(std::move(ptr));
           })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
@@ -802,11 +885,17 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
-      .def_property_readonly("default_value", [](Argument& self) -> py::object {
-        if (!self.default_value())
-          return py::none();
-        IValue v = *self.default_value();
-        return toPyObject(std::move(v));
+      .def_property_readonly(
+          "default_value",
+          [](Argument& self) -> py::object {
+            if (!self.default_value()) {
+              return py::none();
+            }
+            IValue v = *self.default_value();
+            return toPyObject(std::move(v));
+          })
+      .def("has_default_value", [](Argument& self) -> py::bool_ {
+        return self.default_value().has_value();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
@@ -827,13 +916,40 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
+      .def(py::init([]() {
+        return std::make_shared<PythonFutureWrapper>(
+            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+      }))
       .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_then",
+          "then",
           &PythonFutureWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_result",
+          // Intentionally not releasing GIL
+          &PythonFutureWrapper::markCompleted)
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonFutureWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
@@ -893,6 +1009,37 @@ void initJITBindings(PyObject* module) {
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
     return fut->wait();
   });
+
+  m.def(
+      "_collect_all",
+      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
+          -> std::shared_ptr<jit::PythonFutureWrapper> {
+        auto typePtr =
+            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
+            c10::FutureType::create(typePtr));
+        asList.reserve(futures.size());
+        for (const auto& f : futures) {
+          asList.push_back(f->fut);
+        }
+        return std::make_shared<jit::PythonFutureWrapper>(
+            c10::collectAll(asList),
+            /* unwrap_func */ [futures](const py::object& /*unused*/) {
+              // Throw errors when calling wait() on the returned Future if
+              // any of the original futures would throw.
+              // NB: PythonFutureWrapper takes an unwrap_func which serves as a
+              // callback to evalute the value in the Future. RPC uses this
+              // unwrap_func to check whether the returned py::object is a
+              // RemoteException object, and re-throw the exception if it is.
+              // By extracting the c10::ivalue::Future from PythonFutureWrapper
+              // the unwrap_func on the original PythonFutureWrapper objects are
+              // discarded, and hence it will return the RemoteException as an
+              // object instead of re-throwing it.
+              for (auto& fut : futures) {
+                fut->wait();
+              }
+            });
+      });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

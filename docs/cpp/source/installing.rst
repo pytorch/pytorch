@@ -93,6 +93,7 @@ distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can
 using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
 
 .. code-block:: sh
+
   cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
 
 If all goes well, it will look something like this:
