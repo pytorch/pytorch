@@ -61,13 +61,10 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
   auto it = ncclDataType.find(type);
-  if (it == ncclDataType.end()) {
-    // Input tensor is of an unsupported type.
-    auto err = c10::str(
-        "Input tensor data type is not supported for NCCL process group: ",
-        type);
-    TORCH_CHECK(false, err);
-  }
+  TORCH_CHECK(
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
   return it->second;
 }
 
