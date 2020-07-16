@@ -8967,7 +8967,8 @@ add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',
-    with_tf32=True))
+    with_tf32=True,
+    tf32_precision=0.005))
 
 
 # The following are helpers for TestNN.test_affine_*

@@ -4662,7 +4662,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.skip_double = kwargs.get('skip_double', False)
         self.with_tf32 = kwargs.get('with_tf32', False)
-        self.tf32_precison = kwargs.get('tf32_precison', 0.001)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
@@ -4820,7 +4820,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
-        self.tf32_precison = kwargs.get('tf32_precison', 0.001)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
