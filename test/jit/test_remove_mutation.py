@@ -162,6 +162,19 @@ class TestRemoveMutation(JitTestCase):
         FileCheck().check_not("aten::zero_").check_not("aten::fill_").run(graph)
         self.assertEqual(test_successful(), fn())
 
+        # full_like is not implemented for a tensor fill value
+
+        def test_unsuccessful():
+            x = torch.tensor([2, 2])
+            y = torch.tensor([2, 4])
+            x.fill_(y)
+            return x + x
+
+        fn = torch.jit.script(test_unsuccessful)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check('aten::fill_').run(graph)
+
     def test_lists_append(self):
         def successful_remove():
             return [i for i in range(5)]  # noqa: C416
