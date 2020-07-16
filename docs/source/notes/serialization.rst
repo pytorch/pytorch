@@ -97,11 +97,12 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new tensors with the desired 
-view relationships before saving, such that the storage object sizes are minimized.
+storage objects, then care must be taken to construct new tensors that minimize 
+the size of their storage objects but still have the desired view relationships 
+before saving.
 
-Saving and loading Python modules
----------------------------------
+Saving and loading torch.nn.Modules
+-----------------------------------
 
 .. _saving-loading-python-modules:
 
@@ -175,14 +176,14 @@ can use this pattern:
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
 
-Serializing Python modules and loading them in C++
---------------------------------------------------
+Serializing torch.nn.Modules and loading them in C++
+----------------------------------------------------
 
 .. _serializing-python-modules:
 
 See also: `Tutorial: Loading a TorchScript Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_
 
-ScriptModules can be serialized as a TorchScript program using and loaded
+ScriptModules can be serialized as a TorchScript program and loaded
 using :func:`torch.jit.load`.
 This serialization encodes all the modules’ methods, submodules, parameters,
 and attributes, and it allows the serialized program to be loaded in C++
@@ -257,7 +258,7 @@ Finally, to load the module in C++:
 See the `PyTorch C++ API documentation <https://pytorch.org/cppdocs/>`_
 for details about how to use PyTorch modules in C++.
 
-Saving and loading scripted modules across PyTorch versions
+Saving and loading ScriptModules across PyTorch versions
 -----------------------------------------------------------
 
 .. _saving-loading-across-versions:
@@ -269,8 +270,8 @@ explicitly described in
 PyTorch’s `release notes <https://github.com/pytorch/pytorch/releases>`_,
 and modules relying on functionality that has changed may need to be updated
 to continue working properly. In limited cases, detailed below, PyTorch will
-preserve the historic behavior of serialized modules so they do not require an
-update.
+preserve the historic behavior of serialized ScriptModules so they do not require 
+an update.
 
 torch.div performing integer division
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -296,10 +297,10 @@ of its inputs, just like division in Python 3:
     >>> a / b
     tensor(1.6667)
 
-The behavior of :func:`torch.div` is preserved in serialized modules.
-That is, modules serialized with versions of PyTorch before 1.6 will continue
+The behavior of :func:`torch.div` is preserved in serialized ScriptModules.
+That is, ScriptModules serialized with versions of PyTorch before 1.6 will continue
 to see :func:`torch.div` perform floor division when given two integer inputs
-even when loaded with newer versions of PyTorch. Modules using :func:`torch.div`
+even when loaded with newer versions of PyTorch. ScriptModules using :func:`torch.div`
 and serialized on PyTorch 1.6 and later cannot be loaded in earlier versions of
 PyTorch, however, since those earlier versions do not understand the new behavior.
 
@@ -333,9 +334,9 @@ dtype from the fill value:
     >>> torch.full((3,), 1 + 1j)
     tensor([1.+1.j, 1.+1.j, 1.+1.j])
 
-The behavior of :func:`torch.full` is preserved in serialized modules. That is,
-modules serialized with versions of PyTorch before 1.6 will continue to see
+The behavior of :func:`torch.full` is preserved in serialized ScriptModules. That is,
+ScriptModules serialized with versions of PyTorch before 1.6 will continue to see
 torch.full return float tensors by default, even when given bool or
-integer fill values. Modules using :func:`torch.full` and serialized on PyTorch 1.6
+integer fill values. ScriptModules using :func:`torch.full` and serialized on PyTorch 1.6
 and later cannot be loaded in earlier versions of PyTorch, however, since those
 earlier versions do not understand the new behavior.
