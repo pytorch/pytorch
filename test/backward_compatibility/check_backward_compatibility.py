@@ -132,6 +132,7 @@ white_list = [
     ('aten::sparse_coo_tensor', datetime.date(2020, 7, 30)),
     ('aten::_sparse_coo_tensor_with_dims', datetime.date(2020, 7, 30)),
     ('aten::_sparse_coo_tensor_with_dims_and_tensors', datetime.date(2020, 7, 30)),
+    ('aten::to', datetime.date(2020, 7, 15)),
 ]
 
 
