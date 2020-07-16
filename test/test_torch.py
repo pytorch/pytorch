@@ -18149,6 +18149,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         self._test_where_scalar_template(device, dtype, checkResult)
 
+    # As the test fails with Runtime Error not raised on XLA
+    @onlyOnCPUAndCUDA
     def test_where_scalar_scalar(self, device):
         # Scalar-Scalar Version
         height = 5
