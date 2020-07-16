@@ -23,7 +23,7 @@ SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when s
 
 class _LRScheduler(object):
 
-    def __init__(self, optimizer, last_epoch=-1):
+    def __init__(self, optimizer, verbose=False, last_epoch=-1):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
@@ -74,6 +74,7 @@ class _LRScheduler(object):
         self.optimizer.step = with_counter(self.optimizer.step)
         self.optimizer._step_count = 0
         self._step_count = 0
+        self.verbose = verbose
 
         self.step()
 
@@ -147,8 +148,16 @@ class _LRScheduler(object):
                 else:
                     values = self.get_lr()
 
-        for param_group, lr in zip(self.optimizer.param_groups, values):
+        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
+            param_group, lr = data
             param_group['lr'] = lr
+            if self.verbose:
+                if epoch is None:
+                    print('Adjusting learning rate'
+                          ' of group {} to {:.4e}.'.format(i, lr))
+                else:
+                    print('Epoch {:5d}: adjusting learning rate'
+                          ' of group {} to {:.4e}.'.format(epoch, i, lr))
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -175,7 +184,7 @@ class LambdaLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1):
+    def __init__(self, optimizer, lr_lambda, verbose=False, last_epoch=-1):
         self.optimizer = optimizer
 
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -186,7 +195,7 @@ class LambdaLR(_LRScheduler):
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
         self.last_epoch = last_epoch
-        super(LambdaLR, self).__init__(optimizer, last_epoch)
+        super(LambdaLR, self).__init__(optimizer, verbose, last_epoch)
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -255,7 +264,7 @@ class MultiplicativeLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1):
+    def __init__(self, optimizer, lr_lambda, verbose=False, last_epoch=-1):
         self.optimizer = optimizer
 
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -266,7 +275,7 @@ class MultiplicativeLR(_LRScheduler):
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
         self.last_epoch = last_epoch
-        super(MultiplicativeLR, self).__init__(optimizer, last_epoch)
+        super(MultiplicativeLR, self).__init__(optimizer, verbose, last_epoch)
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -340,10 +349,10 @@ class StepLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
+    def __init__(self, optimizer, step_size, gamma=0.1, verbose=False, last_epoch=-1):
         self.step_size = step_size
         self.gamma = gamma
-        super(StepLR, self).__init__(optimizer, last_epoch)
+        super(StepLR, self).__init__(optimizer, verbose, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -385,10 +394,10 @@ class MultiStepLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
+    def __init__(self, optimizer, milestones, gamma=0.1, verbose=False, last_epoch=-1):
         self.milestones = Counter(milestones)
         self.gamma = gamma
-        super(MultiStepLR, self).__init__(optimizer, last_epoch)
+        super(MultiStepLR, self).__init__(optimizer, verbose, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -416,9 +425,9 @@ class ExponentialLR(_LRScheduler):
         last_epoch (int): The index of last epoch. Default: -1.
     """
 
-    def __init__(self, optimizer, gamma, last_epoch=-1):
+    def __init__(self, optimizer, gamma, verbose=False, last_epoch=-1):
         self.gamma = gamma
-        super(ExponentialLR, self).__init__(optimizer, last_epoch)
+        super(ExponentialLR, self).__init__(optimizer, verbose, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -473,10 +482,11 @@ class CosineAnnealingLR(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1):
+    def __init__(self, optimizer, T_max, eta_min=0, verbose=False, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
-        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
+        self.verbose = verbose
+        super(CosineAnnealingLR, self).__init__(optimizer, verbose, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -777,6 +787,7 @@ class CyclicLR(_LRScheduler):
                  cycle_momentum=True,
                  base_momentum=0.8,
                  max_momentum=0.9,
+                 verbose=False,
                  last_epoch=-1):
 
         # Attach optimizer
@@ -830,7 +841,7 @@ class CyclicLR(_LRScheduler):
             self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
-        super(CyclicLR, self).__init__(optimizer, last_epoch)
+        super(CyclicLR, self).__init__(optimizer, verbose, last_epoch)
         self.base_lrs = base_lrs
 
     def _format_param(self, name, optimizer, param):
@@ -922,7 +933,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, verbose=False, last_epoch=-1):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -931,6 +942,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
+        self.verbose = verbose
 
         super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
 
@@ -1008,8 +1020,16 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 return self
 
         with _enable_get_lr_call(self):
-            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            for i, data  in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
+                param_group, lr = data
                 param_group['lr'] = lr
+                if self.verbose:
+                    if epoch is None:
+                        print('Adjusting learning rate'
+                              ' of group {} to {:.4e}.'.format(i, lr))
+                    else:
+                        print('Epoch {:5d}: adjusting learning rate'
+                          ' of group {} to {:.4e}.'.format(epoch, i, lr))
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -1117,6 +1137,7 @@ class OneCycleLR(_LRScheduler):
                  max_momentum=0.95,
                  div_factor=25.,
                  final_div_factor=1e4,
+                 verbose=False,
                  last_epoch=-1):
 
         # Validate optimizer
@@ -1179,7 +1200,7 @@ class OneCycleLR(_LRScheduler):
                     group['max_momentum'] = m_momentum
                     group['base_momentum'] = b_momentum
 
-        super(OneCycleLR, self).__init__(optimizer, last_epoch)
+        super(OneCycleLR, self).__init__(optimizer, verbose, last_epoch)
 
     def _format_param(self, name, optimizer, param):
         """Return correctly formatted lr/momentum for each param group."""
