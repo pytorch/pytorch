@@ -4,7 +4,7 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, FutureType
@@ -105,6 +105,8 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
+        if is_ignored_fn(fn):
+            fn = inspect.unwrap(fn)
         return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
