@@ -18,6 +18,9 @@
 
 using namespace c10d::test;
 
+constexpr auto kSendDelay = std::chrono::milliseconds(100);
+constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
+
 class SignalTest {
  public:
   SignalTest(const std::string& path) : path_(path) {}
@@ -90,11 +93,30 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
   return test.run(0, 2);
 }
 
+class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
+ public:
+  ProcessGroupGlooDelayed(
+      const std::shared_ptr<::c10d::Store>& store,
+      int rank,
+      int size,
+      Options options)
+      : ProcessGroupGloo(store, rank, size, options) {}
+
+  std::shared_ptr<::c10d::ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override {
+    std::this_thread::sleep_for(kSendDelay);
+    return ::c10d::ProcessGroupGloo::send(tensors, dstRank, tag);
+  }
+};
+
 class CollectiveTest {
  public:
   static std::vector<CollectiveTest> initialize(
       const std::string& path,
-      int num) {
+      int num,
+      bool delayed = false) {
     std::vector<CollectiveTest> tests;
     for (auto i = 0; i < num; i++) {
       tests.push_back(CollectiveTest(path));
@@ -102,8 +124,8 @@ class CollectiveTest {
 
     std::vector<std::thread> threads;
     for (auto i = 0; i < num; i++) {
-      threads.push_back(
-          std::thread([i, &tests] { tests[i].start(i, tests.size()); }));
+      threads.push_back(std::thread(
+          [i, &tests, delayed] { tests[i].start(i, tests.size(), delayed); }));
     }
     for (auto& thread : threads) {
       thread.join();
@@ -123,7 +145,7 @@ class CollectiveTest {
     return *pg_;
   }
 
-  void start(int rank, int size) {
+  void start(int rank, int size, bool delayed) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Set a timeout that is small enough to make this test run fast, but also
@@ -133,8 +155,13 @@ class CollectiveTest {
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
-    pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
-        new ::c10d::ProcessGroupGloo(store, rank, size, options));
+    if (!delayed) {
+      pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
+          new ::c10d::ProcessGroupGloo(store, rank, size, options));
+    } else {
+      pg_ = std::unique_ptr<ProcessGroupGlooDelayed>(
+          new ProcessGroupGlooDelayed(store, rank, size, options));
+    }
   }
 
  protected:
@@ -258,6 +285,22 @@ void testBarrier(const std::string& path) {
   for (auto i = 0; i < size; i++) {
     work[i]->wait();
   }
+}
+
+void testWaitDelay(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size, /* delay */ true);
+
+  constexpr uint64_t tag = 0x1337;
+  // test that waiting for work to be sent can be aborted successfully.
+  auto selfRank = 0;
+  auto dstRank = 1;
+  std::vector<at::Tensor> tensors = {
+      at::ones({16, 16}),
+  };
+  auto& pg = tests[selfRank].getProcessGroup();
+  auto sendWork = pg.send(tensors, dstRank, tag);
+  EXPECT_THROW(sendWork->wait(kWaitTimeout), std::exception);
 }
 
 void testSend(const std::string& path) {
@@ -407,6 +450,13 @@ TEST(ProcessGroupGlooTest, testRecv) {
   {
     TemporaryFile file;
     testRecv(file.path);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testWaitDelay) {
+  {
+    TemporaryFile file;
+    testWaitDelay(file.path);
   }
 }
 

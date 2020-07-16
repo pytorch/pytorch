@@ -298,6 +298,27 @@ Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
+Tensor& logit_out(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<double> eps) {
+  auto iter = TensorIterator::unary_op(
+      result,
+      self,
+      /*check_mem_overlap=*/true);
+  logit_stub(iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
+  return result;
+}
+
+Tensor logit(const Tensor& self, c10::optional<double> eps) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logit_out(result, self, eps);
+}
+
+Tensor& logit_(Tensor& self, c10::optional<double> eps) {
+  return at::logit_out(self, self, eps);
+}
+
 Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
 Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
@@ -520,6 +541,7 @@ DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
@@ -529,5 +551,6 @@ DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 DEFINE_DISPATCH(lgamma_stub);
-}
+
+} // namespace native
 } // namespace at
