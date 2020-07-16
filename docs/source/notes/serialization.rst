@@ -97,8 +97,9 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new tensors with the desired 
-view relationships before saving, such that the storage object sizes are minimized.
+storage objects, then care must be taken to construct new tensors that minimize 
+the size of their storage objects but still have the desired view relationships 
+before saving.
 
 Saving and loading torch.nn.Modules
 -----------------------------------
