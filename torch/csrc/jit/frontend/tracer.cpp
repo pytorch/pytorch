@@ -765,7 +765,27 @@ void addInputs(
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
-  AT_ERROR("Tracing float lists currently not supported!");
+  std::vector<Value*> info;
+  auto& g = getTracingState()->graph;
+  for (double elt : value) {
+    info.push_back(g->insertConstant(elt));
+    recordSourceLocation(info.back()->node());
+  }
+  n->addInput(
+      g->insertNode(g->createList(jit::FloatType::get(), info))->output());
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<c10::ArrayRef<double>>& opt_value) {
+  if (opt_value.has_value()) {
+    return addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 
 void addInputs(

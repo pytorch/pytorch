@@ -270,9 +270,12 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`. This type will be
-    used as default floating point type for type inference in
-    :func:`torch.tensor`.
+    r"""Sets the default floating point dtype to :attr:`d`.
+    This dtype is:
+    1. The inferred dtype for python floats in :func:`torch.tensor`.
+    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
+       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
+       otherwise it's set to ``torch.complex64``
 
     The default floating point dtype is initially ``torch.float32``.
 
@@ -280,12 +283,17 @@ def set_default_dtype(d):
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
     Example::
-
-        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
+        >>> # initial default for floating point is torch.float32
+        >>> torch.tensor([1.2, 3]).dtype
         torch.float32
+        >>> # initial default for floating point is torch.complex64
+        >>> torch.tensor([1.2, 3j]).dtype
+        torch.complex64
         >>> torch.set_default_dtype(torch.float64)
-        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        torch.complex128
 
     """
     _C._set_default_dtype(d)
