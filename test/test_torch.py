@@ -18105,6 +18105,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with self.assertRaisesRegex(RuntimeError, "repeated axis in `dst` argument"):
             torch.moveaxis(x, (0, 1), (1, 1))
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_moveaxis(self, device, dtype):
+        for nd in range(5):
+            shape = self._rand_shape(nd, min_size=5, max_size=10)
+            x = self._generate_input(shape, dtype, device, with_extremal=False)
+            for random_negative in [True, False]:
+                for src_dim, dst_dim in permutations(range(nd), r=2):
+                    if random_negative:
+                        src_dim = src_dim - nd
+                    # Integer Inputs
+                    torch_fn = partial(torch.moveaxis, src=src_dim, dst=dst_dim)
+                    np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
+                    self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+                if nd > 0:
+                    for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
+                        # Randomly change a dim to a negative dim representation of itself.
+                        if random_negative:
+                            random_idx = random.randint(0, len(src_sequence) - 1)
+                            src_sequence = list(src_sequence)
+                            src_sequence[random_idx] = src_sequence[random_idx] - nd
+                            src_sequence = tuple(src_sequence)
+                        # Sequence Inputs
+                        dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
+                        torch_fn = partial(torch.moveaxis, src=src_sequence, dst=dst_sequence)
+                        np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
