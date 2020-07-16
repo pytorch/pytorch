@@ -5727,7 +5727,7 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.3-py3.6:be76e8fd-44e2-484d-b090-07e0cc3a56f0"
           resource_class: xlarge
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_rocm3_3_py3_6_test
+          name: pytorch_linux_xenial_rocm3_3_py3_6_test1
           requires:
             - pytorch_linux_xenial_rocm3_3_py3_6_build
           filters:
@@ -5736,9 +5736,20 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          build_environment: "pytorch-linux-xenial-rocm3.3-py3.6-test"
+          build_environment: "pytorch-linux-xenial-rocm3.3-py3.6-test1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.3-py3.6:be76e8fd-44e2-484d-b090-07e0cc3a56f0"
-          resource_class: pytorch/amd-gpu
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_rocm3_3_py3_6_test2
+          requires:
+            - pytorch_linux_xenial_rocm3_3_py3_6_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-linux-xenial-rocm3.3-py3.6-test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.3-py3.6:be76e8fd-44e2-484d-b090-07e0cc3a56f0"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-build"
@@ -5840,12 +5851,17 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:ab1632df-fa59-40e6-8c23-98e004f61148"
       - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_clang5_asan_test
+          name: pytorch_linux_xenial_py3_clang5_asan_test1
           requires:
             - pytorch_linux_xenial_py3_clang5_asan_build
-          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test"
+          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:ab1632df-fa59-40e6-8c23-98e004f61148"
-          resource_class: large
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_py3_clang5_asan_test2
+          requires:
+            - pytorch_linux_xenial_py3_clang5_asan_build
+          build_environment: "pytorch-linux-xenial-py3-clang5-asan-test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:ab1632df-fa59-40e6-8c23-98e004f61148"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
           filters:
