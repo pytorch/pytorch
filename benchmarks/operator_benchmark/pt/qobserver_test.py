@@ -11,8 +11,8 @@ import torch.quantization.observer as obs
 qobserver_short_configs_dict = {
     'attr_names': ('C', 'M', 'N', 'dtype', 'device'),
     'attrs': (
-        (3, 512, 512, torch.quint8, torch.device('cpu')),
-        (3, 512, 512, torch.quint8, torch.device('cuda')),
+        (3, 512, 512, torch.quint8, 'cpu'),
+        (3, 512, 512, torch.quint8, 'cuda'),
     ),
     'tags': ('short',),
 }

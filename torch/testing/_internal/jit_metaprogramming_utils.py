@@ -358,7 +358,7 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
 
     f_args_variable = (self_variable,) + args_variable
     f_args_tensor = (self_tensor,) + args_tensor
-    with torch.jit._disable_emit_hooks():
+    with torch._jit_internal._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
     return script_fn, inputs
 
