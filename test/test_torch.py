@@ -12483,6 +12483,13 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.linspace(10, 2000, 1991, device=device, dtype=dtype),
                              torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
 
+        # Vectorization on non-contiguous tensors
+        if dtype != torch.int8:  # int8 is too small for this test
+            res = torch.rand(3, 3, 1000, device=device).to(dtype)
+            res = res.permute(2, 0, 1)
+            torch.linspace(0, 1000 * 3 * 3, 1000 * 3 * 3, out=res)
+            self.assertEqual(res.flatten(), torch.linspace(0, 1000 * 3 * 3, 1000 * 3 * 3, device=device, dtype=dtype))
+
         self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device, dtype=dtype))
         # steps = 1
         self.assertEqual(torch.linspace(0, 1, 1, device=device, dtype=dtype),
@@ -16924,6 +16931,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         r = a.remainder(b)
         self.assertEqual(r.dtype, a.dtype)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gcd_edge_cases(self, device, dtype):
+        t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
+        t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
+        actual = torch.gcd(t1, t2)
+        expected = np.gcd([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lcm_edge_cases(self, device, dtype):
+        t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
+        t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
+        actual = torch.lcm(t1, t2)
+        expected = np.lcm([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
+
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
@@ -19210,6 +19237,12 @@ tensor_op_tests = [
     ('expand_as', '', _new_t((_M, 1, _M)), lambda t, d: [_new_t((_M, 4, _M))(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('fill_', '', _medium_2d, lambda t, d: [_number(3.14, 3, t)], 1e-3, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('gcd', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
+     [torch.int16, torch.int32, torch.int64],
+     [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
+    ('lcm', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
+     [torch.int16, torch.int32, torch.int64],
+     [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
     ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),

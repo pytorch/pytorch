@@ -180,6 +180,29 @@ class TestMkldnn(TestCase):
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
 
+    def test_conv3d(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
+            for bias in [True, False]:
+                conv3d = torch.nn.Conv3d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv3d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv3d))
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv3d(x)
+                y_mkldnn = mkldnn_conv3d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+
+                self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())
@@ -287,6 +310,22 @@ class TestMkldnn(TestCase):
         # TODO: support training
         for train in [False]:
             bn = torch.nn.BatchNorm2d(C).float().train(train)
+            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+            self.assertEqual(
+                bn(x),
+                mkldnn_bn(x.to_mkldnn()).to_dense())
+
+            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+
+    def test_batch_norm3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(N, C, 30, 30, 30, dtype=torch.float32) * 10
+
+        # TODO: support training
+        for train in [False]:
+            bn = torch.nn.BatchNorm3d(C).float().train(train)
             mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
             self.assertEqual(
                 bn(x),
