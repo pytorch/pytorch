@@ -3519,6 +3519,7 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randn(2, 5, 7, dtype=torch.float64)
         self.run_test(Celu(), (input,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_where(self):
         class Model(torch.nn.Module):
             def forward(self, cond, input, other):
@@ -3529,6 +3530,7 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.ones(2, 3, 1)
         self.run_test(Model(), (x, y, z))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_condition(self):
         class Model(torch.nn.Module):
             def forward(self, input):
