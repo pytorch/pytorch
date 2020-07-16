@@ -254,7 +254,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-bool ProcessGroupNCCL::WorkNCCL::wait() {
+bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds /* unused */) {
   synchronize();
   // Always return true, because abort API is not implemented.
   return true;
