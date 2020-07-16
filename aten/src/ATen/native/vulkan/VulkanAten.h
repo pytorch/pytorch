@@ -44,5 +44,9 @@ at::Tensor vulkan_max_pool2d(
 
 at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape);
 
+Tensor vulkan_transpose(const Tensor& self, int64_t dim0, int64_t dim1);
+
+Tensor& vulkan_transpose_(Tensor& self, int64_t dim0, int64_t dim1);
+
 } // namespace native
 } // namespace at

@@ -1212,7 +1212,11 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
-
+#ifdef USE_VULKAN
+    if (self.is_vulkan()) {
+      return at::native::vulkan_transpose_(self, dim0, dim1);
+    }
+#endif
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
@@ -1236,6 +1240,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_mkldnn()) {
     return at::_mkldnn_transpose(self, dim0, dim1);
   }
+#ifdef USE_VULKAN
+    if (self.is_vulkan()) {
+      return at::native::vulkan_transpose(self, dim0, dim1);
+    }
+#endif
 
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();

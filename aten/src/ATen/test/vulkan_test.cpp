@@ -710,11 +710,37 @@ TEST(VulkanTest, tensor5d) {
   if (!at::vulkan::is_available())
     return;
 
-  auto t_in = at::rand({2, 2, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in =
+      at::rand({2, 2, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   auto tv_in = t_in.vulkan();
 }
 
-//TEST(VulkanTest, view) {
+TEST(VulkanTest, tensor5d_transpose) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({2, 3, 2, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  std::cout << "t_in:" << t_in << std::endl;
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.transpose(1, 2);
+  auto t_out = tv_in.transpose(1, 2).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  // if (!check) {
+  std::cout << "expected:" << t_out_expected << std::endl;
+  std::cout << "got:" << t_out << std::endl;
+  //}
+  ASSERT_TRUE(check);
+}
+
+// TEST(VulkanTest, view) {
 //  if (!at::vulkan::is_available())
 //    return;
 //

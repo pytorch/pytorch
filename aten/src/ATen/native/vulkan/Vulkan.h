@@ -21,12 +21,15 @@
 #endif
 #include <ATen/native/vulkan/VulkanCommon.h>
 
+#define COUT_FLF std::cout << __FILE__ << __LINE__ << __FUNCTION__
+#define COUT_FLFE COUT_FLF << std::endl
+
 namespace at {
 namespace native {
 namespace vulkan {
 namespace detail {
 
-static constexpr bool kEnableValidationLayers = true;
+static constexpr bool kEnableValidationLayers = false;
 bool is_available();
 
 class VContext;

@@ -297,8 +297,21 @@ at::Tensor vulkan_cat(TensorList tensors, int64_t dim) {
   return new_with_vtensor_vulkan(std::move(output), tensor.options());
 }
 
+Tensor vulkan_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  VulkanTensor& x = vtensor_from_vulkan(self);
+  VulkanTensor y = vulkan::detail::transpose(x, dim0, dim1);
+  return new_with_vtensor_vulkan(std::move(y), self.options());
+}
+
+Tensor& vulkan_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
+  VulkanTensor& x = vtensor_from_vulkan(self);
+  VulkanTensor y = vulkan::detail::transpose(x, dim0, dim1);
+  x = std::move(y);
+  return self;
+}
+
 Tensor vulkan_view(const Tensor& self, IntArrayRef size) {
-  //auto inferred_size = at::infer_size(size, self.numel());
+  // auto inferred_size = at::infer_size(size, self.numel());
   return self;
 }
 

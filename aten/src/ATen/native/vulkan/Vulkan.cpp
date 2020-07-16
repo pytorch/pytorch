@@ -45,6 +45,7 @@ VContext::VContext(bool enableValidationLayers)
 }
 
 VContext::~VContext() {
+  COUT_FLFE;
   if (enableValidationLayers_) {
     auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
         instance_, "vkDestroyDebugReportCallbackEXT");
@@ -898,6 +899,8 @@ void ComputeUnit::dispatchCommandBuffer(
     uint32_t groupCountX,
     uint32_t groupCountY,
     uint32_t groupCountZ) {
+  COUT_FLF << " groups:" << groupCountX << " " << groupCountY << " "
+           << groupCountZ << std::endl;
   vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
 }
 
@@ -910,6 +913,7 @@ void ComputeUnit::dispatchCommandBuffer(
     uint32_t gridY,
     uint32_t gridZ,
     WorkGroupSize workGroupSize) {
+  COUT_FLF << " grid:" << gridX << " " << gridY << " " << gridZ << std::endl;
   dispatchCommandBuffer(
       UP_DIV(gridX, workGroupSize.x),
       UP_DIV(gridY, workGroupSize.y),

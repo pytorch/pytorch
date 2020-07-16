@@ -10,6 +10,9 @@
 #include <ATen/native/vulkan/VulkanConvolution.h>
 #include <ATen/native/vulkan/VulkanOps.h>
 
+#define COUT_FLF std::cout << __FILE__ << __LINE__ << __FUNCTION__
+#define COUT_FLFE COUT_FLF << std::endl
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -218,6 +221,115 @@ void max_pool2d(
   computeUnit.submitAndWaitCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
+VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1) {
+  auto idim = input.dim();
+  TORCH_INTERNAL_ASSERT(
+      idim <= 8, "Vulkan transpose is implemented only for dim <= 8");
+  auto device = context().device();
+  struct ConstBlock {
+    int32_t istrides[8];
+    int32_t ostrides[8];
+    int32_t odims[8];
+  };
+
+  auto isizes = input.sizes();
+  auto osizes = isizes;
+  std::swap(osizes[dim0], osizes[dim1]);
+  COUT_FLFE;
+  for (int i = 0; i < isizes.size(); i++) {
+    std::cout << "isizes[" << i << "]:" << isizes[i] << std::endl;
+  }
+
+  for (int i = 0; i < osizes.size(); i++) {
+    std::cout << "osizes[" << i << "]:" << osizes[i] << std::endl;
+  }
+  COUT_FLFE;
+  VulkanTensor output{osizes};
+  output.allocate_storage();
+  COUT_FLFE;
+
+  int32_t idims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t odims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  for (int i = 0; i < idim; i++) {
+    idims8[8 - idim + i] = isizes[i];
+    odims8[8 - idim + i] = osizes[i];
+  }
+  COUT_FLFE;
+  for (int i = 0; i < 8; i++) {
+    std::cout << "idims8[" << i << "]:" << idims8[i] << std::endl;
+  }
+  COUT_FLFE;
+  for (int i = 0; i < 8; i++) {
+    std::cout << "odims8[" << i << "]:" << odims8[i] << std::endl;
+  }
+  int32_t istrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t ostrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  COUT_FLFE;
+  for (int i = 6; i >= 0; --i) {
+    istrides8[i] = idims8[i + 1] * istrides8[i + 1];
+    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
+  }
+  COUT_FLFE;
+  for (int i = 0; i < 8; i++) {
+    std::cout << "istrides8[" << i << "]:" << istrides8[i] << std::endl;
+  }
+  COUT_FLFE;
+  for (int i = 0; i < 8; i++) {
+    std::cout << "ostrides8[" << i << "]:" << ostrides8[i] << std::endl;
+  }
+  std::swap(istrides8[8 - idim + dim0], istrides8[8 - idim + dim1]);
+  COUT_FLFE;
+  for (int i = 0; i < 8; i++) {
+    std::cout << "after_swap istrides8[" << i << "]:" << istrides8[i]
+              << std::endl;
+  }
+
+  ConstBlock cb{};
+  std::copy(
+      std::begin(istrides8), std::end(istrides8), std::begin(cb.istrides));
+  std::copy(
+      std::begin(ostrides8), std::end(ostrides8), std::begin(cb.ostrides));
+  std::copy(std::begin(odims8), std::end(odims8), std::begin(cb.odims));
+
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.buffer()->bind(descriptorSet, 0);
+  input.buffer()->bind(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(permute), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.buffer()->addBufferMemoryBarrier(
+      computeUnit.commandBuffer(), 0, input.buffer()->sizeBytes());
+  computeUnit.dispatchCommandBuffer(
+      odims8[6] * odims8[7],
+      odims8[4] * odims8[5],
+      odims8[2] * odims8[3],
+      workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+  COUT_FLFE;
+  return output;
 }
 
 void add(
