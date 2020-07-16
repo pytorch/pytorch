@@ -3327,6 +3327,8 @@ class RpcTest(RpcAgentTestFixture):
         # Test PG
         dist.barrier()
 
+        rpc.shutdown()
+
     @dist_init(setup_rpc=False)
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
@@ -3351,6 +3353,8 @@ class RpcTest(RpcAgentTestFixture):
 
         # Test PG
         dist.barrier()
+
+        rpc.shutdown()
 
     @dist_init
     def test_wait_all_with_exception(self):
