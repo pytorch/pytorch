@@ -78,7 +78,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST
 };
 
 struct FunctionParameter;
@@ -164,6 +164,7 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
+  inline c10::OptionalArray<double> doublelistOptional(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
@@ -182,8 +183,8 @@ struct PythonArgs {
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
-  inline std::complex<double> toComplex(int i);
-  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
+  inline c10::complex<double> toComplex(int i);
+  inline c10::complex<double> toComplexWithDefault(int i, c10::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
@@ -343,6 +344,27 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
     return {};
   }
   return intlist(i);
+}
+
+inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<double> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    try {
+      res[idx] = THPUtils_unpackDouble(obj);
+    } catch (const std::exception &e) {
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
+  }
+  return res;
 }
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
@@ -521,14 +543,14 @@ inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   return toDouble(i);
 }
 
-inline std::complex<double> PythonArgs::toComplex(int i) {
-  std::complex<double> default_value = *const_cast<std::complex<double> *>(
-    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+inline c10::complex<double> PythonArgs::toComplex(int i) {
+  c10::complex<double> default_value = *const_cast<c10::complex<double> *>(
+    reinterpret_cast<const c10::complex<double> *>(signature.params[i].default_complex));
   if (!args[i]) return default_value;
   return THPUtils_unpackComplexDouble(args[i]);
 }
 
-inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+inline c10::complex<double> PythonArgs::toComplexWithDefault(int i, c10::complex<double> default_value) {
   if (!args[i]) return default_value;
   return toDouble(i);
 }
