@@ -785,7 +785,19 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def(
+          "add_attribute",
+          [](const std::shared_ptr<ClassType>& self,
+             const std::string& name,
+             const std::shared_ptr<ClassType>& other) {
+            return self->addAttribute(name, other);
+          })
+      .def(
+          "unsafe_remove_attribute",
+          [](const std::shared_ptr<ClassType>& self, const std::string& name) {
+            self->unsafeRemoveAttribute(name);
+          });
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {

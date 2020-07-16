@@ -156,8 +156,18 @@ class NestedModuleTest(JitBackendTestCase):
         lowered_module = to_test_backend_multi(
             self.scripted_module, {"forward": {"": ""}}
         )
+
+        # Function for use with torch.jit.selective_to_jit_backend. It lowers the module inside
+        # NestedModule, but not the outermost module.
+        def to_backend_fn(mod):
+            if mod.original_name == NestedModuleTest.NestedModule.__name__:
+                return mod
+
+            return to_test_backend(mod, {"": ""})
+
+        self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(BasicModule()))
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
-        self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(lowered_module))
+        self.lowered_module = torch.jit.selective_to_jit_backend(self.lowered_module, to_backend_fn)
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
