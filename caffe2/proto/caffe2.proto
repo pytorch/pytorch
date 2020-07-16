@@ -365,7 +365,8 @@ message NetDef {
   // in parallel.
   // Note: This is to be deprecated. Using the arg field with "num_workers" as
   // key.
-  optional int32 num_workers = 4 [deprecated=true];
+  // Note 2: The old uses of this were never actually cleaned up
+  optional int32 num_workers = 4;
 
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the

@@ -9,7 +9,8 @@ namespace jit {
 enum class MobileOptimizerType : int8_t {
   CONV_BN_FUSION,
   INSERT_FOLD_PREPACK_OPS,
-  REMOVE_DROPOUT
+  REMOVE_DROPOUT,
+  FUSE_ADD_RELU,
 };
 
 TORCH_API void insertPrePackedOps(std::shared_ptr<Graph>& graph);

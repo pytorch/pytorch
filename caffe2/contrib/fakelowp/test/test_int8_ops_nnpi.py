@@ -221,13 +221,13 @@ class Int8OpsTest(serial.SerializedTestCase):
         n=st.integers(1, 4),
         rand_seed=st.integers(0, 65534)
     )
-    @settings(max_examples=1)
+    @settings(max_examples=100)
     def test_int8_small_input(self, n, rand_seed):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
-        X_fp32 = np.random.uniform(0.001, 0.003, size=(n, n)).astype(np.float16).astype(np.float32)
+        X_fp32 = np.random.uniform(0.01, 0.03, size=(n, n)).astype(np.float16).astype(np.float32)
         W_fp32 = np.identity(n, dtype=np.float32)
         b_fp32 = np.zeros((n,), dtype=np.float32)
 

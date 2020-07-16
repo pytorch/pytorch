@@ -1700,6 +1700,29 @@ def bilinear(input1, input2, weight, bias=None):
     """
     return torch.bilinear(input1, input2, weight, bias)
 
+def silu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
+    r"""Applies the silu function, element-wise.
+
+    .. math::
+        \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
+
+    .. note::
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        where the SiLU was experimented with later.
+
+    See :class:`~torch.nn.SiLU` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(silu, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.silu_(input)
+    return torch._C._nn.silu(input)
 
 def hardswish(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
@@ -2469,12 +2492,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     else:
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
-        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()),
-                      stacklevel=2)
-    if input.numel() != target.numel():
-        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.numel(), input.numel()))
+        raise ValueError("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                         "Please ensure they have the same size.".format(target.size(), input.size()))
 
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
