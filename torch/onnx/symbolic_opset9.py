@@ -954,6 +954,9 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Greater", input, other)
 
 
@@ -962,6 +965,9 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Less", input, other)
 
 
@@ -1017,7 +1023,10 @@ def __lshift_(g, self, other):
     return lshift
 
 
-def where(g, condition, self, other):
+def where(g, condition, self=None, other=None):
+    if self is None:
+        condition = nonzero(g, condition)
+        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)))
     return g.op("Where", condition, self, other)
 
 
