@@ -4,67 +4,6 @@ from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union
 import warnings
 
-REQUIRE_SAME_MAP_SIZE = (
-    'vmap: Expected all tensors to have the same size in the mapped dimension, '
-    'got sizes {sizes} for the mapped dimension'
-)
-
-ELEMENT_MUST_BE_TENSOR = (
-    'vmap({fn}, ...): `{fn}` must only return Tensors, got '
-    'type {out} for return {idx}.'
-)
-
-MUST_RETURN_TENSORS = (
-    'vmap({fn}, ...): `{fn}` must only return Tensors, got '
-    'type {out} as the return.'
-)
-
-NO_INPUTS = (
-    'vmap({fn})(<inputs>): got no inputs. Maybe you forgot '
-    'to add inputs, or you are trying to vmap over a '
-    'function with no inputs. The latter is unsupported.'
-)
-
-OUT_DIMS_MUST_BE_INT_OR_TUPLE_OF_INT = (
-    'vmap({fn}, ..., out_dims={out_dims}): `out_dims` must be an int or a tuple '
-    'of int representing where in the outputs the vmapped dimension should appear.'
-)
-
-OUT_DIMS_AND_NUM_OUTPUTS_MISMATCH = (
-    'vmap({fn}, ..., out_dims={out_dims}): `out_dims` must have one dim per '
-    'output (got {num_outputs} outputs) of {fn}.'
-)
-
-EXPECTED_IN_DIMS_TO_BE_INT_OR_TUPLE = (
-    'vmap({fn}, in_dims={in_dims}, ...): expected `in_dims` to be int or tuple, '
-    'got: {actual_type}.'
-)
-
-IN_DIMS_AND_NUM_INPUTS_MISMATCH = (
-    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): expected one `in_dim` per '
-    'input (got {num_inputs} inputs) of {fn}'
-)
-
-IN_DIMS_MUST_BE_FLAT_TUPLE = (
-    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): in_dims must be a flat '
-    'tuple containing ints and/or Nones. If you were trying to vmap over a '
-    'Tensor inside a Python collection in `inputs`, we do not yet support that.'
-)
-
-CANT_VMAP_A_NONTENSOR = (
-    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): Got in_dim={in_dim} for '
-    'input {idx}, but input {idx} is not a Tensor (got {arg_type}) so it '
-    'cannot be vmap\'ed over. If you were trying to vmap over a Tensor inside '
-    'a Python collection in `inputs`, we do not yet support that; otherwise, '
-    'use None as the respective in_dim for input {idx}.'
-)
-
-IN_DIM_NOT_IN_TENSOR = (
-    'vmap({fn}, in_dims={in_dims}, ...)(<inputs>): Got in_dim={in_dim} for '
-    'input {idx}, but input {idx} is a Tensor of dimensionality {tensor_dim} '
-    'so expected in_dim to satisfy 0 <= in_dim < {tensor_dim}.'
-)
-
 in_dims_t = Union[int, Tuple[Optional[int], ...]]
 out_dims_t = Union[int, Tuple[int, ...]]
 
@@ -75,7 +14,9 @@ def _validate_and_get_batch_size(
     batch_sizes = [arg.size(in_dim) for in_dim, arg in zip(in_dims_as_tuple, args)
                    if in_dim is not None]
     if batch_sizes and any([size != batch_sizes[0] for size in batch_sizes]):
-        raise ValueError(REQUIRE_SAME_MAP_SIZE.format(sizes=batch_sizes))
+        raise ValueError(
+            f'vmap: Expected all tensors to have the same size in the mapped '
+            f'dimension, got sizes {batch_sizes} for the mapped dimension')
     return batch_sizes[0]
 
 # Check compatibility of `in_dims` and `args`. More specifically, checks the following:
@@ -90,19 +31,27 @@ def _check_args_can_be_mapped_with_in_dims(
         if in_dim is None:
             continue
         if not isinstance(in_dim, int):
-            raise ValueError(IN_DIMS_MUST_BE_FLAT_TUPLE.format(
-                fn=fn_name, in_dims=in_dims))
+            raise ValueError(
+                f'vmap({fn_name}, in_dims={in_dims}, ...)(<inputs>): in_dims '
+                f'must be a flat tuple containing ints and/or Nones. If you were '
+                f'trying to vmap over a Tensor inside a Python collection in '
+                f'`inputs`, we do not yet support that.')
         if not isinstance(arg, Tensor):
-            raise ValueError(CANT_VMAP_A_NONTENSOR.format(
-                fn=fn_name, in_dims=in_dims, in_dim=in_dim,
-                idx=idx, arg_type=str(type(arg))))
+            raise ValueError(
+                f'vmap({fn_name}, in_dims={in_dims}, ...)(<inputs>): Got '
+                f'in_dim={in_dim} for input {idx}, but input {idx} is not a '
+                f'Tensor (got {type(arg)}) so it cannot be vmap\'ed over. '
+                f'If you were trying to vmap over a Tensor inside a Python '
+                f'collection in `inputs`, we do not yet support that; otherwise, '
+                f'use None as the respective in_dim for input {idx}.')
         # NB: We don't do dimension wrapping here. Consider allowing it in the
         # future if there is demand.
         if in_dim >= 0 and in_dim < arg.dim():
             continue
-        raise ValueError(IN_DIM_NOT_IN_TENSOR.format(
-            fn=fn_name, in_dims=in_dims, idx=idx, tensor_dim=arg.dim(), in_dim=in_dim))
-
+        raise ValueError(
+            f'vmap({fn_name}, in_dims={in_dims}, ...)(<inputs>): Got in_dim={in_dim} '
+            f'for input {idx}, but input {idx} is a Tensor of dimensionality '
+            f'{arg.dim()} so expected in_dim to satisfy 0 <= in_dim < {arg.dim()}.')
 
 def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
@@ -123,17 +72,21 @@ def _as_tuple(value: Any, num_elements: int, error_message_lambda: Callable[[], 
 def _create_batched_inputs(
         in_dims: in_dims_t, args: Tuple, vmap_level: int, fn_name: str) -> Tuple[Tuple, int]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
-        raise ValueError(EXPECTED_IN_DIMS_TO_BE_INT_OR_TUPLE.format(
-            fn=fn_name, in_dims=in_dims, actual_type=str(type(in_dims))))
+        raise ValueError(
+            f'vmap({fn_name}, in_dims={in_dims}, ...): expected `in_dims` to '
+            f'be int or tuple, got: {type(in_dims)}.')
 
     # NB: Checks that len(in_dims) == len(args) (if in_dims is a tuple).
     in_dims_as_tuple = _as_tuple(
         in_dims, len(args),
-        lambda: IN_DIMS_AND_NUM_INPUTS_MISMATCH.format(
-            fn=fn_name, in_dims=in_dims, num_inputs=len(args)))
+        lambda: f'vmap({fn_name}, in_dims={in_dims}, ...)(<inputs>): expected '
+                f'one `in_dim` per input (got {len(args)} inputs) of {fn_name}')
 
     if len(args) == 0:
-        raise ValueError(NO_INPUTS.format(fn=fn_name))
+        raise ValueError(
+            f'vmap({fn_name})(<inputs>): got no inputs. Maybe you forgot to add '
+            f'inputs, or you are trying to vmap over a function with no inputs. '
+            f'The latter is unsupported.')
 
     _check_args_can_be_mapped_with_in_dims(in_dims_as_tuple, args, fn_name, in_dims)
     batch_size = _validate_and_get_batch_size(in_dims_as_tuple, args)
@@ -151,8 +104,8 @@ def _unwrap_batched(
     num_outputs = _num_outputs(batched_outputs)
     out_dims_as_tuple = _as_tuple(
         out_dims, num_outputs,
-        lambda: OUT_DIMS_AND_NUM_OUTPUTS_MISMATCH.format(
-            fn=fn_name, out_dims=out_dims, num_outputs=num_outputs))
+        lambda: f'vmap({fn_name}, ..., out_dims={out_dims}): `out_dims` must '
+                f'have one dim per output (got {num_outputs} outputs) of {fn_name}.')
 
     # NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     # There is something wrong with our type bindings for functions that begin
@@ -171,18 +124,23 @@ def _validate_outputs(outputs: Any, fn_name: str) -> None:
     if isinstance(outputs, Tensor):
         return
     if not isinstance(outputs, tuple):
-        raise ValueError(MUST_RETURN_TENSORS.format(fn=fn_name, out=type(outputs)))
+        raise ValueError(f'vmap({fn_name}, ...): `{fn_name}` must only return '
+                         f'Tensors, got type {type(outputs)} as the return.')
     for idx, output in enumerate(outputs):
         if isinstance(output, Tensor):
             continue
-        raise ValueError(ELEMENT_MUST_BE_TENSOR.format(fn=fn_name, out=type(output), idx=idx))
+        raise ValueError(f'vmap({fn_name}, ...): `{fn_name}` must only return '
+                         f'Tensors, got type {type(output)} for return {idx}.')
 
 def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, fn_name: str) -> None:
     if isinstance(out_dims, int):
         return
     if not isinstance(out_dims, tuple) or \
             not all([isinstance(out_dim, int) for out_dim in out_dims]):
-        raise ValueError(OUT_DIMS_MUST_BE_INT_OR_TUPLE_OF_INT.format(out_dims=out_dims, fn=fn_name))
+        raise ValueError(
+            f'vmap({fn_name}, ..., out_dims={out_dims}): `out_dims` must be '
+            f'an int or a tuple of int representing where in the outputs the '
+            f'vmapped dimension should appear.')
 
 # This is the global tracker for how many nested vmaps we are currently inside.
 VMAP_LEVEL: int = 0

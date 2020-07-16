@@ -256,8 +256,8 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
-set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
-set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
+set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
+set(TORCH_ROOT "${PROJECT_SOURCE_DIR}")
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -274,7 +274,12 @@ endif()
 
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
+  if(USE_DISTRIBUTED)
+    add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+    target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
+    add_dependencies(process_group_agent torch c10d)
+    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
+  endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -1169,6 +1174,30 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+if(BUILD_MOBILE_BENCHMARK)
+  foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
+    get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
+    add_executable(${benchmark_name} "${benchmark_src}")
+    target_link_libraries(${benchmark_name} torch_library benchmark)
+    target_include_directories(${benchmark_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${benchmark_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${benchmark_name} PRIVATE ${ATen_CPU_INCLUDE})
+    target_link_options(${benchmark_name} PRIVATE "LINKER:--allow-multiple-definition")
+  endforeach()
+endif()
+
+if(BUILD_MOBILE_TEST)
+  foreach(test_src ${ATen_MOBILE_TEST_SRCS})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    add_executable(${test_name} "${test_src}")
+    target_link_libraries(${test_name} torch_library gtest_main)
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
+    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+  endforeach()
 endif()
 
 # ---[ Test binaries.
