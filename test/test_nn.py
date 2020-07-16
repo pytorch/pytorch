@@ -2917,7 +2917,7 @@ class TestNN(NNTestCase):
         _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
         out_hat = torch.nn.functional.linear(input, _weight, _bias)
         expect_out = m(input)
-        self.assertAlmostEqual(expect_out, out_hat)
+        self.assertEqual(expect_out, out_hat)
 
     def test_spectral_norm_pickle(self):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
@@ -4400,8 +4400,8 @@ class TestNN(NNTestCase):
             res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
                                                    reduction='sum', zero_infinity=True)
             grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
-        self.assertAlmostEqual(res_cpu, res_gpu, delta=1e-4)
-        self.assertAlmostEqual(grad_cpu, grad_gpu, delta=1e-4)
+        self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
+        self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -4417,13 +4417,13 @@ class TestNN(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
                                                reduction='sum', zero_infinity=True)
 
-        self.assertAlmostEqual(res2, res, delta=1e-4)
-        self.assertAlmostEqual(res_cpu, res.cpu(), delta=1e-4)
+        self.assertEqual(res2, res, atol=1e-4, rtol=0)
+        self.assertEqual(res_cpu, res.cpu(), atol=1e-4, rtol=0)
         g1, = torch.autograd.grad(res, log_probs)
         g2, = torch.autograd.grad(res2, log_probs)
         g3, = torch.autograd.grad(res_cpu, log_probs)
-        self.assertAlmostEqual(g2, g3, delta=1e-4)
-        self.assertAlmostEqual(g1, g2, delta=1e-4)
+        self.assertEqual(g2, g3, atol=1e-4, rtol=0)
+        self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
     def test_RNN_cell_no_broadcasting(self):
@@ -6264,7 +6264,7 @@ class TestNN(NNTestCase):
             cudnn_input_grad = input.grad.data.clone()
             self.assertEqualTypeString(cudnn_output, input)
             self.assertEqual(cudnn_output, thnn_output)
-            self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
+            self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_nonaffine_cuda_half_input(self):
@@ -8019,14 +8019,14 @@ class TestNN(NNTestCase):
                     gradient_o = torch.randn(output.shape)
                     gradient_w = torch.autograd.grad(output, input if (gradient == 'input') else weight, gradient_o)
 
-                    self.assertAlmostEqual(gradient_w[0],
-                                           func_backward(
-                                               input_shape if (gradient == 'input') else input,
-                                               weight_shape if (gradient == 'weight') else weight,
-                                               gradient_o,
-                                               stride=stride,
-                                               padding=padding,
-                                               dilation=dilation))
+                    self.assertEqual(gradient_w[0],
+                                     func_backward(
+                                     input_shape if (gradient == 'input') else input,
+                                     weight_shape if (gradient == 'weight') else weight,
+                                     gradient_o,
+                                     stride=stride,
+                                     padding=padding,
+                                     dilation=dilation))
 
     def test_grad_conv1d_input(self):
         self.run_grad_conv_test(F.conv1d, F.grad.conv1d_input, 1, 'input')
@@ -8065,14 +8065,14 @@ class TestNN(NNTestCase):
                         bias = torch.randn([chan_out], requires_grad=True, dtype=torch.float)
                     output = torch._nnpack_spatial_convolution(input, weight, stride=stride, padding=padding, bias=bias)
                     output_expected = torch.nn.functional.conv2d(input, weight, stride=stride, padding=padding, bias=bias)
-                    self.assertAlmostEqual(output, output_expected, delta=3e-4)
+                    self.assertEqual(output, output_expected, atol=3e-4, rtol=0)
 
                     gradient_o = torch.randn(output.shape, dtype=torch.float)
 
                     grads = torch.autograd.grad(output, [input, weight], gradient_o)
                     grads_expected = torch.autograd.grad(output_expected, [input, weight], gradient_o)
                     for gr, gr_expected in zip(grads, grads_expected):
-                        self.assertAlmostEqual(gr, gr_expected, delta=3e-4)
+                        self.assertEqual(gr, gr_expected, atol=3e-4, rtol=0)
 
     def test_fold_invalid_arg(self):
         # input wrong dimension
@@ -9185,8 +9185,8 @@ class TestNNDeviceType(NNTestCase):
         mean = out_reshaped.mean(1)
         var = out_reshaped.var(1, unbiased=False)
 
-        self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
-        self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+        self.assertEqual(torch.abs(mean.data).mean(), 0, atol=1e-5, rtol=0)
+        self.assertEqual(torch.abs(var.data).mean(), 1, atol=1e-5, rtol=0)
 
         # check that eval mode doesn't change behavior
         grad_out = torch.randn_like(output)
@@ -9215,8 +9215,8 @@ class TestNNDeviceType(NNTestCase):
         input_reshaped = input_var.transpose(1, 0).reshape(c, b, -1)
         var = input_reshaped.var(2, unbiased=True)[:, :]
 
-        self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
-        self.assertAlmostEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, delta=1e-5)
+        self.assertEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, atol=1e-5, rtol=0)
+        self.assertEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, atol=1e-5, rtol=0)
 
         # in eval mode, adding X * std to a channel in input should make the
         # corresponding channel in output have mean X
@@ -9243,8 +9243,8 @@ class TestNNDeviceType(NNTestCase):
             cudnn_output.sum().backward()
             cudnn_input_grad = input.grad.data.clone()
             self.assertEqualTypeString(cudnn_output, input)
-            self.assertAlmostEqual(cudnn_output, thnn_output, delta=1e-4)
-            self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
+            self.assertEqual(cudnn_output, thnn_output, atol=1e-4, rtol=0)
+            self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
     def _test_LayerNorm_general(self, device, dtype=torch.float):
         for i in range(2, 6):
@@ -9264,8 +9264,8 @@ class TestNNDeviceType(NNTestCase):
             var = out_reshaped.var(-1, unbiased=False)
 
             delta = 1e-1 if dtype == torch.bfloat16 else 1e-5
-            self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=delta)
-            self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=delta)
+            self.assertEqual(torch.abs(mean.data).mean(), 0, atol=delta, rtol=0)
+            self.assertEqual(torch.abs(var.data).mean(), 1, atol=delta, rtol=0)
 
             # test that LN applies weight and bias correctly
             scale, bias = torch.empty(2).uniform_(0.2, 2).tolist()
@@ -9275,8 +9275,8 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(*(unnormalized_shape + [-1]))
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=delta)
-            self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=delta)
+            self.assertEqual(torch.abs(mean.data).mean(), bias, atol=delta, rtol=0)
+            self.assertEqual(torch.abs(var.data).mean(), scale ** 2, atol=delta, rtol=0)
 
         bad_norm_shape_input_shape = {
             (): (),
@@ -9318,8 +9318,8 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
             # test that GN applies weight and bias correctly
             scale = torch.empty(c, device=device, dtype=dtype).uniform_(0.2, 2)
@@ -9332,8 +9332,8 @@ class TestNNDeviceType(NNTestCase):
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
             var = out_normed_reshaped.var(-1, unbiased=False)
-            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
         bad_shape_g = {
             (1, 2, 3, 4): 3,
@@ -10122,7 +10122,7 @@ class TestNNDeviceType(NNTestCase):
 
         # 2eps = 1x addition + 1x subtraction.
         tol = 2 * torch.finfo(dtype).eps
-        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
+        self.assertEqual(logits_soft.grad, logits_hard.grad, atol=tol, rtol=0)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
@@ -10930,8 +10930,8 @@ class TestNNDeviceType(NNTestCase):
         res4 = module(data2)
         self.assertEqual(res3, res1)
         self.assertEqual(res4, res2)
-        self.assertAlmostEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
-        self.assertAlmostEqual(module.running_var, (running_var1 + running_var2) / 2)
+        self.assertEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
+        self.assertEqual(module.running_var, (running_var1 + running_var2) / 2)
 
     @dtypes(torch.float)
     def test_batchnorm_simple_average(self, device, dtype):
@@ -11119,7 +11119,7 @@ class TestNNDeviceType(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
-        self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss)
+        self.assertEqual(-log_probs.sum(0)[:, 0], loss)
 
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
@@ -11127,7 +11127,7 @@ class TestNNDeviceType(NNTestCase):
         log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
-        self.assertAlmostEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
+        self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     def test_empty_dropout(self, device):
         x = torch.Tensor([]).to(device)

@@ -247,7 +247,7 @@ class TestObserver(QuantizationTestCase):
                     ref_scale = 0.0313725
                     ref_zero_point = -128 if qdtype is torch.qint8 else 0
             self.assertEqual(qparams[1].item(), ref_zero_point)
-            self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+            self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
             state_dict = myobs.state_dict()
             b = io.BytesIO()
             torch.save(state_dict, b)
@@ -474,7 +474,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
-        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+        self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
         # Test for serializability
         state_dict = myobs.state_dict()
         b = io.BytesIO()
