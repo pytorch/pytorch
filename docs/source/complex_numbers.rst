@@ -134,7 +134,7 @@ Autograd
 PyTorch supports autograd for complex tensors. The autograd APIs can be
 used for both holomorphic and non-holomorphic functions. For holomorphic functions,
 you get the regular complex gradient. For :math:`C → R` real-valued loss functions,
-`grad` gives a descent direction. For more details, check out the note :ref:`complex_autograd-doc`.
+`grad.conj()` gives a descent direction. For more details, check out the note :ref:`complex_autograd-doc`.
 
 We do not support the following subsystems:
 
