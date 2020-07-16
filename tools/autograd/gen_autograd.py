@@ -45,11 +45,10 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
+    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
     'squeeze': 'self',
     't': 'self',
     'transpose': 'self',
@@ -72,21 +71,14 @@ VIEW_FUNCTIONS = {
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
-# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of outputs is being gradually deprecated.
-MULTI_OUTPUT_SAFE_FUNCTIONS = {
-    'split',
-    'split_with_sizes',
-}
-
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # may return a view of its inputs; however they may sometimes return a copy.
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag', 'narrow',
+    'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
+    'expand_as', 'view_as', 'real', 'imag',
 })
 
 def format_return_type(returns):
