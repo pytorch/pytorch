@@ -27,6 +27,8 @@ class TestAAA(NNTestCase):
 
         if device == 'cuda':
             torch.cuda.synchronize()
+ 
+        self.fail('stop running all other tests')
 
 instantiate_device_type_tests(TestAAA, globals())
 
