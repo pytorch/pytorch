@@ -986,12 +986,15 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
 
 def atleast_1d(*tensors):
     r"""
-    atleast_1d(input) -> Tensor
-    Returns a 1-dimensional view of each each input tensor with zero dimensions.
+    Returns a 1-dimensional view of each input tensor with zero dimensions.
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
         input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
     Example::
         >>> x = torch.randn(2)
         >>> x
@@ -1017,11 +1020,14 @@ def atleast_1d(*tensors):
 
 def atleast_2d(*tensors):
     r"""
-    atleast_2d(input) -> Tensor
     Returns a 2-dimensional view of each each input tensor with zero dimensions.
     Input tensors with two or more dimensions are returned as-is.
     Args:
         input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
     Example::
         >>> x = torch.tensor(1.)
         >>> x
@@ -1049,22 +1055,30 @@ def atleast_2d(*tensors):
 
 def atleast_3d(*tensors):
     r"""
-    atleast_3d(input) -> Tensor
     Returns a 3-dimensional view of each each input tensor with zero dimensions.
     Input tensors with three or more dimensions are returned as-is.
     Args:
         input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
     Example::
         >>> x = torch.tensor(0.5)
         >>> x
         tensor(0.5000)
         >>> torch.atleast_3d(x)
         tensor([[[0.5000]]])
-        >>> x = torch.randn(1,1)
-        >>> x
-        tensor([[1.5484]])
-        >>> torch.atleast_3d(x)
-        tensor([[[1.5484]]])
+        >>> y = torch.randn(2,2)
+        >>> y
+        tensor([[-0.8079,  0.7460],
+                [-1.1647,  1.4734]])
+        >>> torch.atleast_3d(y)
+        tensor([[[-0.8079],
+                [ 0.7460]],
+
+                [[-1.1647],
+                [ 1.4734]]])
         >>> x = torch.randn(1,1,1)
         >>> x
         tensor([[[-1.5689]]])
