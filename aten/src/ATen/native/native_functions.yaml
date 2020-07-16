@@ -5228,6 +5228,9 @@
     CUDA: cat_out_cuda
     QuantizedCPU: quantized_cat_out
 
+- func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  variants: function
+
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   dispatch:
