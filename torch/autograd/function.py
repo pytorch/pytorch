@@ -153,6 +153,9 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     # for the tracer
     is_traceable = False
 
+    # If true, undefined/None tensors will be expanded to tensor full of zeros
+    materialize_grads = True
+
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""Performs the operation.
@@ -362,9 +365,9 @@ class NestedIOFunction(Function):
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 
-    def _do_backward(self, gradients, retain_variables):
+    def _do_backward(self, gradients, retain_variables, materialize_grads):
         self.retain_variables = retain_variables
-        result = super(NestedIOFunction, self)._do_backward(gradients, retain_variables)
+        result = super(NestedIOFunction, self)._do_backward(gradients, retain_variables, materialize_grads)
         if not retain_variables:
             del self._nested_output
             del self._to_save_nested

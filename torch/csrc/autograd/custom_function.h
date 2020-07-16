@@ -78,6 +78,13 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// ```
 template <class T>
 struct TORCH_API Function {
+  // If true (default), undefined tensors will be converted to tensors full
+  // of zeros before calling backward function.
+  static bool materialize_grads;
+
+  // Set the value of materialize_grads.
+  static auto set_materialize_grads(bool value) -> void;
+
   // We need to use a different template parameter than T here because T will
   // inherit from Function, and when Function<T> is instantiated, T::forward
   // is not declared yet.
@@ -86,6 +93,9 @@ struct TORCH_API Function {
   template<typename X=T, typename... Args>
   static auto apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
 };
+
+template<class T>
+auto Function<T>::materialize_grads = true;
 
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
@@ -157,6 +167,7 @@ struct CppNode : public Node {
   std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+  bool materialize_grads() override;
 
   void set_ctx_grad_fn(const std::shared_ptr<Node> &node);
   void save_variables_to_ctx();
@@ -194,6 +205,11 @@ typename std::enable_if<std::is_same<T, variable_list>::value, T&>::type to_outp
 
 template <typename T>
 typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(variable_list& output_list) { return output_list[0]; }
+
+template<class T>
+auto Function<T>::set_materialize_grads(bool value) -> void {
+  T::materialize_grads = value;
+}
 
 template<class T>
 template<typename X, typename... Args>
@@ -253,7 +269,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (int i = 0 ; i < num_inputs; ++i) {
-    if (inputs[i].defined()) {
+    if (inputs[i].defined() || !materialize_grads()) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
@@ -314,6 +330,11 @@ void CppNode<T>::release_variables() {
   std::lock_guard<std::mutex> lock(mutex_);
   ctx_.saved_variables_.clear();
   ctx_.has_freed_buffers_ = true;
+}
+
+template<class T>
+bool CppNode<T>::materialize_grads() {
+  return T::materialize_grads;
 }
 
 template<class T>

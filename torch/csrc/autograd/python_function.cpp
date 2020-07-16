@@ -60,7 +60,7 @@ auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
   }
 
   THPObjectPtr r(PyObject_CallMethod(
-      obj, "_do_backward", "OO", pyInputs.get(), Py_True));
+      obj, "_do_backward", "OO", pyInputs.get(), Py_True, materialize_grads()));
   if (!r) throw_python_error();
 
   auto num_outputs = PyTuple_GET_SIZE(r.get());
@@ -113,7 +113,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   auto& output_info = py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
     PyObject* input;
-    if (inputs[i].defined()) {
+    if (inputs[i].defined() || !materialize_grads()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
       input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
@@ -193,6 +193,15 @@ auto PyNode::is_traceable() -> bool {
   THPObjectPtr traceable_py_bool {PyObject_GetAttrString(forward_class, "is_traceable")};
   if (!traceable_py_bool) throw_python_error();
   return traceable_py_bool == Py_True;
+}
+
+auto PyNode::materialize_grads() -> bool {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr forward_class {PyObject_GetAttrString(obj, "_forward_cls")};
+  if (!forward_class) throw_python_error();
+  THPObjectPtr materialize_grads_py_bool {PyObject_GetAttrString(forward_class, "materialize_grads")};
+  if (!materialize_grads_py_bool) throw_python_error();
+  return materialize_grads_py_bool == Py_True;
 }
 
 auto PyNode::release_variables() -> void {
@@ -727,11 +736,13 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
 {
   try {
     Py_ssize_t num_args = args ? PyTuple_GET_SIZE(args) : 0;
-    THPUtils_assert(num_args == 2, "_do_backward expects exactly two arguments");
+    THPUtils_assert(num_args == 3, "_do_backward expects exactly three arguments");
     PyObject *raw_grad_output = PyTuple_GET_ITEM(args, 0);
     PyObject *retain_variables = PyTuple_GET_ITEM(args, 1);
-    if (!PyTuple_Check(raw_grad_output) || !PyBool_Check(retain_variables)) {
-      THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool)");
+    PyObject *materialize_grads = PyTuple_GET_ITEM(args, 2);
+    if (!PyTuple_Check(raw_grad_output) || !PyBool_Check(retain_variables) 
+        || !PyBool_Check(materialize_grads)) {
+      THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool, bool)");
       return nullptr;
     }
     auto cdata = self->cdata.lock();
@@ -752,10 +763,12 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
                     PyTuple_GET_SIZE(raw_grad_output));
 
     // Some of the output might have been unused, so we have to allocate
-    // zero-filled buffers instead
+    // zero-filled buffers if materialize_grads is True
     Py_INCREF(raw_grad_output);
     THPObjectPtr grad_output(raw_grad_output);
-    _prepare_grads(self, grad_output, true);
+    if (materialize_grads == Py_True) {
+      _prepare_grads(self, grad_output, true);
+    }
 
     // self.backward(*grad_output)
     THPObjectPtr backward_fn(PyObject_GetAttrString((PyObject*)self, "backward"));

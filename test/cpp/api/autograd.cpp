@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include <torch/csrc/autograd/functions/basic_ops.h>
+
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
@@ -221,6 +223,27 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
 
   ASSERT_FALSE(torch::autograd::grad(
     {MyFunction::apply(x)}, {x}, {}, false, false, true)[0].defined());
+}
+
+TEST(CustomAutogradTest, FunctionDontMaterializeGrads) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable var) {
+      return var;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {  
+      return grad_output;
+    }
+  };
+
+  auto x = torch::ones(1, torch::requires_grad());
+  MyFunction::set_materialize_grads(true);
+  UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
+  ASSERT_FALSE(x.grad().defined());
+
+  MyFunction::set_materialize_grads(false);
+  UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
+  ASSERT_FALSE(x.grad().defined());
 }
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {

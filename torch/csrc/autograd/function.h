@@ -318,6 +318,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
+  // Returns true if undefined input tensors should be converted to tensors
+  // full of zeros before calling backward function.
+  virtual bool materialize_grads() {
+    return true;
+  }
+
   /// A `Node` is said to pass state transparently to backward, if the
   /// state consists only of (Saved)Variables and only non-variable objects
   /// that parameterize the operation in some way that defines the graph
