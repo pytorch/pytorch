@@ -34,10 +34,6 @@ class backend {
                 "execute",
                 detail::getExecuteFunc<TBackendInterface>(),
                 detail::getExecuteSchema());
-
-    // Register the backend in the registry so that a Python binding is created
-    // for it later.
-    detail::registerBackend(backend_name_);
   }
 };
 

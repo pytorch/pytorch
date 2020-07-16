@@ -7,7 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 
 
@@ -64,8 +64,7 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        image_path = gen_docker_image_path(base_build_env_name,
-                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
+        image_path = gen_docker_image_path(base_build_env_name)
         return miniutils.quote(image_path)
 
     def get_build_job_name_pieces(self, build_or_test):
@@ -101,7 +100,7 @@ class Conf:
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
 
-        if phase == "test":
+        if phase in ["test", "test1", "test2"]:
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -216,6 +215,7 @@ def instantiate_configs():
 
         elif compiler_name == "rocm":
             rocm_version = fc.find_prop("compiler_version")
+            restrict_phases = ["build", "test1", "test2"]
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")
@@ -235,6 +235,7 @@ def instantiate_configs():
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
+                restrict_phases = ["build", "test1", "test2"]
 
         if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"

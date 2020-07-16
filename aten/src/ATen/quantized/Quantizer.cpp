@@ -4,10 +4,10 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <cmath>
 #include <typeinfo>
@@ -66,7 +66,9 @@ inline Tensor new_qtensor(
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  at::Allocator* allocator = GetAllocator(options.device().type());
+  at::Allocator* allocator = options.device().type() == DeviceType::CUDA
+    ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
+    : at::getCPUAllocator();
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {

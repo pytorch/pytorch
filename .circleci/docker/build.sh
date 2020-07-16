@@ -71,13 +71,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-pynightly)
-    TRAVIS_PYTHON_VERSION=nightly
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
     CUDA_VERSION=9.2
     CUDNN_VERSION=7

@@ -101,6 +101,46 @@ TypePtr IValue::type() const {
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
 
+void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+  if (visitor(*this)) {
+    // Short cut.
+    return;
+  }
+  switch (this->tag) {
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.visit(visitor);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().visit(visitor);
+        pair.key().visit(visitor);
+      }
+      break;
+    case Tag::Object: {
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
+        attribute.visit(visitor);
+      }
+      break;
+    }
+    default:
+      break;
+ }
+}
+
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
   switch (this->tag) {
     case Tag::Tensor:
@@ -360,7 +400,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
+      if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
           return out << i << ".";
