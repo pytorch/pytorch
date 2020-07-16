@@ -4818,6 +4818,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
+        self.with_tf32 = kwargs.get('with_tf32', True)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
