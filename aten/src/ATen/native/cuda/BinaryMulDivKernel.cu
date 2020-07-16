@@ -47,6 +47,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
             int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
             auto b = iter.scalar_value<accscalar_t>(scalar_arg);
             iter.remove_operand(scalar_arg);
+            const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
             gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t a) -> scalar_t {
               return a * b;
             });
