@@ -18083,6 +18083,28 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.linspace(start, end, steps, dtype=dtype, device=device)
         self.assertGreater(x[1] - x[0], (end - start) / steps)
 
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_moveaxis_invalid(self, device, dtype):
+        shape = self._rand_shape(4, min_size=5, max_size=10)
+        x = self._generate_input(shape, dtype, device, False)
+
+        # Invalid `src` and `dst` dimension
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.moveaxis(x, 5, 0)
+
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.moveaxis(x, 0, 5)
+
+        # Mismatch in size of `src` and `dst`
+        with self.assertRaisesRegex(RuntimeError, "Invalid Source or Destination Axes"):
+            torch.moveaxis(x, (1, 0), (0, ))
+
+        with self.assertRaisesRegex(RuntimeError, "repeated axis in `src` argument"):
+            torch.moveaxis(x, (0, 0), (0, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "repeated axis in `dst` argument"):
+            torch.moveaxis(x, (0, 1), (1, 1))
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
