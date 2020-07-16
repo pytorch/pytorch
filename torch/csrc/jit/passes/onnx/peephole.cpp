@@ -948,10 +948,17 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
   }
 }
 
-static void fuseSequenceSplitConcat(Block* b) {
+
+// This optimization removes consecutive SplitToSequence and ConcatFromSequence operators.
+// The optimization only happens when
+//  1. Output of SplitToSequence is not used by any other nodes.
+//  2. The attribute keepdims and axis of SplitToSequence match
+//     attribute new_axis and axis of ConcatFromSequence.
+// In that case, the two ops combined are no-op, and can be safely removed.
+static void removeSequenceSplitConcat(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseSequenceSplitConcat(child_block);
+      removeSequenceSplitConcat(child_block);
     }
     if (it->kind() == onnx::ConcatFromSequence &&
         it->input()->node()->kind() == onnx::SplitToSequence) {
@@ -1036,7 +1043,7 @@ void PeepholeOptimizeONNX(
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
-  fuseSequenceSplitConcat(graph->block());
+  removeSequenceSplitConcat(graph->block());
 }
 
 } // namespace jit
