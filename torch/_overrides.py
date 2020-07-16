@@ -403,6 +403,7 @@ def get_testing_overrides():
                            dropout, train, bidirectional, batch_sizes, dropout_state: -1),
         torch.mm: lambda input, mat2, out=None: -1,
         torch.mode: lambda input: -1,
+        torch.moveaxis: lambda input, src, dst: -1,
         torch.mul: lambda input, other, out=None: -1,
         torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
         torch.mv: lambda input, vec, out=None: -1,
