@@ -233,7 +233,11 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#endif  // CUDA_VERSION < 11000
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
         opa,
@@ -254,7 +258,11 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         ldc,
         CUDA_R_32F,
         CUBLAS_GEMM_DFALT_TENSOR_OP));
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif  // CUDA_VERSION < 11000
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
