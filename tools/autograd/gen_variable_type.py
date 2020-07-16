@@ -1198,16 +1198,20 @@ def emit_body(declaration):
 
     declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
 
-    body.extend(emit_increment_version())
-
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
-    body.append(declare_returned_variables)
 
+    # increment version before redispatching - for composite ops if constituent
+    # op has mutated and saved the variable then we should not increment again
+    # afterwards.
+    body.extend(emit_increment_version())
+
+    body.append(declare_returned_variables)
     body.append(emit_call(env, tie_return_values))
+
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
