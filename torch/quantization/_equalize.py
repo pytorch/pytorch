@@ -1,47 +1,42 @@
 import torch
 import copy
 
+_supported_types = [torch.nn.Conv2d, torch.nn.Linear]
+
 def max_over_ndim(input, axis_list, keepdim=False):
     ''' Applies 'torch.max' over the given axises
     '''
     axis_list.sort(reverse=True)
-    reduced_input = input
     for axis in axis_list:
-        reduced_input, _ = reduced_input.max(axis, keepdim)
-    return reduced_input
+        input, _ = input.max(axis, keepdim)
+    return input
 
 def min_over_ndim(input, axis_list, keepdim=False):
     ''' Applies 'torch.min' over the given axises
     '''
     axis_list.sort(reverse=True)
-    reduced_input = input
     for axis in axis_list:
-        reduced_input, _ = reduced_input.min(axis, keepdim)
-    return reduced_input
+        input, _ = input.min(axis, keepdim)
+    return input
 
 def channel_range(input, axis=0):
     ''' finds the range of weights associated with a specific channel
     '''
     size_of_tensor_dim = len(input.size())
-    mins = input
-    maxs = input
-
     axis_list = list(range(size_of_tensor_dim))
     axis_list.remove(axis)
 
-    mins = min_over_ndim(mins, axis_list)
-    maxs = max_over_ndim(maxs, axis_list)
+    mins = min_over_ndim(input, axis_list)
+    maxs = max_over_ndim(input, axis_list)
 
-    assert(mins.size()[0] == input.size()[axis])
+    assert mins.size()[0] == input.size()[axis], "Dimensions of resultant channel range does not match size of requested axis"
     return maxs - mins
 
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     ''' Given two adjacent tensors', the weights are scaled such that
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
-
     '''
-    _supported_types = [torch.nn.Conv2d, torch.nn.Linear]
     if type(module1) not in _supported_types or type(module2) not in _supported_types:
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
@@ -118,8 +113,8 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     between the associated modules in each dictionary
 
     '''
-    if len(curr_modules) != len(prev_modules):
-        raise TypeError("incompatiable modules in convergence condition")
+    if curr_modules.keys() != prev_modules.keys():
+        raise ValueError("The keys to the given mappings must have the same set of names of modules")
 
     summed_norms = 0
     if None in prev_modules.values():

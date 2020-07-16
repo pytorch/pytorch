@@ -238,6 +238,5 @@ void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
   mr.removeTensorMutation();
 }
 
-
 } // namespace jit
 } // namespace torch

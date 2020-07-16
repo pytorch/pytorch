@@ -1178,6 +1178,11 @@ class TestDistributions(TestCase):
         # check entropy computation
         self.assertEqual(Categorical(p).entropy(), torch.tensor([1.0114, 1.0297]), atol=1e-4, rtol=0)
         self.assertEqual(Categorical(s).entropy(), torch.tensor([0.0, 0.0]))
+        # issue gh-40553
+        logits = p.log()
+        logits[1, 1] = logits[0, 2] = float('-inf')
+        e = Categorical(logits=logits).entropy()
+        self.assertEqual(e, torch.tensor([0.6365, 0.5983]), atol=1e-4, rtol=0)
 
     def test_categorical_enumerate_support(self):
         examples = [
