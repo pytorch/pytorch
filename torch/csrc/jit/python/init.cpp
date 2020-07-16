@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -22,6 +21,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -50,6 +50,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -240,6 +241,9 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("preservedAttrs") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def(
+          "_jit_pass_fuse_add_relu",
+          [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def(
@@ -706,6 +710,7 @@ void initJITBindings(PyObject* module) {
           "INSERT_FOLD_PREPACK_OPS",
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
       .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .value("FUSE_ADD_RELU", MobileOptimizerType::FUSE_ADD_RELU)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires

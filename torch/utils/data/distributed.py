@@ -72,10 +72,9 @@ class DistributedSampler(Sampler):
             # that each rank gets the same amount of data when iterating this
             # dataloader.
             self.num_samples = math.ceil((len(self.dataset) - self.num_replicas) / self.num_replicas)
-            self.total_size = self.num_samples * self.num_replicas
         else:
             self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)
-            self.total_size = self.num_samples * self.num_replicas
+        self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
 

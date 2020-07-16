@@ -106,7 +106,7 @@ jit_sources_common = [
 
 libtorch_sources_common = core_sources_common + jit_sources_common
 
-core_sources_full = [
+core_autograd_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -122,6 +122,9 @@ core_sources_full = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+]
+
+core_sources_full = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -172,6 +175,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
+    "torch/csrc/jit/passes/fuse_relu.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/graph_rewrite_helper.cpp",
     "torch/csrc/jit/passes/guard_elimination.cpp",
@@ -253,7 +257,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_autograd_sources)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -278,6 +282,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
     "torch/csrc/distributed/rpc/python_resp.cpp",
     "torch/csrc/distributed/rpc/request_callback.cpp",
+    "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
     "torch/csrc/distributed/rpc/rref_context.cpp",
     "torch/csrc/distributed/rpc/rref_proto.cpp",

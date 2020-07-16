@@ -391,11 +391,14 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      // TODO: Maybe TensorAccessor can beused here?
+      auto* self_ptr = self.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
-        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+        scalar_t *self_ip = self_ptr + self_i * self_stride;
+        *self_ip += *(source_ptr + i * source_stride);
       }
     });
   }

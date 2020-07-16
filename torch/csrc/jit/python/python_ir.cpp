@@ -415,6 +415,7 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(offset)
       .VS(uses)
       .VS(replaceAllUsesWith)
+      .VS(replaceAllUsesAfterNodeWith)
       .def("node", [](Value& v) { return v.node(); })
       .def(
           "setTypeAs",
