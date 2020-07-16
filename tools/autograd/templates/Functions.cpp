@@ -2085,17 +2085,6 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
   }
 }
 
-Tensor abs_backward(const Tensor & grad, const Tensor& self) {
-  if(self.is_complex()) {
-    // this is not correct because it will give inf/-inf for 0
-    // although 0 is a point of non-differentiability, in line with abs behavior we would like to
-    // return 0, once torcg.sgn is added it would be automatically handled in sgn and we should
-    //  return grad * self.sgn()
-    return grad * self.conj() / self.abs();
-  } else {
-    return grad * self.sign();
-  }
-}
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;

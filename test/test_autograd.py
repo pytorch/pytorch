@@ -4397,7 +4397,7 @@ def add_test(
         self_size,
         args,
         variant_name='',
-        run_for_real_complex = (True, False),
+        run_for_real_complex=(True, False),
         check_ad=(),  # only used in test_jit
         dim_args_idx=(),
         skipTestIf=(),

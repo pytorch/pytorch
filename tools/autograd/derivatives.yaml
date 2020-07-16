@@ -159,7 +159,7 @@
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
-  self: abs_backward(grad, self)
+  self: grad * self.sign()
 
 - name: absolute(Tensor self) -> Tensor
   self: grad * self.sign()
