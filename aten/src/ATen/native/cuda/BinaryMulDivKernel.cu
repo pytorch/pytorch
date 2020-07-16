@@ -40,6 +40,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
     });
   } else if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && (iter.is_cpu_scalar(1) ||
 iter.is_cpu_scalar(2))) {
+  //if common dtype is half the scalar constant can overflow in half precision, and yet the result can
+  //still be representable in the half dtype. Cast scalar to acc_type to have better accuracy
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
