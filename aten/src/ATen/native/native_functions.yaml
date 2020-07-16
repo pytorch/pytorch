@@ -1314,6 +1314,24 @@
   dispatch:
     CPU: from_file
 
+- func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: gcd(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
+
+- func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: lcm(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
+
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
 # `cudnn_grid_sampler`, `grid_sampler_2d`, or `grid_sampler_3d`, each of which
