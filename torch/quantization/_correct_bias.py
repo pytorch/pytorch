@@ -81,6 +81,42 @@ class MeanLogger(ns.Logger):
             self.stats["tensor_val"] = self.sum / self.count
         return y
 
+class ShadowModule(nn.Module):
+    def __init__(self, float_module=None, quantized_module=None):
+        super(ShadowModule, self).__init__()
+        self.float_module = float_module
+        self.quantized_module = quantized_module
+
+    def forward(self, x):
+        self.float_module(x)
+        self.quantized_module(x)
+        # hooks should already been added, running the data here is the calibration
+
+        output_logger, input_logger = get_matching_activations(float_model, qmodel)
+
+def add_shadow(float_model, quantized_model):
+    ''' using the quantized_model as a base, the submodules will be wrapped in a
+    shadowModule along with the floating point corresponding partner
+
+    and adds the pre and post hooks
+    '''
+    # setting up qconfigs to add post hook
+    qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
+    float_model.qconfig = qconfig_debug
+    qmodel.qconfig = qconfig_debug
+    # calling prepare with prehook param, and throwing the whitelist to make sure supported modules
+    # get the qconfig and thus post hook
+    white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
+    torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
+    torch.quantization.prepare(qmodel, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+
+    for name, module in quantized_model.named_modules():
+        pass
+
+
+
+
+
 def correct_quantized_bias(output_dict, float_model, qmodel):
     ''' Inplace function to modify the weights of the qmodel based off the
     recorded differences in weights provided by output_dict
@@ -88,10 +124,7 @@ def correct_quantized_bias(output_dict, float_model, qmodel):
     '''
     for key in output_dict:
         q_mod = get_module(qmodel, key[:-6])  #.orig_module
-        # print(key[:-6], type(q_mod))
-    ###################
-    # todo
-        if hasattr(q_mod, 'bias') and not isinstance(q_mod, torch.nn.intrinsic.quantized.ConvReLU2d): # get rid of linear later
+        if hasattr(q_mod, 'bias') and type(q_mod) in [nn.Linear, nn.Conv2d, nnq.Linear, nnq.Conv2d]: # get rid of linear later
             print(type(q_mod))
             if (isinstance(q_mod.bias, torch.nn.parameter.Parameter) and (q_mod.bias is not None)) or \
                 (q_mod.bias() is not None):

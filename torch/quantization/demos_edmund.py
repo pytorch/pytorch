@@ -282,17 +282,13 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
                 count =0
                 for data in data_loader_test:
                     with torch.no_grad():
-                        # print(count)
                         count += 1
                         if count != 34:
                             output = unquantized_model(data[0])
                             q_output = model(data[0])
                             # print("sqnr score: ", _correct_bias.compute_error(output, q_output))
                         else:
-                            # print("skip")
                             pass
-                        # if count == 30:
-                        #     break
                 print("finished bias calibrating")
                 # compare_dict = ns.get_matching_activations(unquantized_model, model)
                 output_logger, input_logger = _correct_bias.get_matching_activations(unquantized_model, model)
