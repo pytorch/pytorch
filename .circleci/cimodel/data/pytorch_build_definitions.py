@@ -7,7 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 
 
@@ -31,6 +31,10 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+
+    @staticmethod
+    def is_test_phase(phase):
+        return phase in ["test", "test1", "test2"]
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -64,8 +68,7 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        image_path = gen_docker_image_path(base_build_env_name,
-                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
+        image_path = gen_docker_image_path(base_build_env_name)
         return miniutils.quote(image_path)
 
     def get_build_job_name_pieces(self, build_or_test):
@@ -84,9 +87,9 @@ class Conf:
         build_env_name = "-".join(map(str, build_job_name_pieces))
         parameters["build_environment"] = miniutils.quote(build_env_name)
         parameters["docker_image"] = self.gen_docker_image_path()
-        if phase == "test" and self.gpu_resource:
+        if Conf.is_test_phase(phase) and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
-        if phase == "test":
+        if Conf.is_test_phase(phase):
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
@@ -101,7 +104,7 @@ class Conf:
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
 
-        if phase in ["test", "test1", "test2"]:
+        if Conf.is_test_phase(phase):
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -313,7 +316,7 @@ def get_workflow_jobs():
         for phase in phases:
 
             # TODO why does this not have a test?
-            if phase == "test" and conf_options.cuda_version == "10":
+            if Conf.is_test_phase(phase) and conf_options.cuda_version == "10":
                 continue
 
             x.append(conf_options.gen_workflow_job(phase))
