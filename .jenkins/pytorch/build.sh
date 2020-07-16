@@ -233,6 +233,17 @@ else
     make VERBOSE=1
     popd
     assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
   else
     # Test standalone c10 build
     if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
