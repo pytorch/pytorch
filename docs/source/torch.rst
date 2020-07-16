@@ -289,6 +289,7 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg
@@ -333,6 +334,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -407,8 +409,10 @@ Other Operations
     fliplr
     flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave

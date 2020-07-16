@@ -95,6 +95,20 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 }
 
+template <typename T>
+struct CppTypeToScalarType;
+
+#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type) \
+  template<>                                                  \
+  struct CppTypeToScalarType<cpp_type>:                       \
+    std::integral_constant<c10::ScalarType,                   \
+                           c10::ScalarType::scalar_type>      \
+  {};
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
+
+#undef SPECIALIZE_CppTypeToScalarType
+
 #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
   _(int8_t, Char)                 \
@@ -184,6 +198,13 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
   }
   AT_ERROR(
       "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+}
+
+inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::TypeMeta> type_meta) {
+  if (!type_meta.has_value()) {
+    return c10::nullopt;
+  }
+  return typeMetaToScalarType(*type_meta);
 }
 
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {

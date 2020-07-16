@@ -157,11 +157,12 @@ class NLLLoss(_WeightedLoss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the sum of the output will be divided by the number of
-            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
+            be applied, ``'mean'``: the weighted mean of the output is taken,
+            ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in
+            the meantime, specifying either of those two args will override
+            :attr:`reduction`. Default: ``'mean'``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -474,7 +475,7 @@ class BCELoss(_WeightedLoss):
     However, an infinite term in the loss equation is not desirable for several reasons.
 
     For one, if either :math:`y_n = 0` or :math:`(1 - y_n) = 0`, then we would be
-    multipying 0 with infinity. Secondly, if we have an infinite loss value, then
+    multiplying 0 with infinity. Secondly, if we have an infinite loss value, then
     we would also have an infinite term in our gradient, since
     :math:`\lim_{x\to 0} \frac{d}{dx} \log (x) = \infty`.
     This would make BCELoss's backward method nonlinear with respect to :math:`x_n`,
@@ -884,7 +885,11 @@ class CrossEntropyLoss(_WeightedLoss):
     .. math::
         \text{loss}(x, class) = weight[class] \left(-x[class] + \log\left(\sum_j \exp(x[j])\right)\right)
 
-    The losses are averaged across observations for each minibatch.
+    The losses are averaged across observations for each minibatch. If the
+    :attr:`weight` argument is specified then this is a weighted average:
+
+    .. math::
+        \text{loss} = \frac{\sum^{N}_{i=1} loss(i, class[i])}{\sum^{N}_{i=1} weight[class[i]]}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
     an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`,
@@ -908,11 +913,12 @@ class CrossEntropyLoss(_WeightedLoss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the sum of the output will be divided by the number of
-            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
+            be applied, ``'mean'``: the weighted mean of the output is taken,
+            ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in
+            the meantime, specifying either of those two args will override
+            :attr:`reduction`. Default: ``'mean'``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -1316,7 +1322,7 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
         >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
         >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
-        >>> 
+        >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)

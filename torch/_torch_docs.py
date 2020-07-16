@@ -1186,15 +1186,18 @@ add_docstr(torch.view_as_complex,
            r"""
 view_as_complex(input) -> Tensor
 
-Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
-:attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a new
-complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last dimension of
-the input tensor is expected to represent the real and imaginary components of complex numbers.
+Returns a view of :attr:`input` as a complex tensor. For an input complex
+tensor of :attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a
+new complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last
+dimension of the input tensor is expected to represent the real and imaginary
+components of complex numbers.
 
 .. warning::
-    :func:`view_as_complex` is only supported for tensors with :class:`torch.dtype` ``torch.float64`` and ``torch.float32`.
-    The input is expected to have the last dimension of :attr:`size` 2. In addition, the tensor must have a `stride` of 1
-    for its last dimension. The strides of all other dimensions must be even numbers.
+    :func:`view_as_complex` is only supported for tensors with
+    :class:`torch.dtype` ``torch.float64`` and ``torch.float32``.  The input is
+    expected to have the last dimension of :attr:`size` 2. In addition, the
+    tensor must have a `stride` of 1 for its last dimension. The strides of all
+    other dimensions must be even numbers.
 
 Args:
     {input}
@@ -1713,6 +1716,31 @@ Example::
     >>> torch.cumsum(a, dim=0)
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
+""".format(**reduceops_common_args))
+
+add_docstr(torch.count_nonzero,
+           r"""
+count_nonzero(input, dim=None) -> Tensor
+
+Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
+If no dim is specified then all non-zeros in the tensor are counted.
+
+Args:
+    {input}
+    dim (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
+
+Example::
+
+    >>> x = torch.zeros(3,3)
+    >>> x[torch.randn(3,3) > 0.5] = 1
+    >>> x
+    tensor([[0., 1., 1.],
+            [0., 0., 0.],
+            [0., 0., 1.]])
+    >>> torch.count_nonzero(x)
+    tensor(3)
+    >>> torch.count_nonzero(x, dim=0)
+    tensor([0, 1, 2])
 """.format(**reduceops_common_args))
 
 add_docstr(torch.dequantize,
@@ -2468,6 +2496,35 @@ Example::
             [ 4,  3]])
 """)
 
+
+add_docstr(torch.gcd,
+           r"""
+gcd(input, other, out=None) -> Tensor
+
+Computes the element-wise greatest common divisor (GCD) of :attr:`input` and :attr:`other`.
+
+Both :attr:`input` and :attr:`other` must have integer types.
+
+Note that we define the GCD(0, 0) to be 0.
+
+Args:
+    input (Tensor)
+    other (Tensor)
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.gcd(a, b)
+    tensor([1, 2, 5])
+    >>> c = torch.tensor([3])
+    >>> torch.gcd(a, c)
+    tensor([1, 1, 3])
+""".format(**common_args))
+
 add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
@@ -2937,6 +2994,32 @@ Example::
     >>> torch.kthvalue(x, 2, 0, True)
     torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """.format(**single_dim_common))
+
+add_docstr(torch.lcm,
+           r"""
+lcm(input, other, out=None) -> Tensor
+
+Computes the element-wise least common multiple (LCM) of :attr:`input` and :attr:`other`.
+
+Both :attr:`input` and :attr:`other` must have integer types.
+
+Args:
+    input (Tensor)
+    other (Tensor)
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.lcm(a, b)
+    tensor([15, 20, 15])
+    >>> c = torch.tensor([3])
+    >>> torch.lcm(a, c)
+    tensor([15, 30, 15])
+""".format(**common_args))
 
 add_docstr(torch.le,
            r"""
@@ -5416,6 +5499,37 @@ Example::
     tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
 """.format(**common_args))
 
+add_docstr(torch.logit,
+           r"""
+logit(input, eps=None, out=None) -> Tensor
+
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+
+.. math::
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
+""".format(**common_args))
+
 add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
@@ -7258,6 +7372,10 @@ The inverse of this function is :func:`~torch.ifft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7353,6 +7471,10 @@ The inverse of this function is :func:`~torch.fft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7437,6 +7559,10 @@ The inverse of this function is :func:`~torch.irfft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7512,6 +7638,10 @@ The inverse of this function is :func:`~torch.rfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
+
+.. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7735,8 +7865,8 @@ vander(x, N=None, increasing=False) -> Tensor
 """ + r"""
 Generates a Vandermonde matrix.
 
-The columns of the output matrix are elementwise powers of the input vector :math:`x^(N-1), x^(N-2), ..., x^0`.
-If increasing is true, the order of the columns is reversed :math:`x^0, x^1, ..., x^(N-1)`. Such a
+The columns of the output matrix are elementwise powers of the input vector :math:`x^{{(N-1)}}, x^{{(N-2)}}, ..., x^0`.
+If increasing is True, the order of the columns is reversed :math:`x^0, x^1, ..., x^{{(N-1)}}`. Such a
 matrix with a geometric progression in each row is named for Alexandre-Theophile Vandermonde.
 
 Arguments:
@@ -7747,9 +7877,9 @@ Arguments:
         the powers increase from left to right, if False (the default) they are reversed.
 
 Returns:
-    Tensor: Vandermonde matrix. If increasing is False, the first column is :math:`x^(N-1)`,
-    the second :math:`x^(N-2)` and so forth. If increasing is True, the columns
-    are :math:`x^0, x^1, ..., x^(N-1)`.
+    Tensor: Vandermonde matrix. If increasing is False, the first column is :math:`x^{{(N-1)}}`,
+    the second :math:`x^{{(N-2)}}` and so forth. If increasing is True, the columns
+    are :math:`x^0, x^1, ..., x^{{(N-1)}}`.
 
 Example::
 
