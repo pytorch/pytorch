@@ -51,7 +51,7 @@ from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -8777,8 +8777,6 @@ def add_test(test, decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
-        if test.with_tf32:
-            fn = tf32_on_and_off()(fn)
         if decorator is not None:
             fn = decorator(fn)
         setattr(TestNN, test_name, fn)
@@ -8792,8 +8790,18 @@ def add_test(test, decorator=None):
         kwargs['extra_args'] = test.extra_args
 
     if 'dtype' in get_function_arglist(test.test_cuda):
-        add(cuda_test_name + '_float', lambda self,
-            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
+        if tf32_is_not_fp32():
+            def with_tf32_off(self, test=test, kwargs=kwargs):
+                with tf32_off():
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+            add(cuda_test_name + '_fp32', with_tf32_off)
+            def with_tf32_on(self, test=test, kwargs=kwargs):
+                with tf32_on():
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+            add(cuda_test_name + '_tf32', with_tf32_on)
+        else:
+            add(cuda_test_name + '_float', lambda self,
+                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
         add(cuda_test_name + '_double', lambda self,
             test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
 

@@ -5,6 +5,7 @@ import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
 import inspect
+import contextlib
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -108,3 +109,25 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         return wrapped
     return wrapper
+
+
+@contextlib.contextmanager
+def tf32_off():
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = False
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            yield 
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+
+
+@contextlib.contextmanager
+def tf32_on():
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            yield 
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
