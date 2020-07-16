@@ -2584,13 +2584,10 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
-        class TensorFactoryScript(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
-
-        x = torch.randn(2, 3, 4)
-        self.run_test(TensorFactoryScript(), x)
+        scripted_model = torch.jit.script(TensorFactory())
+        another_x = torch.randn(5, 6, 7)
+        self.run_test(scripted_model, x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
