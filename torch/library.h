@@ -484,14 +484,15 @@ public:
   /// ```
   /// // Example:
   ///
-  /// void xla_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  ///   // ... see aten/src/ATen/core/dispatch/backend_fallback_test.cpp
-  ///   // for a full example ...
+  /// TORCH_LIBRARY_IMPL(_, XLAPreAutograd, m) {
+  ///   // If there is not a kernel explicitly registered
+  ///   // for XLAPreAutograd, fallthrough to the next
+  ///   // available kernel
+  ///   m.fallback(torch::CppFunction::makeFallthrough());
   /// }
   ///
-  /// TORCH_LIBRARY_IMPL(_, XLA, m) {
-  ///   m.fallback(xla_fallback);
-  /// }
+  /// // See aten/src/ATen/core/dispatch/backend_fallback_test.cpp
+  /// // for a full example of boxed fallback
   /// ```
   template <typename Func>
   Library& fallback(Func&& raw_f) & {
@@ -619,6 +620,10 @@ public:
 ///   m.impl("add", add_cpu_impl);
 /// }
 /// ```
+///
+/// If ``add_cpu_impl`` is an overloaded function, use a
+/// ``static_cast`` to specify which overload you want
+/// (by providing the full type).
 #define TORCH_LIBRARY_IMPL(ns, k, m) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \

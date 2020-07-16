@@ -712,6 +712,12 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
@@ -1313,6 +1319,24 @@
   use_c10_dispatcher: full
   dispatch:
     CPU: from_file
+
+- func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: gcd(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
+
+- func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: lcm(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: function, method
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -2557,12 +2581,24 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
-- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
+- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
@@ -3564,6 +3600,13 @@
   dispatch:
     MkldnnCPU: mkldnn_reorder_conv2d_weight
 
+- func: mkldnn_reorder_conv3d_weight(Tensor self, int[3] padding=0, int[3] stride=1, int[3] dilation=1, int groups=1) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_reorder_conv3d_weight
+
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
 
@@ -4554,14 +4597,14 @@
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: index_select_out_cpu_
-    CUDA: legacy::cuda::_th_index_select_out
+    CUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: index_select_cpu_
-    CUDA: legacy::cuda::_th_index_select
+    CUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
