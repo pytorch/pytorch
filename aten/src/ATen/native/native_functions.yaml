@@ -2130,7 +2130,7 @@
   use_c10_dispatcher: full
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
-- func: moveaxis(Tensor self, int[] src, int[] dst) -> Tensor
+- func: moveaxis.intlist(Tensor self, int[] src, int[] dst) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
