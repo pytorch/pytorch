@@ -106,7 +106,8 @@ module_tests = [
         cpp_constructor_args='torch::nn::LinearOptions(10, 8)',
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
-        with_tf32=True
+        with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Linear',
@@ -115,7 +116,8 @@ module_tests = [
         input_size=(4, 10),
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
-        with_tf32=True
+        with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Threshold',
@@ -1581,6 +1583,7 @@ new_module_tests = [
         cudnn=True,
         desc='stride',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1650,6 +1653,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 3, 7),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -1660,6 +1664,7 @@ new_module_tests = [
         cudnn=True,
         desc='no_bias',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -1679,6 +1684,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(2, 4, 7),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='MaxPool1d',
@@ -1711,6 +1717,7 @@ new_module_tests = [
         desc='strided',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1721,6 +1728,7 @@ new_module_tests = [
         desc='padding',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1780,6 +1788,7 @@ new_module_tests = [
         input_size=(1, 3, 7, 6),
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1796,6 +1805,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1807,6 +1817,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -2038,6 +2049,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv3d',
@@ -2049,6 +2061,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv3d',
@@ -2059,6 +2072,7 @@ new_module_tests = [
         desc='stride',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv3d',
@@ -2069,6 +2083,7 @@ new_module_tests = [
         desc='stride_padding',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv3d',
@@ -2089,6 +2104,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv3d_dilated',
