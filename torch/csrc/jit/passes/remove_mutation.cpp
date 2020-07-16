@@ -41,9 +41,8 @@ struct MutationRemover {
             "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
   }
 
-  Node* replaceSpecialMappedOp(Node* n) {
+  Node* createSpecialMappedOp(Node* n) {
     WithInsertPoint guard(n);
-    TORCH_INTERNAL_ASSERT(isSpecialMappedOp(n));
     auto inputs = n->inputs();
     Node* new_node;
     if (n->matches(
@@ -213,7 +212,7 @@ struct MutationRemover {
 
       Node* new_node;
       if (isSpecialMappedOp(node)) {
-        new_node = replaceSpecialMappedOp(node);
+        new_node = createSpecialMappedOp(node);
       } else {
         auto schema_name = node->schema().name();
         auto new_schema = schema_name.substr(0, schema_name.size() - 1);
