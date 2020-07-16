@@ -285,7 +285,7 @@ void RequestCallbackNoPython::processRpc(
         ownerRRef =
             ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
       } else {
-        ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
+        ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
       }
 
       auto& stack = scriptRemoteCall.stackRef();
