@@ -430,7 +430,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     size_t itc = 0, itp = 0;
     while (itc < consumer_root.size() || itp < producer_root.size()) {
       if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast() &&
-          (itp > producer_root.size() || !producer_root[itp]->isBroadcast())) {
+          (itp >= producer_root.size() || !producer_root[itp]->isBroadcast())) {
         itc++;
         continue;
       }

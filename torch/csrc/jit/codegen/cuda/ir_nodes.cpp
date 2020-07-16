@@ -1027,7 +1027,6 @@ Allocate::Allocate(Val* _val, Val* _size)
         ".");
   }
   addInput(_size);
-  addInput(_val);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 

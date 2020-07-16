@@ -135,7 +135,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
 };
 
 /*
- * Reduction operatoin. Out is first initialized to _init. Then
+ * Reduction operation. Out is first initialized to _init. Then
  * _reduction_op_type is used to update out as out = reductionOp(out, in).
  * Output's axes marked as reduction will be reduced to produce an output
  * tensor. The output tensors size will be the size of all

@@ -314,6 +314,332 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   return producer;
 }
 
+TensorView* TensorView::cache_before() {
+  FusionGuard fg(fusion());
+
+  Expr* origin_expr = fusion()->origin(this);
+  TORCH_CHECK(
+      origin_expr != nullptr && !fusion()->hasInput(this),
+      "Error adding cache_before ",
+      this,
+      " its origin is a nullptr and we restrict using cache_before on an input.");
+
+  TORCH_CHECK(
+      origin_expr != nullptr &&
+          origin_expr->getExprType() != ExprType::ReductionOp,
+      "Error adding cache_before ",
+      this,
+      " its origin is a reduction, instead please use cache_after.");
+
+  // Create Producer Domain
+  // Keep Broadcast Axis (Permanent)
+  auto root_domain = getRootDomain();
+  std::vector<IterDomain*> new_root_domain;
+  for (auto root : root_domain) {
+    if (root->isBroadcast()) {
+      new_root_domain.push_back(new IterDomain(
+          root->start(),
+          root->extent(),
+          root->parallel_method(),
+          false,
+          false,
+          true));
+    } else if (!root->isBroadcast() && !root->isReduction()) {
+      new_root_domain.push_back(new IterDomain(
+          root->start(), root->extent(), root->parallel_method()));
+    }
+  }
+
+  // This domain will be the consumer, so create the producer
+  TensorView* producer =
+      new TensorView(new TensorDomain(new_root_domain), getDataType().value());
+
+  // Set domain of consumer
+  TensorView* consumer = this;
+
+  // Insert producer - Cache_Before (CB) - before this TV.
+  // Before: Prev TV -> [Origin Op] -> This TV
+  // After:  Prev TV -> [Origin Op] -> New CB TV -> [Set Op] -> This TV
+
+  // Get inputs for origin expression
+  auto expr_inputs = origin_expr->inputs();
+
+  // Expr* producer_origin =
+  createExprConsumer(origin_expr, producer);
+
+  // Expr* producer_uses =
+  new UnaryOp(UnaryOpType::Set, consumer, producer);
+
+  // Before: This TV -> Next TV
+  // After:  New TV (CB) -> This TV -> Next TV
+  if (hasComputeAt()) {
+    TransformReplay::replayPasC(producer, consumer, -1);
+    auto this_ca_pos = getThisComputeAtAxis();
+    producer->computeAt(consumer, this_ca_pos);
+  } else {
+    // Before: Prev TV -> This TV
+    // After:  Prev TV -> New TV (CB) -> This TV
+    // Iterate over origin expression inputs for cache_before on outputs
+    for (Val* v : expr_inputs) {
+      if (v->getValType().value() == ValType::TensorView) {
+        TensorView* origin_input = dynamic_cast<TensorView*>(v);
+        if (origin_input->hasComputeAt() &&
+            origin_input->getComputeAtView() == this) {
+          TransformReplay::replayPasC(producer, consumer, -1);
+
+          auto origin_ca_pos = origin_input->getThisComputeAtAxis();
+          auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
+          origin_input->computeAt(producer, origin_ca_pos);
+          producer->setComputeAt(consumer, origin_rel_ca_pos);
+        }
+      }
+    }
+  }
+
+  return producer;
+}
+
+TensorView* TensorView::cache_after() {
+  FusionGuard fg(fusion());
+
+  // Get all the uses for this Tensorview
+  TORCH_CHECK(
+      !fusion()->hasOutput(this),
+      "Error adding cache_after ",
+      this,
+      " we restrict using cache_after on an output.");
+
+  // Create Consumer Domain
+  // Keep Broadcast Axis (Permanent)
+  auto root_domain = getRootDomain();
+  std::vector<IterDomain*> new_root_domain;
+  for (auto root : root_domain) {
+    if (root->isBroadcast()) {
+      new_root_domain.push_back(new IterDomain(
+          root->start(),
+          root->extent(),
+          root->parallel_method(),
+          false,
+          false,
+          true));
+    } else if (!root->isBroadcast() && !root->isReduction()) {
+      new_root_domain.push_back(new IterDomain(
+          root->start(), root->extent(), root->parallel_method()));
+    }
+  }
+
+  // This domain will be the producer, so create the consumer
+  TensorView* consumer =
+      new TensorView(new TensorDomain(new_root_domain), getDataType().value());
+
+  // Set domain of producer - No Change
+  TensorView* producer = this;
+
+  // Insert consumer - Cache_After (CA) - after this TV.
+  // Before: This TV -> [Use Op] -> Next TV
+  // After:  This TV -> [Set Op] -> New CA TV -> [Use Op] -> Next TV
+
+  // Expr* consumer_uses =
+  size_t count = 0;
+  for (auto expr : fusion()->unordered_uses(this)) {
+    createExprProducer(expr, this, consumer);
+    ++count;
+  }
+
+  if (count > 1) {
+    std::cout
+        << "WARNING: Cache_After with multiple consumers can create incorrect "
+           "kernels depending on computeAt configuration."
+        << std::endl;
+  }
+
+  // Expr* consumer_origin =
+  new UnaryOp(UnaryOpType::Set, consumer, producer);
+
+  // Before: This TV -> Next TV
+  // After:  This TV -> New TV (After) -> Next TV
+  if (hasComputeAt()) {
+    TransformReplay::replayCasP(consumer, producer, -1);
+
+    auto rel_ca_pos = getRelativeComputeAtAxis();
+    auto this_ca_pos = getThisComputeAtAxis();
+    auto this_ca_view = getComputeAtView();
+
+    computeAt(consumer, this_ca_pos);
+    consumer->setComputeAt(this_ca_view, rel_ca_pos);
+  } else {
+    // Check users of this TV for computeAt for cache_after on inputs
+    for (auto expr : fusion()->unordered_uses(consumer)) {
+      auto expr_outputs = expr->outputs();
+      for (Val* v : expr_outputs) {
+        if (v->getValType().value() == ValType::TensorView) {
+          TensorView* output = dynamic_cast<TensorView*>(v);
+          if (output->hasComputeAt()) {
+            TransformReplay::replayPasC(consumer, output, -1);
+            auto output_ca_pos = output->getThisComputeAtAxis();
+            consumer->setComputeAt(output, output_ca_pos);
+          }
+        }
+      }
+    }
+  }
+
+  return consumer;
+}
+
+namespace {
+
+// Create New Expr given consumer - [output of the expression]
+struct CreateExprConsumer : public OptInDispatch {
+ public:
+  static void create(Expr* expr, TensorView* consumer) {
+    CreateExprConsumer cec(consumer);
+    cec.handle(expr);
+  }
+
+ private:
+  explicit CreateExprConsumer(TensorView* consumer) : consumer_(consumer) {}
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+
+  void handle(UnaryOp* unary_expr) final {
+    new UnaryOp(unary_expr->getUnaryOpType(), consumer_, unary_expr->in());
+  }
+
+  void handle(BinaryOp* binary_expr) final {
+    new BinaryOp(
+        binary_expr->getBinaryOpType(),
+        consumer_,
+        binary_expr->lhs(),
+        binary_expr->rhs());
+  }
+
+  void handle(TernaryOp* ternary_expr) final {
+    new TernaryOp(
+        ternary_expr->getTernaryOpType(),
+        consumer_,
+        ternary_expr->in1(),
+        ternary_expr->in2(),
+        ternary_expr->in3());
+  }
+
+  void handle(ReductionOp* reduction_expr) final {
+    new ReductionOp(
+        reduction_expr->getReductionOpType(),
+        reduction_expr->init(),
+        consumer_,
+        reduction_expr->in());
+  }
+
+  void handle(BroadcastOp* broadcast_expr) final {
+    new BroadcastOp(consumer_, broadcast_expr->in());
+  }
+
+ private:
+  TensorView* consumer_ = nullptr;
+};
+
+// Create New Expr given producer - [an input for the expression]
+struct CreateExprProducer : public OptInDispatch {
+ public:
+  static void create(Expr* expr, TensorView* current, TensorView* producer) {
+    CreateExprProducer cep(current, producer);
+    cep.handle(expr);
+  }
+
+ private:
+  explicit CreateExprProducer(TensorView* current, TensorView* producer)
+      : current_(current), producer_(producer) {}
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+
+  void handle(UnaryOp* unary_expr) final {
+    new UnaryOp(unary_expr->getUnaryOpType(), unary_expr->out(), producer_);
+  }
+
+  void handle(BinaryOp* binary_expr) final {
+    if (binary_expr->lhs()->sameAs(current_)) {
+      new BinaryOp(
+          binary_expr->getBinaryOpType(),
+          binary_expr->out(),
+          producer_,
+          binary_expr->rhs());
+    } else {
+      new BinaryOp(
+          binary_expr->getBinaryOpType(),
+          binary_expr->out(),
+          binary_expr->lhs(),
+          producer_);
+    }
+  }
+
+  void handle(TernaryOp* ternary_expr) final {
+    if (ternary_expr->in1()->sameAs(current_)) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          producer_,
+          ternary_expr->in2(),
+          ternary_expr->in3());
+    } else if (ternary_expr->in2()->sameAs(current_)) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          ternary_expr->in1(),
+          producer_,
+          ternary_expr->in3());
+    } else {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          ternary_expr->in1(),
+          ternary_expr->in2(),
+          producer_);
+    }
+  }
+
+  void handle(ReductionOp* reduction_expr) final {
+    new ReductionOp(
+        reduction_expr->getReductionOpType(),
+        reduction_expr->init(),
+        reduction_expr->out(),
+        producer_);
+  }
+
+  void handle(BroadcastOp* broadcast_expr) final {
+    new BroadcastOp(broadcast_expr->out(), producer_);
+  }
+
+ private:
+  TensorView* current_ = nullptr;
+  TensorView* producer_ = nullptr;
+};
+
+} // namespace
+
+// In Cache Before, for the origin expr of the original tensor,
+// we create a new operation where the original tensor is replaced
+// with the new cache tensor. This function creates a new expr
+// given the consumer, the output of the expression.
+void TensorView::createExprConsumer(Expr* expr, TensorView* consumer) {
+  CreateExprConsumer::create(expr, consumer);
+}
+
+// In Cache After, for all the uses of the original tensor, we create
+// a new operation where the original tensor is replaced with the new
+// cache tensor. This function creates a new expr given a producer,
+// an input for the expression.
+void TensorView::createExprProducer(
+    Expr* expr,
+    TensorView* current,
+    TensorView* producer) {
+  CreateExprProducer::create(expr, current, producer);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
