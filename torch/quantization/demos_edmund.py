@@ -272,30 +272,30 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 
 
                 # ns.prepare_model_outputs(unquantized_model, model, _correct_bias.MeanLogger)
-                qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
-                float_model.qconfig = qconfig_debug
-                qmodel.qconfig = qconfig_debug
+                qconfig_debug = torch.quantization.QConfig(activation=_correct_bias.MeanLogger, weight=None)
+                unquantized_model.qconfig = qconfig_debug
+                model.qconfig = qconfig_debug
                 white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
 
-                torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
-                torch.quantization.prepare(qmodel, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+                torch.quantization.prepare(unquantized_model, inplace=True, white_list=white_list, prehook=_correct_bias.MeanLogger)
+                torch.quantization.prepare(model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=_correct_bias.MeanLogger)
                 count =0
                 for data in data_loader_test:
                     with torch.no_grad():
-                        print(count)
+                        # print(count)
                         count += 1
-                        print(data[0].size())
                         if count != 34:
                             output = unquantized_model(data[0])
                             q_output = model(data[0])
-                            print("sqnr score: ", _correct_bias.compute_error(output, q_output))
+                            # print("sqnr score: ", _correct_bias.compute_error(output, q_output))
                         else:
-                            print("skip")
+                            # print("skip")
+                            pass
                         # if count == 30:
                         #     break
                 print("finished bias calibrating")
                 # compare_dict = ns.get_matching_activations(unquantized_model, model)
-                output_logger, input_logger = get_matching_activations(float_model, qmodel)
+                output_logger, input_logger = _correct_bias.get_matching_activations(unquantized_model, model)
 
                 _correct_bias.correct_quantized_bias_V2(output_logger, input_logger, unquantized_model, model)
 

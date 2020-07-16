@@ -120,7 +120,7 @@ def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmod
     recorded differences in weights provided by output_dict
 
     '''
-    print(expected_output)
+    # print(expected_output)
     for key in expected_output:
         q_mod = get_module(qmodel, key[:-1]) #removing decimal
         if hasattr(q_mod, 'bias') and type(q_mod) in [nn.Linear, nn.Conv2d, nnq.Linear, nnq.Conv2d]:
@@ -130,31 +130,27 @@ def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmod
 
                 float_submodule = get_module(float_model, key[:-1])
                 float_weight = get_param(float_submodule, 'weight')
+
                 quantized_submodule = get_module(qmodel, key[:-1])
                 quantized_weight = get_param(quantized_submodule, 'weight')
+
                 if quantized_weight.is_quantized:
                     quantized_weight = quantized_weight.dequantize()
 
-
-
                 error_matrix = float_weight - quantized_weight
-                # linear works fine for just taking mean over input channel
-                # error_matrix = torch.mean(error_matrix, 1) # getting rid of input channel
 
                 if type(q_mod) in [nn.Conv2d, nnq.Conv2d]:
                     sum_kernels = torch.sum(error_matrix, (2,3)) #c_o, c_i
                     expected_c_i = torch.mean(expected_input[key]['float'], (0,2,3)) #c_i
-                    # expected_c_o = sum over c_i (expected_c_i*sum[c_o,c_i])
-                    # print(type(sum_kernels))
-                    # print(type(expected_c_i))
                     expected_c_i = expected_c_i.reshape(expected_c_i.size()[0], 1) #flipping into column vector
                     expected_c_o = torch.matmul(sum_kernels, expected_c_i) #c_o
-                    # print('expected_c_o.size(): ', expected_c_o.size())
-                    # print()
+                    expected_c_o = expected_c_o.squeeze(1)
                 elif type(q_mod) in [nn.Linear, nnq.Linear]:
                     expected_c_o = torch.mean(error_matrix, 1)
 
                 updated_bias = bias.data - expected_c_o
+
+                updated_bias = updated_bias.reshape(bias.data.size())
 
                 if isinstance(q_mod.bias, torch.nn.parameter.Parameter):
                     q_mod.bias.data = updated_bias
@@ -324,6 +320,9 @@ def sanity_checks_sqnr():
     correct_quantized_bias_V2(*x[:-1])
     output_logger, input_logger, float_model, qmodel, img_data = x
 
+    correct_quantized_bias_V2(output_logger, input_logger, float_model, qmodel)
+
+
     for key in output_logger:
         float_submodule = get_module(float_model, key[:-1])
         quantized_submodule = get_module(qmodel, key[:-1])
@@ -396,7 +395,7 @@ def get_matching_activations(float_module, q_module):
         the matching float and quantized activations
     """
     float_dict = {}
-    print("float module: ", float_module)
+    # print("float module: ", float_module)
     # return
     get_logger_entries(float_module, float_dict)
 
@@ -413,7 +412,7 @@ def get_matching_activations(float_module, q_module):
         output_logger[key] = {}
         output_logger[key]['float'] = float_dict[key]['activation_post_process']
         output_logger[key]['quantized'] = quantized_dict[key]['activation_post_process']
-    print("float_dict: ", float_dict)
+    # print("float_dict: ", float_dict)
     return output_logger, input_logger
 
 if __name__ == "__main__":
