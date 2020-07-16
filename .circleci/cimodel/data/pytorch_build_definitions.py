@@ -32,6 +32,10 @@ class Conf:
     is_important: bool = False
     parallel_backend: Optional[str] = None
 
+    @staticmethod
+    def is_test_phase(phase):
+        return phase in ["test", "test1", "test2"]
+
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
     def get_parms(self, for_docker):
@@ -83,9 +87,9 @@ class Conf:
         build_env_name = "-".join(map(str, build_job_name_pieces))
         parameters["build_environment"] = miniutils.quote(build_env_name)
         parameters["docker_image"] = self.gen_docker_image_path()
-        if phase == "test" and self.gpu_resource:
+        if Conf.is_test_phase(phase) and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
-        if phase == "test":
+        if Conf.is_test_phase(phase):
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
@@ -100,7 +104,7 @@ class Conf:
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
 
-        if phase in ["test", "test1", "test2"]:
+        if Conf.is_test_phase(phase):
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -312,7 +316,7 @@ def get_workflow_jobs():
         for phase in phases:
 
             # TODO why does this not have a test?
-            if phase == "test" and conf_options.cuda_version == "10":
+            if Conf.is_test_phase(phase) and conf_options.cuda_version == "10":
                 continue
 
             x.append(conf_options.gen_workflow_job(phase))
