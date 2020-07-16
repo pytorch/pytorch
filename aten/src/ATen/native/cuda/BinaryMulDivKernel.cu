@@ -38,8 +38,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
-  } else if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
-       if (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2)) {
+  } else if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) &&
+    (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2))) {
   //if common dtype is half the scalar constant can overflow in half precision, and yet the result can
   //still be representable in the half dtype. Cast scalar to acc_type to have better accuracy
           AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
@@ -51,15 +51,8 @@ void mul_kernel_cuda(TensorIterator& iter) {
               return a * b;
             });
           });
-     } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a * b;
-        });
-      });
-     }
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "mul_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "mul_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
