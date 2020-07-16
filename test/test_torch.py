@@ -6490,7 +6490,15 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
     def test_isreal_nan_inf(self, device, dtype):
-        vals = (float('nan'), 1 + float('nan') * 1j, 1 + float('inf') * 1j, 1 - float('inf') * 1j)
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
         self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
 
     @onlyCPU
