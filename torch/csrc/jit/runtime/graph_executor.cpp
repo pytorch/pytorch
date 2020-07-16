@@ -51,6 +51,7 @@
 #include <vector>
 #include "ATen/core/interned_strings.h"
 #include "jit/passes/bailout_graph.h"
+#include "jit/passes/utils/subgraph_utils.h"
 
 namespace torch {
 namespace jit {
@@ -755,33 +756,55 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
-void InsertGuardsOnInputs(std::shared_ptr<Graph> graph) {
-  auto dummy = graph->insertConstant(1);
-  for (auto gi : graph->inputs()) {
-    if (gi->type()->cast<TensorType>()) {
-      auto pn = graph->create(prim::Guard, 1); 
-      graph->prependNode(pn);
-      pn->addInput(dummy);
-      pn->output()->setType(gi->type());
-      gi->replaceAllUsesWith(pn->output());
-      dummy->replaceAllUsesWith(gi);
+void InsertGuardsOnInputs(Block* b) {
+
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) { 
+    if (it->kind() == Symbol::fromQualString("tensorexpr::Group")) {
+
+      WithInsertPoint wip{*it};
+      auto graph = b->owningGraph();
+      auto dummy = graph->insertConstant(1);
+      for (auto gi : it->inputs()) {
+        if (gi->type()->cast<TensorType>()) {
+          auto pn = graph->create(prim::Guard, 1); 
+          graph->prependNode(pn);
+          pn->addInput(dummy);
+          pn->output()->setType(gi->type());
+          gi->replaceAllUsesWith(pn->output());
+          dummy->replaceAllUsesWith(gi);
+          
+        }
+      }
+      dummy->node()->destroy();
+    } else {
+      for (auto ib : it->blocks()) {
+        InsertGuardsOnInputs(ib);
+      }
     }
   }
 }
 
-void InsertBailoutsOnTEGroups(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+void unmergeTEGroups(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end();) {
     auto n = *it;
+    it++;
     if (n->kind() == Symbol::fromQualString("tensorexpr::Group")) {
-
-      auto subgraph = n->g(attr::Subgraph);
-      InsertGuardsOnInputs(subgraph);
-      InsertBailOuts(subgraph);
-    } else {
+      auto subgraph = SubgraphUtils::getSubgraph(n);
+      SubgraphUtils::unmergeSubgraph(n);
+    }
+    else {
       for (auto ib : n->blocks()) {
-        InsertBailoutsOnTEGroups(ib);
+        unmergeTEGroups(ib);
       }
     }
+  }
+}
+
+void cleanupBailOutTemplate(Block* b) {
+  auto bt_it = std::find_if(b->nodes().begin(), b->nodes().end(), [](Node* n) { return n->kind() == prim::BailoutTemplate; });
+  if (bt_it != b->nodes().end()) {
+    auto bt_graph = bt_it->g(attr::Subgraph);
+    unmergeTEGroups(bt_graph->block());
   }
 }
 
@@ -809,7 +832,10 @@ void runNondiffOptimization(
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
       FuseTensorExprs(graph);
-      InsertBailoutsOnTEGroups(graph->block());
+      InsertGuardsOnInputs(graph->block());
+      InsertBailOuts(graph);
+      cleanupBailOutTemplate(graph->block());
+      //InsertBailoutsOnTEGroups(graph->block());
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
