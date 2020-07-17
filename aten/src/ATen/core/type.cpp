@@ -24,7 +24,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
-      for (size_t i = 0; i < *ndim; ++i) {
+      size_t i = 0;
+      for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
@@ -36,6 +37,18 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         if (has_valid_strides_info) {
           out << ":" << *value->strides()[i];
         }
+      }
+      if (value->requiresGrad()) {
+        if (i++ > 0) {
+          out << ", ";
+        }
+        out << "requires_grad=" << *value->requiresGrad();
+      }
+      if (value->device()) {
+        if (i++ > 0) {
+          out << ", ";
+        }
+        out << "device=" << *value->device();
       }
       out << ")";
     }
