@@ -14,7 +14,7 @@ struct FuncArg {
 using AtenFuncArgs = std::vector<FuncArg>;
 using CallFuncArgs = std::vector<FuncArg>;
 
-// White lists for quantizable operators
+// Lists of allowed quantizable operators
 std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",

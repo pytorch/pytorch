@@ -124,10 +124,8 @@ class UnaryOpTest(serial.SerializedTestCase):
         workspace.ResetWorkspace()
         n = 1
         m = 10001
-        if opname == "Logit":
-            X = np.linspace(0, value, num=m, dtype=np.float32)
-        else:
-            X = np.linspace(-value, value, num=m, dtype=np.float32)
+
+        X = np.linspace(-value, value, num=m, dtype=np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
@@ -194,9 +192,68 @@ class UnaryOpTest(serial.SerializedTestCase):
     def test_swish(self):
         self._test_unary_op("Swish", value=20, atol=0.008)
 
-    def _test_logit(self):
-        self._test_unary_op("Logit", value=1)
+    @settings(max_examples=1)
+    def test_logit(self):
+        workspace.ResetWorkspace()
+        n = 1
+        m = 15361
+        X = np.linspace(0, 1, num=m, dtype=np.float32)
 
+        pred_net = caffe2_pb2.NetDef()
+        pred_net.name = "pred"
+        pred_net.external_input.append("X")
+        pred_net.external_output.append("Y")
+        pred_net.op.add().CopyFrom(
+            core.CreateOperator(
+                'Logit',
+                ['X'],
+                ['Y'],
+                eps=1e-8)
+        )
+        ref_net = caffe2_pb2.NetDef()
+        ref_net.name = "ref"
+        ref_net.external_input.append("X")
+        ref_net.external_output.append("Y")
+        ref_net.op.add().CopyFrom(
+            core.CreateOperator(
+                'LogitFakeFp16NNPI',
+                ['X'],
+                ['Y'],
+                eps=1e-8)
+        )
+        print("REF NET = {}".format(ref_net))
+
+        shape_hints = {"X": (n, m)}
+        pred_net_onnxified = onnxifi_caffe2_net(pred_net,
+                                                shape_hints,
+                                                debug=True,
+                                                adjust_batch=False,
+                                                use_onnx=False)
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in pred_net_onnxified.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+        workspace.SwitchWorkspace("glow_test_ws", True)
+        workspace.FeedBlob("X", X)
+        workspace.CreateNet(ref_net)
+        workspace.CreateNet(pred_net_onnxified)
+        # Run Glow net
+        workspace.RunNet(pred_net_onnxified.name)
+        Y_glow = workspace.FetchBlob('Y')
+        # Run caffe2 reference net
+        workspace.RunNet(ref_net.name)
+        Y_c2 = workspace.FetchBlob('Y')
+
+        diff = np.abs(Y_c2 - Y_glow)
+        if np.nanmax(diff) > 9e-3:
+            np.save('/tmp/logit_diff', diff)
+            np.save('/tmp/logit_result', Y_c2)
+            print_test_debug_info('Logit', {
+                "X": X,
+                "Y_c2": Y_c2,
+                "Y_glow": Y_glow,
+                "diff": diff
+            })
+            assert(0)
 
 class ReluTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))

@@ -197,7 +197,7 @@ private:
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args);
+  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -272,10 +272,8 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;
@@ -293,10 +291,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;

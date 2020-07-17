@@ -166,6 +166,31 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.))
 
+    def test_function_returns_undefined_tensor(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        # Test that undefined tensors returned from custom backward function
+        # are propagated as undefined and not tensor full of zeroes
+        x = torch.ones(1, requires_grad=True)
+
+        MyFunction.apply(x).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x ** 2).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x).sum().backward()
+        self.assertIsNone(x.grad)
+
+        self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -6489,6 +6514,32 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    def _test_atleast(self, device, torch_fn):
+        # 0-dim
+        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), s)
+        gradgradcheck(lambda x: torch_fn(x), s)
+
+        # 1-dim
+        a = torch.rand(4, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), a)
+        gradgradcheck(lambda x: torch_fn(x), a)
+
+        # 2,3,4-dim
+        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
+        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
+        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
+
+        input_tuple = (s, a, b, c, d)
+        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+
+    def test_atleast(self, device):
+        self._test_atleast(device, torch.atleast_1d)
+        self._test_atleast(device, torch.atleast_2d)
+        self._test_atleast(device, torch.atleast_3d)
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
