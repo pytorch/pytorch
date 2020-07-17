@@ -2935,14 +2935,14 @@ add_docstr(torch.isreal,
            r"""
 isreal(input) -> Tensor
 
-Returns a new tensor with boolean elements representing if each element is real-valued or not.
+Returns a new tensor with boolean elements representing if each element of :attr:input is real-valued or not.
 All real-valued types are considered real. Complex values are considered real when their imaginary part is 0.
 
 Arguments:
-    input (Tensor): A tensor to check
+    {input}
 
 Returns:
-    Tensor: A boolean tensor containing a True at each location of real elements.
+    Tensor: A boolean tensor with True where :attr:input is real-valued and False elsewhere.
 
 Example::
 
