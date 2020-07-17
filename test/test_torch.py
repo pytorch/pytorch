@@ -18120,6 +18120,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.linspace(start, end, steps, dtype=dtype, device=device)
         self.assertGreater(x[1] - x[0], (end - start) / steps)
 
+    def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
+        for ndims in range(0, 5):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for n in range(ndims + 1):
+                for with_extremal in [False, True]:
+                    for contiguous in [False, True]:
+                        # Generate Input.
+                        x = self._generate_input(shape, dtype, device, with_extremal)
+                        if contiguous:
+                            x = x.T
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+                        # Compare sequence input
+                        torch_sequence_x = (x,) * random.randint(3, 10)
+                        np_sequence_x = tuple(map(lambda x: np.array(x.detach().cpu().numpy()), torch_sequence_x))
+                        torch_res = torch_fn(*torch_sequence_x)
+                        np_res = np_fn(*np_sequence_x)
+
+                        torch_res = tuple(map(lambda x: x.cpu(), torch_res))
+                        np_res = tuple(map(lambda x: torch.from_numpy(x), np_res))
+                        self.assertEqual(np_res, torch_res)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_atleast(self, device, dtype):
+        self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
+        self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
+        self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
+
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
