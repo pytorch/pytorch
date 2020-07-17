@@ -4988,6 +4988,12 @@
     CPU, CUDA: max
     QuantizedCPU: max_quant
 
+- func: min_and_max(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU: min_and_max
+
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
