@@ -166,6 +166,31 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.))
 
+    def test_function_returns_undefined_tensor(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        # Test that undefined tensors returned from custom backward function
+        # are propagated as undefined and not tensor full of zeroes
+        x = torch.ones(1, requires_grad=True)
+
+        MyFunction.apply(x).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x ** 2).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x).sum().backward()
+        self.assertIsNone(x.grad)
+
+        self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
