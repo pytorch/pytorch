@@ -2268,6 +2268,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -3661,20 +3668,6 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
-""")
-
-add_docstr_all('unsafe_chunk',
-               r"""
-unsafe_chunk(chunks, dim=0) -> List of Tensors
-
-See :func:`torch.unsafe_chunk`
-""")
-
-add_docstr_all('unsafe_split',
-               r"""
-unsafe_split(split_size, dim=0) -> List of Tensors
-
-See :func:`torch.unsafe_split`
 """)
 
 add_docstr_all('stft',
