@@ -72,7 +72,6 @@ void testLiteInterpreterParams() {
 void testMobileNamedParameters() {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
-  m.register_parameter("foo2", 2 * torch::ones({}), false);
   m.define(R"(
     def add_it(self, x):
       b = 4
@@ -80,26 +79,19 @@ void testMobileNamedParameters() {
   )");
   Module child("m2");
   child.register_parameter("foo", 4 * torch::ones({}), false);
-  m.register_module("child", child);
-
-  std::vector<IValue> values;
-  for (auto e : m.named_parameters()) {
-    values.push_back(e.value);
-  }
+  m.register_module("child1", child);
+  m.register_module("child2", child);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
-  m.save("/Users/annshan/models/testfull.bc");
-  m._save_for_mobile("/Users/annshan/models/test.bc");
-
-  std::vector<IValue> mobile_values;
+  auto full_params = m.named_parameters();
   auto mobile_params = bc.named_parameters();
-  for (auto it = mobile_params.begin(); it != mobile_params.end(); it++) {
-    mobile_values.push_back(it->value());
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item().toInt() == mobile_params[e.name].item().toInt());
   }
-  AT_ASSERT(values == mobile_values);
 }
 
 } // namespace jit
