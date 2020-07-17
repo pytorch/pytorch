@@ -205,13 +205,12 @@ averages, you can use the :func:`update_parameters` function:
 
 
 SWA learning rate schedules
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The learning rate schedule is an important component of SWA. Typically, in SWA the learning rate
-is set to a high constant value. :class:`SWALR` is a learning rate scheduler that anneals the 
-learning rate to a fixed value, and then keeps it constant. For example, the following code creates 
-a scheduler that linearly anneals the learning rate from its initial value to 0.05 in 5 epochs
-within each parameter group:
+Typically, in SWA the learning rate is set to a high constant value. :class:`SWALR` is a 
+learning rate scheduler that anneals the learning rate to a fixed value, and then keeps it 
+constant. For example, the following code creates a scheduler that linearly anneals the 
+learning rate from its initial value to 0.05 in 5 epochs within each parameter group:
 
 >>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, \
 >>>         anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
@@ -239,7 +238,7 @@ statistics for each batch normalization layer in the model.
 
 
 Custom averaging strategies
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 By default, :class:`torch.optim.swa_utils.AveragedModel` computes a running equal average of 
 the parameters that you provide, but you can also use custom averaging functions with the 
@@ -253,7 +252,7 @@ Example:
 
 
 Putting it all together
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 
 In the example below, ``swa_model`` is the SWA model that accumulates the averages of the weights.
 We train the model for a total of 300 epochs and we switch to the SWA learning rate schedule 
@@ -264,6 +263,7 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=300)
 >>> swa_start = 160
 >>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+>>>
 >>> for epoch in range(300):
 >>>       for input, target in loader:
 >>>           optimizer.zero_grad()
@@ -279,5 +279,3 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 >>> # Use swa_model to make predictions on test data 
 >>> preds = swa_model(test_input)
-
-
