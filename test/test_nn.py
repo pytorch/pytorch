@@ -9427,7 +9427,7 @@ class TestNNDeviceType(NNTestCase):
     
     @onlyCUDA
     @dtypes(*NO_HALF_TENSORTYPES)
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.001)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -9449,7 +9449,7 @@ class TestNNDeviceType(NNTestCase):
         grad_output = torch.randn(seq_length, batch, hidden_size, dtype=dtype)
         hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
         grad_hy = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
-        with torch.backends.cudnn.flags(enabled=False):
+        with torch.backends.cudnn.flags(enabled=False, allow_tf32=None):
             for module in (nn.GRU, nn.LSTM):
                 for bias in (True, False):
                     rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
