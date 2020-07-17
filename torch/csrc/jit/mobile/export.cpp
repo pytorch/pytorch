@@ -98,12 +98,12 @@ class ScriptModuleSerializer {
 
     auto type_printer =
         [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-          auto namedType = t->cast<c10::NamedType>();
-          if (namedType && namedType->name()) {
-            return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-          }
-          return c10::nullopt;
-        };
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           qualifier,

@@ -2894,6 +2894,69 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
+    @unittest.skip("Enable once jit trace Tensor.numel as constant is fixed.")
+    def test_embedding_bag_dynamic(self):
+        class EmbeddingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embeddingbag = torch.nn.EmbeddingBag(40, 12, mode='sum')
+
+            def forward(self, input):
+                return self.embeddingbag(input)
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (10, 5))
+        y = torch.randint(10, (20, 5))
+        self.run_test(model, x, test_with_inputs=[y],
+                      input_names=['input'],
+                      output_names=['output'],
+                      dynamic_axes={'input': [0],
+                                    'output': [0]
+                                    })
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag(self):
+        model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
+        input = torch.randint(10, (7,))
+        offset = torch.tensor([0, 2, 5, 6])
+        self.run_test(model, (input, offset))
+
+        model = torch.nn.EmbeddingBag(10, 5, mode='sum', include_last_offset=True)
+        input = torch.randint(10, (7,))
+        offset = torch.tensor([0, 2, 5, 6])
+        self.run_test(model, (input, offset))
+
+        model = torch.nn.EmbeddingBag(10, 5, mode='max')
+        input = torch.randint(10, (7, 5))
+        self.run_test(model, (input))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag_1d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, offset, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input, offsets=offset,
+                                                         mode='sum', per_sample_weights=weights)
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (6,))
+        w = torch.randn(6,)
+        offset = torch.tensor([0, 2, 5])
+        embedding_matrix = torch.rand(10, 15)
+        self.run_test(model, (embedding_matrix, x, offset, w))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag_2d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input,
+                                                         mode='sum', per_sample_weights=weights)
+
+        embedding_matrix = torch.rand(10, 15)
+        model = EmbeddingModel()
+        x = torch.randint(7, (2, 3))
+        w = torch.randn(2, 3)
+        self.run_test(model, (embedding_matrix, x, w))
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):

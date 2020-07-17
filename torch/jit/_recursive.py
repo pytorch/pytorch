@@ -15,7 +15,7 @@ from torch._six import get_function_from_type, bind_method
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 # TODO: there should be a more principled way of doing this.
-blacklist = [
+ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
@@ -183,7 +183,7 @@ def infer_concrete_type_builder(nn_module):
         concrete_type_builder.add_overload(name, overloaded_names)
 
     for name, value in nn_module.__dict__.items():
-        if name in blacklist or name.startswith("__"):
+        if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue

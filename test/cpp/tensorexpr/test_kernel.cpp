@@ -20,8 +20,8 @@ void testKernel_1() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:3,3:1)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:3,3:1, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
@@ -49,8 +49,8 @@ void testKernel_2() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:1,3:5)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:1,3:5, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
@@ -79,8 +79,8 @@ void testKernel_3() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:12,3:2)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:12,3:2, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
