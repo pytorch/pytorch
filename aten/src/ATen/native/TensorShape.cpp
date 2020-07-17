@@ -1715,22 +1715,51 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
   TORCH_CHECK(it_dst == normalized_dst.end(), "moveaxis: repeated dim in `dst` (", dst, ")");
 
+  // Algorithm Walkthrough
+  // Example Input
+  // Variable State:
+  //     normalized_src = 0, 1
+  //     normalized_src = 2, 4
+  //     self_dim = 5
   DimVector order(self_dim);
   DimVector source_dims(self_dim);
   DimVector destination_dims(self_dim);
 
+  // We initialize two vectors to track update to the dims
+  // `order` contains the final order of the dim positions.
+  // Variable State:
+  //     order = NA, NA, NA, NA, NA
+  //     source_dims = 0, 1, 2, 3, 4
+  //     destination_dims = 0, 1, 2, 3, 4
   std::iota(source_dims.begin(), source_dims.end(), 0);
   std::iota(destination_dims.begin(), destination_dims.end(), 0);
 
+  // We mark and update position for the dim provided by user
+  // i.e. `normalized_src` and `normalized_dims`
+  // Variable State:
+  //     order = NA, NA, 0, NA, 1
+  //     source_dims = -1, -1, 2, 3, 4
+  //     destination_dims = 0, 1, -1, 3, -1
   for (int64_t i = 0; i < src.size(); ++i) {
       order[normalized_dst[i]] = normalized_src[i];
       source_dims[normalized_src[i]] = -1;
       destination_dims[normalized_dst[i]] = -1;
   }
 
+  // Remove the dims whose position we already know,
+  // the ones marked with -1 in previous step
+  // Variable State:
+  //     source_dims = 2, 3, 4
+  //     destination_dims = 0, 1, 3
   auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
   auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
 
+  // Update the position of the remaining dimensions.
+  // `source_dims` now contains the original position
+  // `destination_dims` contains the new position it will shifted to
+  // after considering the user inputs.
+  // Variable State:
+  //     order = 2, 3, 0, 4, 1
   int64_t rest_dim = self.dim() - src.size();
   for (int64_t i = 0; i < rest_dim; ++i) {
       order[destination_dims[i]] = source_dims[i];
