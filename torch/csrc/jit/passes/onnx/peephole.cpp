@@ -948,9 +948,8 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
   }
 }
 
-
-// This optimization removes consecutive SplitToSequence and ConcatFromSequence operators.
-// The optimization only happens when
+// This optimization removes consecutive SplitToSequence and ConcatFromSequence
+// operators. The optimization only happens when
 //  1. Output of SplitToSequence is not used by any other nodes.
 //  2. The attribute keepdims and axis of SplitToSequence match
 //     attribute new_axis and axis of ConcatFromSequence.
