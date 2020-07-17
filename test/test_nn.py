@@ -9427,7 +9427,7 @@ class TestNNDeviceType(NNTestCase):
     
     @onlyCUDA
     @dtypes(*NO_HALF_TENSORTYPES)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
