@@ -4969,6 +4969,15 @@
   dispatch:
     CPU, CUDA: sign_out
 
+- func: signbit(Tensor self, *) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: signbit_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   use_c10_dispatcher: full
   variants: method, function

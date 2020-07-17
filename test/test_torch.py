@@ -11349,6 +11349,53 @@ class TestTorchDeviceType(TestCase):
         a_bool.sign_()
         self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
 
+    def test_signbit(self, device):
+        for dtype in torch.testing.get_all_math_dtypes(device):
+            if dtype.is_complex:
+                continue
+
+            # Include NaN for floating point numbers
+            if dtype.is_floating_point:
+                dt_info = torch.finfo(dtype)
+
+                # Create tensor (with NaN checking)
+                a = torch.tensor([float('nan'), -12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                a_target = torch.tensor([False, True, False, False, True, False], device=device, dtype=bool)
+
+            else:
+                dt_info = torch.iinfo(dtype)
+
+                # If unsigned type, everything should be False
+                if dt_info.min == 0:
+                    a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                    a_target = torch.tensor([False, False, False, False, False], device=device, dtype=bool)
+                else:
+                    a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
+                    a_target = torch.tensor([True, False, False, True, False], device=device, dtype=bool)
+
+            self.assertEqual(a.signbit(), a_target, msg='signbit device={} dtype={}'.format(device, dtype))
+            self.assertEqual(torch.signbit(a), a_target, msg='signbit device={} dtype={}'.format(device, dtype))
+
+            out = torch.empty_like(a)
+            torch.signbit(a, out=out)
+            self.assertEqual(out.bool(), a_target, msg='signbit_out device={} dtype={}'.format(device, dtype))
+
+            a.signbit_()
+            self.assertEqual(a.bool(), a_target.bool(), msg='signbit_ device={} dtype={}'.format(device, dtype))
+
+        # Include test for bool dtype
+        a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
+        a_bool_target = torch.tensor([True, True, False, True], device=device).bool()
+        self.assertEqual(a_bool.signbit(), a_bool_target, msg='signbit device={} dtype=bool'.format(device))
+        self.assertEqual(torch.signbit(a_bool), a_bool_target, msg='signbit device={} dtype=bool'.format(device))
+
+        a_out = torch.empty_like(a_bool)
+        torch.signbit(a_bool, out=a_out)
+        self.assertEqual(a_out, a_bool_target, msg='signbit_out device={} dtype=bool'.format(device))
+
+        a_bool.signbit_()
+        self.assertEqual(a_bool, a_bool_target, msg='signbit_ device={} dtype=bool'.format(device))
+
     def test_logical_any(self, device):
         x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
 

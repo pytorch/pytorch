@@ -366,6 +366,28 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor& signbit_out(Tensor& result, const Tensor& self) {
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .build();
+  signbit_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor signbit(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  return at::signbit_out(result, self);
+}
+
+Tensor& signbit_(Tensor& self) {
+  return at::signbit_out(self, self);
+}
+
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   if (min && max) {
@@ -543,6 +565,7 @@ DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
+DEFINE_DISPATCH(signbit_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

@@ -5704,6 +5704,28 @@ Example::
     tensor([ 1., -1.,  0.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.signbit,
+           r"""
+signbit(input, out=None) -> Tensor
+
+Returns a new tensor with the signbits of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
+    >>> a
+    tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
+    >>> torch.signbit(a)
+    tensor([ False, True,  False,  False])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor

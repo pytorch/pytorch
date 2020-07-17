@@ -373,6 +373,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("sign", CppFunction::makeFallthrough());
   m.impl("sign.out", CppFunction::makeFallthrough());
   m.impl("sign_", CppFunction::makeFallthrough());
+  m.impl("signbit", CppFunction::makeFallthrough());
+  m.impl("signbit.out", CppFunction::makeFallthrough());
+  m.impl("signbit_", CppFunction::makeFallthrough());
   m.impl("sin", CppFunction::makeFallthrough());
   m.impl("sin.out", CppFunction::makeFallthrough());
   m.impl("sin_", CppFunction::makeFallthrough());
