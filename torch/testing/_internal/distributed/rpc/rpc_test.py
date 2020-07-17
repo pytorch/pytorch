@@ -3521,13 +3521,6 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         args = (2,)
         self._test_remote_message_dropped_timeout(func, args, dst=0)
 
-    @dist_init(faulty_messages=[], messages_to_delay={})
-    def test_owner_rref(self):
-        if self.rank != 0:
-            return
-        rref = rpc.remote(worker_name(0), torch.add, args=(1, 1))
-        rref.to_here()
-
     def _test_remote_message_delay_timeout(self, func, args, dst=None):
         if self.rank != 0:
             return
@@ -3563,16 +3556,14 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
                 # to_here() should raise timeout error, since it does not know about the
                 # status of rpc.remote().
                 slow_rref.to_here(0.001)
-        # Note: UserRRef will try to send out a RRefUserDelete, but will not find it on the owner.
-        # later, the owner will process the RRef creation, and time out
-        # waiting for the delete messages.
-        # Therefore, we wait until we get notification that pending owners have been confirmed
-        # before sending out RRefUserDeletes.
+        # Note: If we proceed with shutdown, UserRRef will send out a RRefUserDelete
+        # but this can be a noop since it may not exist on the owner yet. Later,
+        # the owner can process the RRef creation and wait for the delete message,
+        # thus leading to a timeout.
+        # Therefore, we wait until we get notification that pending owners have
+        # been confirmed before sending out RRefUserDeletes.
         if dst_rank != self.rank:
             wait_until_owners_and_forks_on_rank(2, 2, rank=dst_rank)
-        else:
-            # 1 owner, fork deleted
-            wait_until_owners_and_forks_on_rank(1, 0, rank=dst_rank)
 
     @dist_init(faulty_messages=[], messages_to_delay={"PYTHON_REMOTE_CALL": 2})
     def test_udf_remote_message_delay_timeout(self):

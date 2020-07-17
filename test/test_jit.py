@@ -2997,6 +2997,22 @@ def foo(x):
         # shouldn't throw a type error
         torch.jit.script(MyMod())
 
+    def test_unused_decorator(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+
+            @torch.jit.unused
+            @torch.no_grad()
+            def fn(self, x):
+                # type: (Tensor) -> int
+                return next(x)  # invalid, but should be ignored
+
+            def forward(self, x):
+                return self.fn(x)
+
+        torch.jit.script(MyMod())
+
     @_inline_everything
     def test_lazy_script(self):
         def untraceable(x):
