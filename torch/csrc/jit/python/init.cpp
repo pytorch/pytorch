@@ -544,10 +544,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
-             std::set<MobileOptimizerType>& optimization_blacklist,
+             std::set<MobileOptimizerType>& optimization_blocklist,
              std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
-                module, optimization_blacklist, preserved_methods);
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
