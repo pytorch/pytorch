@@ -316,8 +316,15 @@ class MultiplicativeLR(_LRScheduler):
             return list(self.base_lrs)
 
 
-
 class WarmUpLR(LambdaLR):
+    """WarmUp learning rate
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        warmup_epoch (int): epoch to run warmup
+        warmup_ratio (float): Initial LR equals to warmup_ratio * base_lr 
+        last_epoch (int): The index of last epoch. Default: -1.
+    """
     def __init__(self, optimizer, warmup_epoch, warmup_ratio, type='linear', last_epoch=-1):
         self. warmup_epoch = warmup_epoch
         if type == 'linear':
