@@ -1123,13 +1123,6 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
-        prec = delta
-        if places:
-            prec = 10**(-places)
-        rtol = None if prec is None else 0
-        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
-
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
