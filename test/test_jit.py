@@ -1398,7 +1398,7 @@ graph(%Ra, %Rb):
                     X = torch.randn(M, M, requires_grad=requires_grad)
                     if requires_grad:
                         FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
-                    self.assertEqual(training, 'bernoulli_' in profile(scripted, X))
+                    self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
@@ -1421,8 +1421,8 @@ graph(%Ra, %Rb):
             X = torch.randn(M, M, requires_grad=requires_grad)
             if requires_grad:
                 FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
-            self.assertIn('bernoulli_', profile(scripted_training, X))
-            self.assertNotIn('bernoulli_', profile(scripted_eval, X))
+            self.assertIn('aten::bernoulli_', profile(scripted_training, X))
+            self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
@@ -2473,7 +2473,7 @@ graph(%Ra, %Rb):
         mul_events = defaultdict(int)
         other_fn_events = defaultdict(int)
         for e in prof.function_events:
-            if e.name == "mul":
+            if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
                 mul_events[e.thread] = e.cpu_interval.elapsed_us()
             elif e.name == "other_fn":

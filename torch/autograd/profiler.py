@@ -832,9 +832,9 @@ def parse_cpu_trace(thread_records):
     filtered_out_names = [
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
-        "is_leaf",
-        "output_nr",
-        "_version",
+        "aten::is_leaf",
+        "aten::output_nr",
+        "aten::_version",
     ]
 
     # cuda start events and the overall profiler start event don't happen
@@ -896,9 +896,9 @@ def parse_cpu_trace(thread_records):
             elif record.kind() == 'pop':
                 assert (
                     record_key in range_starts
-                ), """Expected record (name={}) with key {} to exist in range_starts.
+                ), """Expected record with key {} to exist in range_starts.
                     This means that the pop event did not have a corresponding push.""".format(
-                    record.name(), record_key
+                    record_key
                 )
 
                 start = range_starts[record_key]
