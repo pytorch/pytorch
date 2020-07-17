@@ -230,7 +230,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Variable& mutable_grad() override {
     return grad_;
   }
 

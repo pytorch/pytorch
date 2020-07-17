@@ -13980,11 +13980,11 @@ class TestTorchDeviceType(TestCase):
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
-            x = torch.arange(2 * L + 1, dtype=dtype)
+            x = torch.arange(2 * L + 1, device=device, dtype=dtype)
             original = amplitude * torch.sin(2 * math.pi / L * x * n)
             # stft = torch.stft(original, L, hop_length=L, win_length=L,
             #                   window=torch.ones(L), center=False, normalized=False)
-            stft = torch.zeros((L // 2 + 1, 2, 2), dtype=dtype)
+            stft = torch.zeros((L // 2 + 1, 2, 2), device=device, dtype=dtype)
             stft_largest_val = (amplitude * L) / 2.0
             if n < stft.size(0):
                 stft[n, :, 1] = -stft_largest_val
@@ -13995,7 +13995,7 @@ class TestTorchDeviceType(TestCase):
 
             inverse = torch.istft(
                 stft, L, hop_length=L, win_length=L,
-                window=torch.ones(L, dtype=dtype), center=False, normalized=False)
+                window=torch.ones(L, device=device, dtype=dtype), center=False, normalized=False)
             # There is a larger error due to the scaling of amplitude
             original = original[..., :inverse.size(-1)]
             self.assertEqual(inverse, original, atol=1e-3, rtol=0)
@@ -15224,8 +15224,8 @@ class TestTorchDeviceType(TestCase):
         if dtype == torch.double:
             # double precision
             a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
-            self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
+            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
+            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self, device):
@@ -16604,11 +16604,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
