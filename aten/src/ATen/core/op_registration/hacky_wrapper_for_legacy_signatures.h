@@ -4,6 +4,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
+#include <ATen/Tensor.h>
 
 // This file defines hacky_wrapper_for_legacy_signatures, which takes a kernel written in a legacy way
 // (e.g. with TensorOptions packed) and wraps it into a kernel with the signature expected by
@@ -54,20 +55,20 @@ static_assert(has_tensoroptions_arg<int (int64_t, const TensorOptions&)>(), "");
 static_assert(has_tensoroptions_arg<int (int64_t, TensorOptions)>(), "");
 static_assert(!has_tensoroptions_arg<int (int64_t, std::string)>(), "");
 
-template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct with_scattered_tensor_options_;
+template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct with_scattered_tensor_options__;
 
 template<class FuncPtr, class Enable = void>
-struct with_scattered_tensor_options final {};
+struct with_scattered_tensor_options_ final {};
 
 template<class UnderlyingFuncPtr>
-struct with_scattered_tensor_options<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options_<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
     // FuncType does not have TensorOptions arguments.
     // Don't wrap anything but just return the base pointer.
     using FuncPtr = UnderlyingFuncPtr;
 };
 
 template<class UnderlyingFuncPtr>
-struct with_scattered_tensor_options<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options_<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
 private:
     // FuncType has TensorOptions arguments.
     // Return a function pointer to a wrapper function that replaces those with expanded arguments.
@@ -83,13 +84,13 @@ private:
     using parameters_after_tensoroptions =
         guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
-    using wrapper = with_scattered_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
+    using wrapper = with_scattered_tensor_options__<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
 public:
     using FuncPtr = TORCH_FN_TYPE(&wrapper::wrapper);
 };
 
 template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
-struct with_scattered_tensor_options_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
+struct with_scattered_tensor_options__<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
     static decltype(auto) wrapper(
                 ParametersBeforeTensorOptions... parameters_before,
                 optional<ScalarType> scalar_type,
@@ -105,11 +106,78 @@ struct with_scattered_tensor_options_<FuncPtr, guts::typelist::typelist<Paramete
     }
 };
 
+/**
+ * Take a kernel function that has a `TensorOptions` argument and
+ * return a new kernel function that has `optional<ScalarType>,
+ * optional<Layout>, optional<Device>, optional<bool>` arguments
+ * instead, packs them into a `TensorOptions` struct and
+ * calls the original kernel function.
+ */
+template<class FuncPtr>
+constexpr auto with_scattered_tensor_options(FuncPtr) {
+    return typename with_scattered_tensor_options_<FuncPtr>::FuncPtr();
 }
 
-template<class FuncPtr>
-constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr) {
-    return typename detail::with_scattered_tensor_options<FuncPtr>::FuncPtr();
+template<class KernelType>
+struct make_optional_tensor_explicit final {
+    template<class T>
+    static decltype(auto) call(T&& arg) {
+        return std::forward<T>(arg);
+    }
+};
+
+template<>
+struct make_optional_tensor_explicit<at::Tensor> final {
+    template<class _Tensor, std::enable_if_t<std::is_same<std::remove_cv_t<std::remove_reference_t<_Tensor>>, at::Tensor>::value, int> = 0>
+    static decltype(auto) call(_Tensor&& arg) {
+        return std::forward<_Tensor>(arg);
+    }
+
+    template<class _OptTensor, std::enable_if_t<std::is_same<std::remove_cv_t<std::remove_reference_t<_OptTensor>>, optional<at::Tensor>>::value, int> = 0>
+    static at::Tensor call(_OptTensor&& arg) {
+        if (arg.has_value()) {
+            return *std::forward<_OptTensor>(arg);
+        } else {
+            return at::Tensor(); // undefined tensor
+        }
+    }
+};
+
+template<class TargetSignature, class KernelFunc>
+struct with_explicit_optional_tensors_ final {};
+
+template<class Return, class... TargetSignatureArgs, class... KernelSignatureArgs, Return(*KernelFunc)(KernelSignatureArgs...)>
+struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), TORCH_FN_TYPE(KernelFunc)> final {
+    static Return wrapper(TargetSignatureArgs... args) {
+        return (*KernelFunc)(make_optional_tensor_explicit<std::remove_cv_t<std::remove_reference_t<KernelSignatureArgs>>>::call(
+                std::forward<TargetSignatureArgs>(args)
+            )...);
+    }
+};
+
+/**
+ * Take a kernel function that has a number of `Tensor` arguments
+ * and take in a `TargetSignature` that must match, but is allowed
+ * to take `optional<Tensor>` in place of some or all of the `Tensor`
+ * arguments. Returns a new kernel function that has `optional<Tensor>`
+ * in those locations, unwraps them to `Tensor` (potentially undefined tensor)
+ * and calls the original kernel function.
+ */
+template<class TargetSignature, class KernelFunc>
+constexpr auto with_explicit_optional_tensors(KernelFunc) {
+    // TODO Only wrap if signatures have an entry where Tensor is vs optional<Tensor>
+    using WrappedFunc = TORCH_FN_TYPE((&with_explicit_optional_tensors_<TargetSignature, KernelFunc>::wrapper));
+    return WrappedFunc();
+}
+
+}
+
+template<class TargetSignature, class FuncPtr>
+constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr kernel_func) {
+    constexpr auto with_tensoroptions_scattered = detail::with_scattered_tensor_options(kernel_func);
+    constexpr auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_tensoroptions_scattered);
+    static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
+    return result;
 };
 
 }
