@@ -33,9 +33,20 @@ std::vector<at::Tensor> ProcessGroup::Work::result() const {
 
 void ProcessGroup::Work::synchronize() {}
 
-bool ProcessGroup::Work::wait() {
+bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [&] { return completed_; });
+  if (timeout == kNoTimeout) {
+    // This waits without a timeout.
+    cv_.wait(lock, [&] { return completed_; });
+  } else {
+    // Waits for the user-provided timeout.
+    cv_.wait_for(lock, timeout, [&] { return completed_; });
+    if (!completed_) {
+      // Throw exception if the wait operation timed out and the work was not
+      // completed.
+      throw std::runtime_error("Operation timed out!");
+    }
+  }
   if (exception_) {
     std::rethrow_exception(exception_);
   }

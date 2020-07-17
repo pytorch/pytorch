@@ -73,23 +73,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_index_select
-  cuda_bool: True
-  cuda_bfloat16: True
-  cname: indexSelect
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-]]
-[[
   name: _th_index_copy_
   cname: indexCopy
   cpu_bool: True

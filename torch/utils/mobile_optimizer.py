@@ -19,12 +19,13 @@ def optimize_for_mobile(
         preserved_methods: List[AnyStr] = None):
     """
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
-        optimization_blacklist: A set with type of MobileOptimizerType.
-        When set is not passed, optimization method will run all the optimizer pass; otherwise, optimizer
-        method will run the optimization pass that is not included inside optimization_blacklist.
+        script_module: An instance of torch script module with type of ScriptModule.
+        optimization_blacklist: A set with type of MobileOptimizerType. When set is not passed, 
+            optimization method will run all the optimizer pass; otherwise, optimizer
+            method will run the optimization pass that is not included inside optimization_blacklist.
+        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked.
     Returns:
-        script_module: A new optimized torch script module
+        A new optimized torch script module
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
