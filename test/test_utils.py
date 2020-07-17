@@ -625,8 +625,8 @@ class TestBenchmarkUtils(TestCase):
 
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
             x = tensors["x"]
-            self.assertTrue(
-                torch.allclose(x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3))
+            self.assertEqual(
+                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
 if __name__ == '__main__':
