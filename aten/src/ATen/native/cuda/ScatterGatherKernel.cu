@@ -14,6 +14,58 @@
 
 namespace at { namespace native {
 
+// Implement as functors since lambdas don't get optimized.
+class ReduceMultiply {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    // GPU atomic multiply
+  }
+
+  constexpr C10_DEVICE void operator() (bool * self_data, const bool * src_data) const {
+    // GPU atomic &&
+  }
+};
+static ReduceMultiply reduce_multiply;
+
+class ReduceAdd {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    // GPU atomic add
+    gpuAtomicAdd(self_data, *src_data);
+  }
+};
+static ReduceAdd reduce_add;
+
+class ReduceSubtract {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    // GPU atomic subtraction
+  }
+};
+static ReduceSubtract reduce_subtract;
+
+class ReduceDivide {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    // GPU atomic divsion
+  }
+};
+static ReduceDivide reduce_divide;
+
+class TensorAssign {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    // GPU atomic assign
+    *self_data = *src_data;
+  }
+};
+static TensorAssign tensor_assign;
+
 // The kernels are implemented on an opaque,
 // self-aligned type of the correct size,
 // to avoid redundant kernels for different types
@@ -278,42 +330,53 @@ struct cuda_scatter_fill_base_kernel {
 void gather_cuda_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
-    "gather_out_cuda", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      *lhs = *rhs;
-    }
-  );
+    "gather_out_cuda", tensor_assign);
 }
 
 void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel<>()(
     self, dim, index, src,
-    "scatter_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      *lhs = *rhs;
-    }
-  );
+    "scatter_cuda_", tensor_assign);
 }
 
 void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
-    "scatter_fill_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      *lhs = *rhs;
-    }
-  );
+    "scatter_fill_cuda_", tensor_assign);
 }
 
 void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  // cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
+  //   self, dim, index, src,
+  //   "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
+  //     gpuAtomicAdd(lhs, *rhs);
+  //   }
+  // );
+
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
-    "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      gpuAtomicAdd(lhs, *rhs);
-    }
-  );
+    "scatter_add_cuda_", reduce_add);
 }
 
 void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
-
+  switch (reduce) {
+  case SCATTER_GATHER_OP::REDUCE_ADD :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+                                       "scatter_reduce_cuda_add_", reduce_add);
+    break;
+  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+                                       "scatter_reduce_cuda_subtract_", reduce_subtract);
+    break;
+  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+                                       "scatter_reduce_cuda_multiply_", reduce_multiply);
+    break;
+  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+                                       "scatter_reduce_cuda_divide_", reduce_divide);
+  }
 }
 
 void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
