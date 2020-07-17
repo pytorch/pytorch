@@ -42,7 +42,7 @@ class TestModels(TestCase):
     opset_version = _export_onnx_opset_version
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
-        self.is_script_test_enabled = False
+        self.is_script_test_enabled = True
         with torch.onnx.select_model_mode_for_export(model, None):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
