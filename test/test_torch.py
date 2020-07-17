@@ -6461,6 +6461,70 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isneginf, np.isneginf, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_isposinf_float(self, device, dtype):
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+        self.compare_with_numpy(torch.isposinf, np.isposinf, vals, device, dtype)
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        t_target = torch.tensor([0, 1, 0, 0, 0, 0], device=device, dtype=dtype)
+
+        out = torch.empty_like(t)
+        torch.isposinf(t, out=out)
+
+        self.assertEqual(out, t_target, msg='isposinf_out device={} dtype={}'.format(device, dtype))
+        t.isposinf_()
+        self.assertEqual(t, t_target, msg='isposinf_ device={} dtype={}'.format(device, dtype))
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_isposinf_int_and_bool(self, device, dtype):
+        vals = (-1, 0, 1)
+        self.compare_with_numpy(torch.isposinf, np.isposinf, vals, device, dtype)
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        t_target = torch.tensor([0, 0, 0], device=device, dtype=dtype)
+
+        out = torch.empty_like(t)
+        torch.isposinf(t, out=out)
+        self.assertEqual(out, t_target, msg='isposinf_out device={} dtype={}'.format(device, dtype))
+
+        t.isposinf_()
+        self.assertEqual(t, t_target, msg='isposinf_ device={} dtype={}'.format(device, dtype))
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_isneginf_float(self, device, dtype):
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+        self.compare_with_numpy(torch.isneginf, np.isneginf, vals, device, dtype)
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        t_target = torch.tensor([1, 0, 0, 0, 0, 0], device=device, dtype=dtype)
+
+        out = torch.empty_like(t)
+        torch.isneginf(t, out=out)
+
+        self.assertEqual(out, t_target, msg='isneginf_out device={} dtype={}'.format(device, dtype))
+        t.isneginf_()
+        self.assertEqual(t, t_target, msg='isneginf_ device={} dtype={}'.format(device, dtype))
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_isneginf_int_and_bool(self, device, dtype):
+        vals = (-1, 0, 1)
+        self.compare_with_numpy(torch.isneginf, np.isneginf, vals, device, dtype)
+
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        t_target = torch.tensor([0, 0, 0], device=device, dtype=dtype)
+
+        out = torch.empty_like(t)
+        torch.isneginf(t, out=out)
+        self.assertEqual(out, t_target, msg='isneginf_out device={} dtype={}'.format(device, dtype))
+
+        t.isneginf_()
+        self.assertEqual(t, t_target, msg='isneginf_ device={} dtype={}'.format(device, dtype))
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
