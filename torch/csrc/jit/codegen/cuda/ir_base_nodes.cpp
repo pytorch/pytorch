@@ -86,7 +86,7 @@ class ConstCheck : OptOutConstDispatch {
 
   void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
-      OptOutConstDispatch::handle(inp);
+      handle(inp);
     }
   }
 

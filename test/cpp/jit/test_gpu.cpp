@@ -5070,6 +5070,25 @@ void testGPU_FusionCacheMultiConsumer() {
   return;
 }
 
+void testGPU_FusionConstCheck() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.setFusionPtr(std::make_unique<Fusion>());
+  Fusion* fusion = prog.fusion();
+  FusionGuard fg(fusion);
+
+  auto one = new Int(1);
+  TORCH_CHECK(one->isConstScalar());
+
+  auto one_x2 = mul(one, one);
+  TORCH_CHECK(one_x2->isConstScalar());
+
+  auto one_x3 = mul(one_x2, one);
+  TORCH_CHECK(one_x3->isConstScalar());
+
+  auto one_x4 = mul(one_x3, one);
+  TORCH_CHECK(one_x4->isConstScalar());
+}
+
 } // namespace jit
 } // namespace torch
 

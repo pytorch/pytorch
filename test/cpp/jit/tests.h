@@ -179,7 +179,8 @@ namespace jit {
   _(GPU_FusionCacheIndirect)                        \
   _(GPU_FusionCacheBcast)                           \
   _(GPU_FusionCacheComplex)                         \
-  _(GPU_FusionCacheMultiConsumer)
+  _(GPU_FusionCacheMultiConsumer)                   \
+  _(GPU_FusionConstCheck)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
