@@ -9118,7 +9118,7 @@ class TestNNDeviceType(NNTestCase):
         ).to('cpu').numpy()
 
         self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
-        self.assertEqual(scipy_ary, gridsample_ary)
+        self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -9165,7 +9165,7 @@ class TestNNDeviceType(NNTestCase):
             ).to('cpu').numpy()
 
             self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
-            self.assertEqual(scipy_ary, gridsample_ary)
+            self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -9204,7 +9204,7 @@ class TestNNDeviceType(NNTestCase):
             align_corners=True
         ).to('cpu').numpy()
 
-        self.assertEqual(scipy_ary, gridsample_ary)
+        self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
