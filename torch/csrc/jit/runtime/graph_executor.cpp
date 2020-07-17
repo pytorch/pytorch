@@ -763,19 +763,17 @@ void InsertGuardsOnInputs(Block* b) {
 
       WithInsertPoint wip{*it};
       auto graph = b->owningGraph();
-      auto dummy = graph->insertConstant(1);
-      for (auto gi : it->inputs()) {
+      for (size_t i = 0; i < it->inputs().size(); i++) {
+      //for (auto gi : it->inputs()) {
+        auto gi = it->input(i);
         if (gi->type()->cast<TensorType>()) {
           auto pn = graph->create(prim::Guard, 1); 
-          graph->prependNode(pn);
-          pn->addInput(dummy);
+          graph->insertNode(pn);
+          pn->addInput(gi);
           pn->output()->setType(gi->type());
-          gi->replaceAllUsesWith(pn->output());
-          dummy->replaceAllUsesWith(gi);
-          
+          it->replaceInput(i, pn->output());
         }
       }
-      dummy->node()->destroy();
     } else {
       for (auto ib : it->blocks()) {
         InsertGuardsOnInputs(ib);
