@@ -2452,7 +2452,7 @@ def as_strided(g, self, sizes, strides, offset=None):
     if not sym_help._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
         for i, (size, stride) in enumerate(zip(sizes, strides)):
-            r_size = [1]*rank
+            r_size = [1] * rank
             r_size[i] = -1
             ind = ind + torch.arange(size).view(r_size) * stride
         if offset:
@@ -2461,7 +2461,7 @@ def as_strided(g, self, sizes, strides, offset=None):
     else:
         ind = None
         for i, stride in enumerate(strides):
-            r_size = [1]*rank
+            r_size = [1] * rank
             r_size[i] = -1
             size = select(g, sizes, g.op("Constant", value_t=torch.tensor([0])), g.op("Constant", value_t=torch.tensor(i)))
             tmp_ind = g.op("Reshape", arange(g, size, 4, None, None, None), g.op("Constant", value_t=torch.tensor(r_size)))

@@ -885,6 +885,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
