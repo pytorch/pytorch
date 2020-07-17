@@ -9095,14 +9095,14 @@ class TestNNDeviceType(NNTestCase):
         transform_tensor, transform_ary, offset = \
             _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
 
-        scipy_ary = scipy.ndimage.affine_transform(
+        scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
             input_ary[0, 0],
             transform_ary,
             offset=offset,
             output_shape=output_size[2:],
             order=1,
             mode='nearest',
-            prefilter=False)
+            prefilter=False))
 
         affine_tensor = torch.nn.functional.affine_grid(
             transform_tensor,
@@ -9115,7 +9115,7 @@ class TestNNDeviceType(NNTestCase):
             affine_tensor,
             padding_mode='border',
             align_corners=True
-        ).to('cpu').numpy()
+        ).to('cpu')
 
         self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
         self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
@@ -9135,14 +9135,14 @@ class TestNNDeviceType(NNTestCase):
             transform_tensor, transform_ary, offset = \
                 _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
 
-            scipy_ary = scipy.ndimage.affine_transform(
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
                 input_ary[0, 0],
                 transform_ary,
                 offset=offset,
                 output_shape=output_size[2:],
                 order=1,
                 mode='nearest',
-                prefilter=True)
+                prefilter=True))
 
             if input_size2dsq == output_size2dsq:
                 self.assertEqual(scipy_ary.mean(), input_ary.mean())
@@ -9162,7 +9162,7 @@ class TestNNDeviceType(NNTestCase):
                 affine_tensor,
                 padding_mode='border',
                 align_corners=True
-            ).to('cpu').numpy()
+            ).to('cpu')
 
             self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
             self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
@@ -9182,14 +9182,14 @@ class TestNNDeviceType(NNTestCase):
         transform_tensor, transform_ary, offset = \
             _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
 
-        scipy_ary = scipy.ndimage.affine_transform(
+        scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
             input_ary[0, 0],
             transform_ary,
             offset=offset,
             output_shape=output_size[2:],
             order=1,
             mode='nearest',
-            prefilter=False)
+            prefilter=False))
 
         affine_tensor = torch.nn.functional.affine_grid(
             transform_tensor,
@@ -9202,7 +9202,7 @@ class TestNNDeviceType(NNTestCase):
             affine_tensor,
             padding_mode='border',
             align_corners=True
-        ).to('cpu').numpy()
+        ).to('cpu')
 
         self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
@@ -9226,13 +9226,13 @@ class TestNNDeviceType(NNTestCase):
             transform_tensor, transform_ary, grid_ary = \
                 _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
 
-            scipy_ary = scipy.ndimage.affine_transform(
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
                 input_ary[0, 0],
                 transform_ary,
                 output_shape=output_size[2:],
                 order=1,
                 mode='nearest',
-                prefilter=False)
+                prefilter=False))
 
             affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
@@ -9245,7 +9245,7 @@ class TestNNDeviceType(NNTestCase):
                 affine_tensor,
                 padding_mode='border',
                 align_corners=True
-            ).to('cpu').numpy()
+            ).to('cpu')
 
             affine_tensor = affine_tensor.to('cpu')
 
@@ -9279,13 +9279,13 @@ class TestNNDeviceType(NNTestCase):
             transform_tensor, transform_ary, grid_ary = \
                 _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
 
-            scipy_ary = scipy.ndimage.affine_transform(
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
                 input_ary[0, 0],
                 transform_ary,
                 output_shape=output_size[2:],
                 order=1,
                 mode='nearest',
-                prefilter=False)
+                prefilter=False))
 
             affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
@@ -9298,7 +9298,7 @@ class TestNNDeviceType(NNTestCase):
                 affine_tensor,
                 padding_mode='border',
                 align_corners=True
-            ).to('cpu').numpy()
+            ).to('cpu')
 
             affine_tensor = affine_tensor.to('cpu')
 
