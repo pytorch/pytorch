@@ -1050,6 +1050,8 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual([], event.kernels)
                 self.assertEqual(0, event.cuda_time)
             else:
+                if event.node_id == 1:
+                    continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 self.assertGreater(event.cuda_time_total, 0)
                 self.assertEqual(1, len(event.kernels))
@@ -1060,6 +1062,16 @@ class RpcTest(RpcAgentTestFixture):
                     self.assertEqual(kernel.device, 1)
 
                 self.assertGreater(event.cuda_time, 0)
+
+        # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
+        # events.
+        REMOTE_OP_STR = "#remote_op: "
+        def get_name(event):
+            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
+
+        remote_events = [event for event in function_events if event.is_remote]
+        remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
+        self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
 
     @dist_init
     def test_profiler_export_trace(self):
@@ -1232,8 +1244,8 @@ class RpcTest(RpcAgentTestFixture):
             for event in events
             if event.is_remote
         }
-        self.assertTrue("mul" in remote_events)
-        remote_mul_event = remote_events["mul"]
+        self.assertTrue("aten::mul" in remote_events)
+        remote_mul_event = remote_events["aten::mul"]
         self.assertEqual(remote_mul_event.node_id, dst)
         self.check_profiling_info(
             worker_name(self.rank),
