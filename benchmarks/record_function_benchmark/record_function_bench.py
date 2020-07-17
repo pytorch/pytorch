@@ -1,6 +1,5 @@
 import argparse
 import sys
-import timeit
 import torch
 import torch.utils._benchmark as benchmark_utils
 

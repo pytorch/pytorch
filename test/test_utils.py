@@ -595,7 +595,7 @@ class TestHipify(TestCase):
 class TestBenchmarkUtils(TestCase):
     def test_timer(self):
         timer = benchmark_utils.Timer(
-            stmt = "torch.ones(())",
+            stmt="torch.ones(())",
         )
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
