@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -715,6 +716,27 @@ void logaddexp2_kernel(TensorIterator& iter) {
   });
 }
 
+void gcd_kernel(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return calc_gcd(a, b);
+          });
+    });
+}
+
+void lcm_kernel(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            scalar_t g = calc_gcd(a, b);
+            return (g == 0) ? 0 : a / g * b;
+          });
+    });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -749,6 +771,8 @@ REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
+REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
+REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 
 } // namespace native
 } // namespace at
