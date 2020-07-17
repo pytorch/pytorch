@@ -8345,22 +8345,30 @@ class TestNN(NNTestCase):
     def test_unflatten_invalid_arg(self):
         # Wrong type for unflattened_size (tuple of floats)
 
-        with self.assertRaisesRegex(TypeError, r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(3, 128, 128.3))
 
         # Wrong type for unflattened_size (tuple of lists)
 
-        with self.assertRaisesRegex(TypeError, r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
             nn.Unflatten(dim='features', unflattened_size=(['C', 3], ['W', 128], ['H', 128]))
 
         # Wrong type for unflattened_size (list of ints)
 
-        with self.assertRaisesRegex(TypeError, r"unflattened_size must be a tuple of ints, but found type list"):
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be a tuple of ints, but found type list"):
             nn.Unflatten(dim=1, unflattened_size=[3, 128, 128])
 
         # Wrong type for unflattened_size (list of lists)
 
-        with self.assertRaisesRegex(TypeError, r"unflattened_size must be a tuple of tuples, but found type list"):
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be a tuple of tuples, but found type list"):
             nn.Unflatten(dim='features', unflattened_size=[['C', 3], ['W', 128], ['H', 128]])
 
 

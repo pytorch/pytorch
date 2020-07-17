@@ -45,9 +45,8 @@ class Unflatten(Module):
     r"""
     Unflattens a tensor into another tensor of shape (N, C, H, W). For use with :class:`~nn.Sequential`.
     Args:
-        channels: numbers of channels or depth of the output tensor
-        height: dimension corresponding to the height of the output tensor.
-        width: dimension corresponding to the width of the output tensor.
+        dim: tensor dimension to be unflattened
+        unflattened_size: shape of the output tensor
 
     Shape:
         - Input: :math:`(N, *dims)`
@@ -57,13 +56,17 @@ class Unflatten(Module):
     Examples::
         >>> m = nn.Sequential(
         >>>     nn.Linear(49152, 49152),
-        >>>     nn.Unflatten(3, 128, 128)
+        >>>     nn.Unflatten(1, (3, 128, 128))
+        >>> )
+
+        >>> m = nn.Sequential(
+        >>>     nn.Linear(49152, 49152),
+        >>>     nn.Unflatten('features', (('C', 3), ('H', 128), ('W',128)))
         >>> )
     """
-    __constants__ = ['channels', 'height', 'width']
-    channels: int
-    height: int
-    width: int
+    __constants__ = ['dim', 'unflattened_size']
+    dim: Union[int, str]
+    unflattened_size: Union[tuple, Size]
 
     def __init__(self, dim: Union[int, str], unflattened_size: Union[tuple, Size]) -> None:
         super(Unflatten, self).__init__()
@@ -81,17 +84,18 @@ class Unflatten(Module):
         if (isinstance(input, tuple)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
-                    raise TypeError("unflattened_size must be tuple of tuples, but found element of type {} at pos {}".format(
-                        type(elem).__name__, idx))
+                    raise TypeError("unflattened_size must be tuple of tuples, " + 
+                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
-        raise TypeError("unflattened_size must be a tuple of tuples, but found type {}".format(type(input).__name__))
+        raise TypeError("unflattened_size must be a tuple of tuples, " +
+                        "but found type {}".format(type(input).__name__))
 
     def _require_tuple_int(self, input):
         if (isinstance(input, tuple)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
-                    raise TypeError("unflattened_size must be tuple of ints, but found element of type {} at pos {}".format(
-                        type(elem).__name__, idx))
+                    raise TypeError("unflattened_size must be tuple of ints, " + 
+                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
         raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
 
