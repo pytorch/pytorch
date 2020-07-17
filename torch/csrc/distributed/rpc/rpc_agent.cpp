@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
+#include <c10/util/Logging.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -237,6 +239,9 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
 }
 
 std::shared_ptr<RpcAgent>& getRefToCurrentRpcAgent() {
+  #ifdef C10_USE_GLOG
+    google::base::GetLogger(google::GLOG_ERROR);
+  #endif
   static std::shared_ptr<RpcAgent> currentRpcAgent = nullptr;
   return currentRpcAgent;
 }
