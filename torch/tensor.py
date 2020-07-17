@@ -924,9 +924,20 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.grad.__delete__, relevant_args, self)
         del self._grad
-    
+
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        """
+        This __torch_function__ implementation wraps subclasses such that
+        methods called on subclasses return a subclass instance instead of
+        a ``torch.Tensor`` instance.
+
+        One corollary to this is that you need coverage for torch.Tensor
+        methods if implementing __torch_function__ for subclasses.
+
+        We recommend always calling ``super().__torch_function__`` as the base
+        case when doing the above.
+        """
         if kwargs is None:
             kwargs = {}
 
@@ -935,9 +946,20 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            if cls is not Tensor and isinstance(ret, Tensor):
-                ret = ret.as_subclass(cls)
-        
-        return ret
+
+        return _convert(ret, cls)
 
     __module__ = 'torch'
+
+
+def _convert(ret, cls):
+    if cls is Tensor:
+        return ret
+
+    if isinstance(ret, Tensor):
+        ret = ret.as_subclass(cls)
+
+    if isinstance(ret, tuple):
+        ret = tuple(_convert(r, cls) for r in ret)
+
+    return ret
