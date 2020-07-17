@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
+import numpy as np
 
 # torch.quantization
 from torch.quantization import (
@@ -2812,6 +2813,43 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             model = self.checkGraphModeOp(
                 FunctionalLinear(weight, bias), x,
                 "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+
+    def test_embedding_bag(self):
+        class M(torch.nn.Module):
+            def __init__(self, weights):
+                super(M, self).__init__()
+                self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
+                                                        embedding_dim=12,
+                                                        include_last_offset=True,
+                                                        _weight=weights,
+                                                        mode='sum')
+
+                self.embedding2 = torch.nn.EmbeddingBag(num_embeddings=10,
+                                                        embedding_dim=12,
+                                                        include_last_offset=True,
+                                                        _weight=weights,
+                                                        mode='sum')
+
+            def forward(self, indices1, offsets1, indices2, offsets2):
+                e1 = self.embedding1(indices1, offsets1)
+                e2 = self.embedding2(indices2, offsets2)
+                return e1, e2
+
+        weights = torch.from_numpy((np.random.random_sample((10, 12)) + 1).astype(np.float32))
+        module = M(weights)
+        m = torch.jit.script(module)
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+
+        from torch.quantization import QConfigDynamic, NoopObserver
+        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"),
+                                              weight=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"))
+        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(custom_op_name="embedding_bag_byte"),
+                                              weight=NoopObserver.with_args(custom_op_name="embedding_bag_byte"))
+        m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
+        FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
+                   .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
+                   .run(m.graph)
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines

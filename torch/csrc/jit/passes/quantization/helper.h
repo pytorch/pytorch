@@ -99,6 +99,11 @@ TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 
+TORCH_API bool matchCallFuncToUse(
+    const Use& use,
+    const std::string& func_name,
+    c10::optional<int> n);
+
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);

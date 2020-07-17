@@ -43,6 +43,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -257,7 +258,7 @@ bool isWeight(Value* v) {
       v,
       AtenFuncArgs(
           {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
-      CallFuncArgs({{"linear", 2}}));
+      CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
 
