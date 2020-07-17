@@ -100,7 +100,7 @@ void slot_params_recurse(
 void slot_named_params_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     std::map<std::string, at::Tensor>* params,
-    std::string parent_name) {
+    const std::string& parent_name) {
   auto slots = obj->slots();
   size_t nslots = slots.size();
   for (size_t i = 0; i < nslots; ++i) {
@@ -124,7 +124,8 @@ const std::vector<at::Tensor> Module::parameters() const {
 
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
-  slot_named_params_recurse(object_, &params, "");
+  const std::string name = "";
+  slot_named_params_recurse(object_, &params, name);
   return params;
 }
 } // namespace mobile
