@@ -672,6 +672,7 @@ struct checkFuture {
         work_counter_(work_counter),
         input_size_(input_size),
         mutex_(mutex){};
+
  public:
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
   std::vector<at::Tensor>& outputs_;

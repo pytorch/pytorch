@@ -3095,7 +3095,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            return process_group.allreduce(bucket.get_tensors()).getFuture()
+            return process_group.allreduce(bucket.get_tensors()).get_future()
 
         # Register DDP Communication Hook
         gpu_model._register_comm_hook(None, allreduce_hook)

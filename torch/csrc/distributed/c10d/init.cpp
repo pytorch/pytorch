@@ -702,7 +702,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_Future",
+          "get_future",
           std::make_shared<jit::PythonFutureWrapper>(
               &::c10d::ProcessGroup::Work::getFuture),
           py::call_guard<py::gil_scoped_release>());
