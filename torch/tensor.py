@@ -946,8 +946,7 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-
-        return _convert(ret, cls)
+            return _convert(ret, cls)
 
     __module__ = 'torch'
 
