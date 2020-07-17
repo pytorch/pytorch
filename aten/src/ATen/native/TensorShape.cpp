@@ -1695,16 +1695,16 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
 
 Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "moveaxis: Invalid source or destination dims: src (",
-              src.size(), " dims ) should contain the same number of dims as dst (", dst.size(), "dims)");
+              src, " dims ) should contain the same number of dims as dst (", dst, "dims)");
   auto normalized_src = src.vec();
   maybe_wrap_dims(normalized_src, self.dim());
   auto normalized_dst = dst.vec();
   maybe_wrap_dims(normalized_dst, self.dim());
 
   auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "moveaxis: repeated axis in `src` (", src, ")");
+  TORCH_CHECK(it_src == normalized_src.end(), "moveaxis: repeated dim in `src` (", src, ")");
   auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "moveaxis: repeated axis in `dst` (", dst, ")");
+  TORCH_CHECK(it_dst == normalized_dst.end(), "moveaxis: repeated dim in `dst` (", dst, ")");
 
   std::vector<int64_t> order, source_dims, destination_dims;
   order.resize(self.dim());
