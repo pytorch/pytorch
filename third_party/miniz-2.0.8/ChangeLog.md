@@ -10,7 +10,7 @@
 ### 2.0.7
 
  - Removed need in C++ compiler in cmake build
- - Fixed loads of uninitilized value errors found with Valgrind by memsetting m_dict to 0 in tdefl_init.
+ - Fixed loads of uninitialized value errors found with Valgrind by memsetting m_dict to 0 in tdefl_init.
  - Fix resource leak in mz_zip_reader_init_file_v2
  - Fix assert with mz_zip_writer_add_mem* w/MZ_DEFAULT_COMPRESSION
  - cmake build: install library and headers
