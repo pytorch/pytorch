@@ -699,10 +699,6 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # Non-graceful, as otherwise the stub agent would have to support
-        # sending messages in order for _wait_all_workers to work.
-        rpc.shutdown(graceful=False)
-
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
