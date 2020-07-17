@@ -1915,11 +1915,19 @@ class ConvNet(nn.Module):
 
 class Task(nn.Module):
     def __init__(self):
-        super(Task, self).__init__()
+        super().__init__()
         self.p = nn.Parameter(torch.ones(2, 2))
 
     def forward(self, x):
         return self.p + x
+
+class TestDdpCommHook(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.t0 = Task()
+
+    def forward(self, x, rank):
+        return self.t0(x + rank)
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
@@ -2988,6 +2996,165 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         else:
             with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
                 m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+
+    @requires_gloo()
+    def test_ddp_comm_hook_future_passing_cpu(self):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            TestDdpCommHook().cpu(),
+            process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        cpu_model._register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(cpu_model)
+
+    def _test_ddp_comm_hook_future_passing_gpu(self, c10d_process_group):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d_process_group(store, self.rank, self.world_size)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            TestDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        gpu_model._register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(gpu_model)
+
+    def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+        fut = torch.futures.Future()
+        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
+
+        def fut_then(fut):
+            # Add ones to fut's result.
+            return [t + torch.ones_like(t) for t in fut.wait()]
+
+        return fut.then(fut_then)
+
+    def _run_and_verify_simple_hook(self, model):
+        # Run forward
+        output = model(8, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_gloo(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using gloo backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupGloo)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_nccl(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using nccl backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupNCCL)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_init(self):
+        """
+        This unit test makes sure that register_comm_hook properly checks the format
+        of hook defined by user. The Python hook must be callable. This test also
+        checks whether bucket annotation checked properly if defined.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
+            model._register_comm_hook(state=None, hook=1)
+
+        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
+            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_return_type(self):
+        """
+        This test checks whether return annotation checked properly if defined. It also
+        checks whether an internal error is thrown if return type is incorrect and user
+        hasn't specified any return type annotation.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
+            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+        with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
+            def comm_hook(state: object, bucket: dist.GradBucket):
+                return 1
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+            # Run forward
+            output = model(8, self.rank)
+
+            # Run backward
+            output.mean().backward()
+
+    @requires_gloo()
+    def test_ddp_comm_hook_register_just_once(self):
+        """
+        DDP communication hook can only be registered once. This test validates whether
+        the error is thrown properly when register_comm_hook is called more than once.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        model._register_comm_hook(None, dummy_hook)
+
+        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
+            model._register_comm_hook(None, dummy_hook)
 
 
 class ReducerModule(nn.Module):
