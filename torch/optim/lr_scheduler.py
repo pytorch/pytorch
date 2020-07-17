@@ -21,51 +21,6 @@ EPOCH_DEPRECATION_WARNING = (
 
 SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
 
-
-class LRScheduler_Compose(object):
-    def __init__(self, scheduler_list):
-        """
-        schduler_list: list of [scheduler, start_epoch, end_epoch]
-        """
-        self.scheduler_list = scheduler_list
-        for l in self.scheduler_list:
-            if l[1] < 0: 
-                l[1] = 0
-            if l[2] < 0: 
-                l[2] = math.inf
-
-    def step(self, epoch=None):
-        last_epoch = self.scheduler_list[0][0].last_epoch
-        for scheduler, epoch_s, epoch_e in self.scheduler_list:
-            if epoch_s <= last_epoch and last_epoch <= epoch_e:
-                scheduler.step()
-            else:
-                scheduler.last_epoch += 1
-        self._last_lr = [group['lr'] for group in self.scheduler_list[0][0].optimizer.param_groups]
-
-    def state_dict(self):
-        return {i: l[0].state_dict() for (i, l) in enumerate(self.scheduler_list)}
-
-    def load_state_dict(self, state_dict):
-        for i in range(len(self.scheduler_list)):
-            if i not in state_dict:
-                raise KeyError("Given state dict is not compatible with current scheduler_list")
-            self.state_dict[i].load_state_dict(state_dict[i])
-
-    def get_last_lr(self):
-        """ Return last computed learning rate by current scheduler.
-        """
-        return self._last_lr
-
-    def __repr__(self):
-        format_string = self.__class__.__name__ + '('
-        for scheduler, epoch_s, epoch_e in self.scheduler_list:
-            format_string += '\n'
-            format_string += '    {}, start: {}, end: {}'.format(scheduler, epoch_s, epoch_e)
-        format_string += '\n)'
-        return format_string
-
-
 class _LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1):
@@ -196,9 +151,6 @@ class _LRScheduler(object):
             param_group['lr'] = lr
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
-
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
 
 
 class LambdaLR(_LRScheduler):
@@ -359,7 +311,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return [group['lr'] for group in self.optimizer.param_groups]
+            return list(self.base_lrs)
 
 
 class StepLR(_LRScheduler):
@@ -489,6 +441,11 @@ class PolyLR(_LRScheduler):
     pow<0 is forbidden because it would be an increase curve rather than a decrease curve.
 
     Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        pow (float): power of polynomial.
+        max_epoch (int): time period for polynomial annealing.
+        min_lrs (float or list): a float indicating the end of annealing lr,
+            or a list of float, one for each group in optimizer.param_groups 
     """
     def __init__(self, optimizer, pow, max_epoch, min_lrs=0, last_epoch=-1):
         if pow < 0:
@@ -505,7 +462,7 @@ class PolyLR(_LRScheduler):
         if self.last_epoch == 0:
             return self.base_lrs
         
-        base = 1 - 1 / max(1, self.max_epoch - self.last_epoch - 1)
+        base = max(0, 1 - 1 / (self.max_epoch - self.last_epoch - 1))
         coeff = base ** coeff
         return [(lr - min_lr) * coeff + min_lr
                 for group, min_lr in zip(self.optimizer.param_groups, self.min_lrs)]
@@ -514,7 +471,7 @@ class PolyLR(_LRScheduler):
         base = max(0, 1 - self.last_epoch / self.max_epoch)
         coeff = base ** self.pow
         return [(group['lr'] - min_lr) * coeff + min_lr
-                for base_lr, min_lr in zip(self.base_lrs, self.min_lrs)]        
+                for base_lr, min_lr in zip(self.base_lrs, self.min_lrs)] 
 
 
 class CosineAnnealingLR(_LRScheduler):
