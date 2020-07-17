@@ -330,6 +330,9 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 
 static Tensor& nanprod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  if (c10::isIntegralType(self.scalar_type(), true)) {
+    return at::native::prod_out_impl(result, self, dim, keepdim, opt_dtype);
+  }
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("nanprod", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {

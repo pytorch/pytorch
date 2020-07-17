@@ -4193,10 +4193,9 @@ for shape in [(1,), ()]:
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
     def test_nanprod_with_nans(self):
-        a = torch.randn(2, 2, 2, 2)
+        a = torch.randn(2, 2, requires_grad=True)
         with torch.no_grad():
             a[a < 0.2] = float('nan')
-        a.requires_grad = True
 
         # No args
         gradcheck(lambda x: x.nanprod(), a)
@@ -4211,14 +4210,14 @@ for shape in [(1,), ()]:
         gradgradcheck(lambda x: x.nanprod(0, True), a)
 
     def test_nanprod_dtype(self):
-        inp = torch.randn(2, 2, 2, 2)
+        inp = torch.randn(2, 2, requires_grad=True)
         with torch.no_grad():
             inp[inp < 0.2] = float('nan')
 
         def test(inp, inp_dtype, out_dtype):
             with torch.no_grad():
                 a = inp.to(inp_dtype)
-            a.requires_grad = True
+                a.requires_grad = True
             b = torch.nanprod(a, dtype=out_dtype)
             b.backward()
             self.assertEqual(a.dtype, a.grad.dtype)
