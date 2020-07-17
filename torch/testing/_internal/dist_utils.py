@@ -258,8 +258,8 @@ def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20)
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
+                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
+                    timeout, num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
                 )
             )
 

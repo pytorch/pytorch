@@ -15,6 +15,7 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
@@ -60,6 +61,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::kwargs& kwargs,
     Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
+  std::vector<std::shared_ptr<jit::Operator>> candidates;
+
   if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
@@ -74,13 +77,20 @@ std::shared_ptr<Operator> matchBuiltinOp(
         continue;
       }
 
-      // Found the right op!
-      return op;
+      // Prefer C10 ops so that they go through C10 dispatch. We expect the
+      // total # of possible overloaded ops to be small (i.e. it is 10 for
+      // torch.add) so a worst-case linear search should not incur significant
+      // extra overhead.
+      if (op->isC10Op()) {
+        return op;
+      }
+      candidates.emplace_back(op);
     }
   }
 
+  // Ensure that we generated some candidates.
   TORCH_CHECK(
-      false,
+      !candidates.empty(),
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -89,6 +99,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
+  return candidates[0];
 }
 
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
