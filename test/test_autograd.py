@@ -6511,7 +6511,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(c.grad.stride(), (2, 1))
 
     def test_moveaxis(self, device):
-        x = torch.randn(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
+        x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
 
         # Positive axis
         gradcheck(lambda x: torch.moveaxis(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
