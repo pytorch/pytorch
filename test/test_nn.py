@@ -9126,7 +9126,7 @@ class TestNNDeviceType(NNTestCase):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for input_size2dsq, output_size2dsq in \
-                itertools.product(device_(), input_size2dsq_(), output_size2dsq_()):
+                itertools.product(input_size2dsq_(), output_size2dsq_()):
             input_size = input_size2dsq
             input_ary = np.array(np.random.random(input_size), dtype=np.float32)
             output_size = output_size2dsq
@@ -9212,7 +9212,7 @@ class TestNNDeviceType(NNTestCase):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for angle_rad, input_size2d, output_size2d in \
-                itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
+                itertools.product(angle_rad_(), input_size2d_(), output_size2d_()):
 
             input_size = input_size2d
             input_ary = np.array(np.random.random(input_size), dtype=np.float32).round(3)
@@ -9262,7 +9262,7 @@ class TestNNDeviceType(NNTestCase):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for angle_rad, axis_vector, input_size3d, output_size3d in \
-                itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
+                itertools.product(angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
             input_size = input_size3d
             input_ary = np.array(np.random.random(input_size), dtype=np.float32)
             output_size = output_size3d
