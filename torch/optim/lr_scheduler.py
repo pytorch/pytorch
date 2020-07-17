@@ -104,6 +104,18 @@ class _LRScheduler(object):
         # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
+    def print_lr(self, is_verbose, group, lr, epoch=None):
+        """Display the current learning rate.
+        """
+        if is_verbose:
+            if epoch is None:
+                print('Adjusting learning rate'
+                      ' of group {} to {:.4e}.'.format(group, lr))
+            else:
+                print('Epoch {:5d}: adjusting learning rate'
+                      ' of group {} to {:.4e}.'.format(epoch, group, lr))
+
+
     def step(self, epoch=None):
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
@@ -151,13 +163,7 @@ class _LRScheduler(object):
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             param_group['lr'] = lr
-            if self.verbose:
-                if epoch is None:
-                    print('Adjusting learning rate'
-                          ' of group {} to {:.4e}.'.format(i, lr))
-                else:
-                    print('Epoch {:5d}: adjusting learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, lr))
+            self.print_lr(self.verbose, i, lr, epoch)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -171,6 +177,8 @@ class LambdaLR(_LRScheduler):
         lr_lambda (function or list): A function which computes a multiplicative
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -253,6 +261,8 @@ class MultiplicativeLR(_LRScheduler):
         lr_lambda (function or list): A function which computes a multiplicative
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -334,6 +344,8 @@ class StepLR(_LRScheduler):
         step_size (int): Period of learning rate decay.
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -380,6 +392,8 @@ class MultiStepLR(_LRScheduler):
         milestones (list): List of epoch indices. Must be increasing.
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -422,6 +436,8 @@ class ExponentialLR(_LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
     """
 
@@ -476,6 +492,8 @@ class CosineAnnealingLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
@@ -636,9 +654,7 @@ class ReduceLROnPlateau(object):
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
-                if self.verbose:
-                    print('Epoch {:5d}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+                self.print_lr(self.verbose, i, new_lr, epoch)
 
     @property
     def in_cooldown(self):
@@ -753,6 +769,8 @@ class CyclicLR(_LRScheduler):
             to learning rate; at the start of a cycle, momentum is 'max_momentum'
             and learning rate is 'base_lr'
             Default: 0.9
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of the last batch. This parameter is used when
             resuming a training job. Since `step()` should be invoked after each
             batch instead of after each epoch, this number represents the total
@@ -927,6 +945,8 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         T_0 (int): Number of iterations for the first restart.
         T_mult (int, optional): A factor increases :math:`T_{i}` after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int, optional): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
@@ -944,7 +964,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.eta_min = eta_min
         self.verbose = verbose
 
-        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
+        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, verbose, last_epoch)
 
         self.T_cur = self.last_epoch
 
@@ -1020,16 +1040,10 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 return self
 
         with _enable_get_lr_call(self):
-            for i, data  in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
+            for i, data in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
                 param_group, lr = data
                 param_group['lr'] = lr
-                if self.verbose:
-                    if epoch is None:
-                        print('Adjusting learning rate'
-                              ' of group {} to {:.4e}.'.format(i, lr))
-                    else:
-                        print('Epoch {:5d}: adjusting learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, lr))
+                self.print_lr(self.verbose, i, lr, epoch)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -1104,6 +1118,8 @@ class OneCycleLR(_LRScheduler):
         final_div_factor (float): Determines the minimum learning rate via
             min_lr = initial_lr/final_div_factor
             Default: 1e4
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         last_epoch (int): The index of the last batch. This parameter is used when
             resuming a training job. Since `step()` should be invoked after each
             batch instead of after each epoch, this number represents the total
