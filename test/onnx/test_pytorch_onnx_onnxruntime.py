@@ -80,6 +80,10 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                            dynamic_axes=dynamic_axes,
                            input_names=input_names, output_names=output_names,
                            fixed_batch_size=fixed_batch_size)
+        # import onnx
+        # m = onnx.load_model_from_string(f.getvalue())
+        # print('onnx:')
+        # print(m)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -884,6 +888,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
+
+    def test_as_strided(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                chunk_size = list(x.size())
+                chunk_size[1] = chunk_size[1] * 2 - 1
+                chunk_stride = list(x.stride())
+                chunk_stride[1] = chunk_stride[1] // 2
+                return x.as_strided((3, 3, 3), (1, 4, 2), storage_offset=2), x.as_strided(chunk_size, chunk_stride)
+
+        x = torch.randn(5, 8, 7)
+        self.run_test(Model(), x)
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
