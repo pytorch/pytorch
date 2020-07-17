@@ -1913,6 +1913,21 @@ class ConvNet(nn.Module):
         x = self.conv2(x).to(device=gpus[3], dtype=self.dtypes[3])
         return self.conv3(x)
 
+class Task(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p = nn.Parameter(torch.ones(2, 2))
+
+    def forward(self, x):
+        return self.p + x
+
+class TestDdpCommHook(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.t0 = Task()
+
+    def forward(self, x, rank):
+        return self.t0(x + rank)
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
@@ -2106,20 +2121,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus[:2]
         model = DoubleGpuNet(gpus)
 
-        with self.assertRaisesRegex(AssertionError, "output_device .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "output_device .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "only works with CUDA devices"):
+        with self.assertRaisesRegex(AssertionError, "input module must be on the same type of devices"):
             model.fc1 = model.fc1.cpu()
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
@@ -2329,19 +2344,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         2) DDP does update the grad of locally unused parameters.
         """
         class GlobalLocalUnusedParamModule(nn.Module):
-            class Task(nn.Module):
-                def __init__(self):
-                    super(GlobalLocalUnusedParamModule.Task, self).__init__()
-                    self.p = nn.Parameter(torch.ones(2, 2))
-
-                def forward(self, x):
-                    return self.p + x
-
             def __init__(self):
                 super(GlobalLocalUnusedParamModule, self).__init__()
-                self.t0 = self.Task()
-                self.t1 = self.Task()
-                self.task_unused = self.Task()
+                self.t0 = Task()
+                self.t1 = Task()
+                self.task_unused = Task()
 
             def task_parameters(self):
                 return (self.t0.p, self.t1.p, self.task_unused.p)
@@ -2383,6 +2390,62 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             GlobalLocalUnusedParamModule().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(gpu_model)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_find_unused_parameters_when_unused_parameters_empty(self):
+        """
+        An empty unused_parameters array does not imply find_unused_parameters =
+        false. This test makes sure that DDP allreduces unused parameters
+        accordingly where the forward pass in some process uses all parameters.
+        This unit test creates a module that uses all parameters in rank = 0, and
+        has unused parameters in other ranks.
+        """
+        class FindUnusedParamModule(nn.Module):
+            def __init__(self):
+                super(FindUnusedParamModule, self).__init__()
+                self.t0 = Task()
+                self.t1 = Task()
+
+            def task_parameters(self):
+                return (self.t0.p, self.t1.p)
+
+            def forward(self, x, rank):
+                return self.t1(self.t0(x)) if rank == 0 else self.t1(x)
+
+        def run_and_verify_grad(model):
+            # Run forward
+            output = model(8, self.rank)
+
+            # The grads of all parameters should be None at this point.
+            [self.assertIsNone(t_p.grad) for t_p in model.module.task_parameters()]
+
+            # Run backward
+            output.mean().backward()
+
+            # Now locally unused parameter should have grad updated on all ranks.
+            [self.assertIsNotNone(t_p.grad) for t_p in model.module.task_parameters()]
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            FindUnusedParamModule().cpu(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(cpu_model)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            FindUnusedParamModule().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
             find_unused_parameters=True,
@@ -2934,6 +2997,165 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
                 m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
 
+    @requires_gloo()
+    def test_ddp_comm_hook_future_passing_cpu(self):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            TestDdpCommHook().cpu(),
+            process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        cpu_model._register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(cpu_model)
+
+    def _test_ddp_comm_hook_future_passing_gpu(self, c10d_process_group):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d_process_group(store, self.rank, self.world_size)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            TestDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        gpu_model._register_comm_hook(None, self._simple_hook)
+
+        self._run_and_verify_simple_hook(gpu_model)
+
+    def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+        fut = torch.futures.Future()
+        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
+
+        def fut_then(fut):
+            # Add ones to fut's result.
+            return [t + torch.ones_like(t) for t in fut.wait()]
+
+        return fut.then(fut_then)
+
+    def _run_and_verify_simple_hook(self, model):
+        # Run forward
+        output = model(8, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_gloo(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using gloo backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupGloo)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_nccl(self):
+        """
+        This unit test executes _test_ddp_comm_hook_future_passing_gpu using nccl backend.
+        """
+        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupNCCL)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_init(self):
+        """
+        This unit test makes sure that register_comm_hook properly checks the format
+        of hook defined by user. The Python hook must be callable. This test also
+        checks whether bucket annotation checked properly if defined.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
+            model._register_comm_hook(state=None, hook=1)
+
+        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
+            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_return_type(self):
+        """
+        This test checks whether return annotation checked properly if defined. It also
+        checks whether an internal error is thrown if return type is incorrect and user
+        hasn't specified any return type annotation.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
+            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+        with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
+            def comm_hook(state: object, bucket: dist.GradBucket):
+                return 1
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+            # Run forward
+            output = model(8, self.rank)
+
+            # Run backward
+            output.mean().backward()
+
+    @requires_gloo()
+    def test_ddp_comm_hook_register_just_once(self):
+        """
+        DDP communication hook can only be registered once. This test validates whether
+        the error is thrown properly when register_comm_hook is called more than once.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(
+            TestDdpCommHook(),
+            process_group=process_group
+        )
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        model._register_comm_hook(None, dummy_hook)
+
+        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
+            model._register_comm_hook(None, dummy_hook)
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
@@ -2989,13 +3211,14 @@ class ReducerTest(TestCase):
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(parameters, buckets, self.process_group)
 
-    def _create_reducer_for_models(self, models):
+    def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
         group_by_dtype = groupby(
             range(len(parameters[0])),
             key=lambda i: parameters[0][i].dtype)
         buckets = [list(indices) for _, indices in group_by_dtype]
-        return dist.Reducer(parameters, buckets, self.process_group)
+        return dist.Reducer(parameters, buckets, self.process_group,
+                            find_unused_parameters=find_unused_parameters)
 
     def test_forward_backward_single_replica(self):
         batch_size = 10
@@ -3030,7 +3253,7 @@ class ReducerTest(TestCase):
     def test_forward_backward_unused_parameters(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model])
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
@@ -3051,7 +3274,7 @@ class ReducerTest(TestCase):
     def test_forward_backward_optimizer(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model])
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
         loss = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters())
         for i in range(3):

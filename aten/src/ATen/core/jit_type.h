@@ -277,6 +277,7 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 struct CAFFE2_API OptionalType
     : public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
+    TORCH_INTERNAL_ASSERT(element, "OptionalType requires valid TypePtr");
     // Optional is a union of [None, T], so Optional[[Optional[T]]] ->
     // Optional[T]
     if (auto opt_ptr = element->cast<OptionalType>()) {
@@ -1481,7 +1482,7 @@ inline TypePtr TensorType::fromBoolType() {
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
-    return at::ScalarType::Double;
+    return at::typeMetaToScalarType(c10::get_default_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
@@ -1517,9 +1518,12 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    if (!isCustomClassRegistered<T>()) {
-      throw c10::Error("Type could not be converted to any of the known types.", "");
-    }
+    TORCH_CHECK(
+        isCustomClassRegistered<T>(),
+        "Type ",
+        c10::util::get_fully_qualified_type_name<T>(),
+        " could not be converted to any of the known types."
+    );
     auto res = getCustomClassType<T>();
     return std::dynamic_pointer_cast<Type>(std::move(res));
   }
@@ -1552,6 +1556,24 @@ struct getTypePtr_<int64_t> final {
 };
 template <>
 struct getTypePtr_<c10::ScalarType> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Device> final {
+  static TypePtr call() {
+    return DeviceObjType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Layout> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::MemoryFormat> final {
   static TypePtr call() {
     return IntType::get();
   }

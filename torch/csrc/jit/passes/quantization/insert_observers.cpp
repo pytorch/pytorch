@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <regex>
 #include <stack>
@@ -34,7 +35,6 @@ using QConfigTypePtrMap =
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
-using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
@@ -242,12 +242,18 @@ class ModuleCloneHelper {
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
+    // we only support %self being Module in the arguments of function
+    auto schema_type_remap_fn = [&](TypePtr type_ptr) {
+      return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
+    };
+    auto schema =
+        method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
         this_method_name, graph);
     target.type()->addMethod(copied);
-    // we'll use default schema for cloned method
+    copied->setSchema(std::move(schema));
   }
 };
 
@@ -1107,10 +1113,10 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-  // must do constant propagation first before replacement
-  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
+  replaceConvolutionWithAtenConv(graph);
+  RemoveListMutation(graph);
 }
 
 void InsertObserversHelper::analyze(
@@ -1448,7 +1454,8 @@ InsertObserversHelper::insertObserversFor(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,
                 "branches for `if` should return values that are observed "
-                "consistently");
+                "consistently, if node:",
+                *n);
           } else {
             aggregated_output_observe_state = subblock_output_observe_state;
           }
@@ -1515,6 +1522,7 @@ void InsertObserversHelper::propagateObservedProperty(
           observed_values_.count(v) || block_observed_values.count(v);
     }
     if (all_observed) {
+      GRAPH_DEBUG("Pass through observed property in node:", *output->node());
       // This is to propagate observed property through
       // all ops that doesn't require observation
       block_observed_values.insert(output);
