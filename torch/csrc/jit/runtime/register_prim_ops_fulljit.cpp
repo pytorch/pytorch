@@ -671,19 +671,20 @@ void hashValue(Stack* stack) {
   push(stack, int64_t(hash));
 }
 
+// As described in https://docs.python.org/3/library/functions.html#round
+// When a number is exactly halfway between two integers, python builtin round
+// function will round to even number. We use round(x/2)*2 to handle the
+// special halfway case. For positive 'x', round(x/2)*2 =
+// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
+// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
+// result will always be a even number. Due to symmetricity, it also applies to
+// negative cases.
+double round_to_even(double a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+}
+
 RegisterOperators reg2({
-
-    Operator(
-        "aten::__getitem__.str(str s, int index) -> str",
-        [](Stack* stack) {
-          auto index = pop(stack).toInt();
-          auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
-          char c = string.at(norm_index);
-          push(stack, std::string(&c, 1));
-        },
-        aliasAnalysisFromSchema()),
-
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
         "aten::len.any(Any[] a) -> int",
@@ -728,10 +729,6 @@ RegisterOperators reg2({
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__contains__.str_list(str[] l, str item) -> bool",
-        listContains<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort.int(int[](a!) self, bool reverse=False) -> ()",
@@ -839,18 +836,6 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ord(str string) -> int",
-        [](Stack* stack) {
-          auto string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              string.size() == 1,
-              "String for ord() must be 1 character, found ",
-              string.size());
-          uint8_t ord = string.at(0);
-          push(stack, int64_t(ord));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::chr(int i) -> str",
         [](Stack* stack) {
           auto i = pop(stack).toInt();
@@ -923,7 +908,7 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
+    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
@@ -934,7 +919,6 @@ RegisterOperators reg2({
         float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
     DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
@@ -1347,7 +1331,9 @@ at::Tensor interpolate(
   auto input_dim = input.dim();
   if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors), scale_factors_1);
+        input,
+        _output_size(input, 1, size, scale_factors),
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
@@ -1375,7 +1361,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        scale_factors_1);
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")

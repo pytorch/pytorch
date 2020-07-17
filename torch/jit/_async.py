@@ -9,6 +9,12 @@ functionalities in `torch.jit`.
 
 import torch
 
+from torch.utils import set_module
+from torch.jit._builtins import _register_builtin
+from torch._jit_internal import Future
+
+set_module(Future, "torch.jit")
+
 
 def fork(func, *args, **kwargs):
     """
@@ -84,3 +90,6 @@ def wait(future):
         `T`: the return value of the the completed task
     """
     return torch._C.wait(future)
+
+
+_register_builtin(wait, "aten::wait")
