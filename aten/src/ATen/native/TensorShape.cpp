@@ -1696,10 +1696,12 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
 Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "moveaxis: Invalid source or destination dims: src (",
               src, " dims ) should contain the same number of dims as dst (", dst, "dims)");
+
+  auto self_dim = self.dim();
   auto normalized_src = src.vec();
-  maybe_wrap_dims(normalized_src, self.dim());
+  maybe_wrap_dims(normalized_src, self_dim);
   auto normalized_dst = dst.vec();
-  maybe_wrap_dims(normalized_dst, self.dim());
+  maybe_wrap_dims(normalized_dst, self_dim);
 
   auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
   TORCH_CHECK(it_src == normalized_src.end(), "moveaxis: repeated dim in `src` (", src, ")");
@@ -1707,9 +1709,9 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(it_dst == normalized_dst.end(), "moveaxis: repeated dim in `dst` (", dst, ")");
 
   std::vector<int64_t> order, source_dims, destination_dims;
-  order.resize(self.dim());
-  source_dims.resize(self.dim());
-  destination_dims.resize(self.dim());
+  order.resize(self_dim);
+  source_dims.resize(self_dim);
+  destination_dims.resize(self_dim);
 
   std::iota(source_dims.begin(), source_dims.end(), 0);
   std::iota(destination_dims.begin(), destination_dims.end(), 0);
