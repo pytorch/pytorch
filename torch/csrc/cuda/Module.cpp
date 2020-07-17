@@ -56,7 +56,7 @@ static void poison_fork() {
 
 void THCPModule_setDevice(int device)
 {
-  THCudaCheck(cudaSetDevice(device));
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
@@ -75,9 +75,8 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  int device;
   torch::utils::cuda_lazy_init();
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -87,6 +86,19 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   poison_fork();
   return PyLong_FromLong(at::cuda::device_count());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  poison_fork();
+#ifdef CUDA_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -127,8 +139,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
     throw python_error();
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
   }
@@ -502,6 +513,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getArchFlags", (PyCFunction)THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},

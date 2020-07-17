@@ -57,6 +57,7 @@ bool isSimpleMap(Node* node) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::logit(Tensor self, float? eps=None) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::max(Tensor self, Tensor other) -> Tensor",

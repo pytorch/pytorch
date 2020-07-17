@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
-#include <ATen/cuda/CUDABlas.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/cuda/CUDABlas.h>
 
 namespace at { namespace native {
 
@@ -337,11 +337,82 @@ Tensor& addbmm__cuda(Tensor& self,
 
 Tensor addbmm_cuda(const Tensor& self,
                    const Tensor& batch1, const Tensor& batch2,
-                   Scalar beta, Scalar alpha) 
+                   Scalar beta, Scalar alpha)
 {
   Tensor out = at::empty({0}, self.options());
   addbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
   return out;
+}
+
+Tensor dot_cuda(const Tensor& self, const Tensor& other) {
+  at::NoNamesGuard guard;
+
+  TORCH_CHECK(
+      self.dim() == 1 && other.dim() == 1,
+      "1D tensors expected, got, ",
+      self.dim(),
+      ", ",
+      other.dim(),
+      " tensors");
+  TORCH_CHECK(
+      self.scalar_type() == other.scalar_type(),
+      "dot : expected both vectors to have same dtype, but found ",
+      self.scalar_type(),
+      " and ",
+      other.scalar_type());
+  TORCH_CHECK(
+      self.numel() == other.numel(),
+      "inconsistent tensor size, expected tensor [",
+      self.numel(),
+      "] and src [",
+      other.numel(),
+      "] to have the same number of elements, but got ",
+      self.numel(),
+      " and ",
+      other.numel(),
+      " elements respectively");
+  TORCH_CHECK(
+      self.device() == other.device(),
+      "expected all tensors to be on the same device. Found: ",
+      self.device(),
+      ", ",
+      other.device());
+  TORCH_CHECK(
+      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
+          (other.stride(0) <= INT_MAX),
+      "dot only supports n, incx, incy with the bound [val] <= %d",
+      INT_MAX);
+
+  const int n = static_cast<int>(self.numel());
+  int incx = static_cast<int>(self.stride(0));
+  int incy = static_cast<int>(other.stride(0));
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "dot", [&] {
+    Tensor result = at::empty({}, self.options());
+
+    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasPointerMode_t previous_mode = CUBLAS_POINTER_MODE_DEVICE;
+    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
+    TORCH_CUDABLAS_CHECK(
+        cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
+
+    at::cuda::blas::dot<scalar_t>(
+        handle,
+        n,
+        self.data_ptr<scalar_t>(),
+        incx,
+        other.data_ptr<scalar_t>(),
+        incy,
+        result.data_ptr<scalar_t>());
+
+    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
+
+    return result;
+  });
 }
 
 } }

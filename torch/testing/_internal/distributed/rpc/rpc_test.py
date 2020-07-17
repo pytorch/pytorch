@@ -6,7 +6,7 @@ from threading import Lock
 import time
 import unittest
 from collections import namedtuple
-from functools import partial
+from functools import partial, wraps
 from unittest import mock
 
 import torch
@@ -472,14 +472,18 @@ load_tests = load_tests
 
 
 class RpcTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
-        def decorator(self):
-            return unittest.skipIf(
-                self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
-                "This test is not yet supported in the Tensorpipe Agent"
-            )(old_func)
+    def _skip_if_tensorpipe_agent(test_func):  # noqa: B902
+        @wraps(test_func)
+        def wrapped_test_func(self):
+            if self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE:
+                # In theory we should call self.skipTest(reason), but this does
+                # not play well with the test runner, which sees an exception
+                # being raised and marks the test as failed. Thus instead we
+                # make the test a successful no-op.
+                return
+            test_func(self)
 
-        return decorator
+        return wrapped_test_func
 
     @dist_init
     def test_worker_id(self):
@@ -991,7 +995,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(self_worker_name in rpc_event.name)
         self.assertTrue(dst_worker_name in rpc_event.name)
         if isinstance(func, torch.jit.ScriptFunction):
-            self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(func) in rpc_event.name)
         else:
             self.assertTrue(func.__name__ in rpc_event.name)
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
@@ -1215,30 +1219,28 @@ class RpcTest(RpcAgentTestFixture):
         fut.wait()
 
     def validate_profiling_workload(self, dst, prof):
+        REMOTE_OP_STR = "#remote_op: "
+
+        def convert_remote_to_local(event_name):
+            remote_op_key = REMOTE_OP_STR
+            return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+
         events = prof.function_events
-
-        rpc_mul_event = get_function_event(
-            events, torch.jit._find_builtin(torch.mul)
-        )
-
         remote_events = {
-            event for event in events if event.name in ["mul"]
-        } - {rpc_mul_event}
-
-        for remote_event in remote_events:
-            self.assertEqual(remote_event.node_id, dst)
-
+            convert_remote_to_local(event.name): event
+            for event in events
+            if event.is_remote
+        }
+        self.assertTrue("mul" in remote_events)
+        remote_mul_event = remote_events["mul"]
+        self.assertEqual(remote_mul_event.node_id, dst)
         self.check_profiling_info(
             worker_name(self.rank),
             worker_name(dst),
             torch.mul,
-            rpc_mul_event,
+            remote_mul_event,
             RPCExecMode.ASYNC,
         )
-        # Validate that the invocations of the RPC events themselves have
-        # the current rank as the node id.
-        for evt in [rpc_mul_event]:
-            self.assertEqual(evt.node_id, self.rank)
 
     @dist_init
     def test_profiler_with_autograd_context(self):
@@ -1481,7 +1483,7 @@ class RpcTest(RpcAgentTestFixture):
             with torch.autograd.profiler.profile() as pf:
                 key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch.jit._qualified_name(my_script_func),
+                    torch._jit_internal._qualified_name(my_script_func),
                     "worker1",
                     "worker0",
                 )
@@ -1498,9 +1500,9 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(result, expected)
             events = pf.function_events
             rpc_event = get_function_event(
-                events, torch.jit._qualified_name(my_script_func)
+                events, torch._jit_internal._qualified_name(my_script_func)
             )
-            self.assertTrue(torch.jit._qualified_name(my_script_func) in rpc_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(my_script_func) in rpc_event.name)
 
     @dist_init
     def test_py_class_constructor(self):
@@ -2045,6 +2047,14 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @_skip_if_tensorpipe_agent
     def test_single_threaded_rref_owner(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
@@ -2110,6 +2120,14 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @_skip_if_tensorpipe_agent
     def test_single_threaded_rref_to_here(self):
+        # We need a process group in order to perform a barrier at the end.
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
         caller_rank = 0
@@ -3489,13 +3507,6 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         args = (2,)
         self._test_remote_message_dropped_timeout(func, args, dst=0)
 
-    @dist_init(faulty_messages=[], messages_to_delay={})
-    def test_owner_rref(self):
-        if self.rank != 0:
-            return
-        rref = rpc.remote(worker_name(0), torch.add, args=(1, 1))
-        rref.to_here()
-
     def _test_remote_message_delay_timeout(self, func, args, dst=None):
         if self.rank != 0:
             return
@@ -3531,16 +3542,14 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
                 # to_here() should raise timeout error, since it does not know about the
                 # status of rpc.remote().
                 slow_rref.to_here(0.001)
-        # Note: UserRRef will try to send out a RRefUserDelete, but will not find it on the owner.
-        # later, the owner will process the RRef creation, and time out
-        # waiting for the delete messages.
-        # Therefore, we wait until we get notification that pending owners have been confirmed
-        # before sending out RRefUserDeletes.
+        # Note: If we proceed with shutdown, UserRRef will send out a RRefUserDelete
+        # but this can be a noop since it may not exist on the owner yet. Later,
+        # the owner can process the RRef creation and wait for the delete message,
+        # thus leading to a timeout.
+        # Therefore, we wait until we get notification that pending owners have
+        # been confirmed before sending out RRefUserDeletes.
         if dst_rank != self.rank:
             wait_until_owners_and_forks_on_rank(2, 2, rank=dst_rank)
-        else:
-            # 1 owner, fork deleted
-            wait_until_owners_and_forks_on_rank(1, 0, rank=dst_rank)
 
     @dist_init(faulty_messages=[], messages_to_delay={"PYTHON_REMOTE_CALL": 2})
     def test_udf_remote_message_delay_timeout(self):

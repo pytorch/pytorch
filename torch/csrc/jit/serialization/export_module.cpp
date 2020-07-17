@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -81,6 +80,16 @@ c10::IValue getFunctionTuple(const Function& func) {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
+    } else {
+      TORCH_CHECK(
+          ins.op != CREATE_OBJECT,
+          "CREATE_OBJECT is not supported in mobile module. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module)).");
+      TORCH_CHECK(
+          isOpSupportedInMobile(ins.op),
+          toString(ins.op),
+          " is not supported in mobile module.");
     }
   }
 
@@ -296,6 +305,8 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
+    elements.emplace_back(
+        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
@@ -331,7 +342,7 @@ class ScriptModuleSerializer {
   }
 
   caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::Tensor> constant_table_;
+  std::vector<at::IValue> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   std::vector<c10::NamedTypePtr> class_deps_;
   TypeNameUniquer type_name_uniquer_;

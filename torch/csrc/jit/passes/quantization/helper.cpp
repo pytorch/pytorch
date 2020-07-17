@@ -191,7 +191,7 @@ AtenFuncArgs _observe_inputs_aten_func = {};
 CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 // Aten functions for getting tensor information
-std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim"};
+std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim", "numel"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
@@ -301,18 +301,34 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
-    return {n->input(0)};
+    // only propagate dequantize for Tensor
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      return {n->input(0)};
+    } else {
+      return {};
+    }
   } else if (
-      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
+      n->kind() == prim::ListConstruct &&
+      v->type()->isSubtypeOf(ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
     }
     return inputs;
+  } else if (n->kind() == prim::TupleConstruct) {
+    std::vector<Value*> inputs;
+    for (auto* input : n->inputs()) {
+      if (input->type()->isSubtypeOf(TensorType::get())) {
+        inputs.push_back(input);
+      }
+    }
+    return inputs;
   } else if (n->kind() == Symbol::aten("append")) {
-    // notice that append is an op that changes input inplace
-    return {n->input(0), n->input(1)};
+    TORCH_WARN(
+        "Quantization for inplace operation aten::append "
+        "is not supported");
   }
+
   return {};
 }
 
