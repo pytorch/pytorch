@@ -11,6 +11,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCAtomics.cuh>
+#include <AtomicOps.cuh>
 
 namespace at { namespace native {
 
@@ -43,6 +44,7 @@ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
     // GPU atomic subtraction
+    gpuAtomic<sub_op>(self_data, *src_data);
   }
 };
 static ReduceSubtract reduce_subtract;
