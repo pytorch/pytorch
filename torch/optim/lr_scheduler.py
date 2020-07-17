@@ -483,6 +483,40 @@ class ExponentialLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
+class PolyLR(_LRScheduler):
+    """Decays the learning rate of each parameter group polynomially in given period of time.
+    When pow=1, lr decays linearly. When pow>1, lr drops fast then slowly converges to the end. When pow<1, otherwise.
+    pow<0 is forbidden because it would be an increase curve rather than a decrease curve.
+
+    Args:
+    """
+    def __init__(self, optimizer, pow, max_epoch, min_lrs=0, last_epoch=-1):
+        if pow < 0:
+            raise ValueError("Expected non-negative pow.")
+
+        self.pow = pow
+        self.max_epoch = max_epoch
+        if not isinstance(min_lrs, list) and not isinstance(min_lrs, tuple):
+            self.min_lrs = [min_lrs] * len(optimizer.param_groups)
+
+        super().__init__(optimizer, last_epoch=last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch == 0:
+            return self.base_lrs
+        
+        base = 1 - 1 / max(1, self.max_epoch - self.last_epoch - 1)
+        coeff = base ** coeff
+        return [(lr - min_lr) * coeff + min_lr
+                for group, min_lr in zip(self.optimizer.param_groups, self.min_lrs)]
+
+    def _get_closed_form_lr(self):
+        base = max(0, 1 - self.last_epoch / self.max_epoch)
+        coeff = base ** self.pow
+        return [(group['lr'] - min_lr) * coeff + min_lr
+                for base_lr, min_lr in zip(self.base_lrs, self.min_lrs)]        
+
+
 class CosineAnnealingLR(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
