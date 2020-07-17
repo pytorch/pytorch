@@ -7,7 +7,6 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
@@ -53,6 +52,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kInt, ncclInt32},
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
+    {at::kBool, ncclUint8},
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     {at::kBFloat16, ncclBfloat16},
 #endif
@@ -68,14 +68,14 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
   return it->second;
 }
 
-// Helper function that casts tensors from bool to long.
-void castTensorsFromBool(std::vector<at::Tensor>& tensors) {
-  for (auto& tensor : tensors) {
-    // TODO: a simple tensor = tensor.to(long) won't work here. The allreduce
-    // will be correct, but the modified tensor won't be reflected in Python.
-    auto asIntBufTensor = tensor.to(at::kLong);
-    tensor.set_data(asIntBufTensor);
+ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
+  if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+    // For bool tensors, map sum to max, which both represent a bitwise or.
+    // This is to prevent overflow issues with sum, since we use uint8 to
+    // represent a bool (see ncclDataType mapping).
+    return ncclMax;
   }
+  return ncclOp[reduceOp];
 }
 
 // Get the deviceList String from the list of devices
@@ -214,8 +214,15 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-// Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
+  // Call Synchronize without a timeout. We use this method to avoid adding a
+  // timeout argument to the public synchronize API.
+  synchronizeInternal(kNoTimeout);
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
@@ -224,11 +231,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
+    // Use the passed in timeout if provided, otherwise use the default
+    // opTimeout for each WorkNCCL object.
+    std::chrono::milliseconds workTimeout =
+        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - workStartTime_) > opTimeout_) {
+              currentTimepoint - workStartTime_) > workTimeout) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -266,8 +277,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-bool ProcessGroupNCCL::WorkNCCL::wait() {
-  synchronize();
+bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
 }
@@ -668,15 +679,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     PreProcess pre,
     PostProcess post) {
-  auto requiresBoolConversion =
-      inputs.size() > 0 && inputs[0].scalar_type() == at::ScalarType::Bool;
-  if (requiresBoolConversion) {
-    castTensorsFromBool(inputs);
-    if (&inputs != &outputs) {
-      castTensorsFromBool(outputs);
-    }
-  }
-
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
@@ -714,36 +716,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
-    }
-  }
-
-  // This needs to be outside of the nccl_group-guard due to
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/groups.html:
-  // Caution: When called inside a group, stream operations (like ncclAllReduce)
-  // can return without having enqueued the operation on the stream. Stream
-  // operations like cudaStreamSynchronize can therefore be called only after
-  // ncclGroupEnd returns.
-
-  // Run conversion back on the same ncclStream
-  if (requiresBoolConversion) {
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      {
-        at::cuda::CUDAStreamGuard guard(ncclStreams_[key][i]);
-        auto asBoolTensor = outputs[i].to(at::kBool);
-        // TODO: the simple t = t.to(bool) doesn't work similar to above.
-        outputs[i].set_data(asBoolTensor);
-      }
-    }
-
-    if (&inputs != &outputs) {
-      // Inputs and outputs differ, so we expect inputs not to be modified.
-      for (size_t i = 0; i < inputs.size(); ++i) {
-        {
-          at::cuda::CUDAStreamGuard guard(ncclStreams_[key][i]);
-          auto boolTensor = inputs[i].to(at::kBool);
-          inputs[i].set_data(boolTensor);
-        }
-      }
     }
   }
 
@@ -792,7 +764,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       });
@@ -846,7 +818,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             root,
             comm,
             stream.stream());
@@ -928,7 +900,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
             output.data_ptr(),
             output.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       },
