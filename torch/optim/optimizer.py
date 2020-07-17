@@ -219,6 +219,10 @@ class Optimizer(object):
             else:
                 param_group.setdefault(name, default)
 
+        params = param_group['params']
+        if len(params) != len(set(params)):
+            raise ValueError("optimizer contains a parameter group with duplicate parameters")
+
         param_set = set()
         for group in self.param_groups:
             param_set.update(set(group['params']))

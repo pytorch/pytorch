@@ -491,6 +491,11 @@ class TestOptim(TestCase):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
 
+    def test_duplicate_params_in_param_group(self):
+        param = Variable(torch.randn(5, 5))
+        with self.assertRaises(ValueError):
+            optim.SGD([param, param], lr=0.1)
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
