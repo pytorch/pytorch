@@ -44,8 +44,11 @@ bool ProcessGroup::Work::wait() {
   return true;
 }
 
-void ProcessGroup::Work::abort() {
-  TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.")
+void ProcessGroup::Work::abort(){
+    TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.")}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
+  TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
 }
 
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
