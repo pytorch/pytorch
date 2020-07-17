@@ -10,6 +10,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
+from io import StringIO
 
 import torch
 import torch.cuda
@@ -17,6 +18,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -231,6 +233,17 @@ class Barrier(object):
             time.sleep(0.1)
 
 
+@contextmanager
+def _captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+
+
 class _DistTestBase(object):
     def _barrier(self, *args, **kwargs):
         Barrier.sync(*args, **kwargs)
@@ -278,6 +291,34 @@ class _DistTestBase(object):
             for i in range(world_size)
         }
         return rank_to_GPU
+
+    def test_dump_DDP_relevant_env_vars(self):
+        with _captured_output() as (out, err):
+            _dump_DDP_relevant_env_vars()
+            lines = out.getvalue().splitlines()
+
+        def format_line(var):
+            return "env:%s=%s" % (var, os.environ[var] if var in os.environ else "N/A")
+
+        # Check relevant env vars
+        vars = [
+            "MASTER_ADDR",
+            "MASTER_PORT",
+            "WORLD_SIZE",
+            "NCCL_TOPO_DUMP_FILE",  # N/A
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertIn(line, lines)
+        # Check irrelevant env vars
+        vars = [
+            "xxx",
+            "yyy",
+            "zzz",
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertNotIn(line, lines)
 
     # GET RANK
     def test_get_rank(self):

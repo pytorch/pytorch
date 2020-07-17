@@ -95,14 +95,14 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_post_upload_jobs,
+        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     docker_builder_functions = [
