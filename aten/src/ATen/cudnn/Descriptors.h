@@ -258,7 +258,7 @@ struct TORCH_CUDA_API RNNDescriptor
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000 
-      else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
+      else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
 #endif
