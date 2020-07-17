@@ -231,6 +231,8 @@ class LambdaLR(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.")
 
+        if self.last_epoch == 0:
+            return self.base_lrs
         return [base_lr * lmbda(self.last_epoch)
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
@@ -312,6 +314,19 @@ class MultiplicativeLR(_LRScheduler):
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
             return list(self.base_lrs)
+
+
+
+class WarmUpLR(LambdaLR):
+    def __init__(self, optimizer, warmup_epoch, warmup_ratio, type='linear', last_epoch=-1):
+        self. warmup_epoch = warmup_epoch
+        if type == 'linear':
+            lr_lambda = lambda epoch: (1 - epoch / warmup_epoch) * (1 - warmup_ratio)
+        elif type == 'exp':
+            lr_lambda = lambda epoch: warmup_ratio**(1 - epoch / warmup_epoch)
+        else:
+            raise NotImplementedError
+        super(WarmUpLR, self).__init__(optimizer, lr_lambda, last_epoch)
 
 
 class StepLR(_LRScheduler):
