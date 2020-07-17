@@ -8503,13 +8503,17 @@ def add_test(test, decorator=None):
 
     if 'dtype' in get_function_arglist(test.test_cuda):
         if tf32_is_not_fp32() and test.with_tf32:
+
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
                     test.test_cuda(self, dtype=torch.float, **kwargs)
+
             add(cuda_test_name + '_fp32', with_tf32_off)
+
             def with_tf32_on(self, test=test, kwargs=kwargs):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, dtype=torch.float, **kwargs)
+
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name + '_float', lambda self,
@@ -8529,13 +8533,17 @@ def add_test(test, decorator=None):
 
     else:
         if tf32_is_not_fp32() and test.with_tf32:
+
             def with_tf32_off(self, test=test, kwargs=kwargs):
                 with tf32_off():
                     test.test_cuda(self, **kwargs)
+
             add(cuda_test_name + '_fp32', with_tf32_off)
+
             def with_tf32_on(self, test=test, kwargs=kwargs):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, **kwargs)
+
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
@@ -9092,7 +9100,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                    "Scipy v1.0 and/or numpy not found")
+                     "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -9436,7 +9444,6 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
 
-    
     @onlyCUDA
     @dtypes(*NO_HALF_TENSORTYPES)
     @tf32_on_and_off(0.005)
@@ -9473,7 +9480,7 @@ class TestNNDeviceType(NNTestCase):
                         hx = (hx_val.clone().requires_grad_(True),
                               hx_val.clone().add(1).requires_grad_(True))
                         hx_device = (hx_val.clone().to(device).requires_grad_(True),
-                                   hx_val.clone().to(device).add(1).requires_grad_(True))
+                                     hx_val.clone().to(device).add(1).requires_grad_(True))
                     else:
                         hx = hx_val.clone().requires_grad_(True)
                         hx_device = hx_val.clone().to(device).requires_grad_(True)
