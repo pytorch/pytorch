@@ -61,5 +61,7 @@ DECLARE_DISPATCH(binary_fn, fmod_stub);
 DECLARE_DISPATCH(binary_fn_alpha, fmod_scalar_stub);
 DECLARE_DISPATCH(binary_fn, logaddexp_stub);
 DECLARE_DISPATCH(binary_fn, logaddexp2_stub);
+DECLARE_DISPATCH(binary_fn, gcd_stub);
+DECLARE_DISPATCH(binary_fn, lcm_stub);
 
 }} // namespace at::native
