@@ -510,25 +510,6 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
-std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0,
-           "chunk expects at least a 1-dimensional tensor");
-  TORCH_CHECK(chunks > 0,
-           "chunk expects `chunks` to be greater than 0, got: ", chunks);
-
-  std::vector<Tensor> result;
-  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
-
-  // See the comment above in chunk(...)
-  if (split_size == 0 && self.size(dim) == 0) {
-    std::vector<int64_t> split_sizes(chunks, split_size);
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
-    return self.unsafe_split_with_sizes(split_sizes, dim);
-  } else {
-    return self.unsafe_split(split_size, dim);
-  }
-}
-
 Tensor diagflat(const Tensor& self, int64_t offset) {
   return self.contiguous().view(-1).diag(offset);
 }
@@ -1071,14 +1052,6 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
-  auto result = at::native::split(self, split_size, dim);
-  for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
-  }
-  return result;
-}
-
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
@@ -1099,14 +1072,6 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
            "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
            " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
   return splits;
-}
-
-std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
-  auto result = at::native::split_with_sizes(self, split_sizes, dim);
-  for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
-  }
-  return result;
 }
 
 // Precondition: tensors is non-empty

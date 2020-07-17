@@ -1030,36 +1030,6 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
-add_docstr(torch.unsafe_chunk,
-           r"""
-unsafe_chunk(input, chunks, dim=0) -> List of Tensors
-
-Works like :func:`torch.chunk` but without enforcing the autograd restrictions
-on inplace modification of the outputs.
-
-.. warning::
-    This function is safe to use as long as only the input, or only the outputs
-    are modified inplace after calling this function. It is user's
-    responsibility to ensure that is the case. If both the input and one or more
-    of the outputs are modified inplace, gradients computed by autograd will be
-    silently incorrect.
-""")
-
-add_docstr(torch.unsafe_split,
-           r"""
-unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
-
-Works like :func:`torch.split` but without enforcing the autograd restrictions
-on inplace modification of the outputs.
-
-.. warning::
-    This function is safe to use as long as only the input, or only the outputs
-    are modified inplace after calling this function. It is user's
-    responsibility to ensure that is the case. If both the input and one or more
-    of the outputs are modified inplace, gradients computed by autograd will be
-    silently incorrect.
-""")
-
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
@@ -2535,11 +2505,12 @@ Computes the element-wise greatest common divisor (GCD) of :attr:`input` and :at
 
 Both :attr:`input` and :attr:`other` must have integer types.
 
-Note that we define the GCD(0, 0) to be 0.
+.. note::
+    This defines :math:`gcd(0, 0) = 0`.
 
 Args:
-    input (Tensor)
-    other (Tensor)
+    {input}
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
@@ -3033,9 +3004,12 @@ Computes the element-wise least common multiple (LCM) of :attr:`input` and :attr
 
 Both :attr:`input` and :attr:`other` must have integer types.
 
+.. note::
+    This defines :math:`lcm(0, 0) = 0` and :math:`lcm(0, a) = 0`.
+
 Args:
-    input (Tensor)
-    other (Tensor)
+    {input}
+    other (Tensor): the second input tensor
 
 Keyword arguments:
     {out}
