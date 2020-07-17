@@ -121,7 +121,7 @@ struct gpuAtomic<add_op> {
   }
 
   inline __device__ void operator() (bool * address, bool val) {
-    *address = (*address) && val;
+    *address = address && val;
   }
 
   inline  __device__ at::Half operator() (at::Half *address, at::Half val) {
@@ -200,6 +200,13 @@ struct gpuAtomic<add_op> {
   inline __device__ void operator() (c10::complex<T> * address, c10::complex<T> val) {
     operator()(&address->real_, val.real_);
     operator()(&address->imag_, val.imag_);
+  }
+};
+
+template<>
+struct gpuAtomic<sub_op> {
+  template <typename T>
+  inline __device__ void operator() (T * address, T val) {
   }
 };
 
