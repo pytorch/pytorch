@@ -1,16 +1,16 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "XXX"
+producer_version: "1.7"
 graph {
   node {
-    input: "x"
+    input: "0"
     input: "params.0"
     output: "2"
     name: "Add_0"
     op_type: "Add"
   }
   node {
-    input: "x"
+    input: "0"
     input: "2"
     output: "3"
     name: "Mul_1"
@@ -43,7 +43,7 @@ graph {
     raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
   }
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
