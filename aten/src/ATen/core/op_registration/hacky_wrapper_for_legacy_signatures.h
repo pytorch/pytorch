@@ -143,11 +143,11 @@ struct make_optional_tensor_explicit<at::Tensor> final {
     }
 };
 
-template<class TargetSignature, class KernelFunc>
+template<class TargetSignature, class KernelSignature, class KernelFunc>
 struct with_explicit_optional_tensors_ final {};
 
 template<class Return, class... TargetSignatureArgs, class... KernelSignatureArgs, Return(*KernelFunc)(KernelSignatureArgs...)>
-struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), TORCH_FN_TYPE(KernelFunc)> final {
+struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), Return(KernelSignatureArgs...), TORCH_FN_TYPE(KernelFunc)> final {
     static Return wrapper(TargetSignatureArgs... args) {
         return (*KernelFunc)(make_optional_tensor_explicit<std::remove_cv_t<std::remove_reference_t<KernelSignatureArgs>>>::call(
                 std::forward<TargetSignatureArgs>(args)
@@ -166,7 +166,7 @@ struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), TORCH_FN
 template<class TargetSignature, class KernelFunc>
 constexpr auto with_explicit_optional_tensors(KernelFunc) {
     // TODO Only wrap if signatures have an entry where Tensor is vs optional<Tensor>
-    using WrappedFunc = TORCH_FN_TYPE((&with_explicit_optional_tensors_<TargetSignature, KernelFunc>::wrapper));
+    using WrappedFunc = TORCH_FN_TYPE((&with_explicit_optional_tensors_<TargetSignature, typename KernelFunc::FuncType, KernelFunc>::wrapper));
     return WrappedFunc();
 }
 
