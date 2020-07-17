@@ -211,6 +211,7 @@ class AbstractTestCases:
                            'smm',
                            'softmax',
                            'split_with_sizes',
+                           'unsafe_split_with_sizes',
                            'sspaddmm',
                            'to_dense',
                            'sparse_resize_',
@@ -12483,6 +12484,13 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.linspace(10, 2000, 1991, device=device, dtype=dtype),
                              torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
 
+        # Vectorization on non-contiguous tensors
+        if dtype != torch.int8:  # int8 is too small for this test
+            res = torch.rand(3, 3, 1000, device=device).to(dtype)
+            res = res.permute(2, 0, 1)
+            torch.linspace(0, 1000 * 3 * 3, 1000 * 3 * 3, out=res)
+            self.assertEqual(res.flatten(), torch.linspace(0, 1000 * 3 * 3, 1000 * 3 * 3, device=device, dtype=dtype))
+
         self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device, dtype=dtype))
         # steps = 1
         self.assertEqual(torch.linspace(0, 1, 1, device=device, dtype=dtype),
@@ -13973,11 +13981,11 @@ class TestTorchDeviceType(TestCase):
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
-            x = torch.arange(2 * L + 1, dtype=dtype)
+            x = torch.arange(2 * L + 1, device=device, dtype=dtype)
             original = amplitude * torch.sin(2 * math.pi / L * x * n)
             # stft = torch.stft(original, L, hop_length=L, win_length=L,
             #                   window=torch.ones(L), center=False, normalized=False)
-            stft = torch.zeros((L // 2 + 1, 2, 2), dtype=dtype)
+            stft = torch.zeros((L // 2 + 1, 2, 2), device=device, dtype=dtype)
             stft_largest_val = (amplitude * L) / 2.0
             if n < stft.size(0):
                 stft[n, :, 1] = -stft_largest_val
@@ -13988,7 +13996,7 @@ class TestTorchDeviceType(TestCase):
 
             inverse = torch.istft(
                 stft, L, hop_length=L, win_length=L,
-                window=torch.ones(L, dtype=dtype), center=False, normalized=False)
+                window=torch.ones(L, device=device, dtype=dtype), center=False, normalized=False)
             # There is a larger error due to the scaling of amplitude
             original = original[..., :inverse.size(-1)]
             self.assertEqual(inverse, original, atol=1e-3, rtol=0)
@@ -15217,8 +15225,8 @@ class TestTorchDeviceType(TestCase):
         if dtype == torch.double:
             # double precision
             a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
-            self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
+            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
+            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self, device):
@@ -16597,11 +16605,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True), 
+        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
                          expected_output_tensor,
                          atol=precision_4dps, rtol=0)
 
@@ -16923,6 +16931,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = 1.0 if dtype == torch.int64 else 1
         r = a.remainder(b)
         self.assertEqual(r.dtype, a.dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gcd_edge_cases(self, device, dtype):
+        t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
+        t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
+        actual = torch.gcd(t1, t2)
+        expected = np.gcd([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lcm_edge_cases(self, device, dtype):
+        t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
+        t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
+        actual = torch.lcm(t1, t2)
+        expected = np.lcm([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
 
     @slowTest
     @onlyOnCPUAndCUDA
@@ -19210,6 +19238,12 @@ tensor_op_tests = [
     ('expand_as', '', _new_t((_M, 1, _M)), lambda t, d: [_new_t((_M, 4, _M))(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('fill_', '', _medium_2d, lambda t, d: [_number(3.14, 3, t)], 1e-3, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('gcd', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
+     [torch.int16, torch.int32, torch.int64],
+     [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
+    ('lcm', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
+     [torch.int16, torch.int32, torch.int64],
+     [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
     ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),

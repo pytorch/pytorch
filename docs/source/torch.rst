@@ -409,8 +409,10 @@ Other Operations
     fliplr
     flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave
