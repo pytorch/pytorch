@@ -1531,7 +1531,7 @@ Example::
 
 add_docstr(torch.cross,
            r"""
-cross(input, other, dim=-1, out=None) -> Tensor
+cross(input, other, dim=None, out=None) -> Tensor
 
 
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
