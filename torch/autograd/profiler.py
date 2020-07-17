@@ -925,11 +925,12 @@ def parse_cpu_trace(thread_records):
                 if not is_async and start.has_cuda():
                     cuda_start = adjusted_time(start, cuda_records)
                     cuda_end = adjusted_time(record, cuda_records)
-                    fe.append_kernel(
-                        start.name(),
-                        start.device(),
-                        cuda_start,
-                        cuda_end)
+                    if (cuda_end - cuda_start) > 0:
+                        fe.append_kernel(
+                            start.name(),
+                            start.device(),
+                            cuda_start,
+                            cuda_end)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
