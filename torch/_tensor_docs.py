@@ -1320,6 +1320,20 @@ gather(dim, index) -> Tensor
 See :func:`torch.gather`
 """)
 
+add_docstr_all('gcd',
+               r"""
+gcd(other) -> Tensor
+
+See :func:`torch.gcd`
+""")
+
+add_docstr_all('gcd_',
+               r"""
+gcd_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.gcd`
+""")
+
 add_docstr_all('ge',
                r"""
 ge(other) -> Tensor
@@ -1704,6 +1718,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('lcm',
+               r"""
+lcm(other) -> Tensor
+
+See :func:`torch.lcm`
+""")
+
+add_docstr_all('lcm_',
+               r"""
+lcm_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.lcm`
 """)
 
 add_docstr_all('le',
@@ -2240,6 +2268,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2753,6 +2788,20 @@ add_docstr_all('sigmoid_',
 sigmoid_() -> Tensor
 
 In-place version of :meth:`~Tensor.sigmoid`
+""")
+
+add_docstr_all('logit',
+               r"""
+logit() -> Tensor
+
+See :func:`torch.logit`
+""")
+
+add_docstr_all('logit_',
+               r"""
+logit_() -> Tensor
+
+In-place version of :meth:`~Tensor.logit`
 """)
 
 add_docstr_all('sign',

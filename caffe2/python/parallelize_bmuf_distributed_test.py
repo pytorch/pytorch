@@ -13,6 +13,8 @@ import logging
 from hypothesis import given
 import hypothesis.strategies as st
 
+from caffe2.python import workspace
+
 log = logging.getLogger("parallelize_bmuf_distributed_test")
 log.setLevel(logging.INFO)
 
@@ -20,7 +22,7 @@ log.setLevel(logging.INFO)
 def bmuf_process(filestore_dir, process_id, shared_results,
                  cpu_device=False, nesterov=False):
     # We need to import caffe2 in every process to initialize CUDA independently.
-    from caffe2.python import core, cnn, data_parallel_model, dyndep, workspace
+    from caffe2.python import core, cnn, data_parallel_model, dyndep
     from caffe2.proto import caffe2_pb2
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
@@ -224,6 +226,9 @@ class DistributedTest(unittest.TestCase):
         nesterov=st.booleans()
     )
     def test_bmuf_distributed(self, cpu_device, nesterov):
+        if (not cpu_device) and workspace.has_hip_support:
+            log.info('Skipping the test on ROCm due to regression in ROCm3.5')
+            return 
         self._test_bmuf_distributed(cpu_device=cpu_device, nesterov=nesterov)
 
     def _test_bmuf_distributed(self, cpu_device=False, nesterov=False):
