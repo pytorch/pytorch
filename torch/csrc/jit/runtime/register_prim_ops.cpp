@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <bitset>
@@ -24,16 +25,110 @@ namespace jit {
 
 namespace {
 
+std::string stringSlice(
+    std::string string,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+
+  const int64_t size = string.size();
+
+  // Clamp start and end to the bounds of the list
+  start = std::max(int64_t(0), normalizeIndex(start, size));
+  end = std::min(size, normalizeIndex(end, size));
+
+  if (end <= start) {
+    // Slice is empty
+    return std::string("");
+  }
+
+  std::string result(string.begin() + start, string.begin() + end);
+  return result;
+}
+
+// consecutive whitespace are regarded as a single separator,
+// the result will contain no empty strings at the start or end
+// if the string has leading or trailing whitespace.
+c10::List<std::string> splitNoneSeparator(const std::string& string) {
+  c10::List<std::string> splits;
+  // whitespaces includes tab, space and
+  // the delimiters defined in the implementation of splitlines
+  std::string whitespaces =
+      " \t\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
+  std::string::size_type prev_pos = 0;
+  std::string::size_type pos = 0;
+
+  while ((pos = string.find_first_of(whitespaces, pos)) != std::string::npos) {
+    auto substr = string.substr(prev_pos, pos - prev_pos);
+    // skip the whitespaces as the Python split() method
+    if (!substr.empty()) {
+      splits.emplace_back(substr);
+    }
+    pos++;
+    prev_pos = pos;
+  }
+  if (prev_pos != string.size()) {
+    splits.emplace_back(string.substr(prev_pos));
+  }
+  return splits;
+}
+
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl("slice.str", TORCH_FN(stringSlice));
+  m.impl("strip", [](std::string string, const std::string& chars) {
+    auto rindex = string.find_last_not_of(chars);
+    if (rindex != std::string::npos) {
+      string = string.substr(0, rindex + 1);
+    } else {
+      string = "";
+    }
+    auto lindex = string.find_first_not_of(chars);
+    if (lindex != std::string::npos) {
+      string = string.substr(lindex, string.size());
+    } else {
+      string = "";
+    }
+    return string;
+  });
+  m.impl(
+      "split.str",
+      [](const std::string& string,
+         c10::optional<std::string> separator,
+         int64_t max) {
+        if (!separator.has_value()) {
+          // if separator is not specified,
+          // a different splitting algorithm is applied as Python
+          return splitNoneSeparator(string);
+          ;
+        }
+        if (separator.value().empty()) {
+          throw std::runtime_error("ValueError: empty separator");
+        }
+
+        std::string::size_type prev_pos = 0;
+        std::string::size_type pos = 0;
+        c10::List<std::string> splits;
+        auto count = 0;
+
+        while ((pos = string.find(separator.value(), pos)) !=
+               std::string::npos) {
+          count++;
+          if (max >= 0 && count > max) {
+            break;
+          } else {
+            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+          }
+          pos += separator.value().size();
+          prev_pos = pos;
+        }
+        splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
+        return splits;
+      });
+}
+
 RegisterOperators reg(
     {Operator(
-         "aten::len.str(str s) -> int",
-         [](Stack& stack) {
-           auto string = pop(stack).toStringRef();
-           push(stack, static_cast<int64_t>(string.size()));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::list(str t) -> str[]",
          [](Stack& stack) {
            auto str = pop(stack).toStringRef();
@@ -452,6 +547,7 @@ RegisterOperators reg(
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
      DEFINE_UNARY_OP(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
@@ -529,6 +625,54 @@ RegisterOperators reg(
              AT_ERROR("len() of a 0-d tensor");
            }
            push(stack, t.sizes()[0]);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::ord(str string) -> int",
+         [](Stack& stack) {
+           auto string = pop(stack).toStringRef();
+           TORCH_CHECK(
+               string.size() == 1,
+               "String for ord() must be 1 character, found ",
+               string.size());
+           uint8_t ord = string.at(0);
+           push(stack, int64_t(ord));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::lower(str self) -> str",
+         [](Stack& stack) {
+           auto string = pop(stack).toStringRef();
+           std::stringstream ss;
+           for (char c : string) {
+             ss << static_cast<char>(::tolower(c));
+           }
+           push(stack, ss.str());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::__contains__.str_list(str[] l, str item) -> bool",
+         listContains<std::string>,
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::len.str(str s) -> int",
+         [](Stack& stack) {
+           auto string = pop(stack).toStringRef();
+           push(stack, static_cast<int64_t>(string.size()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::__getitem__.str(str s, int index) -> str",
+         [](Stack& stack) {
+           auto index = pop(stack).toInt();
+           auto string = pop(stack).toStringRef();
+           auto norm_index = normalizeIndex(index, string.size());
+           char c = string.at(norm_index);
+           push(stack, std::string(&c, 1));
+           return 0;
          },
          aliasAnalysisFromSchema()),
      //

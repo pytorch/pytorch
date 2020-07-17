@@ -46,3 +46,13 @@ class PReluNet(nn.Module):
     def forward(self, x):
         output = self.features(x)
         return output
+
+class FakeQuantNet(nn.Module):
+    def __init__(self):
+        super(FakeQuantNet, self).__init__()
+        self.fake_quant = torch.quantization.FakeQuantize()
+        self.fake_quant.disable_observer()
+
+    def forward(self, x):
+        output = self.fake_quant(x)
+        return output

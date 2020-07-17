@@ -462,14 +462,50 @@ class TestTorchFunctionOverride(TestCase):
             quux(t1)
 
 def generate_tensor_like_override_tests(cls):
+    from torch.testing._internal.generated.annotated_fn_args import annotated_args
+
     def test_generator(func, override):
-        args = inspect.getfullargspec(override)
-        nargs = len(args.args)
-        if args.defaults is not None:
-            nargs -= len(args.defaults)
-        func_args = [TensorLike() for _ in range(nargs)]
-        if args.varargs is not None:
-            func_args += [TensorLike(), TensorLike()]
+        func_args = []
+        if inspect.isbuiltin(func) and func in annotated_args:
+            for arg in annotated_args[func]:
+                # Guess valid input to aten function based on type of argument
+                t = arg['simple_type']
+                if t.endswith('?'):
+                    t = t[:-1]
+                if t == 'Tensor':
+                    func_args.append(TensorLike())
+                elif t == 'TensorList':
+                    func_args.append([TensorLike(), TensorLike()])
+                elif t == 'IntArrayRef':
+                    size = arg.get('size', 2)
+                    if size == 1:
+                        func_args.append(1)
+                    else:
+                        func_args.append([1] * size)
+                elif t == 'Scalar':
+                    func_args.append(3.5)
+                elif t == 'bool':
+                    func_args.append(False)
+                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                    func_args.append(0)
+                elif t.startswith('float') or t == 'double':
+                    func_args.append(1.0)
+                elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
+                    func_args.append(None)
+                elif t == 'ScalarType':
+                    func_args.append(torch.float32)
+                elif t == 'std::string':
+                    func_args.append('')
+                else:
+                    raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
+        else:
+            args = inspect.getfullargspec(override)
+            nargs = len(args.args)
+            if args.defaults is not None:
+                nargs -= len(args.defaults)
+            func_args += [TensorLike() for _ in range(nargs)]
+            if args.varargs is not None:
+                func_args += [TensorLike(), TensorLike()]
 
         def test(self):
             self.assertEqual(func(*func_args), -1)

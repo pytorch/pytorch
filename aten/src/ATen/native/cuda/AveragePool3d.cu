@@ -55,6 +55,11 @@ __global__ void avg_pool3d_cuda_update_output(
     hend = min(hend, input.size(2));
     wend = min(wend, input.size(3));
 
+    if (tstart >= tend || hstart >= hend || wstart >= wend) {
+      output[slice][oFrame][oRow][oCol] = scalar_t(0);
+      return;
+    }
+
     accscalar_t divide_factor;
     if (divisor_override) {
       divide_factor = static_cast<accscalar_t>(divisor_override);
@@ -118,6 +123,11 @@ __global__ void avg_pool3d_cuda_update_output(
     tend = min(tend, input.size(1));
     hend = min(hend, input.size(2));
     wend = min(wend, input.size(3));
+
+    if (tstart >= tend || hstart >= hend || wstart >= wend) {
+      output[slice][oFrame][oRow][oCol] = scalar_t(0);
+      return;
+    }
 
     accscalar_t divide_factor;
     if (divisor_override) {

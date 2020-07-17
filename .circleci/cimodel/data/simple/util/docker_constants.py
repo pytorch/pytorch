@@ -4,8 +4,6 @@ AWS_DOCKER_HOST = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 # TOP OF .circleci/config.yml
 DOCKER_IMAGE_TAG = "ab1632df-fa59-40e6-8c23-98e004f61148"
 
-DOCKER_IMAGE_TAG_ROCM = "be76e8fd-44e2-484d-b090-07e0cc3a56f0"
-
 
 def gen_docker_image_path(container_type, container_tag=DOCKER_IMAGE_TAG):
     return "/".join([
