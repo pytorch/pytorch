@@ -80,10 +80,6 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                            dynamic_axes=dynamic_axes,
                            input_names=input_names, output_names=output_names,
                            fixed_batch_size=fixed_batch_size)
-        # import onnx
-        # m = onnx.load_model_from_string(f.getvalue())
-        # print('onnx:')
-        # print(m)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
