@@ -1066,6 +1066,7 @@ class RpcTest(RpcAgentTestFixture):
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
         REMOTE_OP_STR = "#remote_op: "
+
         def get_name(event):
             return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
 
