@@ -198,7 +198,7 @@ OPERATOR = CodeTemplate("""\
 """)
 
 
-blacklisted_types = {
+disallowed_types = {
     'Storage',
     'DimnameList?',
     'ConstQuantizerPtr',
@@ -211,7 +211,7 @@ default_only_types = {'Generator'}
 
 def is_jit_arg(i, arg):
     simple_type = arg['simple_type']
-    if simple_type in blacklisted_types:
+    if simple_type in disallowed_types:
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False
