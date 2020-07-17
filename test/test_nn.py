@@ -9254,7 +9254,7 @@ class TestNNDeviceType(NNTestCase):
                     grid_out = np.dot(grid_ary, [r, c, 1])
                     self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
 
-            self.assertEqual(scipy_ary, gridsample_ary)
+            self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -9308,7 +9308,7 @@ class TestNNDeviceType(NNTestCase):
                         grid_out = np.dot(grid_ary, [i, r, c, 1])
                         self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
 
-            self.assertEqual(scipy_ary, gridsample_ary)
+            self.assertEqual(scipy_ary, gridsample_ary.expand_as(scipy_ary))
 
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
