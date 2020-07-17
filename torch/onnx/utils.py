@@ -337,7 +337,7 @@ def _trace_and_get_graph_from_model(model, args):
 def _model_to_jit_graph(model, args, example_outputs, retain_param_name, enable_jit_freeze_module):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or ScriptFunction"
+        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
             if not enable_jit_freeze_module:
                 graph = model.forward.graph
