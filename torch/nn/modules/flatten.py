@@ -1,6 +1,8 @@
 from .module import Module
 
+from typing import Union
 from torch import Tensor
+from torch import Size
 
 
 class Flatten(Module):
@@ -63,17 +65,48 @@ class Unflatten(Module):
     height: int
     width: int
 
-    def __init__(self, channels: int, height: int, width: int) -> None:
+    def __init__(self, dim: Union[int, str], unflattened_size: Union[tuple, Size]) -> None:
         super(Unflatten, self).__init__()
-        self.channels = channels
-        self.height = height
-        self.width = width
+        if isinstance(dim, int):
+            self._require_tuple_int(unflattened_size)
+            self.named = False
+        else:
+            self._require_tuple_tuple(unflattened_size)
+            self.named = True
+
+        self.dim = dim
+        self.unflattened_size = unflattened_size
+
+    def _require_tuple_tuple(self, input):
+        if (isinstance(input, tuple)):
+            for idx, elem in enumerate(input):
+                if not isinstance(elem, tuple):
+                    raise TypeError("unflattened_size must be tuple of tuples, but found element of type {} at pos {}".format(
+                        type(elem).__name__, idx))
+            return
+        raise TypeError("unflattened_size must be a tuple of tuples, but found type {}".format(type(input).__name__))
+
+    def _require_tuple_int(self, input):
+        if (isinstance(input, tuple)):
+            for idx, elem in enumerate(input):
+                if not isinstance(elem, int):
+                    raise TypeError("unflattened_size must be tuple of ints, but found element of type {} at pos {}".format(
+                        type(elem).__name__, idx))
+            return
+        raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
 
     def forward(self, input: Tensor) -> Tensor:
-        input = input.refine_names('N', 'features')
-        return input.unflatten('features', (('C', self.channels), ('H', self.height), ('W', self.width)))
+        if self.named:
+            return input.unflatten(self.dim, self.unflattened_size)
+        else:
+            dim = self.dim
+            if self.dim < 0:
+                dim += input.ndim()
+            inp_size = list(input.size())
+            new_size = inp_size[:dim] + list(self.unflattened_size) + inp_size[dim + 1:]
+            return input.view(new_size)
 
     def extra_repr(self) -> str:
-        return 'channels={}, height={}, width={}'.format(
-            self.channels, self.height, self.width
+        return 'dim={}, unflattened_size={}'.format(
+            self.dim, self.unflattened_size
         )
