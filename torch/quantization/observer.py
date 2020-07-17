@@ -81,6 +81,9 @@ class _ObserverBase(ObserverBase):
         qscheme: Quantization scheme to be used.
         reduce_range: Reduces the range of the quantized data type by 1 bit.
                       This is sometimes required to avoid instruction overflow.
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     .. warning::
 
@@ -95,13 +98,11 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_affine``
         - ``torch.per_channel_symmetric``
     """
-
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+                 reduce_range=False, initial_dynamic_qrange=None):
         super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         self.reduce_range = reduce_range
-
         self.eps = torch.finfo(torch.float32).eps
         assert self.qscheme in (
             torch.per_tensor_affine,
@@ -115,6 +116,72 @@ class _ObserverBase(ObserverBase):
             torch.qint8,
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
+        self.is_dynamic_qrange = initial_dynamic_qrange is not None
+        if self.is_dynamic_qrange:
+            self._validate_dynamic_range_init(initial_dynamic_qrange)
+        self.initial_dynamic_qrange = initial_dynamic_qrange
+
+    @torch.jit.export
+    def _validate_dynamic_range_init(self, initial_dynamic_qrange):
+        # type: (Tuple[int, int]) -> None
+        r"""Validates that the dynamic quantization range is properly initialized
+        and within the given bound supported by the observer dtype.
+
+        To accommodate lower-bit quantization with respect to the existing torch.qint8 and
+        torch.quint8 datatypes, the user can choose to use dynamic quantization range by passing
+        in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
+        values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
+        fake quantization. These estimates are compared against parameters learned through backpropagation.
+        The related literatures for scale and zero point via backpropagation are as follows:
+
+        Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
+        Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf
+        """
+        # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
+        # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
+        initial_qmin, initial_qmax = initial_dynamic_qrange
+        assert initial_qmin <= 0 <= initial_qmax, "Dynamic quantization range must include 0."
+        assert initial_qmin < initial_qmax, "qmin must be strictly less than qmax for dynamic quantization range."
+
+    @torch.jit.export
+    def _calculate_qmin_qmax(self):
+        # type: () -> Tuple[int, int]
+        r"""Calculates actual qmin and qmax based on the quantization range,
+        observer datatype and if range is reduced.
+        """
+        if self.is_dynamic_qrange:
+            # This initialization here is to be resolve TorchScript compilation issues and allow
+            # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
+            # The actual values of initial_qmin and initial_qmax will be reset below.
+            initial_qmin, initial_qmax = 0, 255
+            # The following assignment of initial_qrange to a local variable and the if check refine the
+            # attribute from Optional to a valid tuple for use, based on TorchScript's requirements.
+            initial_dynamic_qrange = self.initial_dynamic_qrange
+            if initial_dynamic_qrange is not None:
+                initial_qmin, initial_qmax = initial_dynamic_qrange
+
+            qrange_len = initial_qmax - initial_qmin + 1
+            assert 0 < qrange_len <= 256, \
+                "quantization range should be positive and not exceed the maximum bit range (=256)."
+            if self.dtype == torch.qint8:
+                qmin, qmax = -qrange_len // 2, qrange_len // 2 - 1
+            else:
+                qmin, qmax = 0, qrange_len - 1
+            if self.reduce_range:
+                qmin, qmax = qmin // 2, qmax // 2
+        else:
+            # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
+            if self.dtype == torch.qint8:
+                if self.reduce_range:
+                    qmin, qmax = -64, 63
+                else:
+                    qmin, qmax = -128, 127
+            else:
+                if self.reduce_range:
+                    qmin, qmax = 0, 127
+                else:
+                    qmin, qmax = 0, 255
+        return qmin, qmax
 
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
@@ -146,16 +213,7 @@ class _ObserverBase(ObserverBase):
                 min_val, max_val
             )
 
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
-            else:
-                qmin, qmax = -128, 127
-        else:
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
+        qmin, qmax = self._calculate_qmin_qmax()
 
         min_val = torch.min(min_val, torch.zeros_like(min_val))
         max_val = torch.max(max_val, torch.zeros_like(max_val))
@@ -169,7 +227,11 @@ class _ObserverBase(ObserverBase):
             scale = max_val / (float(qmax - qmin) / 2)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
-                zero_point = zero_point.new_full(zero_point.size(), 128)
+                if self.is_dynamic_qrange:
+                    # When dynamic quantization range is used, down-rounded midpoint of the range is chosen.
+                    zero_point = zero_point.new_full(zero_point.size(), (qmin + qmax) // 2)
+                else:
+                    zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
