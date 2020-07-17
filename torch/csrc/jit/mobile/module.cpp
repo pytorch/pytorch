@@ -105,7 +105,8 @@ void slot_named_params_recurse(
   size_t nslots = slots.size();
   for (size_t i = 0; i < nslots; ++i) {
     auto slot = slots[i];
-    std::string name = parent_name.size() == 0 ? parent_name : parent_name + ".";
+    std::string name =
+        parent_name.size() == 0 ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     if (slot.isTensor()) {
       (*params)[name] = slot.toTensor();
