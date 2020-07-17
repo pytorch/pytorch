@@ -43,6 +43,8 @@ DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
+DEFINE_DISPATCH(gcd_stub);
+DEFINE_DISPATCH(lcm_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -850,6 +852,36 @@ Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) 
 Tensor logaddexp2(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::logaddexp2_out(result, self, other);
+}
+
+Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  gcd_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor gcd(const Tensor& self, const Tensor& other) {  
+  Tensor result = at::empty({0}, self.options());
+  return at::gcd_out(result, self, other);
+}
+
+Tensor& gcd_(Tensor& self, const Tensor& other) {
+  return at::gcd_out(self, self, other);
+}
+
+Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  lcm_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor lcm(const Tensor& self, const Tensor& other) {  
+  Tensor result = at::empty({0}, self.options());
+  return at::lcm_out(result, self, other);
+}
+
+Tensor& lcm_(Tensor& self, const Tensor& other) {
+  return at::lcm_out(self, self, other);
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
