@@ -17009,21 +17009,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gcd_edge_cases(self, device, dtype):
+    def test_gcd(self, device, dtype):
+        # Tests gcd(0, 0), gcd(0, a) cases
         t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.gcd(t1, t2)
         expected = np.gcd([0, 10, 0], [0, 0, 10])
         self.assertEqual(actual, expected)
 
+        # Compares with NumPy
+        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        actual = torch.gcd(a, b)
+        expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected)
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_lcm_edge_cases(self, device, dtype):
+    def test_lcm(self, device, dtype):
+        # Tests lcm(0, 0), lcm(0, a) cases
         t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.lcm(t1, t2)
         expected = np.lcm([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
+
+        # Compares with NumPy
+        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        actual = torch.lcm(a, b)
+        expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
     @slowTest

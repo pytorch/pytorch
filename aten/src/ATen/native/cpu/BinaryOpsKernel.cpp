@@ -732,7 +732,7 @@ void lcm_kernel(TensorIterator& iter) {
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
             scalar_t g = calc_gcd(a, b);
-            return (g == 0) ? 0 : a / g * b;
+            return (g == 0) ? 0 : std::abs(a / g * b);
           });
     });
 }
