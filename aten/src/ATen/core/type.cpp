@@ -40,9 +40,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << ")";
     }
 
-    if (value->undefined() && *value->undefined()) {
-      out << "[Undefined]";
-    }
+    out << "[" << (!value->undefined() ? "u?" : *value->undefined() ? "u" : "!u") << "]";
+    // if (value->undefined() && *value->undefined()) {
+    //   out << "[Undefined]";
+    // }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";

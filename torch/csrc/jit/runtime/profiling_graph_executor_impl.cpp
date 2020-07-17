@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include "ATen/core/interned_strings.h"
 
 C10_DECLARE_bool();
 
@@ -95,6 +96,26 @@ static void removeProfileNodes(Block* b) {
   }
 }
 
+void removeGradSums(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == aten::_grad_sum_to_size) {
+      auto in_type = it->input(0)->type()->expect<TensorType>();
+      auto out_type = it->output()->type()->expect<TensorType>();
+      if (in_type->isComplete() && out_type->isComplete() && in_type->sizes() == out_type->sizes()) {
+        GRAPH_DEBUG("@#$Removing ", getHeader(*it));
+        it->input(0)->setType(it->output()->type());
+        it->output()->replaceAllUsesWith(it->input(0));
+        it.destroyCurrent();
+      }
+    } else {
+      for (auto ib : it->blocks()) {
+        removeGradSums(ib);
+      }
+    }
+  }
+
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   if (!getGraphExecutorOptimize()) {
@@ -109,14 +130,17 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   // EliminateRedundantGuards(copy);
   // InsertBailOuts(copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
-  specializeAutogradZero(*copy);
+  GRAPH_DEBUG("before specializeAutogradZero");
+  specializeAutogradZero(copy);
+  removeGradSums(copy->block());
+  GRAPH_DEBUG("after specializeAutogradZero");
 
   runRequiredPasses(copy);
-  PeepholeOptimize(copy);
+  //PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
 
-  if (false && needsGradientInProfilingMode(copy->block())) {
+  if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);

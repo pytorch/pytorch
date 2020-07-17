@@ -467,7 +467,7 @@ RegisterOperators reg_graph_executor_ops({Operator(
       InsertGuards(g);
       // note, no EliminateRedundantGuards
       InsertBailOuts(g);
-
+      PeepholeOptimize(g);
       auto diff_nodes = CreateAutodiffSubgraphs(
           g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
       for (Node* dnode : diff_nodes) {
@@ -637,7 +637,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     //          left in that may inhibit optimization
     Inline(*opt_graph);
     LowerGradOf(*opt_graph);
-    specializeAutogradZero(*opt_graph);
+    specializeAutogradZero(opt_graph);
     LowerSimpleTuples(opt_graph);
     ConstantPooling(opt_graph);
 
@@ -804,6 +804,10 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
+bool bailoutsInserted(std::shared_ptr<Graph> graph) {
+  return std::any_of(graph->nodes().begin(), graph->nodes().end(), [](Node* n) {return n->kind() == prim::BailOut; });
+}
+
 void replaceTEGroupsWithTEWrapper(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     auto n = *it;
@@ -854,7 +858,10 @@ void runNondiffOptimization(
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
       FuseTensorExprs(graph);
-      replaceTEGroupsWithTEWrapper(graph->block());
+      if (!bailoutsInserted(graph)) {
+        replaceTEGroupsWithTEWrapper(graph->block());
+      }
+      
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
