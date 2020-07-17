@@ -193,11 +193,44 @@ static void isposinf_kernel_impl(TensorIterator& iter) {
   }
 }
 
+static void isneginf_kernel_for_bool_impl(TensorIterator& iter) {
+  if (c10::isIntegralType(iter.input_dtype(), /*include_bool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "isneginf_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> bool { return false; });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isneginf_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
+    });
+  }
+}
+
+static void isneginf_kernel_for_scalar_impl(TensorIterator& iter) {
+  if (c10::isIntegralType(iter.input_dtype(), /*include_bool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "isneginf_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> scalar_t { return false; });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isneginf_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a == -std::numeric_limits<scalar_t>::infinity(); });
+    });
+  }
+}
+
+static void isneginf_kernel_impl(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    isneginf_kernel_for_bool_impl(iter);
+  } else {
+    isneginf_kernel_for_scalar_impl(iter);
+  }
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
 }} // namespace at::native

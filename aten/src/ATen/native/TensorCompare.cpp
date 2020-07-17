@@ -14,6 +14,7 @@ DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(min_stub);
 DEFINE_DISPATCH(isposinf_stub);
+DEFINE_DISPATCH(isneginf_stub);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -135,7 +136,7 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor isneginf(const Tensor &self) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(at::kBool));
   at::native::isneginf_out(result, self);
   return result;
 }
@@ -146,13 +147,8 @@ Tensor& isneginf_(Tensor &self) {
 
 Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   result.resize_(self.sizes());
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
-    result = at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
-  } else {
-    result = AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isneginf", [&]() {
-      return self == -std::numeric_limits<scalar_t>::infinity();
-    });
-  }
+  auto iter = build_is_infinity_op_iterator(result, self);
+  isneginf_stub(iter.device_type(), iter);
   return result;
 }
 
