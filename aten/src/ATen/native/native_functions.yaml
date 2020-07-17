@@ -492,6 +492,29 @@
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: atleast_1d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+
+- func: atleast_2d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
