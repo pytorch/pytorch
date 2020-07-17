@@ -87,13 +87,13 @@ if(USE_TBB)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
-  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
   set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
@@ -1736,7 +1736,7 @@ endif()
 # End ATen checks
 #
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
 #

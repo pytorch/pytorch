@@ -2703,23 +2703,77 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-# This testcase tests the underlying operators that are implemented in C++.
 @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
 class TestQuantizedEmbeddingBag(TestCase):
+    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate):
+        weights = torch.from_numpy((np.random.random_sample((
+            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        w_packed = pack_fn(weights)
+        w_unpacked = unpack_fn(w_packed)
+
+        # compare against C2 to ensure numerical equivalency.
+        from caffe2.python import core, workspace
+        conversion_op = "FloatToFused8BitRowwiseQuantized"
+        if bit_rate == 4:
+            conversion_op = "FloatToFused4BitRowwiseQuantized"
+
+        def get_c2_weights(weights):
+            workspace.ResetWorkspace()
+
+            workspace.FeedBlob("weights", weights)
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    conversion_op, ["weights"], ["quantized_weights"]
+                )
+            )
+            emb_q = workspace.FetchBlob("quantized_weights")
+            if bit_rate == 4:
+                workspace.RunOperatorOnce(
+                    core.CreateOperator(
+                        "Fused4BitRowwiseQuantizedToFloat", ["quantized_weights"], ["dequantized_weights"]
+                    )
+                )
+                dequantized_data = torch.from_numpy(workspace.FetchBlob("dequantized_weights"))
+            else:
+                dequantized_data = torch.ops._caffe2.Fused8BitRowwiseQuantizedToFloat(
+                    torch.tensor(emb_q)
+                )
+            return torch.from_numpy(emb_q), dequantized_data
+
+        w_packed_c2, w_unpacked_c2 = get_c2_weights(weights)
+
+        # Compare packed weights against C2.
+        np.testing.assert_equal(w_packed.numpy(), w_packed_c2.numpy())
+        # Compare unpacked weights against C2
+        np.testing.assert_equal(w_unpacked.numpy(), w_unpacked_c2.numpy())
+
+    """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
+    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim):
+        pack_fn = torch.ops.quantized.embedding_bag_byte_prepack
+        unpack_fn = torch.ops.quantized.embedding_bag_byte_unpack
+
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=8)
+
+    """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
+    def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim):
+        pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
+        unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
+
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=4)
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
             embedding_dim, num_offsets, enable_per_sample_weights,
             include_last_offset, atol, rtol):
-        # PyTorch ops require weights to be fused and N bit rowwise quantized.
-        # TODO(radkris) Remove the usage of C2 conversion ops once
-        # embedding_bag_prepack op have been landed.
-        from caffe2.python import core, workspace
-        conversion_op = "FloatToFused8BitRowwiseQuantized"
         pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
         if bit_rate == 4:
-            conversion_op = "FloatToFused4BitRowwiseQuantized"
             pt_op = torch.ops.quantized.embedding_bag_4bit_rowwise_offsets
+            pt_prepack_op = torch.ops.quantized.embedding_bag_4bit_prepack
 
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
@@ -2746,21 +2800,7 @@ class TestQuantizedEmbeddingBag(TestCase):
         indices = torch.from_numpy(np.random.randint(
             low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
 
-        # TODO(radkris) Remove the usage of C2 conversion ops once
-        # embedding_bag_prepack op have been landed.
-        def get_quantized_weights(weights):
-            workspace.ResetWorkspace()
-
-            workspace.FeedBlob("weights", weights)
-            workspace.RunOperatorOnce(
-                core.CreateOperator(
-                    conversion_op, ["weights"], ["quantized_weights"]
-                )
-            )
-            emb_q = workspace.FetchBlob("quantized_weights")
-            return torch.from_numpy(emb_q)
-
-        q_weights = get_quantized_weights(weights)
+        q_weights = pt_prepack_op(weights)
         per_sample_weights = torch.from_numpy(np.random.uniform(
             low=0.01, high=0.5, size=[len(indices)]).astype(np.float32)) if \
             enable_per_sample_weights else None
@@ -2797,6 +2837,7 @@ class TestQuantizedEmbeddingBag(TestCase):
         torch.testing.assert_allclose(reference_result, result, atol=atol,
                                       rtol=rtol)
 
+    """ Tests the correctness of the embedding_bag_8bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -2811,8 +2852,9 @@ class TestQuantizedEmbeddingBag(TestCase):
             enable_per_sample_weights, include_last_offset,
             atol=0.005, rtol=1e-3)
 
+    """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 2 == 0),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
