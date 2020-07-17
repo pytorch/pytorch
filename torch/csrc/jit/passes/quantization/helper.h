@@ -120,7 +120,10 @@ TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
 // c10::nullopt
-c10::optional<Module> getInvokedModuleOpt(const Module& module, Node* n, Value* self);
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self);
 
 // ==================== filter functions for matches ==============
 // filter to check Value `vname` is a constant of int value `value`

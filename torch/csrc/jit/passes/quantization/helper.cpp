@@ -563,7 +563,10 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
-c10::optional<Module> getInvokedModuleOpt(const Module& module, Node* n, Value* self) {
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self) {
   auto* instance = n->inputs()[0];
   auto path = getModuleAccessPath(instance, self);
   Module m = module;
