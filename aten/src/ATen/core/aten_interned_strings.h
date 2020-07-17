@@ -207,6 +207,9 @@ _(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
+_(aten, atleast_1d) \
+_(aten, atleast_2d) \
+_(aten, atleast_3d) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -346,6 +349,7 @@ _(aten, frobenius_norm) \
 _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
+_(aten, gcd) \
 _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
@@ -407,6 +411,7 @@ _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
+_(aten, lcm) \
 _(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
@@ -553,6 +558,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, quantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \

@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-#include<iostream>
+#include <iostream>
 using namespace std;
 using namespace at;
 
@@ -31,6 +31,32 @@ TEST(atest, operators) {
   ASSERT_TRUE(tensor({a | b}).equal(a_tensor | b_tensor));
   ASSERT_TRUE(tensor({a & b}).equal(a_tensor & b_tensor));
   ASSERT_TRUE(tensor({a ^ b}).equal(a_tensor ^ b_tensor));
+}
+
+template <class T>
+void run_logical_op_test(const Tensor& exp, T func) {
+  auto x_tensor = tensor({1, 1, 0, 1, 0});
+  auto y_tensor = tensor({0, 1, 0, 1, 1});
+  // Test op over integer tensors
+  auto out_tensor = empty({5}, kInt);
+  func(out_tensor, x_tensor, y_tensor);
+  ASSERT_EQ(out_tensor.dtype(), kInt);
+  ASSERT_TRUE(exp.equal(out_tensor));
+  // Test op over boolean tensors
+  out_tensor = empty({5}, kBool);
+  func(out_tensor, x_tensor.to(kBool), y_tensor.to(kBool));
+  ASSERT_EQ(out_tensor.dtype(), kBool);
+  ASSERT_TRUE(out_tensor.equal(exp.to(kBool)));
+}
+
+TEST(atest, logical_and_operators) {
+  run_logical_op_test(tensor({0, 1, 0, 1, 0}), logical_and_out);
+}
+TEST(atest, logical_or_operators) {
+  run_logical_op_test(tensor({1, 1, 0, 1, 1}), logical_or_out);
+}
+TEST(atest, logical_xor_operators) {
+  run_logical_op_test(tensor({1, 0, 0, 0, 1}), logical_xor_out);
 }
 
 // TEST_CASE( "atest", "[]" ) {
@@ -84,8 +110,7 @@ TEST(atest, atest) {
   {
     int isgone = 0;
     {
-      auto f2 =
-          from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
+      auto f2 = from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
   }
@@ -93,8 +118,7 @@ TEST(atest, atest) {
     int isgone = 0;
     Tensor a_view;
     {
-      auto f2 =
-          from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
+      auto f2 = from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
       a_view = f2.view({3, 2, 1});
     }
     ASSERT_EQ(isgone, 0);
@@ -105,17 +129,17 @@ TEST(atest, atest) {
   if (at::hasCUDA()) {
     int isgone = 0;
     {
-      auto base = at::empty({1,2,3}, TensorOptions(kCUDA));
+      auto base = at::empty({1, 2, 3}, TensorOptions(kCUDA));
       auto f2 = from_blob(base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
 
     // Attempt to specify the wrong device in from_blob
-    auto t = at::empty({1,2,3}, TensorOptions(kCUDA, 0));
-    EXPECT_ANY_THROW(from_blob(t.data_ptr(), {1,2,3}, at::Device(kCUDA, 1)));
+    auto t = at::empty({1, 2, 3}, TensorOptions(kCUDA, 0));
+    EXPECT_ANY_THROW(from_blob(t.data_ptr(), {1, 2, 3}, at::Device(kCUDA, 1)));
 
     // Infers the correct device
-    auto t_ = from_blob(t.data_ptr(), {1,2,3}, kCUDA);
+    auto t_ = from_blob(t.data_ptr(), {1, 2, 3}, kCUDA);
     ASSERT_EQ(t_.device(), at::Device(kCUDA, 0));
   }
 }

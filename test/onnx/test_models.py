@@ -9,15 +9,16 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
 from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
-from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet
+from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
 
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, disableScriptTest
+from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, skipIfUnsupportedMinOpsetVersion, disableScriptTest
 
 import torch
 import torch.onnx
 import torch.onnx.utils
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
+from torch import quantization
 
 import unittest
 
@@ -37,6 +38,8 @@ BATCH_SIZE = 2
 
 class TestModels(TestCase):
     keep_initializers_as_inputs = False
+    from torch.onnx.symbolic_helper import _export_onnx_opset_version
+    opset_version = _export_onnx_opset_version
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
         self.is_script_test_enabled = False
@@ -161,6 +164,32 @@ class TestModels(TestCase):
         netG.apply(weights_init)
         input = Variable(torch.Tensor(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fake_quant(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(FakeQuantNet()), toC(x))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_qat_resnet(self):
+        # Quantize ResNet50 model
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        qat_resnet50 = resnet50()
+
+        # Use per tensor for weight. Per channel support will come with opset 13
+        qat_resnet50.qconfig = quantization.QConfig(
+            activation=quantization.default_fake_quant, weight=quantization.default_fake_quant)
+        quantization.prepare_qat(qat_resnet50, inplace=True)
+        qat_resnet50.apply(torch.quantization.enable_observer)
+        qat_resnet50.apply(torch.quantization.enable_fake_quant)
+
+        _ = qat_resnet50(x)
+        for module in qat_resnet50.modules():
+            if isinstance(module, quantization.FakeQuantize):
+                module.calculate_qparams()
+        qat_resnet50.apply(torch.quantization.disable_observer)
+
+        self.exportTest(toC(qat_resnet50), toC(x))
 
 if __name__ == '__main__':
     run_tests()
