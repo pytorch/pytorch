@@ -1637,6 +1637,34 @@ isinf() -> Tensor
 See :func:`torch.isinf`
 """)
 
+add_docstr_all('isposinf',
+               r"""
+isposinf() -> Tensor
+
+See :func:`torch.isposinf`
+""")
+
+add_docstr_all('isposinf_',
+               r"""
+isposinf_() -> Tensor
+
+In-place version of :meth:`~Tensor.isposinf`
+""")
+
+add_docstr_all('isneginf',
+               r"""
+isneginf() -> Tensor
+
+See :func:`torch.isneginf`
+""")
+
+add_docstr_all('isneginf_',
+               r"""
+isneginf_() -> Tensor
+
+In-place version of :meth:`~Tensor.isneginf`
+""")
+
 add_docstr_all('isfinite',
                r"""
 isfinite() -> Tensor
