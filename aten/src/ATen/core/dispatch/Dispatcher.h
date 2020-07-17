@@ -352,7 +352,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       if (guard.needs_inputs) {
         std::vector<c10::IValue> stack;
         stack.reserve(sizeof...(Args));
-        auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
+        auto boxed_all_args = impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
 
         guard.before(op.schema().name(), stack, at::sequence_number::peek());
 

@@ -52,20 +52,20 @@ inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
   return true;
 }
 
-// boxArgumentsIntoStack takes the arguments and pushes them as IValues onto the stack.
+// boxArgumentsOrCannotBoxIntoStack takes the arguments and pushes them as IValues onto the stack.
 // In case the argument cannot be converted to IValue, the function pushes "cannot box"
 // IValue string. Return value - whether all of the arguments could be converted to IValues
-inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack) {
+inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack) {
   return true;
 }
 template<typename Item>
-inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack, const Item& item) {
+inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item) {
   return pushIValueOrCannotBox(stack, item);
 }
 template<typename Item, typename... Rest>
-inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
+inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
   auto res = pushIValueOrCannotBox(stack, item);
-  return boxArgumentsIntoStack(stack, other_items...) && res;
+  return boxArgumentsOrCannotBoxIntoStack(stack, other_items...) && res;
 }
 
 template<class Result>
