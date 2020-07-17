@@ -16818,6 +16818,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              atol=0.01, rtol=0)
             self.assertEqual(a1.div(a2), a1 / a2)
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    def test_divmul_scalar(self, device, dtype):
+        x = torch.tensor(100., device=device, dtype=dtype)
+        x_ref = x.float()
+        scale = 1e5
+        res = x.div(scale)
+        expected = x_ref.div(scale)
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+        x = torch.tensor(1e-5, device=device, dtype=dtype)
+        x_ref = x.float()
+        res = x.mul(scale)
+        expected = x_ref.mul(scale)
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+        res = scale * x
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
