@@ -96,7 +96,6 @@ void testMobileNamedParameters() {
 void testMobileSaveLoadData() {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
-  m.register_parameter("foo2", 2 * torch::ones({}), false);
   m.define(R"(
     def add_it(self, x):
       b = 4
@@ -104,23 +103,20 @@ void testMobileSaveLoadData() {
   )");
   Module child("m2");
   child.register_parameter("foo", 4 * torch::ones({}), false);
-  m.register_module("child", child);
-
-  std::vector<IValue> values;
-  for (auto e : m.named_parameters()) {
-    values.emplace_back(e.value);
-  }
+  m.register_module("child1", child);
+  m.register_module("child2", child);
   std::stringstream ss;
   std::stringstream ss_data;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
+
+  auto full_params = m.named_parameters();
   bc.save_data(ss_data);
   auto mobile_params = _load_mobile_data(ss_data);
-  std::vector<IValue> mobile_values;
-  for (const auto& e : mobile_params) {
-    mobile_values.emplace_back(e);
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item().toInt() == mobile_params[e.name].item().toInt());
   }
-  AT_ASSERT(values == mobile_values);
 }
 
 } // namespace jit

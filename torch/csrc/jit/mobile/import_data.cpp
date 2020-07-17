@@ -154,21 +154,21 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
-std::vector<at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_mobile_data(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   return _load_mobile_data(std::move(rai), device);
 }
 
-std::vector<at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_mobile_data(
     const std::string& filename,
     c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   return _load_mobile_data(std::move(rai), device);
 }
 
-std::vector<at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_mobile_data(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
@@ -183,7 +183,7 @@ std::vector<at::Tensor> _load_mobile_data(
     if (observer) {
       observer->onExitLoadModel(name);
     }
-    return result.parameters();
+    return result.named_parameters();
   } catch (const std::exception& ex) {
     if (observer) {
       observer->onFailLoadModel(
