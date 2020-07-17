@@ -9169,50 +9169,49 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotate45(self):
+    def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
-        for device in device_():
-            input_size = [1, 1, 3, 3]
-            input_ary = np.array(np.zeros(input_size), dtype=np.float32)
-            input_ary[0, 0, 0, :] = 0.5
-            input_ary[0, 0, 2, 2] = 1.0
-            output_size = [1, 1, 3, 3]
-            angle_rad = 0.125 * math.pi * 2
+        input_size = [1, 1, 3, 3]
+        input_ary = np.array(np.zeros(input_size), dtype=np.float32)
+        input_ary[0, 0, 0, :] = 0.5
+        input_ary[0, 0, 2, 2] = 1.0
+        output_size = [1, 1, 3, 3]
+        angle_rad = 0.125 * math.pi * 2
 
-            transform_tensor, transform_ary, offset = \
-                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+        transform_tensor, transform_ary, offset = \
+            _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
 
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                offset=offset,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=False)
+        scipy_ary = scipy.ndimage.affine_transform(
+            input_ary[0, 0],
+            transform_ary,
+            offset=offset,
+            output_shape=output_size[2:],
+            order=1,
+            mode='nearest',
+            prefilter=False)
 
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
+        affine_tensor = torch.nn.functional.affine_grid(
+            transform_tensor,
+            torch.Size(output_size),
+            align_corners=True
+        )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
+        gridsample_ary = torch.nn.functional.grid_sample(
+            torch.tensor(input_ary, device=device).to(device),
+            affine_tensor,
+            padding_mode='border',
+            align_corners=True
+        ).to('cpu').numpy()
 
-            self.assertEqual(scipy_ary, gridsample_ary)
+        self.assertEqual(scipy_ary, gridsample_ary)
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotateRandom(self):
+    def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
-        for device, angle_rad, input_size2d, output_size2d in \
+        for angle_rad, input_size2d, output_size2d in \
                 itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
 
             input_size = input_size2d
@@ -9259,10 +9258,10 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    def test_affine_3d_rotateRandom(self):
+    def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
-        for device, angle_rad, axis_vector, input_size3d, output_size3d in \
+        for angle_rad, axis_vector, input_size3d, output_size3d in \
                 itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
             input_size = input_size3d
             input_ary = np.array(np.random.random(input_size), dtype=np.float32)
