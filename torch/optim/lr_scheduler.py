@@ -503,7 +503,6 @@ class CosineAnnealingLR(_LRScheduler):
     def __init__(self, optimizer, T_max, eta_min=0, verbose=False, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
-        self.verbose = verbose
         super(CosineAnnealingLR, self).__init__(optimizer, verbose, last_epoch)
 
     def get_lr(self):
@@ -964,7 +963,6 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
-        self.verbose = verbose
 
         super(CosineAnnealingWarmRestarts, self).__init__(optimizer, verbose, last_epoch)
 
