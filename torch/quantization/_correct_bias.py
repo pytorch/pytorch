@@ -33,13 +33,20 @@ from  mobilenet_classes import (
 
 
 def get_module(model, name):
+    ''' Given name of submodule, this function grabs the submodule from given model
+    '''
     curr = model
     name = name.split('.')
     for subname in name:
+        if subname == '':
+            return curr
         curr = curr._modules[subname]
     return curr
 
 def get_param(module, attr):
+    ''' Sometime the weights/bias attribute gives you the raw tensor, but sometimes
+    is a function that will give you the raw tensor, this function takes care of that logic
+    '''
     if isinstance(getattr(module, attr, None), nn.Parameter):
         return getattr(module, attr, None)
     else:
@@ -89,30 +96,72 @@ class ShadowModule(nn.Module):
 
     def forward(self, x):
         self.float_module(x)
+        print(self.float_module.activation_post_process.count)
+        if x.is_quantized:
+            x = x.dequantize()
         self.quantized_module(x)
         # hooks should already been added, running the data here is the calibration
 
-        output_logger, input_logger = get_matching_activations(float_model, qmodel)
+        output_logger, input_logger = get_matching_activations(self.float_module, self.quantized_module)
+        correct_quantized_bias_V2(output_logger, input_logger, self.float_module, self.quantized_module)
+        y = self.quantized_module(x)
+        if y.is_quantized:
+            return y.dequantize()
+        else:
+            return y
 
-def add_shadow(float_model, quantized_model):
-    ''' using the quantized_model as a base, the submodules will be wrapped in a
-    shadowModule along with the floating point corresponding partner
 
-    and adds the pre and post hooks
-    '''
+
+def sequential_bias_correction(float_model, quantized_model, img_data, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+    # adding hooks
     # setting up qconfigs to add post hook
     qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
     float_model.qconfig = qconfig_debug
-    qmodel.qconfig = qconfig_debug
+    quantized_model.qconfig = qconfig_debug
     # calling prepare with prehook param, and throwing the whitelist to make sure supported modules
     # get the qconfig and thus post hook
-    white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
-    torch.quantization.prepare(qmodel, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+    torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
 
-    for name, module in quantized_model.named_modules():
-        pass
+    add_shadow(float_model, quantized_model, white_list=white_list)
 
+    # format the data
+    # the shadow takes care of everything :O
+    for data in img_data:
+        with torch.no_grad():
+            quantized_model(data[0])
+            break
+
+    strip_hooks_and_qconfigs(quantized_model)
+    strip_shadow(quantized_model)
+    return quantized_model
+
+def add_shadow(float_model, quantized_model, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+    float_module_children = {}
+    for name, mod in float_model.named_children():
+        float_module_children[name] = mod
+
+    reassign = {}
+    for name, mod in quantized_model.named_children():
+        if name not in float_module_children:
+            continue
+
+        float_mod = float_module_children[name]
+
+        if type(float_mod) not in white_list:
+            add_shadow(float_mod, mod, white_list)
+
+        if type(float_mod) in white_list:
+            reassign[name] = ShadowModule(mod, float_mod)
+
+    for key, value in reassign.items():
+        quantized_model._modules[key] = value
+
+def strip_hooks_and_qconfigs(model):
+    pass
+
+def strip_shadow(model):
+    pass
 
 
 
@@ -169,6 +218,8 @@ def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmod
 
                 if quantized_weight.is_quantized:
                     quantized_weight = quantized_weight.dequantize()
+                # if float_weight.is_quantized:
+                #     float_weight = float_weight.dequantize()
 
                 error_matrix = float_weight - quantized_weight
 
@@ -435,6 +486,8 @@ def get_matching_activations(float_module, q_module):
     quantized_dict = {}
     get_logger_entries(q_module, quantized_dict)
 
+    print(float_dict.keys())
+    print(quantized_dict.keys())
     output_logger = {}
     input_logger = {}
 
@@ -452,7 +505,8 @@ if __name__ == "__main__":
     # act_compare_dict, float_model, qmodel, img_data = setup_foward_hook(MeanLogger, get_online_mobilenet)
     # print(qmodel)
 
-    sanity_checks_sqnr()
+    sequential_bias_correction(*get_online_mobilenet())
+    # sanity_checks_sqnr()
     # sanity_checks_accuracy()
     # correct_quantized_bias(*setup_foward_hook(MeanLogger))
     # main()
