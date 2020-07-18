@@ -6,11 +6,13 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/ATen.h>
 
+namespace at { namespace native { namespace atomic_ops {
 template <typename operation, size_t n>
 struct AtomicAddIntegerImplNew;
 
 using add_op = std::integral_constant<int, 0>;
 using sub_op = std::integral_constant<int, 1>;
+using mul_op = std::integral_constant<int, 2>;
 
 // Integer addition functions.
 template<typename T>
@@ -192,8 +194,8 @@ struct gpuAtomic<add_op> {
 
   // default double and float types call CUDA atomicAdd.
   template <typename T>
-  inline __device__ T operator() (T * address, T val) {
-    return atomicAdd(address, val);
+  inline __device__ void operator() (T * address, T val) {
+    atomicAdd(address, val);
   }
 
   template <typename T>
@@ -207,8 +209,23 @@ template<>
 struct gpuAtomic<sub_op> {
   template <typename T>
   inline __device__ void operator() (T * address, T val) {
+    gpuAtomic<add_op>()(address, -val);
   }
 };
+
+template <>
+struct gpuAtomic<mul_op> {
+  template <typename T>
+  inline __device__ void operator() (T * address, T val) {
+    
+  }
+
+  inline __device__ void operator() (bool * address, bool val) {
+    
+  }
+};
+
+}}}                             // namespace at::native::atomic_ops
 
 // template <>
 // struct gpuAtomic<add_op> {

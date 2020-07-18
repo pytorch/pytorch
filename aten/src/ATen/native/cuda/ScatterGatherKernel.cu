@@ -21,10 +21,7 @@ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
     // GPU atomic multiply
-  }
-
-  constexpr C10_DEVICE void operator() (bool * self_data, const bool * src_data) const {
-    // GPU atomic &&
+    atomic_ops::gpuAtomic<atomic_ops::mul_op>()(self_data, *src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -35,7 +32,7 @@ public:
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
     // GPU atomic add
     // gpuAtomicAdd(self_data, *src_data);
-    gpuAtomic<add_op>()(self_data, *src_data);
+    atomic_ops::gpuAtomic<atomic_ops::add_op>()(self_data, *src_data);
   }
 };
 static ReduceAdd reduce_add;
@@ -45,7 +42,7 @@ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
     // GPU atomic subtraction
-    gpuAtomic<sub_op>()(self_data, *src_data);
+    atomic_ops::gpuAtomic<atomic_ops::sub_op>()(self_data, *src_data);
   }
 };
 static ReduceSubtract reduce_subtract;
