@@ -118,7 +118,6 @@ jobs:
           # See https://circleci.com/docs/2.0/env-vars/#using-parameters-and-bash-environment
           echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
           echo "export id=$id" >> $BASH_ENV
-          echo "export COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}" >> $BASH_ENV
     - run:
         name: Check for no AVX instruction by default
         no_output_timeout: "20m"
@@ -161,12 +160,6 @@ jobs:
           echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          echo "Stopping current container"
-          docker container stop $id
-          echo "Pruning stopped containers"
-          docker container prune -f
-          echo "Deleting the image"
-          docker image rm ${COMMIT_DOCKER_IMAGE}
         when: always
     - store_test_results:
         path: test-reports

@@ -492,6 +492,29 @@
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: atleast_1d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+
+- func: atleast_2d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -711,12 +734,6 @@
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   use_c10_dispatcher: full
   variants: function
-
-- func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -1526,6 +1543,10 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: isreal(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: is_nonzero(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -2594,24 +2615,12 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
-- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
-
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
-- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
-
-- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False

@@ -12,6 +12,8 @@
 #include <gloo/allgather.h>
 #include <gloo/allgatherv.h>
 #include <gloo/allreduce.h>
+#include <gloo/alltoall.h>
+#include <gloo/alltoallv.h>
 #include <gloo/barrier.h>
 #include <gloo/broadcast.h>
 #include <gloo/gather.h>
@@ -204,6 +206,16 @@ void setInput(O& opts, at::Tensor& tensor) {
 }
 
 template <typename T, typename O>
+void setInput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setInput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
+void setInput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
+  opts.setInput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
 void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
   opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
 }
@@ -215,6 +227,11 @@ void setOutput(O& opts, at::Tensor& tensor) {
 
 template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setOutput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
+void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
@@ -2242,6 +2259,83 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
   throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+}
+
+namespace {
+
+class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAlltoallWork(
+      const std::shared_ptr<gloo::Context>& context,
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      uint32_t tag)
+      : context(context),
+        outputTensor(outputTensor),
+        inputTensor(inputTensor),
+        outputCounts(std::move(outputCounts)),
+        inputCounts(std::move(inputCounts)),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  at::Tensor outputTensor;
+  at::Tensor inputTensor;
+  std::vector<int64_t> outputCounts;
+  std::vector<int64_t> inputCounts;
+  const uint32_t tag;
+
+  void run() override {
+    const auto scalarType = outputTensor.scalar_type();
+    if (outputCounts.size() == 0 && inputCounts.size() == 0) {
+      // Gloo alltoall
+      gloo::AlltoallOptions opts(context);
+      opts.setTag(tag);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor);
+      gloo::alltoall(opts);
+    } else {
+      // Gloo alltoallv
+      gloo::AlltoallvOptions opts(context);
+      opts.setTag(tag);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, inputCounts);
+      GENERATE_ALL_TYPES(
+          scalarType, setOutput, opts, outputTensor, outputCounts);
+      gloo::alltoallv(opts);
+    }
+  }
+};
+
+} // namespace
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    std::vector<int64_t>& outputCounts,
+    std::vector<int64_t>& inputCounts,
+    const AllToAllOptions& /* unused */) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::alltoall_base: " + msg);
+  };
+
+  // CPU tensors for now
+  assertCPU(invalidArgument, {outputTensor});
+  assertCPU(invalidArgument, {inputTensor});
+  assertDense(invalidArgument, {outputTensor});
+  assertDense(invalidArgument, {inputTensor});
+
+  auto tag = nextTag();
+  auto context = getContext(tag);
+  std::shared_ptr<AsyncAlltoallWork> work = std::make_shared<AsyncAlltoallWork>(
+      std::move(context),
+      outputTensor,
+      inputTensor,
+      outputCounts,
+      inputCounts,
+      tag);
+  enqueue(work);
+  return work;
 }
 
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {

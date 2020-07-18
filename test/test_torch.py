@@ -211,7 +211,6 @@ class AbstractTestCases:
                            'smm',
                            'softmax',
                            'split_with_sizes',
-                           'unsafe_split_with_sizes',
                            'sspaddmm',
                            'to_dense',
                            'sparse_resize_',
@@ -6473,6 +6472,34 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64, torch.complex128)
+    def test_isreal_complex(self, device, dtype):
+        vals = (1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j)
+        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_isreal_noncomplex(self, device, dtype):
+        vals = (1, 2, 3)
+        # Manual check here since numpy doesn't support bfloat16
+        result = torch.isreal(torch.tensor(vals, dtype=dtype))
+        expected = torch.ones(result.size(), dtype=torch.bool, device=device)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64)
+    def test_isreal_nan_inf(self, device, dtype):
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
+        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
 
     @onlyCPU
     def test_isfinite_type(self, device):
@@ -16761,6 +16788,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              atol=0.01, rtol=0)
             self.assertEqual(a1.div(a2), a1 / a2)
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    def test_divmul_scalar(self, device, dtype):
+        x = torch.tensor(100., device=device, dtype=dtype)
+        x_ref = x.float()
+        scale = 1e5
+        res = x.div(scale)
+        expected = x_ref.div(scale)
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+        x = torch.tensor(1e-5, device=device, dtype=dtype)
+        x_ref = x.float()
+        res = x.mul(scale)
+        expected = x_ref.mul(scale)
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+        res = scale * x
+        self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
+
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
@@ -16935,21 +16979,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gcd_edge_cases(self, device, dtype):
+    def test_gcd(self, device, dtype):
+        # Tests gcd(0, 0), gcd(0, a) cases
         t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.gcd(t1, t2)
         expected = np.gcd([0, 10, 0], [0, 0, 10])
         self.assertEqual(actual, expected)
 
+        # Compares with NumPy
+        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        actual = torch.gcd(a, b)
+        expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected)
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_lcm_edge_cases(self, device, dtype):
+    def test_lcm(self, device, dtype):
+        # Tests lcm(0, 0), lcm(0, a) cases
         t1 = torch.tensor([0, 10, 0], dtype=dtype, device=device)
         t2 = torch.tensor([0, 0, 10], dtype=dtype, device=device)
         actual = torch.lcm(t1, t2)
         expected = np.lcm([0, 10, 0], [0, 0, 10])
+        self.assertEqual(actual, expected)
+
+        # Compares with NumPy
+        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+        actual = torch.lcm(a, b)
+        expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
     @slowTest
@@ -18171,6 +18231,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch_fn = partial(torch.moveaxis, src=src_sequence, dst=dst_sequence)
                         np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
                         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+    def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
+        for ndims in range(0, 5):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for n in range(ndims + 1):
+                for with_extremal in [False, True]:
+                    for contiguous in [False, True]:
+                        # Generate Input.
+                        x = self._generate_input(shape, dtype, device, with_extremal)
+                        if contiguous:
+                            x = x.T
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+                        # Compare sequence input
+                        torch_sequence_x = (x,) * random.randint(3, 10)
+                        np_sequence_x = tuple(map(lambda x: np.array(x.detach().cpu().numpy()), torch_sequence_x))
+                        torch_res = torch_fn(*torch_sequence_x)
+                        np_res = np_fn(*np_sequence_x)
+
+                        torch_res = tuple(map(lambda x: x.cpu(), torch_res))
+                        np_res = tuple(map(lambda x: torch.from_numpy(x), np_res))
+                        self.assertEqual(np_res, torch_res)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_atleast(self, device, dtype):
+        self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
+        self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
+        self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.

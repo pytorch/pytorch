@@ -271,6 +271,74 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   }
 }
 
+void testAlltoall(const std::string& path, const at::DeviceType b) {
+  const auto size = 4;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Generate inputs
+  std::vector<at::Tensor> inputs(size);
+  std::vector<std::vector<int32_t>> blobs = {
+      {0, 1, 2, 3, 4, 5},
+      {10, 11, 12, 13, 14, 15, 16, 17, 18},
+      {20, 21, 22, 23, 24},
+      {30, 31, 32, 33, 34, 35, 36},
+  };
+  for (auto rank = 0; rank < size; rank++) {
+    const std::vector<int32_t>& blob = blobs[rank];
+    inputs[rank] = at::from_blob((int32_t*)(blob.data()), blob.size(), b);
+  }
+
+  // Allocate outputs
+  std::vector<at::Tensor> outputs(size);
+  std::vector<int> outputLengths = {9, 7, 6, 5};
+  for (auto rank = 0; rank < size; rank++) {
+    outputs[rank] =
+        at::empty(outputLengths[rank], c10::TensorOptions(at::kInt).device(b));
+  }
+
+  // Generate splits
+  std::vector<std::vector<int64_t>> inputSplits = {
+      {2, 2, 1, 1},
+      {3, 2, 2, 2},
+      {2, 1, 1, 1},
+      {2, 2, 2, 1},
+  };
+  std::vector<std::vector<int64_t>> outputSplits = {
+      {2, 3, 2, 2},
+      {2, 2, 1, 2},
+      {1, 2, 1, 2},
+      {1, 2, 1, 1},
+  };
+
+  // Kick off work
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  for (auto rank = 0; rank < size; rank++) {
+    work[rank] = tests[rank].getProcessGroup().alltoall_base(
+        outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
+  }
+
+  // Wait for work to complete
+  for (auto i = 0; i < size; i++) {
+    work[i]->wait();
+  }
+
+  // Verify outputs
+  std::vector<std::vector<int32_t>> expected = {
+      {0, 1, 10, 11, 12, 20, 21, 30, 31},
+      {2, 3, 13, 14, 22, 32, 33},
+      {4, 15, 16, 23, 34, 35},
+      {5, 17, 18, 24, 36},
+  };
+  for (auto rank = 0; rank < size; rank++) {
+    auto& tensor = outputs[rank];
+    EXPECT_EQ(tensor.numel(), expected[rank].size());
+    auto data = tensor.data_ptr<int32_t>();
+    for (auto j = 0; j < tensor.numel(); j++) {
+      EXPECT_EQ(data[j], expected[rank][j]);
+    }
+  }
+}
+
 void testBarrier(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size);
@@ -429,6 +497,13 @@ TEST(ProcessGroupGlooTest, testBroadcastCPU) {
   {
     TemporaryFile file;
     testBroadcast(file.path, at::DeviceType::CPU);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testAllToAllCPU) {
+  {
+    TemporaryFile file;
+    testAlltoall(file.path, at::DeviceType::CPU);
   }
 }
 
