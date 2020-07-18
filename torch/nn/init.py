@@ -2,6 +2,9 @@ from __future__ import division
 
 import math
 import warnings
+import contextlib
+from typing import Tuple, Union
+from packaging.version import parse, Version
 
 import torch
 from torch import Tensor
@@ -525,3 +528,83 @@ kaiming_uniform = _make_deprecate(kaiming_uniform_)
 kaiming_normal = _make_deprecate(kaiming_normal_)
 orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
+
+# Use "init_version" to handle "_init_version". This value is always same as torch.__version__. 
+# "init_version" ensures this value remains same.
+v = parse(torch.__version__)
+_init_version = (v.major, v.minor, v.micro)
+
+@contextlib.contextmanager
+def init_version(version : Union[Tuple[int, int, int], str] = None) -> None:
+    r"""Context manager to use a specific version of initialization for `nn.modules`.
+    By default, the latest initialization (torch.__version__) is used.
+
+    Args:
+        version: which pytorch version to use for initializing nn.modules. The format should be
+            a version string (major,minor,micro) or a tuple of integers. (default=None, meaning
+            use the currently set initialization version, which defaults to torch.__version__)
+
+            Examples of valid version are (1,7,0), '1.7.1'.
+
+    Examples:
+        >>> with nn.init.init_version('1.5.1') as version:
+        >>>     model = nn.Sequential(...)
+        >>>
+        >>> with nn.init.init_version() as version:
+        >>>     # use latest initialization
+        >>>     model = nn.Sequential(...)
+
+    Note:
+        For researchers, who want to make their models available to the community, avoid hard-coding version
+        number as `with init_version('my.version.number')` in your code. The reason being when a new
+        initialization is released in pytorch, people would have to change the source code of your repo
+        in order to use that initialization. Instead, log/print a warning, to tell the community that your
+        model was built using this version of initialization scheme.
+
+        This can be illustrated as follows:
+        1. You release a model with version='1.7.0' hard-coded in your source code.
+            ```python
+            with nn.init.init_version('1.7.0') as version:
+                model = MyModel(...)
+            ```
+        2. Now in PyTorch=1.42.0 release a new initialization scheme is introduced.
+        3. To use this new initialization scheme, people would have to change the source code of your repo.
+        This can be a little inconvinient. 
+        4. To avoid this situation you can log a warning during model initialization that our model used this 
+        version of PyTorch for initialization.
+            ```python
+            with nn.init.init_version() as version:
+                if version != (1,7,0):
+                    log.warning(f"This model was designed to use `init_version('1.7.0') but was initialized with {version}")
+            ``` 
+    """
+    global _init_version
+
+    if version is None:
+        yield _init_version
+    else:
+        if isinstance(version, str):
+            v = parse(version)
+            if isinstance(v, Version):
+                version = (v.major, v.minor, v.micro)
+            else:
+                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+        elif isinstance(version, tuple):
+            for x in version:
+                if not isinstance(x, int):
+                    raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+        else:
+            raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+
+        # version, should be less than torch.__version__
+        if version > _init_version:
+            raise ValueError(f"version {version} should be less than torch version {torch_v}")
+
+        old_init_version = _init_version
+        _init_version = version
+
+        yield version
+
+        if _init_version != version:
+            raise Exception('version was modified before resetting it back to original value.')
+        _init_version = old_init_version

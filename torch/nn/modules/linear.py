@@ -80,12 +80,18 @@ class Linear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+    def reset_parameters(self, version=None) -> None:
+        with init.init_version(version) as version:
+            if version >= (1, 7, 0):
+                init.kaiming_normal_(self.weight, mode='fan_out')
+                if self.bias is not None:
+                    init.zeros_(self.bias)
+            else:
+                init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+                if self.bias is not None:
+                    fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+                    bound = 1 / math.sqrt(fan_in)
+                    init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.linear(input, self.weight, self.bias)
