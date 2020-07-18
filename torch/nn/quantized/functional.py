@@ -381,6 +381,23 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
+def celu(input, scale, zero_point, alpha=1.):
+    # type: (Tensor, float, int, Optional[float]) -> Tensor
+    r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
+
+    Applies the quantized CELU function element-wise.
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
+
+    Args:
+        input: quantized input
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.celu' must be quantized!")
+    return torch.ops.quantized.celu(input, scale, zero_point, alpha)
+
+
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
