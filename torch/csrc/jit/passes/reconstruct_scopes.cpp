@@ -29,8 +29,7 @@ class ReconstructScopesPass {
   std::string getScopeString(Function* f) const;
 };
 
-void ReconstructScopesPass::constructFunctionToModuleMap(
-    Module& module) {
+void ReconstructScopesPass::constructFunctionToModuleMap(Module& module) {
   for (auto& method : module.get_methods()) {
     func_to_module[&method.function()] = module._ivalue();
   }
