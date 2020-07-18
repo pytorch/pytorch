@@ -1651,6 +1651,13 @@ isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 See :func:`torch.isclose`
 """)
 
+add_docstr_all('isreal',
+               r"""
+isreal() -> Tensor
+
+See :func:`torch.isreal`
+""")
+
 add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
@@ -2266,13 +2273,6 @@ add_docstr_all('qscheme',
 qscheme() -> torch.qscheme
 
 Returns the quantization scheme of a given QTensor.
-""")
-
-add_docstr_all('quantile',
-               r"""
-quantile(q, dim=None, keepdim=False) -> Tensor
-
-See :func:`torch.quantile`
 """)
 
 add_docstr_all('q_scale',
