@@ -6018,7 +6018,7 @@ Example::
 .. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim` treating, Not a Numbers (NaNs) as zero. 
+dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
 If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 {keepdim_details}
