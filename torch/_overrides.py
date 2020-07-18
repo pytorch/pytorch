@@ -419,7 +419,6 @@ def get_testing_overrides():
         torch.miopen_rnn: (lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first,
                            dropout, train, bidirectional, batch_sizes, dropout_state: -1),
         torch.mm: lambda input, mat2, out=None: -1,
-        torch.mode: lambda input: -1,
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.moveaxis: lambda input, src, dst: -1,
         torch.mul: lambda input, other, out=None: -1,
