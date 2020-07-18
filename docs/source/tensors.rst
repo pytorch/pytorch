@@ -437,7 +437,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
-   .. automethod:: quantile
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales
