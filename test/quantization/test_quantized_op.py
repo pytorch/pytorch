@@ -325,6 +325,33 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="F.elu failed ({} vs {})".format(qY, qY_hat))
 
+
+    """Tests the correctness of the quantized::celu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e2, 1e2, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(scale_max=9.999999747378752e-06)),
+           alpha=st.floats(0.01, 100.0, allow_nan=False, allow_infinity=False))
+    def test_qcelu(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+        output_scale = 0.5
+        output_zero_point = 1
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # calculate CELU(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = torch.nn.functional.celu(dqX, alpha)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
+                                           dtype=torch_type)
+
+        # test regular
+        qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
+        self.assertEqual(qY, qY_hat,
+                         msg="F.celu failed ({} vs {})".format(qY, qY_hat))
+
+
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
