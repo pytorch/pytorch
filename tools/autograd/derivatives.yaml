@@ -1199,6 +1199,9 @@
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
 
+- name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), result)
+
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
 
