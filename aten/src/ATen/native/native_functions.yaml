@@ -5061,18 +5061,6 @@
     CPU: median_cpu
     CUDA: median_cuda
 
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: legacy::cpu::_th_sort_out
