@@ -22,14 +22,14 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
 
 TORCH_API void ReconstructScopes(
-    script::Module& module,
+    Module& module,
     Graph& g,
     const std::string& prefix);
 

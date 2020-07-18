@@ -6,44 +6,44 @@ namespace jit {
 
 class ReconstructScopesPass {
  public:
-  ReconstructScopesPass(script::Module& m, Graph& g, const std::string& p)
+  ReconstructScopesPass(Module& m, Graph& g, const std::string& p)
       : root_module(&m), graph(&g), prefix(p){};
   void run();
 
  private:
-  script::Module* root_module;
+  Module* root_module;
   Graph* graph;
   std::string prefix;
 
-  std::unordered_map<Function*, script::ModulePtr> func_to_module;
-  std::unordered_map<script::ModulePtr, std::string> module_names;
+  std::unordered_map<Function*, ModulePtr> func_to_module;
+  std::unordered_map<ModulePtr, std::string> module_names;
 
   void visitBlock(Block* b);
   void visitNode(Node* n);
 
-  void constructFunctionToModuleMap(script::Module& module);
+  void constructFunctionToModuleMap(Module& module);
   void constructRelativeNamesForModules(
-      script::Module& module,
+      Module& module,
       const std::string& prefix);
 
   std::string getScopeString(Function* f) const;
 };
 
 void ReconstructScopesPass::constructFunctionToModuleMap(
-    script::Module& module) {
+    Module& module) {
   for (auto& method : module.get_methods()) {
     func_to_module[&method.function()] = module._ivalue();
   }
-  for (script::Module m : module.children()) {
+  for (Module m : module.children()) {
     constructFunctionToModuleMap(m);
   }
 }
 
 void ReconstructScopesPass::constructRelativeNamesForModules(
-    script::Module& module,
+    Module& module,
     const std::string& prefix) {
   module_names[module._ivalue()] = prefix;
-  for (script::NameModule s : module.named_children()) {
+  for (NameModule s : module.named_children()) {
     constructRelativeNamesForModules(s.value, prefix + "." + s.name);
   }
 }
@@ -95,7 +95,7 @@ void ReconstructScopesPass::run() {
 }
 
 void ReconstructScopes(
-    script::Module& module,
+    Module& module,
     Graph& g,
     const std::string& prefix = "top") {
   ReconstructScopesPass p(module, g, prefix);
