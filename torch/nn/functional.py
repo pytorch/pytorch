@@ -1083,18 +1083,26 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
-def threshold(input, threshold, value, inplace=False):
+def _threshold(input, threshold, value, inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                _threshold, (input,), input, threshold, value, inplace=inplace)
     if inplace:
         result = _VF.threshold_(input, threshold, value)
     else:
         result = _VF.threshold(input, threshold, value)
     return result
 
+# We define this function as _threshold because it takes an argument
+# named threshold, which clobbers the recursive reference to the
+# function needed for __torch_function__ support
+threshold = _threshold
 
 threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
@@ -2068,6 +2076,10 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps)
     return torch.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 

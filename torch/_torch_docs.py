@@ -2818,14 +2818,16 @@ Example::
 
 add_docstr(torch.isinf,
            r"""
+isinf(input) -> Tensor
+
 Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 Complex values are infinite when their real and/or imaginary part is infinite.
 
     Arguments:
-        tensor (Tensor): A tensor to check
+        {input}}
 
     Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+        Tensor: a boolean tensor with True where :attr:`input` is `+/-INF` and False elsewhere
 
     Example::
 
@@ -2867,16 +2869,18 @@ Examples::
 
 add_docstr(torch.isfinite,
            r"""
+isfinite(input) -> Tensor
+
 Returns a new tensor with boolean elements representing if each element is `finite` or not.
 
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
-        tensor (Tensor): A tensor to check
+        {input}
 
     Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
+        Tensor: a boolean tensor with True where :attr:`input` is finite and False elsewhere
 
     Example::
 
@@ -2886,19 +2890,41 @@ Complex values are finite when both their real and imaginary parts are finite.
 
 add_docstr(torch.isnan,
            r"""
-Returns a new tensor with boolean elements representing if each element is `NaN` or not.
-Complex values are considered `NaN` when either their real and/or imaginary part is NaN.
+isnan(input) -> Tensor
+
+Returns a new tensor with boolean elements representing if each element of :attr:`input`
+is `NaN` or not. Complex values are considered `NaN` when either their real
+and/or imaginary part is NaN.
 
 Arguments:
-    input (Tensor): A tensor to check
+    {input}
 
 Returns:
-    Tensor: A ``torch.BoolTensor`` containing a True at each location of `NaN` elements.
+    Tensor: a boolean tensor with True where :attr:`input` is NaN and False elsewhere
 
 Example::
 
     >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
     tensor([False, True, False])
+""")
+
+add_docstr(torch.isreal,
+           r"""
+isreal(input) -> Tensor
+
+Returns a new tensor with boolean elements representing if each element of :attr:`input` is real-valued or not.
+All real-valued types are considered real. Complex values are considered real when their imaginary part is 0.
+
+Arguments:
+    {input}
+
+Returns:
+    Tensor: A boolean tensor with True where :attr:`input` is real-valued and False elsewhere.
+
+Example::
+
+    >>> torch.isreal(torch.tensor([1, 1+1j, 2+0j]))
+    tensor([True, False, True])
 """)
 
 add_docstr(torch.is_floating_point,
