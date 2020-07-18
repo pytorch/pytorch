@@ -1,8 +1,12 @@
 #pragma once
 
+#include <ATen/SequenceNumber.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
 #include <mutex>
@@ -198,6 +202,13 @@ public:
 
   void checkInvariants() const;
 
+  /* Check if operator calls with a given dispatch key
+   * need to be observed with RecordFunction.
+   */
+  inline bool shouldRecord(DispatchKey dispatch_key) const {
+    return dispatch_key != DispatchKey::BackendSelect;
+  }
+
 private:
   Dispatcher();
 
@@ -328,6 +339,32 @@ template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+
+  // Check if we need to run callbacks registered with RecordFunction
+  // If true and callbacks need inputs, we box the arguments and pass
+  // them into the callbacks and also into the kernel call
+
+  // Note: for perf reasons we wouldn't want to pass arguments into
+  // the function call or prematurely box them
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      if (guard.needs_inputs) {
+        std::vector<c10::IValue> stack;
+        stack.reserve(sizeof...(Args));
+        auto boxed_all_args = impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
+
+        guard.before(op.schema().name(), stack, at::sequence_number::peek());
+
+        // if we could convert all the arguments, also pass the stack into the kernel call
+        if (boxed_all_args) {
+          return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
+        }
+      } else {
+        guard.before(op.schema().name(), at::sequence_number::peek());
+      }
+    }
+  }
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -350,7 +387,9 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
       DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
       args...
     );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+  // do not use RecordFunction on redispatch
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
@@ -358,6 +397,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& entry = op.operatorIterator_->op;
   auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKey);
+
+  // using already existing stack to record function execution in observers
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      if (guard.needs_inputs) {
+        guard.before(op.schema().name(), *stack, at::sequence_number::peek());
+      } else {
+        guard.before(op.schema().name(), at::sequence_number::peek());
+      }
+    }
+  }
   kernel.callBoxed(op, stack);
 }
 
