@@ -2496,6 +2496,36 @@ Example::
             [ 4,  3]])
 """)
 
+
+add_docstr(torch.gcd,
+           r"""
+gcd(input, other, out=None) -> Tensor
+
+Computes the element-wise greatest common divisor (GCD) of :attr:`input` and :attr:`other`.
+
+Both :attr:`input` and :attr:`other` must have integer types.
+
+.. note::
+    This defines :math:`gcd(0, 0) = 0`.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.gcd(a, b)
+    tensor([1, 2, 5])
+    >>> c = torch.tensor([3])
+    >>> torch.gcd(a, c)
+    tensor([1, 1, 3])
+""".format(**common_args))
+
 add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
@@ -2788,14 +2818,16 @@ Example::
 
 add_docstr(torch.isinf,
            r"""
+isinf(input) -> Tensor
+
 Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 Complex values are infinite when their real and/or imaginary part is infinite.
 
     Arguments:
-        tensor (Tensor): A tensor to check
+        {input}}
 
     Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+        Tensor: a boolean tensor with True where :attr:`input` is `+/-INF` and False elsewhere
 
     Example::
 
@@ -2837,16 +2869,18 @@ Examples::
 
 add_docstr(torch.isfinite,
            r"""
+isfinite(input) -> Tensor
+
 Returns a new tensor with boolean elements representing if each element is `finite` or not.
 
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
     Arguments:
-        tensor (Tensor): A tensor to check
+        {input}
 
     Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
+        Tensor: a boolean tensor with True where :attr:`input` is finite and False elsewhere
 
     Example::
 
@@ -2856,14 +2890,17 @@ Complex values are finite when both their real and imaginary parts are finite.
 
 add_docstr(torch.isnan,
            r"""
-Returns a new tensor with boolean elements representing if each element is `NaN` or not.
-Complex values are considered `NaN` when either their real and/or imaginary part is NaN.
+isnan(input) -> Tensor
+
+Returns a new tensor with boolean elements representing if each element of :attr:`input`
+is `NaN` or not. Complex values are considered `NaN` when either their real
+and/or imaginary part is NaN.
 
 Arguments:
-    input (Tensor): A tensor to check
+    {input}
 
 Returns:
-    Tensor: A ``torch.BoolTensor`` containing a True at each location of `NaN` elements.
+    Tensor: a boolean tensor with True where :attr:`input` is NaN and False elsewhere
 
 Example::
 
@@ -2965,6 +3002,35 @@ Example::
     >>> torch.kthvalue(x, 2, 0, True)
     torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """.format(**single_dim_common))
+
+add_docstr(torch.lcm,
+           r"""
+lcm(input, other, out=None) -> Tensor
+
+Computes the element-wise least common multiple (LCM) of :attr:`input` and :attr:`other`.
+
+Both :attr:`input` and :attr:`other` must have integer types.
+
+.. note::
+    This defines :math:`lcm(0, 0) = 0` and :math:`lcm(0, a) = 0`.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([5, 10, 15])
+    >>> b = torch.tensor([3, 4, 5])
+    >>> torch.lcm(a, b)
+    tensor([15, 20, 15])
+    >>> c = torch.tensor([3])
+    >>> torch.lcm(a, c)
+    tensor([15, 30, 15])
+""".format(**common_args))
 
 add_docstr(torch.le,
            r"""
@@ -5442,6 +5508,37 @@ Example::
     tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
     >>> torch.sigmoid(a)
     tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
+""".format(**common_args))
+
+add_docstr(torch.logit,
+           r"""
+logit(input, eps=None, out=None) -> Tensor
+
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+
+.. math::
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
 
 add_docstr(torch.sign,

@@ -60,6 +60,7 @@ TYPE_MAP = {
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
     'IntArrayRef?': 'int[]?',
+    'ArrayRef<double>?': 'float[]?',
     'Layout': 'Layout',
     'Layout?': 'Layout?',
     'Device': 'Device',
@@ -114,6 +115,7 @@ FROM_IVALUE = {
     'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntVector()',
     'IntArrayRef?': '{}.toOptionalIntArray()',
+    'ArrayRef<double>?': '{}.toOptionalDoubleArray()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -196,7 +198,7 @@ OPERATOR = CodeTemplate("""\
 """)
 
 
-blacklisted_types = {
+disallowed_types = {
     'Storage',
     'DimnameList?',
     'ConstQuantizerPtr',
@@ -209,7 +211,7 @@ default_only_types = {'Generator'}
 
 def is_jit_arg(i, arg):
     simple_type = arg['simple_type']
-    if simple_type in blacklisted_types:
+    if simple_type in disallowed_types:
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False

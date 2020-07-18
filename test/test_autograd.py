@@ -1,6 +1,7 @@
 import contextlib
 import gc
 import sys
+import io
 import math
 import tempfile
 import time
@@ -164,6 +165,31 @@ class TestAutograd(TestCase):
                 v.grad.zero_()
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.))
+
+    def test_function_returns_undefined_tensor(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        # Test that undefined tensors returned from custom backward function
+        # are propagated as undefined and not tensor full of zeroes
+        x = torch.ones(1, requires_grad=True)
+
+        MyFunction.apply(x).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x ** 2).backward()
+        self.assertIsNone(x.grad)
+
+        MyFunction.apply(x).sum().backward()
+        self.assertIsNone(x.grad)
+
+        self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
 
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
@@ -3313,6 +3339,56 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    def test_anomaly_grad_warnings(self):
+        # PyTorch won't throw warnings if there is an error
+        # but we'd want to at least see them in stderr
+
+        class StdErrDiverter:
+            def __enter__(self):
+                self.stderr_orig = sys.stderr
+                self.stderr_new = io.StringIO()
+                sys.stderr = self.stderr_new
+                return self
+
+            def __exit__(self, *args):
+                self.captured = self.stderr_new.getvalue()
+                sys.stderr = self.stderr_orig
+
+
+        # if the warnings don't throw, they will be handled as regular warnings
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    a = torch.randn(5, requires_grad=True)
+                    d1 = a + 1
+                    d2 = d1 ** 2
+                    d1 += 1
+                    torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 2)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', str(w[1].message))
+
+        # if the warning throws, it will be printed to sys.stderr
+        with self.assertRaisesRegex(RuntimeError,
+                                    "one of the variables needed for gradient computation has been "
+                                    "modified by an inplace operation"):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    warnings.simplefilter("error")
+                    with StdErrDiverter() as s:
+                        a = torch.randn(5, requires_grad=True)
+                        d1 = a + 1
+                        d2 = d1 ** 2
+                        d1 += 1
+                        torch.autograd.grad(d2.sum(), a)
+
+        self.assertEqual(len(w), 1)
+        self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
+        self.assertIn('Error detected in PowBackward0', s.captured)
+
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
@@ -4524,12 +4600,12 @@ def add_test(
                                 if i.grad is not None:
                                     with torch.no_grad():
                                         i.grad.zero_()
-                            for io, o in zip(inplace_output_variable, output_variable):
+                            for i_o, o in zip(inplace_output_variable, output_variable):
                                 if dtype.is_complex:
-                                    grad = randn_like(io).to(torch.cdouble)
+                                    grad = randn_like(i_o).to(torch.cdouble)
                                 else:
-                                    grad = randn_like(io).double()
-                                io.backward(grad)
+                                    grad = randn_like(i_o).double()
+                                i_o.backward(grad)
                                 o.backward(grad)
                             for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
                                                 (self_variable,) + args_variable):
@@ -6479,6 +6555,32 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
+    def _test_atleast(self, device, torch_fn):
+        # 0-dim
+        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), s)
+        gradgradcheck(lambda x: torch_fn(x), s)
+
+        # 1-dim
+        a = torch.rand(4, dtype=torch.double, requires_grad=True)
+
+        gradcheck(lambda x: torch_fn(x), a)
+        gradgradcheck(lambda x: torch_fn(x), a)
+
+        # 2,3,4-dim
+        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
+        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
+        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
+
+        input_tuple = (s, a, b, c, d)
+        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+
+    def test_atleast(self, device):
+        self._test_atleast(device, torch.atleast_1d)
+        self._test_atleast(device, torch.atleast_2d)
+        self._test_atleast(device, torch.atleast_3d)
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
