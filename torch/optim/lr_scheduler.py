@@ -483,7 +483,7 @@ class PolyLR(_LRScheduler):
     def get_lr(self):
         if self.last_epoch == 0:
             return self.base_lrs
-        
+
         base = max(0, 1 - 1 / (self.max_epoch - self.last_epoch - 1))
         coeff = base ** coeff
         return [(lr - min_lr) * coeff + min_lr
