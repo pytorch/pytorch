@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -171,12 +172,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       continue;
     }
     if (output == Py_None) {
-      auto& info = input_info[results.size()];
-      if (info.requires_grad) {
-        results.emplace_back(info.zeros(_device_guard));
-      } else {
-        results.emplace_back();
-      }
+      results.emplace_back();
     } else {
       if (!THPVariable_Check(output)) {
         std::string msg("expected Variable or None (got ");
@@ -619,7 +615,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    autograd::Node::peek_at_next_sequence_nr());
+    at::sequence_number::peek());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -779,8 +775,6 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_outputs, num_grads);
 
-    // If any of the remaining grad_inputs are None, zero them.
-    _prepare_grads(self, grad_input, false);
     return grad_input.release();
 
   } catch (python_error& e) {
