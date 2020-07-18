@@ -196,37 +196,25 @@ if False:
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
-import torch._C as _C_for_compiled_check
-if _C_for_compiled_check.__file__ is None:
-    _cwd_torch_init = os.path.join(os.getcwd(), 'torch', '__init__.py')
-    if __file__ == _cwd_torch_init:
+try:
+    # _initExtension is chosen (arbitrarily) as a sentinel.
+    from torch._C import _initExtension
+except ImportError:
+    import torch._C as _C_for_compiled_check
+    if _C_for_compiled_check.__file__ is None:
         raise ImportError(textwrap.dedent(f'''
             Failed to load PyTorch C extensions:
-                You appear to be importing PyTorch from a clone of the git repo:
-                    {os.getcwd()}
-                If you intended to compile and run PyTorch from within this
-                clone then this means that the compilation has failed.
-                Otherwise, `cd` to a different directory and rerun your code.
+                It appears that PyTorch has loaded the `torch/_C` folder
+                of the PyTorch repository rather than the C extensions which
+                are expected in the `torch._C` namespace. This can occur when
+                using the `install` workflow. e.g.
+                    $ python setup.py install && python -c "import torch"
+
+                This error can generally be solved using the `develop` workflow
+                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                or by running Python from a different directory.
             ''').strip())
-
-    if any(__file__ == os.path.join(i, 'torch', '__init__.py') for i in sys.path):
-        _torch_root_path = os.path.split(os.path.split(__file__)[0])[0]
-        raise ImportError(textwrap.dedent(f'''
-            Failed to load PyTorch C extensions:
-                `{_torch_root_path}` appears in `sys.path`
-                This generally occurs because the PYTHONPATH environment
-                variable is set or an entry is manually added to `sys.path`
-                before calling `import torch`.
-
-                If you intended to compile and run PyTorch using this
-                clone then this means that the compilation has failed.
-                Otherwise, adjust your environment so that the intended
-                install location appears first in `sys.path`.
-            ''').strip())
-
-    raise ImportError(textwrap.dedent('''
-        Failed to load PyTorch C extensions:
-            The cause of this failure could not be determined.''').strip())
+    raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
 
 __all__ += [name for name in dir(_C)
