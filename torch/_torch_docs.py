@@ -1471,13 +1471,18 @@ complex(real, imag, out=None) -> Tensor
 
 Constructs a complex-valued tensor from Cartesian coordinates.
 
-Example::
+:attr:`real` and :attr:`imag` should be floating-point tensors of the same
+dtype. ``torch.float32`` tensors will lead to an output of ``torch.complex64``,
+and ``torch.float64`` tensors will lead to an output of ``torch.complex128``.
 
-    >>> real = torch.tensor([1, 2], dtype=torch.int32)
-    >>> imag = torch.tensor([3, 4], dtype=torch.float64)
+Example::
+    >>> real = torch.tensor([1, 2], dtype=torch.float32)
+    >>> imag = torch.tensor([3, 4], dtype=torch.float32)
     >>> z = torch.complex(real, imag)
     >>> z
-    tensor([(1.+3.j), (2.+4.j)], dtype=torch.complex128)
+    tensor([(1.+3.j), (2.+4.j)])
+    >>> z.dtype
+    torch.complex64
 
 """.format(**common_args))
 
@@ -1487,10 +1492,13 @@ complex_polar(abs, angle, out=None) -> Tensor
 
 Constructs a complex-valued tensor from polar coordinates.
 
-Example::
+:attr:`abs` and :attr:`angle` should be floating-point tensors of the same
+dtype. ``torch.float32`` tensors will lead to an output of ``torch.complex64``,
+and ``torch.float64`` tensors will lead to an output of ``torch.complex128``.
 
+Example::
     >>> import numpy as np
-    >>> abs = torch.tensor([1, 2], dtype=torch.int32)
+    >>> abs = torch.tensor([1, 2], dtype=torch.float64)
     >>> angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
     >>> z = torch.complex_polar(abs, angle)
     >>> z
