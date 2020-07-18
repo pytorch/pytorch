@@ -4,7 +4,6 @@ import math
 import warnings
 import contextlib
 from typing import Tuple, Union
-from packaging.version import parse, Version
 
 import torch
 from torch import Tensor
@@ -529,10 +528,24 @@ kaiming_normal = _make_deprecate(kaiming_normal_)
 orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
 
+def _parse_version(version):
+    """Internal function to be used by init_version"""
+    if version is None:
+        return _init_version
+    if isinstance(version, tuple):
+        for x in version:
+            if not isinstance(x, int):
+                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+    elif isinstance(version, str):
+        v = version.split('.')
+        version = (int(v[0]), int(v[1]), int(v[2][0]))
+    else:
+        raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+    return version
+
 # Use "init_version" to handle "_init_version". This value is always same as torch.__version__. 
 # "init_version" ensures this value remains same.
-v = parse(torch.__version__)
-_init_version = (v.major, v.minor, v.micro)
+_init_version = _parse_version(torch.__version__)
 
 @contextlib.contextmanager
 def init_version(version : Union[Tuple[int, int, int], str] = None) -> None:
@@ -580,31 +593,17 @@ def init_version(version : Union[Tuple[int, int, int], str] = None) -> None:
     """
     global _init_version
 
-    if version is None:
-        yield _init_version
-    else:
-        if isinstance(version, str):
-            v = parse(version)
-            if isinstance(v, Version):
-                version = (v.major, v.minor, v.micro)
-            else:
-                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
-        elif isinstance(version, tuple):
-            for x in version:
-                if not isinstance(x, int):
-                    raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
-        else:
-            raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+    version = _parse_version(version)
 
-        # version, should be less than torch.__version__
-        if version > _init_version:
-            raise ValueError(f"version {version} should be less than torch version {torch_v}")
+    # version, should be less than torch.__version__
+    if version > _parse_version(torch.__version__):
+        raise ValueError(f"version {version} should be less than torch version {torch_v}")
 
-        old_init_version = _init_version
-        _init_version = version
+    old_init_version = _init_version
+    _init_version = version
 
-        yield version
+    yield version
 
-        if _init_version != version:
-            raise Exception('version was modified before resetting it back to original value.')
-        _init_version = old_init_version
+    if _init_version != version:
+        raise Exception('version was modified before resetting it back to original value.')
+    _init_version = old_init_version
