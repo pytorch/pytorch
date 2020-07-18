@@ -346,6 +346,7 @@ def get_testing_overrides():
         torch.index_fill: lambda input, dim, index, value: -1,
         torch.isfinite: lambda tensor: -1,
         torch.isinf: lambda tensor: -1,
+        torch.isreal: lambda tensor: -1,
         torch.instance_norm: (lambda input, running_mean, running_var, weight, bias, use_input_stats, momentum, eps,
                               cudnn_enabled: -1),
         torch.int_repr: lambda input: -1,

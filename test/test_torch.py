@@ -6473,6 +6473,34 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64, torch.complex128)
+    def test_isreal_complex(self, device, dtype):
+        vals = (1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j)
+        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_isreal_noncomplex(self, device, dtype):
+        vals = (1, 2, 3)
+        # Manual check here since numpy doesn't support bfloat16
+        result = torch.isreal(torch.tensor(vals, dtype=dtype))
+        expected = torch.ones(result.size(), dtype=torch.bool, device=device)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.complex64)
+    def test_isreal_nan_inf(self, device, dtype):
+        vals = (
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), 0),
+            complex(0, float('inf')),
+            complex(float('inf'), float('nan')),
+            complex(float('nan'), 0),
+            complex(-1, 0),
+            complex(0, 1)
+        )
+        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
+
     @onlyCPU
     def test_isfinite_type(self, device):
         with self.assertRaises(TypeError):
