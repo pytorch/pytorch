@@ -666,11 +666,6 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 
 void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
-#else
-  RECORD_FUNCTION(op.schema().name(), *stack);
-#endif
   op.callBoxed(stack);
 }
 
