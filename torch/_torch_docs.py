@@ -2895,7 +2895,7 @@ add_docstr(torch.isnan, r"""
 isnan(input) -> Tensor
 
 Returns a new tensor with boolean elements representing if each element of :attr:`input`
-is `NaN` or not. Complex values are considered "NaN" when either their real
+is NaN or not. Complex values are considered NaN when either their real
 and/or imaginary part is NaN.
 
 Arguments:
