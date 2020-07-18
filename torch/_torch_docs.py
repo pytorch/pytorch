@@ -6001,7 +6001,7 @@ add_docstr(torch.nansum,
            r"""
 nansum(input, dtype=None) -> Tensor
 
-Returns the sum of all elements treating Not a Numbers (NaNs) as zero.
+Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
 
 Args:
     {input}
@@ -6011,16 +6011,14 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.1133, -0.9567,  0.2958]])
+    >>> a = torch.tensor([1., 2., float('nan'), 4.])
     >>> torch.nansum(a)
-    tensor(-0.5475)
+    tensor(7.)
 
 .. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim` treating Not a Numbers (NaNs) as zero. 
+dimension :attr:`dim` treating, Not a Numbers (NaNs) as zero. 
 If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 {keepdim_details}
@@ -6037,13 +6035,13 @@ Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
     1.0
-    >>> a = torch.tensor([[1, 1], [1., float("nan")]])
+    >>> a = torch.tensor([[1, 2], [3., float("nan")]])
     >>> torch.nansum(a)
-    tensor(3.)
+    tensor(6.)
     >>> torch.nansum(a, dim=0)
-    tensor([2., 1.])
+    tensor([4., 2.])
     >>> torch.nansum(a, dim=1)
-    tensor([2., 1.])
+    tensor([3., 3.])
 """.format(**multi_dim_common))
 
 add_docstr(torch.svd,

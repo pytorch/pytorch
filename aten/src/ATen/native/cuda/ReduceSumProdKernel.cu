@@ -35,6 +35,14 @@ struct prod_functor {
   }
 };
 
+// The function `reduce_dispatch` below dispatches to the kernel based
+// on the type of `iter`. It takes care of the common logic
+// for handling Half-Precision floating types.
+// Otherwise the functor `op` is called to dispatch to the kernel
+// of relevant type.
+//
+// Note: Functor `op` should take care of all the types to be supported
+//       except for `at::Half` and `at::BFloat16`.
 template <
     template <
         typename scalar_t,
