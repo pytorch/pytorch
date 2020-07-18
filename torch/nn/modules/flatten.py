@@ -103,9 +103,9 @@ class Unflatten(Module):
         if self.named:
             return input.unflatten(self.dim, self.unflattened_size)
         else:
-            dim = self.dim
-            if self.dim < 0:
-                dim += input.ndim()
+            dim = int(self.dim)
+            if dim < 0:
+                dim += input.dim()
             inp_size = list(input.size())
             new_size = inp_size[:dim] + list(self.unflattened_size) + inp_size[dim + 1:]
             return input.view(new_size)
