@@ -264,7 +264,7 @@ std::tuple<Node*, Node*> insertDefaultObserverNodes(
     Value* self,
     Node* observer,
     const std::vector<std::string>& qparam_names,
-    std::string quantize_func) {
+    const std::string& quantize_func) {
   // Else branch is executed for dynamic weight observers and all observers
   // for static quant.
   Graph* g = observer->owningGraph();
@@ -834,7 +834,7 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
 Node* insertEmbeddingBagOps(
     Module& module,
     Node* observer,
-    std::string op_name) {
+    const std::string& op_name) {
   Graph* g = observer->owningGraph();
   auto observer_out = observer->output();
 
@@ -847,7 +847,7 @@ Node* insertEmbeddingBagOps(
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
   } else {
     TORCH_INTERNAL_ASSERT(
-        "Graph Mode Quantization Currently supports 4-bit and 8-bit embedding bag quantization.");
+        "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
   std::vector<Value*> prepack_inputs = {observer_out};
@@ -869,6 +869,10 @@ Node* insertEmbeddingBagOps(
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
   embedding_bag_inputs[3]->setType(TensorType::get());
+
+  TORCH_CHECK(
+      embedding_bag_inputs.size() == 11,
+      "Expecting FP EmbeddingBag operator to have 11 inputs");
 
   std::vector<Value*> qembedding_bag_inputs = {
       /* weight */ prepack->output(),
