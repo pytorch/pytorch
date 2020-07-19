@@ -2848,15 +2848,26 @@ In-place version of :meth:`~Tensor.sinh`
 
 add_docstr_all('size',
                r"""
-size() -> torch.Size
+size(dim) -> torch.Size or int
 
-Returns the size of the :attr:`self` tensor. The returned value is a subclass of
-:class:`tuple`.
+Returns the size of the :attr:`self` tensor.
+
+:class:`torch.Size` of lengths of each dimension is returned when no argument is passed in. 
+The returned value is a subclass of :class:`tuple`. Otherwise, integer value is returned as
+the length of the specified dimension dim.
+
+Args:
+    dim (int, optional): the desired dimension of which length is required
 
 Example::
 
-    >>> torch.empty(3, 4, 5).size()
+    >>> x = torch.empty(3, 4, 5)
+    >>> x.size()
     torch.Size([3, 4, 5])
+    >>> x.size(0)
+    3
+    >>> x.size(-1)
+    5
 
 """)
 
