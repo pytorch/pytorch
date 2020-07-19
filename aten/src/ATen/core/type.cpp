@@ -193,6 +193,11 @@ AnyClassTypePtr AnyClassType::get() {
   return value;
 }
 
+AnyEnumTypePtr AnyEnumType::get() {
+  static auto value = AnyEnumType::create();
+  return value;
+}
+
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
@@ -1364,6 +1369,11 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  return rhs->kind() == TypeKind::AnyType ||
+      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }
 
 } // namespace c10
