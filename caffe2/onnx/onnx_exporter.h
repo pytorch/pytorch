@@ -114,7 +114,7 @@ class CAFFE2_API OnnxExporter {
 
   // \brief Check black listed arguments where we won't pass down when
   // converting to ONNX node
-  bool IsBlackListed(const caffe2::Argument& arg);
+  bool IsBlockListed(const caffe2::Argument& arg);
 
   // \brief Convert Caffe2 argument to Onnx attribute
   void CopyCaffe2ArgToOnnxAttr(
