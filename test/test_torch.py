@@ -7056,8 +7056,14 @@ class TestTorchDeviceType(TestCase):
     def test_logical_or(self, device):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
-    def generate_clamp_baseline(self, device, min_vals=None, max_vals=None, with_nans=False):
-        X = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+    def generate_clamp_baseline(self, device, dtype, *, min_vals, max_vals, with_nans):
+        """
+        Creates a random tensor for a given device and dtype, and computes the expected clamped
+        values given the min_vals and/or max_vals.
+        If with_nans is provided, then some values are randomly set to nan.
+        """
+        X = torch.rand(100, device=device).mul(50).add(-25)  # uniform in [-25, 25]
+        X = X.to(dtype)
         if with_nans:
             mask = torch.randint(0, 2, X.shape, dtype=torch.bool, device=device)
             X[mask] = nan
@@ -7073,25 +7079,32 @@ class TestTorchDeviceType(TestCase):
         return X, X_clamped
 
     def test_clamp(self, device):
-        # Create min/max argument product
-        args = product((torch.linspace(-1, 1, 100, device=device), -1, None),
-                       (torch.linspace(-1, 1, 100, device=device), 1, None))
+        # Test most common dtypes
+        dtypes = (torch.float, torch.int64)
 
-        for min_val, max_val in args:
-            if min_val is None and max_val is None:
-                continue
+        for dtype in dtypes:
+            # Create min/max argument product
+            args = product((torch.linspace(-15, 15, 100, dtype=dtype, device=device), -1, None),
+                           (torch.linspace(15, -15, 100, dtype=dtype, device=device), 1, None))
 
-            X, Y_expected = self.generate_clamp_baseline(device, min_val, max_val)
+            for min_val, max_val in args:
+                if min_val is None and max_val is None:
+                    continue
 
-            Y_actual = torch.clamp(X, min_val, max_val)
-            self.assertEqual(Y_expected, Y_actual)
+                X, Y_expected = self.generate_clamp_baseline(device, dtype, 
+                                                             min_vals=min_val, 
+                                                             max_vals=max_val,
+                                                             with_nans=False)
 
-            Y_out = torch.empty_like(X)
-            torch.clamp(X, min=min_val, max=max_val, out=Y_out)
-            self.assertEqual(Y_expected, Y_out)
+                Y_actual = torch.clamp(X, min_val, max_val)
+                self.assertEqual(Y_expected, Y_actual)
 
-            X.clamp_(min_val, max_val)
-            self.assertEqual(Y_expected, X)
+                Y_out = torch.empty_like(X)
+                torch.clamp(X, min=min_val, max=max_val, out=Y_out)
+                self.assertEqual(Y_expected, Y_out)
+
+                X.clamp_(min_val, max_val)
+                self.assertEqual(Y_expected, X)
 
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)
@@ -7105,14 +7118,17 @@ class TestTorchDeviceType(TestCase):
 
     def test_clamp_propagates_nans(self, device):
         # Create min/max argument product
-        args = product((torch.linspace(-1, 1, 100, device=device), -1, None),
-                       (torch.linspace(-1, 1, 100, device=device), 1, None))
+        args = product((torch.linspace(-15, 15, 100, device=device), -1, None),
+                       (torch.linspace(15, -15, 100, device=device), 1, None))
 
         for min_val, max_val in args:
             if min_val is None and max_val is None:
                 continue
 
-            X, Y_expected = self.generate_clamp_baseline(device, min_val, max_val, with_nans=True)
+            X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
+                                                         min_vals=min_val, 
+                                                         max_vals=max_val, 
+                                                         with_nans=True)
             Y_expected = torch.isnan(Y_expected)
 
             Y_actual = torch.clamp(X, min_val, max_val)

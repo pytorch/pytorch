@@ -432,17 +432,17 @@ Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor clamp_with_tensors(const Tensor& self, const Tensor& min, const Tensor& max) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
   return at::clamp_with_tensors_out(result, self, min, max);
 }
 
 Tensor clamp_with_tensors_max(const Tensor& self, const Tensor& max) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
   return at::clamp_with_tensors_max_out(result, self, max);
 }
 
 Tensor clamp_with_tensors_min(const Tensor& self, const Tensor& min) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
   return at::clamp_with_tensors_min_out(result, self, min);
 }
 
@@ -467,10 +467,11 @@ Tensor& clamp_with_tensors_out(Tensor& result, const Tensor& self, const Tensor&
       .enforce_safe_casting_to_output(true)
       .build();
     clamp_with_tensors_stub(iter.device_type(), iter);
+    result = iter.output();
   } else if (max.defined()) {
-    at::clamp_with_tensors_max_out(result, self, max);
+    result = at::clamp_with_tensors_max_out(result, self, max);
   } else if (min.defined()) {
-    at::clamp_with_tensors_min_out(result, self, min);
+    result = at::clamp_with_tensors_min_out(result, self, min);
   } else {
     TORCH_CHECK(false,"At least one of 'min' or 'max' must not be None");
   }
@@ -496,6 +497,7 @@ Tensor& clamp_with_tensors_max_out(Tensor& result, const Tensor& self, const Ten
     .enforce_safe_casting_to_output(true)
     .build();
   clamp_max_with_tensor_stub(iter.device_type(), iter);
+  result = iter.output();
   return result;
 }
 
@@ -518,11 +520,12 @@ Tensor& clamp_with_tensors_min_out(Tensor& result, const Tensor& self, const Ten
     .enforce_safe_casting_to_output(true)
     .build();
   clamp_min_with_tensor_stub(iter.device_type(), iter);
+  result = iter.output();
   return result;
 }
 
 Tensor clamp_with_min_tensor(const Tensor& self, const Tensor& min, Scalar max) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
   return at::clamp_with_tensors_out(result, self, min, wrapped_scalar_tensor(max).to(min));
 }
 
@@ -535,7 +538,7 @@ Tensor& clamp_with_min_tensor_out(Tensor& result, const Tensor& self, const Tens
 }
 
 Tensor clamp_with_max_tensor(const Tensor& self, Scalar min, const Tensor& max) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
   return at::clamp_with_tensors_out(result, self, wrapped_scalar_tensor(min).to(max), max);
 }
 

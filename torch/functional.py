@@ -1410,15 +1410,13 @@ lu.__doc__ = _lu_impl.__doc__
 
 def clamp(input, min=None, max=None, out=None):
     r"""
-    Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
-    a resulting tensor:
+    Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and returns a tensor:
 
     .. math::
         y_i = \min(\text{max}_i, \min(\text{min}_i, x_i))
 
-    The :attr:`input` and arguments :attr:`min` and attr:`max` should have matching types.
-    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then args :attr:`min`
-    and :attr:`max` must be `FloatTensor`, `DoubleTensor`, or real numbers.
+    The output dtype is same as :attr:`input` if :attr:`min`/:attr:`max` arguments are scalars, otherwise if the 
+    arguments are tensors then the output dtype uses standard type promotion rules.
 
     Args:
         input (Tensor): the input tensor
@@ -1443,9 +1441,8 @@ def clamp(input, min=None, max=None, out=None):
 
     Clamps all elements in :attr:`input` to be larger or equal to :attr:`min`.
 
-    The :attr:`input` and argument :attr:`min` should have matching types.
-    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then arg :attr:`min`
-    must be `FloatTensor`, `DoubleTensor`, or real number.
+    The output dtype is same as attr:`input` if :attr:`min` argument is a scalar, otherwise if :attr:`min` is a tensor
+    then the output dtype uses standard type promotion rules.
 
     Args:
         input (Tensor): the input tensor
@@ -1468,9 +1465,8 @@ def clamp(input, min=None, max=None, out=None):
 
     Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
 
-    The :attr:`input` and argument :attr:`max` should have matching types.
-    I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then arg :attr:`max`
-    must be `FloatTensor`, `DoubleTensor`, or real number.
+    The output dtype is same as attr:`input` if :attr:`max` argument is a scalar, otherwise if :attr:`max` is a tensor
+    then the output dtype uses standard type promotion rules.
 
     Args:
         input (Tensor): the input tensor

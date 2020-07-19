@@ -6337,38 +6337,40 @@ a")
 
     def test_script_clamp_none(self):
         def test_script_clamp_max_none(x):
-            return torch.clamp(x, min=2, max=None)
+            return torch.clamp(x, min=0.1, max=None)
 
         def test_script_clamp_max(x):
-            return torch.clamp(x, max=2)
+            return torch.clamp(x, max=0.1)
 
         def test_script_clamp_min_none(x):
-            return torch.clamp(x, min=None, max=2)
+            return torch.clamp(x, min=None, max=0.1)
 
         def test_script_clamp_min(x):
-            return torch.clamp(x, min=2)
+            return torch.clamp(x, min=0.1)
 
-        def test_script_clamp_with_tensors_max_none(x):
-            min = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
-            return torch.clamp_with_tensors(x, min=min, max=None)
+        input = [torch.randn(10)]
 
-        def test_script_clamp_with_tensors_max(x):
-            max = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
-            return torch.clamp_with_tensors(x, max=max)
-
-        def test_script_clamp_with_tensors_min_none(x):
-            max = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
-            return torch.clamp_with_tensors(x, min=None, max=max)
-
-        def test_script_clamp_with_tensors_min(x):
-            min = torch.full(x.shape, 2, dtype=x.dtype, device=x.device)
-            return torch.clamp_with_tensors(x, min=min)
-
-        input = [torch.arange(0, 3)]
         self.checkScript(test_script_clamp_max_none, input, optimize=True)
         self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
+
+    def test_script_clamp_with_tensors_none(self):
+        def test_script_clamp_with_tensors_max_none(x, min):
+            return torch.clamp_with_tensors(x, min=min, max=None)
+
+        def test_script_clamp_with_tensors_max(x, max):
+            return torch.clamp_with_tensors(x, max=max)
+
+        def test_script_clamp_with_tensors_min_none(x, max):
+            return torch.clamp_with_tensors(x, min=None, max=max)
+
+        def test_script_clamp_with_tensors_min(x, min):
+            return torch.clamp_with_tensors(x, min=min)
+
+        input = [torch.randn(10),  # x
+                 torch.randn(10)]  # min/max
+
         self.checkScript(test_script_clamp_with_tensors_max_none, input, optimize=True)
         self.checkScript(test_script_clamp_with_tensors_max, input, optimize=True)
         self.checkScript(test_script_clamp_with_tensors_min_none, input, optimize=True)
