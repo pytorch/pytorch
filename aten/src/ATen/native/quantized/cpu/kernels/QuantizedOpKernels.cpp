@@ -636,42 +636,14 @@ void qclamp_with_tensors_kernel(
     const Tensor& min_tensor,
     const Tensor& max_tensor,
     Tensor& qy) {
-  TORCH_CHECK(qx.q_scale() == min_tensor.q_scale() && qx.q_scale() == max_tensor.q_scale(),
-              "Quantized input scale should match min_tensor and max_tensor, got ",
-              qx.q_scale(), ", ", min_tensor.q_scale(), " and ", max_tensor.q_scale());
-  TORCH_CHECK(qx.q_zero_point() == min_tensor.q_zero_point() && qx.q_zero_point() == max_tensor.q_zero_point(),
-              "Quantized input zero-point should match min_tensor and max_tensor, got ", 
-              qx.q_zero_point(), ", ", min_tensor.q_zero_point(), " and ", max_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    qy = at::_empty_affine_quantized(
-      qx.sizes(),
-      at::device(kCPU).dtype(SCALAR_TYPE),
-      qx.q_scale(),
-      qx.q_zero_point(),
-      qx.suggest_memory_format());
-    TensorIterator iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(qy)
-      .add_input(qx)
-      .add_input(min_tensor)
-      .add_input(max_tensor)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .build();
+    Tensor qx_fp = qx.dequantize();
+    Tensor min_tensor_fp = min_tensor.dequantize();
+    Tensor max_tensor_fp = max_tensor.dequantize();
 
-    using Vec = Vec256<scalar_t>;
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value, scalar_t min_scalar, scalar_t max_scalar) -> scalar_t {
-          underlying_t min_clamped =
-              std::max<underlying_t>(value.val_, min_scalar.val_);
-          return scalar_t(std::min<underlying_t>(min_clamped, max_scalar.val_));
-        },
-        [&](Vec val, Vec min_vec, Vec max_vec) -> Vec {
-          auto min_clamped = val.maximum(min_vec);
-          return min_clamped.minimum(max_vec);
-        });
+    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_tensor_fp);
+    qy = at::native::quantize_per_tensor(
+          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
   });
 }
 
@@ -680,46 +652,13 @@ void qclamp_with_min_tensor_kernel(
     const Tensor& min_tensor,
     Scalar max_scalar,
     Tensor& qy) {
-  TORCH_CHECK(qx.q_scale() == min_tensor.q_scale(),
-              "Quantized input scale should match min_tensor, got ",
-              qx.q_scale(), " and ", min_tensor.q_scale());
-  TORCH_CHECK(qx.q_zero_point() == min_tensor.q_zero_point(),
-              "Quantized input zero-point should match min_tensor, got ", 
-              qx.q_zero_point(), " and ", min_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    qy = at::_empty_affine_quantized(
-      qx.sizes(),
-      at::device(kCPU).dtype(SCALAR_TYPE),
-      qx.q_scale(),
-      qx.q_zero_point(),
-      qx.suggest_memory_format());
-    TensorIterator iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(qy)
-      .add_input(qx)
-      .add_input(min_tensor)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .build();
-    
-    using Vec = Vec256<scalar_t>;
-    auto max = max_scalar.to<float>();
-    scalar_t max_q =
-        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
-    auto max_vec = Vec(max_q);
-    
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value, scalar_t min_scalar) -> scalar_t {
-          underlying_t min_clamped =
-              std::max<underlying_t>(value.val_, min_scalar.val_);
-          return scalar_t(std::min<underlying_t>(min_clamped, max_q.val_));
-        },
-        [&](Vec val, Vec min_vec) -> Vec {
-          auto min_clamped = val.maximum(min_vec);
-          return min_clamped.minimum(max_vec);
-        });
+    Tensor qx_fp = qx.dequantize();
+    Tensor min_tensor_fp = min_tensor.dequantize();
+
+    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_scalar);
+    qy = at::native::quantize_per_tensor(
+          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
   });
 }
 
@@ -728,46 +667,13 @@ void qclamp_with_max_tensor_kernel(
     Scalar min_scalar,
     const Tensor& max_tensor,
     Tensor& qy) {
-  TORCH_CHECK(qx.q_scale() == max_tensor.q_scale(),
-              "Quantized input scale should match max_tensor, got ",
-              qx.q_scale(), " and ", max_tensor.q_scale());
-  TORCH_CHECK(qx.q_zero_point() == max_tensor.q_zero_point(),
-              "Quantized input zero-point should match max_tensor, got ", 
-              qx.q_zero_point(), " and ", max_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    qy = at::_empty_affine_quantized(
-      qx.sizes(),
-      at::device(kCPU).dtype(SCALAR_TYPE),
-      qx.q_scale(),
-      qx.q_zero_point(),
-      qx.suggest_memory_format());
-    TensorIterator iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(qy)
-      .add_input(qx)
-      .add_input(max_tensor)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .build();
-    
-    using Vec = Vec256<scalar_t>;
-    auto min = min_scalar.to<float>();
-    scalar_t min_q =
-        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
-    auto min_vec = Vec(min_q);
-    
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value, scalar_t max_scalar) -> scalar_t {
-          underlying_t min_clamped =
-              std::max<underlying_t>(value.val_, min_q.val_);
-          return scalar_t(std::min<underlying_t>(min_clamped, max_scalar.val_));
-        },
-        [&](Vec val, Vec max_vec) -> Vec {
-          auto min_clamped = val.maximum(min_vec);
-          return min_clamped.minimum(max_vec);
-        });
+    Tensor qx_fp = qx.dequantize();
+    Tensor max_tensor_fp = max_tensor.dequantize();
+
+    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_scalar, max_tensor_fp);
+    qy = at::native::quantize_per_tensor(
+          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
   });
 }
 
