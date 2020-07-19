@@ -126,23 +126,33 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
 
 Statement* OptOutMutator::mutate(Allocate* a) {
-  TensorView* tv = static_cast<TensorView*>(mutateAsVal(a->buffer()));
-  Val* ext = mutateAsVal(a->extent())->asVal();
-  if (ext->sameAs(a->extent()) && tv->sameAs(a->buffer()))
-    return a;
-  FusionGuard::getCurFusion()->removeExpr(a);
-  return new Allocate(tv, ext);
+  if (a->buffer()->getValType().value() == ValType::TensorView) {
+    TensorView* tv = static_cast<TensorView*>(mutateAsVal(a->buffer()));
+    Val* ext = mutateAsVal(a->size())->asVal();
+    if (ext->sameAs(a->size()) && tv->sameAs(a->buffer()))
+      return a;
+    FusionGuard::getCurFusion()->removeExpr(a);
+    return new Allocate(tv, a->getMemoryType(), a->size());
+  } else {
+    Val* buffer = mutateAsVal(a->buffer())->asVal();
+    Val* ext = mutateAsVal(a->size())->asVal();
+    if (ext->sameAs(a->size()) && buffer->sameAs(a->buffer()))
+      return a;
+    FusionGuard::getCurFusion()->removeExpr(a);
+    return new Allocate(buffer, a->getMemoryType(), a->size());
+  }
 }
 
 Statement* OptOutMutator::mutate(Split* s) {
-  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(s->outer()));
-  IterDomain* inr = static_cast<IterDomain*>(mutateAsVal(s->inner()));
-  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(s->in()));
-  Int* fact = static_cast<Int*>(mutateAsVal(s->factor()));
+  IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
+  IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(s->in())->as<IterDomain>();
+  Val* fact = mutateAsVal(s->factor())->as<Val>();
 
   if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
-      in->sameAs(s->in()) && fact->sameAs(s->factor()))
+      in->sameAs(s->in()) && areEqualScalars(fact, s->factor())) {
     return s;
+  }
   FusionGuard::getCurFusion()->removeExpr(s);
   return new Split(ot, inr, in, fact);
 }
@@ -200,6 +210,19 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
     return rop;
 
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
+}
+
+Statement* OptOutMutator::mutate(GridReduction* gr) {
+  ReductionOp* reduction_op = mutate(gr->reduction_op())->as<ReductionOp>();
+  Allocate* reduction_buffer = mutate(gr->reduction_buffer())->as<Allocate>();
+  Allocate* sync_buffer = mutate(gr->sync_buffer())->as<Allocate>();
+
+  if (reduction_op->sameAs(gr->reduction_op()) &&
+      reduction_buffer->sameAs(gr->reduction_buffer()) &&
+      sync_buffer->sameAs(gr->sync_buffer()))
+    return gr;
+
+  return new GridReduction(reduction_op, reduction_buffer, sync_buffer);
 }
 
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {

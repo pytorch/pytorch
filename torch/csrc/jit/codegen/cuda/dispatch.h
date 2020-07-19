@@ -73,6 +73,7 @@ class UnaryOp;
 class BinaryOp;
 class TernaryOp;
 class ReductionOp;
+class GridReduction;
 class BroadcastOp;
 class ForLoop;
 class IfThenElse;
@@ -116,6 +117,7 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const BinaryOp*) {}
   virtual void handle(const TernaryOp*) {}
   virtual void handle(const ReductionOp*) {}
+  virtual void handle(const GridReduction*) {}
   virtual void handle(const BroadcastOp*) {}
   virtual void handle(const ForLoop*) {}
   virtual void handle(const IfThenElse*) {}
@@ -156,6 +158,7 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(BinaryOp*) {}
   virtual void handle(TernaryOp*) {}
   virtual void handle(ReductionOp*) {}
+  virtual void handle(GridReduction*) {}
   virtual void handle(BroadcastOp*) {}
   virtual void handle(ForLoop*) {}
   virtual void handle(IfThenElse*) {}
@@ -225,6 +228,9 @@ class TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
+  }
+  virtual void handle(const GridReduction*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GridReduction.");
   }
   virtual void handle(const BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
@@ -304,6 +310,9 @@ class TORCH_CUDA_API OptInDispatch {
   virtual void handle(ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
+  virtual void handle(GridReduction*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GridReduction.");
+  }
   virtual void handle(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
@@ -375,6 +384,7 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(BinaryOp*);
   virtual Statement* mutate(TernaryOp*);
   virtual Statement* mutate(ReductionOp*);
+  virtual Statement* mutate(GridReduction*);
   virtual Statement* mutate(BroadcastOp*);
   virtual Statement* mutate(ForLoop*);
   virtual Statement* mutate(IfThenElse*);
@@ -451,6 +461,9 @@ class TORCH_CUDA_API OptInMutator {
   }
   virtual Statement* mutate(ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
+  }
+  virtual Statement* mutate(GridReduction*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GridReduction.");
   }
   virtual Statement* mutate(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");

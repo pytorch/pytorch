@@ -11,8 +11,7 @@ namespace fuser {
 namespace cuda {
 
 at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(
-    const at::ArrayRef<c10::IValue> inputs,
-    const std::vector<int64_t>& broadcasted_shape) {
+    const at::ArrayRef<c10::IValue> inputs) {
   for (auto& cuda_kernel : kernels_) {
     // bound input sizes
     Fusion* fusion = cuda_kernel.fusion();
@@ -20,7 +19,7 @@ at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(
     EvaluationContext eval_context(fusion);
     for (int i = 0; i < (int)inputs.size(); i++) {
       if (inputs[i].isTensor()) {
-        ExtractSizeStride ess(inputs[i].toTensor(), broadcasted_shape);
+        ExtractSizeStride ess(inputs[i].toTensor());
         const int nDims = ess.sizes.size();
         TensorView* tv = fusion->inputs()[i]->as<TensorView>();
         for (int j = 0; j < nDims; j++) {

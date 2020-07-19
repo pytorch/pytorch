@@ -1,13 +1,12 @@
 #include <ATen/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/ArrayRef.h>
 
+#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -34,77 +33,6 @@ const at::cuda::NVRTC& nvrtc() {
 int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
-
-struct KernelArgumentHolder {
- private:
-  std::vector<ArgAbstract*> arguments;
-  std::vector<void*> void_ptrs;
-  bool changed = true;
-
- public:
-  virtual ~KernelArgumentHolder() {
-    for (auto arg : arguments)
-      delete arg;
-  }
-
-  // Push a tensor to the arguments
-  void push(
-      const at::Tensor& val,
-      c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
-    changed = true;
-    ExtractSizeStride ess(val, std::move(broadcasted_size));
-    int nDims = ess.sizes.size();
-
-    c10::ScalarType dtype = val.scalar_type();
-    TensorArgAbstract* tensor_arg = getTensorArg(dtype, nDims);
-    tensor_arg->setPointer(val.data_ptr());
-    for (int i = 0; i < nDims; i++) {
-      tensor_arg->setSize(i, ess.sizes[i]);
-      tensor_arg->setStride(i, ess.strides[i]);
-    }
-    arguments.push_back(tensor_arg);
-  }
-
-  // Push a scalar or integer to the arguments
-  void push(const IValue& val) {
-    changed = true;
-    TORCH_INTERNAL_ASSERT(
-        val.isScalar(),
-        "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
-        val);
-    switch (val.toScalar().type()) {
-      case (c10::ScalarType::Double):
-        arguments.push_back(new FloatArg((float)val.toDouble()));
-        return;
-      case (c10::ScalarType::Long):
-        arguments.push_back(new IntArg((int)val.toInt()));
-        return;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false,
-            " Tried to create argument to send to a fused kernel, but got an unexpected type.");
-    }
-    TORCH_INTERNAL_ASSERT(
-        false,
-        " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
-  }
-
-  void push(const uint64_t& val) {
-    arguments.push_back(new ULongArg(val));
-  }
-
-  // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
-  // in the buffer
-  void** getBuffer() {
-    if (changed) {
-      void_ptrs = std::vector<void*>(arguments.size(), nullptr);
-      for (decltype(arguments.size()) i{0}; i < arguments.size(); i++)
-        void_ptrs[i] = static_cast<void*>(arguments[i]->arg());
-      changed = false;
-    }
-    return void_ptrs.data();
-  }
-};
 
 std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
   std::stringstream str_stream;

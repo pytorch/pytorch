@@ -31,12 +31,26 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
           aten_opt_type_map(tensor_type->scalarType()),
           false) {
   std::vector<IterDomain*> sizes;
+
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
+
   for (decltype(tensor_type->dim().value()) i = 0;
        i < tensor_type->dim().value();
        i++) {
-    sizes.push_back(new IterDomain(new Int(0), new Int()));
+    if (tensor_type->sizes()[i].has_value() &&
+        tensor_type->sizes()[i].value() == 1) {
+      // If size is known to be 1, assuem it needs to be broadcasted.
+      sizes.push_back(new IterDomain(
+          new Int(0),
+          new Int(1),
+          ParallelType::Serial,
+          false,
+          false,
+          BroadcastType::WithStride));
+    } else {
+      sizes.push_back(new IterDomain(new Int(0), new Int()));
+    }
   }
   domain_ = new TensorDomain(sizes);
 
@@ -214,8 +228,11 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor) {
+TensorView* TensorView::split(int axis, Val* factor) {
+  // Only check things associated with axis, factor will be validated in
+  // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
+
   if (axis < 0)
     axis += domain()->nDims();
 
@@ -229,6 +246,11 @@ TensorView* TensorView::split(int axis, unsigned int factor) {
           getThisComputeAtAxis());
 
   domain()->split(axis, factor);
+  return this;
+}
+
+TensorView* TensorView::split(int axis, unsigned int factor) {
+  domain()->split(axis, new Int(factor));
   return this;
 }
 
@@ -343,7 +365,7 @@ TensorView* TensorView::cache_before() {
           root->parallel_method(),
           false,
           false,
-          true));
+          root->getBroadcastType()));
     } else if (!root->isBroadcast() && !root->isReduction()) {
       new_root_domain.push_back(new IterDomain(
           root->start(), root->extent(), root->parallel_method()));
@@ -421,7 +443,7 @@ TensorView* TensorView::cache_after() {
           root->parallel_method(),
           false,
           false,
-          true));
+          root->getBroadcastType()));
     } else if (!root->isBroadcast() && !root->isReduction()) {
       new_root_domain.push_back(new IterDomain(
           root->start(), root->extent(), root->parallel_method()));

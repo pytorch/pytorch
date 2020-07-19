@@ -13,8 +13,62 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Traverse through the fusion and print CUDA code associated with it
-std::vector<Expr*> GPULower::getLoweredExprs() {
+namespace {
+
+class GridReductionBuffers : OptOutDispatch {
+ public:
+  static std::vector<Allocate*> getGlobalAllocs(
+      const std::vector<Expr*>& exprs) {
+    GridReductionBuffers fgr;
+    for (auto expr : exprs) {
+      fgr.handle(expr);
+    }
+    return fgr.global_allocations_;
+  }
+
+  static std::vector<Allocate*> getSyncAllocs(const std::vector<Expr*>& exprs) {
+    GridReductionBuffers fgr;
+    for (auto expr : exprs) {
+      fgr.handle(expr);
+    }
+    return fgr.sync_allocations_;
+  }
+
+ private:
+  std::vector<Allocate*> global_allocations_;
+  std::vector<Allocate*> sync_allocations_;
+
+  GridReductionBuffers() = default;
+
+  void handle(Expr* expr) final {
+    OptOutDispatch::handle(expr);
+  }
+
+  void handle(ForLoop* fl) final {
+    for (auto expr : fl->body().exprs()) {
+      OptOutDispatch::handle(expr);
+    }
+  }
+
+  void handle(IfThenElse* ite) final {
+    for (auto expr : ite->body().exprs()) {
+      OptOutDispatch::handle(expr);
+    }
+
+    for (auto expr : ite->elseBody().exprs()) {
+      OptOutDispatch::handle(expr);
+    }
+  }
+
+  void handle(GridReduction* gr) final {
+    global_allocations_.push_back(gr->reduction_buffer());
+    sync_allocations_.push_back(gr->sync_buffer());
+  }
+};
+
+} // namespace
+
+void GPULower::lower() {
   FusionGuard fg(fusion_);
 
   // Validate and make some minor modifications in preparation to generate code.
@@ -27,21 +81,45 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
       fusion_, fusion_->exprs(true, false, true), preds);
 
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests, preds);
-
   auto indexed_loops = IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
+  lowered_exprs_ = indexed_loops;
 
-  return indexed_loops;
+  // Get allocations:
+  global_allocations_ = GridReductionBuffers::getGlobalAllocs(lowered_exprs_);
+  sync_allocations_ = GridReductionBuffers::getSyncAllocs(lowered_exprs_);
+}
+
+// Traverse through the fusion and print CUDA code associated with it
+std::vector<Expr*> GPULower::lowered_exprs() {
+  return lowered_exprs_;
 }
 
 std::ostream& GPULower::printKernel(
     std::ostream& os,
     const std::string& kernel_name) {
   FusionGuard fg(fusion_);
-  auto exprs = getLoweredExprs();
+  std::vector<Allocate*> allocs;
+  allocs.insert(
+      allocs.end(), global_allocations_.begin(), global_allocations_.end());
+  allocs.insert(
+      allocs.end(), sync_allocations_.begin(), sync_allocations_.end());
+
+  std::vector<Val*> global_tensors(allocs.size(), nullptr);
+  std::transform(
+      allocs.begin(),
+      allocs.end(),
+      global_tensors.begin(),
+      [](Allocate* alloc) { return alloc->buffer(); });
 
   IRPrinter irp(os);
-  irp.printKernel(exprs, kernel_name);
+  irp.printKernel(lowered_exprs_, kernel_name, global_tensors);
   return os;
+}
+
+std::string GPULower::getKernel(const std::string& kernel_name) {
+  std::stringstream ss;
+  printKernel(ss, kernel_name);
+  return ss.str();
 }
 
 } // namespace fuser

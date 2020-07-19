@@ -67,7 +67,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   }
 
   // Create the allocation node
-  Allocate* alloc = new Allocate(tv, size);
+  Allocate* alloc = new Allocate(tv, MemoryType::Local, size);
 
   // Place the allocation
   if (alloc_pos == 0) {
@@ -258,8 +258,16 @@ void LoopNestGenerator::initReduction(
  */
 void LoopNestGenerator::handle(Expr* expr) {
   if (!ir_utils::isTVOp(expr)) {
-    for (auto out : expr->outputs())
-      pushBack(new Allocate(out, new Int(1)));
+    for (auto out : expr->outputs()) {
+      TORCH_INTERNAL_ASSERT(
+          out->getValType().value() == ValType::Scalar,
+          "Unrecognized output type found in expr ",
+          expr,
+          " cannot lower ",
+          out->getValType().value());
+
+      pushBack(new Allocate(out, MemoryType::Local, new Int(1)));
+    }
     pushBack(expr);
     return;
   }

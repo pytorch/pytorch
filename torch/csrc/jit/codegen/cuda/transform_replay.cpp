@@ -48,7 +48,7 @@ class ReplaySelf : public ReplayTransformations {
         s->outer()->parallel_method(),
         s->outer()->isReduction(),
         s->outer()->isRFactorProduct(),
-        s->outer()->isBroadcast());
+        s->outer()->getBroadcastType());
 
     // inner IterDomain
     IterDomain* idi = new IterDomain(
@@ -57,7 +57,7 @@ class ReplaySelf : public ReplayTransformations {
         s->inner()->parallel_method(),
         s->inner()->isReduction(),
         s->inner()->isRFactorProduct(),
-        s->inner()->isBroadcast());
+        s->inner()->getBroadcastType());
 
     // Generate the split node
     new Split(ido, idi, mapped, s->factor());
@@ -106,7 +106,7 @@ class ReplaySelf : public ReplayTransformations {
         m->out()->parallel_method(),
         m->out()->isReduction(),
         m->out()->isRFactorProduct(),
-        m->out()->isBroadcast());
+        m->out()->getBroadcastType());
 
     new Merge(merged_id, id_outer_mapped, id_inner_mapped);
 

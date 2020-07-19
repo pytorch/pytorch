@@ -475,7 +475,7 @@ std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
 }
 
 Expr* Fusion::origin(Val* val) const {
-  assertInFusion(val, "Cannot dettect the origin of val, ");
+  assertInFusion(val, "Cannot detect the origin of val, ");
   auto it = origin_.find(val);
 
   if (it == origin_.end())

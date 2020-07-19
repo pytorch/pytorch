@@ -16,6 +16,11 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+// Returns true if both v1 and v2 are scalars, are the same type of scalars, and
+// dispatches to the inherited Val type's `->sameAs` call. e.g. if both vals are
+// `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
+bool areEqualScalars(Val* v1, Val* v2);
+
 /*
  * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const
  * TODO: Add testing of sameAs functions for these nodes
@@ -182,6 +187,45 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* const in_ = nullptr;
 };
 
+// Grid reduction operation, this node is used only after lowering a fusion to
+// explicitly mark a grid reduction and the buffer allocation needed to do it.
+// This node provides FusionExecutor the information it needs to allocate the
+// reduction and sync buffers.
+class TORCH_CUDA_API GridReduction : public Expr {
+ public:
+  ~GridReduction() = default;
+  GridReduction(ReductionOp* _reduction_op);
+  GridReduction(
+      ReductionOp* _reduction_op,
+      Allocate* _reduction_buffer,
+      Allocate* _sync_buffer);
+
+  GridReduction(const GridReduction* src, IrCloner* ir_cloner);
+
+  GridReduction(const GridReduction& other) = delete;
+  GridReduction& operator=(const GridReduction& other) = delete;
+
+  GridReduction(GridReduction&& other) = delete;
+  GridReduction& operator=(GridReduction&& other) = delete;
+
+  ReductionOp* reduction_op() const {
+    return reduction_op_;
+  }
+  Allocate* reduction_buffer() const {
+    return reduction_buffer_;
+  }
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  bool sameAs(const GridReduction* other) const;
+
+ private:
+  ReductionOp* reduction_op_ = nullptr;
+  Allocate* reduction_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
+};
+
 class TORCH_CUDA_API TernaryOp : public Expr {
  public:
   ~TernaryOp() = default;
@@ -241,13 +285,14 @@ class TORCH_CUDA_API IterDomain : public Val {
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false,
       bool _rfactor_domain = false,
-      bool _broadcast_domain = false);
+      BroadcastType _broadcast_domain = BroadcastType::Null);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const IterDomain* const other) const;
 
   // Returns a new IterDomain matching properties of this
+  // TODO: parallel_method->getParallelType
   IterDomain* clone() const {
     return new IterDomain(
         start(),
@@ -255,13 +300,14 @@ class TORCH_CUDA_API IterDomain : public Val {
         parallel_method(),
         isReduction(),
         isRFactorProduct(),
-        isBroadcast());
+        getBroadcastType());
   }
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
-  static std::pair<IterDomain*, IterDomain*> split(
-      IterDomain* in,
-      unsigned int factor);
+
+  // TODO: Make protected and friend TensorDomain so only it can call into this
+  // directly, users should not be able to use this call
+  static std::pair<IterDomain*, IterDomain*> split(IterDomain* in, Val* factor);
 
   bool isReduction() const {
     return is_reduction_domain_;
@@ -272,7 +318,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   }
 
   bool isBroadcast() const {
-    return is_broadcast_domain_;
+    return getBroadcastType() != BroadcastType::Null;
   }
 
   bool isParallelized() const {
@@ -303,14 +349,6 @@ class TORCH_CUDA_API IterDomain : public Val {
   void parallelize(ParallelType t) {
     parallel_method_ = t;
 
-    // Currently a limitation as we allocate shared memory as static (not based
-    // off a dynamic size.)
-    if (isReduction())
-      if (isThreadDim())
-        TORCH_CHECK(
-            extent()->isConstScalar(),
-            "Reductions can only be parallelized across dimensions of compile-time known constants.");
-
     TORCH_CHECK(
         t != ParallelType::Vectorize, "Vectorization not yet supported.");
 
@@ -327,6 +365,10 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   ParallelType parallel_method() const {
     return parallel_method_;
+  }
+
+  BroadcastType getBroadcastType() const {
+    return broadcast_type_;
   }
 
   Val* start() const {
@@ -349,7 +391,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_ = false;
   bool is_rfactor_domain_ = false;
-  bool is_broadcast_domain_ = false;
+  BroadcastType broadcast_type_ = BroadcastType::Null;
 };
 
 /*
@@ -437,8 +479,11 @@ class TORCH_CUDA_API TensorDomain : public Val {
   size_t posOf(IterDomain* id) const;
 
   // Split "axis" into 2 axes where the inner axes is size of "factor"
-  // and outer axis is size axis.size() / factor
-  void split(int axis, unsigned int factor);
+  // and outer axis is size axis.size() / factor. Allow factor to be symbolic
+  // value instead of constant.
+  // TODO: Make protected and friend TensorDomain so only it can call into this
+  // directly, users should not be able to use this call
+  void split(int axis_, Val* factor);
 
   // Merge axis_o and axis_i. axis_i is the fast changing dimension. Resulting
   // axis is by default placed at original position axis_o
@@ -482,7 +527,7 @@ class TORCH_CUDA_API Split : public Expr {
   Split(Split&& other) = delete;
   Split& operator=(Split&& other) = delete;
 
-  Split(IterDomain* _outer, IterDomain* _inner, IterDomain* _in, Int* _factor);
+  Split(IterDomain* _outer, IterDomain* _inner, IterDomain* _in, Val* _factor);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -495,7 +540,7 @@ class TORCH_CUDA_API Split : public Expr {
   IterDomain* in() const {
     return in_;
   }
-  Int* factor() const {
+  Val* factor() const {
     return factor_;
   }
   bool sameAs(const Split* const other) const;
@@ -504,7 +549,7 @@ class TORCH_CUDA_API Split : public Expr {
   IterDomain* const outer_ = nullptr;
   IterDomain* const inner_ = nullptr;
   IterDomain* const in_ = nullptr;
-  Int* const factor_ = nullptr;
+  Val* const factor_ = nullptr;
 };
 
 /*
@@ -718,15 +763,13 @@ class TORCH_CUDA_API TensorIndex : public Val {
   std::vector<Val*> indices_;
 };
 
-/*
- * Allocate is a lower level Node that describes a buffer of memory that
- * is required as an intermediate within a kernel.  The extent is the expression
- * of the size of the buffer that is generated from the TensorView that
- * describes the output of an operation.
- *
- * TODO: The components of Allocate like Type and Name could be separated from
- * the the assocated TensorView.  Perhaps that is more appropriate?
- */
+// Allocate is a lower level Node that describes a buffer of memory that
+// is required as an intermediate within a kernel.  The extent is the expression
+// of the size of the buffer that is generated from the TensorView that
+// describes the output of an operation.
+//
+// TODO: The components of Allocate like Type and Name could be separated from
+// the the assocated TensorView.  Perhaps that is more appropriate?
 class TORCH_CUDA_API Allocate : public Expr {
  public:
   ~Allocate() = default;
@@ -737,23 +780,35 @@ class TORCH_CUDA_API Allocate : public Expr {
   Allocate(Allocate&& other) = delete;
   Allocate& operator=(Allocate&& other) = delete;
 
-  Allocate(Val* _tv, Val* size);
+  explicit Allocate(
+      Val* _buffer,
+      MemoryType _memory_type = MemoryType::Local,
+      Val* _size = nullptr);
 
   Allocate(const Allocate* src, IrCloner* ir_cloner);
 
-  DataType buf_type() const;
-  Val* extent() const {
-    return extent_;
-  }
   Val* buffer() const {
     return buffer_;
+  }
+
+  MemoryType getMemoryType() const {
+    return memory_type_;
+  }
+
+  Val* size() const {
+    return size_;
+  }
+
+  DataType buffer_type() const {
+    return buffer_->getDataType().value();
   }
 
   bool sameAs(const Allocate* other) const;
 
  private:
   Val* buffer_ = nullptr;
-  Val* extent_ = nullptr;
+  MemoryType memory_type_ = MemoryType::Local;
+  Val* size_ = nullptr;
 };
 
 /*
@@ -786,6 +841,20 @@ class TORCH_CUDA_API NamedScalar : public Val {
   bool sameAs(const NamedScalar* const other) const {
     return other->name().compare(name()) == 0;
   }
+
+  // Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
+  static NamedScalar* getParallelDim(ParallelType p_type);
+
+  // Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
+  static NamedScalar* getParallelIndex(ParallelType p_type);
+
+  // Return the parallel type of this NamedScalar if it is an extent of a
+  // parallel dimension
+  c10::optional<ParallelType> getParallelDim() const;
+
+  // Return the parallel type of this NamedScalar if it is an index of a
+  // parallel dimension
+  c10::optional<ParallelType> getParallelIndex() const;
 
  private:
   std::string name_;

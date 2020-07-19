@@ -8,8 +8,10 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
+#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <unordered_map>
 
 namespace torch {
@@ -70,17 +72,15 @@ class CudaFusionManager {
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs,
-      const std::vector<at::Tensor>& outputs,
-      const std::vector<int64_t>& broadcasted_shape) {
+      const std::vector<at::Tensor>& outputs) {
     std::lock_guard<std::mutex> guard(mutex_);
     TORCH_CHECK(
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
-    if (auto cuda_kernel_opt =
-            kernel_cache_[kernel_id].getKernelPtr(inputs, broadcasted_shape)) {
+    if (auto cuda_kernel_opt = kernel_cache_[kernel_id].getKernelPtr(inputs)) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel_opt, inputs, outputs, broadcasted_shape);
+      runKernel(*cuda_kernel_opt, inputs, outputs);
     } else {
       // TODO: this should somehow be done after kernel compilation.
       //       we will want compileKernel to return a heuristic
@@ -113,7 +113,7 @@ class CudaFusionManager {
       // NVRTC compile kernel
       compileKernel(cuda_kernel);
 
-      runKernel(cuda_kernel, inputs, outputs, broadcasted_shape);
+      runKernel(cuda_kernel, inputs, outputs);
     }
   }
 
@@ -168,24 +168,30 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-    // shape inference in graph
+    // Only needed if we are doing codegen
+    // if no shape information available, we feed current shape into the kernel;
+    if (!IsNewExecutorEnabled()) {
+      EraseShapeInformation(graph);
+      for (size_t i = 0; i < nInputs; i++) {
+        graph->inputs()[i]->setType(inputs[i].type());
+      }
+      ShapeTypePropagate(graph);
+    }
+    /*
+    // TODO: Delete the shape inference here once we switch to
+    //       ExpressionEvaluator to allocate outputs
+    // shape inference in graph to allocate outputs
     // update shape information per the new inputs;
-    EraseShapeInformation(graph);
+    EraseShapeInformation(shape_inf_graph);
     for (size_t i = 0; i < nInputs; i++) {
-      graph->inputs()[i]->setType(inputs[i].type());
+      shape_inf_graph->inputs()[i]->setType(inputs[i].type());
     }
     // shape inference
-    ShapeTypePropagate(graph);
-
-    // TODO: temporary WAR that allows us to handle fusion with uniform output
-    // shape and consistent broadcast scheme. The difinition is loose and the
-    // implementation is risky. We'll do this properly when we integrate proper
-    // broadcast support.
-    std::vector<int64_t> broadcasted_shape;
+    ShapeTypePropagate(shape_inf_graph);
 
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
-    for (const auto* output : graph->outputs()) {
+    for (const auto* output : shape_inf_graph->outputs()) {
       const auto type = output->type()->expect<TensorType>();
       // Expect output to be tensor;
       TORCH_CHECK(
@@ -207,32 +213,16 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
       const auto tensor = at::empty_strided(sizes, strides, options);
       outputs.push_back(tensor);
-
-      // TODO: unsafe broadcast assumption. We assume all output from fusion has
-      //       identical size when broadcasting.
-      if (broadcasted_shape.empty()) {
-        if (!hasReductionNode(graph->block())) {
-          broadcasted_shape = sizes;
-        } else if (isReductionNode(output->node())) {
-          auto i_type =
-              output->node()->inputs()[0]->type()->expect<TensorType>();
-          TORCH_CHECK(
-              i_type && i_type->sizes().isComplete(),
-              "Complete TensorType for output is expected.");
-          broadcasted_shape = extractSizes(i_type);
-        } else {
-          // TODO: this assert is not fool proof. We could have ignored
-          // pre-reduction tensor marked as output after we first encountered
-          // reduction output tensor.
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
-        }
-      }
     }
-
     CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs, broadcasted_shape);
+        kernel_id, graph, inputs, outputs);
+    */
+    FusionExecutor executor;
+    auto fusion = parseJitIR(graph);
+    scheduleFusion(fusion.get(), inputs);
+    executor.compileFusion(fusion.get());
+    auto outputs = executor.runFusion(inputs);
+
     drop(stack, inputs.size());
     stack.insert(
         stack.end(),

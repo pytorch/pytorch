@@ -65,6 +65,10 @@ class ScalarCheck : OptInDispatch {
 
 } // namespace
 
+bool areEqualScalars(Val* v1, Val* v2) {
+  return ScalarCheck::sameAs(v1, v2);
+}
+
 Bool::Bool(const Bool* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
@@ -286,10 +290,12 @@ std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
       out_val->getValType() == ValType::TensorView ||
           out_val->getValType() == ValType::TensorIndex,
       "Output of reduction must be TensorView or TensorIndex");
+
   // out is a TensorIndex after lowering
   if (out_val->getValType() == ValType::TensorIndex) {
     out_val = static_cast<const TensorIndex*>(out_val)->view();
   }
+
   auto vec_domain = out_val->as<TensorView>()->domain()->domain();
   vec_domain.erase(
       std::remove_if(
@@ -311,25 +317,51 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
   return parallel_domains;
 }
 
+GridReduction::GridReduction(ReductionOp* _reduction_op)
+    : Expr(ExprType::GridReduction), reduction_op_(_reduction_op) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+
+GridReduction::GridReduction(
+    ReductionOp* _reduction_op,
+    Allocate* _reduction_buffer,
+    Allocate* _sync_buffer)
+    : Expr(ExprType::GridReduction),
+      reduction_op_(_reduction_op),
+      reduction_buffer_(_reduction_buffer),
+      sync_buffer_(_sync_buffer) {}
+
+GridReduction::GridReduction(const GridReduction* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_(ir_cloner->clone(src->reduction_op_)),
+      reduction_buffer_(ir_cloner->clone(src->reduction_buffer_)),
+      sync_buffer_(ir_cloner->clone(src->sync_buffer_)) {}
+
+bool GridReduction::sameAs(const GridReduction* other) const {
+  return reduction_op_->sameAs(other->reduction_op()) &&
+      reduction_buffer_->sameAs(other->reduction_buffer()) &&
+      sync_buffer_->sameAs(other->sync_buffer());
+}
+
 IterDomain::IterDomain(
     Val* _start,
     Val* _extent,
     ParallelType _parallel_method,
     bool _reduction_domain,
     bool _rfactor_domain,
-    bool _broadcast_domain)
+    BroadcastType _broadcast_type)
     : Val(ValType::IterDomain, DataType::Int, false),
       start_(_start),
       extent_(_extent),
       parallel_method_(_parallel_method),
       is_reduction_domain_(_reduction_domain),
       is_rfactor_domain_(_rfactor_domain),
-      is_broadcast_domain_(_broadcast_domain) {
+      broadcast_type_(_broadcast_type) {
   TORCH_CHECK(
-      !(is_reduction_domain_ && is_broadcast_domain_),
+      !(isReduction() && isBroadcast()),
       "IterDomain cannot be both a broadcast and reduction domain.");
   TORCH_CHECK(
-      !(is_rfactor_domain_ && is_broadcast_domain_),
+      !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
 
   TORCH_INTERNAL_ASSERT(
@@ -352,7 +384,7 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       parallel_method_(src->parallel_method_),
       is_reduction_domain_(src->is_reduction_domain_),
       is_rfactor_domain_(src->is_rfactor_domain_),
-      is_broadcast_domain_(src->is_broadcast_domain_) {}
+      broadcast_type_(src->broadcast_type_) {}
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
   if (other == this)
@@ -378,13 +410,22 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       "Merging IterDomains requires that their parallel types match.");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
+  BroadcastType bcast_type = BroadcastType::Null;
+  if (outer->isBroadcast() && inner->isBroadcast()) {
+    if (outer->getBroadcastType() == BroadcastType::WithStride ||
+        inner->getBroadcastType() == BroadcastType::WithStride) {
+      bcast_type = BroadcastType::WithStride;
+    } else {
+      bcast_type = BroadcastType::WithoutStride;
+    }
+  }
   IterDomain* merged_id = new IterDomain(
       new Int(0),
       static_cast<Int*>(merged_id_size),
       outer->parallel_method(),
       outer->isReduction(),
       outer->isRFactorProduct() || inner->isRFactorProduct(),
-      outer->isBroadcast() && inner->isBroadcast());
+      bcast_type);
 
   new Merge(merged_id, outer, inner);
 
@@ -393,7 +434,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
 
 std::pair<IterDomain*, IterDomain*> IterDomain::split(
     IterDomain* in,
-    unsigned int factor) {
+    Val* factor) {
   TORCH_CHECK(
       in->start()->isZeroInt(),
       "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
@@ -404,9 +445,24 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         "Splitting an axis of non-Serial iteration is not supported at this time."
         " Parallelization strategy must be set after calling split.");
 
-  Int* fact = new Int(factor);
+  TORCH_CHECK(factor->isAnInt(), "Cannot split by non-integer value ", factor);
+
+  if (factor->getValType() == ValType::Scalar) {
+    TORCH_CHECK(
+        factor->isConstScalar() ||
+            FusionGuard::getCurFusion()->hasInput(factor),
+        factor,
+        " is not a constant nor an input. It must be one or the other to be used in a split.",
+        " If you want a symbolic split based on a thread dimension please use IterDomain::split(IterDomain*, ParallelType);");
+  } else if (factor->getValType() == ValType::NamedScalar) {
+    TORCH_CHECK(
+        factor->as<NamedScalar>()->getParallelDim() != c10::nullopt,
+        "Splitting a dimension by a named scalar is only supported on block or grid dimensions but received ",
+        factor);
+  }
+
   // outer loop size
-  Val* vo = ceilDiv(in->extent(), fact);
+  Val* vo = ceilDiv(in->extent(), factor);
 
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
@@ -415,17 +471,17 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->parallel_method(),
       in->isReduction(),
       in->isRFactorProduct(),
-      in->isBroadcast());
+      in->getBroadcastType());
 
   // inner loop IterDomain
   IterDomain* idi = new IterDomain(
       new Int(0),
-      fact,
+      factor,
       in->parallel_method(),
       in->isReduction(),
       in->isRFactorProduct(),
-      in->isBroadcast());
-  new Split(ido, idi, in, fact);
+      in->getBroadcastType());
+  new Split(ido, idi, in, factor);
   return {ido, idi};
 }
 
@@ -435,8 +491,7 @@ Val* IterDomain::extent() const {
       if (static_cast<Int*>(extent_)->isConst())
         return extent_;
 
-    std::string parallel_dim = stringifyThreadSize(parallel_method_);
-    return new NamedScalar(parallel_dim, DataType::Int);
+    return NamedScalar::getParallelDim(parallel_method());
   }
   return extent_;
 }
@@ -605,9 +660,7 @@ size_t TensorDomain::posOf(IterDomain* id) const {
   TORCH_CHECK(false, "Provided id is not part of this domain.");
 }
 
-// Split "axis" into 2 axes where the inner axes is size of "factor"
-// and outer axis is size axis.extent() / factor
-void TensorDomain::split(int axis_, unsigned int factor) {
+void TensorDomain::split(int axis_, Val* factor) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim domain");
   if (axis_ < 0)
     axis_ += nDims();
@@ -875,12 +928,15 @@ Split::Split(
     IterDomain* _outer,
     IterDomain* _inner,
     IterDomain* _in,
-    Int* _factor)
+    Val* _factor)
     : Expr(ExprType::Split),
       outer_{_outer},
       inner_{_inner},
       in_{_in},
       factor_{_factor} {
+  TORCH_INTERNAL_ASSERT(
+      factor_->isAnInt(),
+      "Attempted to create a Split node with a non-integer factor.");
   addOutput(_outer);
   addOutput(_inner);
   addInput(_in);
@@ -1012,37 +1068,60 @@ Val* TensorIndex::index(int i) const {
   return indices_[i];
 }
 
-Allocate::Allocate(Val* _val, Val* _size)
-    : Expr(ExprType::Allocate), buffer_(_val), extent_{_size} {
-  if (!_size->isAnInt() || !_size->isConstScalar()) {
-    std::stringstream flat_size;
-    IRPrinter irp(flat_size);
-    irp.print_inline(_size);
+Allocate::Allocate(Val* _buffer, MemoryType _memory_type, Val* _size)
+    : Expr(ExprType::Allocate),
+      buffer_(_buffer),
+      memory_type_(_memory_type),
+      size_(_size) {
+  if (size_ != nullptr) {
     TORCH_INTERNAL_ASSERT(
-        false,
-        "Allocations must be based on constant integers but tried to alloc ",
-        _val,
-        " with size ",
-        flat_size.str(),
-        ".");
+        size_->isOneInt() ||
+            buffer_->getValType().value() == ValType::TensorView,
+        "Cannot allocate a non-TensorView buffer with a size != 1, received buffer: ",
+        buffer_);
+  } else {
+    if (buffer_->getValType().value() == ValType::TensorView) {
+      auto tv = buffer_->as<TensorView>();
+      size_ = tv->nDims() == 0 ? new Int(1) : tv->axis(0)->extent();
+      for (size_t i = 1; i < tv->nDims(); i++) {
+        size_ = mul(size_, tv->axis(i)->extent());
+      }
+
+      if ((memory_type_ == MemoryType::Local ||
+           memory_type_ == MemoryType::Shared)) {
+        if (!size_->isConstScalar()) {
+          std::stringstream flat_size;
+          IRPrinter irp(flat_size);
+          irp.print_inline(size_);
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Allocations must be based on constant integers for the memory type ",
+              memory_type_,
+              " but tried to alloc ",
+              buffer_,
+              " with size ",
+              flat_size.str(),
+              ".");
+        }
+      }
+    }
   }
-  addInput(_size);
+  addInput(size_);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       buffer_(ir_cloner->clone(src->buffer_)),
-      extent_(ir_cloner->clone(src->extent_)) {}
-
-DataType Allocate::buf_type() const {
-  return buffer_->getDataType().value();
-}
+      memory_type_(src->memory_type_),
+      size_(ir_cloner->clone(src->size_)) {}
 
 bool Allocate::sameAs(const Allocate* other) const {
   if (!this->buffer_->sameAs(other->buffer()))
     return false;
-  if (!this->extent()->sameAs(other->extent()))
+  if (!this->size()->sameAs(other->size()))
+    return false;
+  if (this->getMemoryType() != other->getMemoryType())
     return false;
   if (this->type() != other->type())
     return false;
@@ -1052,6 +1131,50 @@ bool Allocate::sameAs(const Allocate* other) const {
 
 NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), name_(src->name_) {}
+
+NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
+  std::string parallel_dim = stringifyThreadSize(p_type);
+  return new NamedScalar(parallel_dim, DataType::Int);
+}
+
+NamedScalar* NamedScalar::getParallelIndex(ParallelType p_type) {
+  std::string parallel_ind = stringifyThread(p_type);
+  return new NamedScalar(parallel_ind, DataType::Int);
+}
+
+c10::optional<ParallelType> NamedScalar::getParallelDim() const {
+  if (stringifyThreadSize(ParallelType::TIDx).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDx);
+  } else if (stringifyThreadSize(ParallelType::TIDy).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDy);
+  } else if (stringifyThreadSize(ParallelType::TIDz).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDz);
+  } else if (stringifyThreadSize(ParallelType::BIDx).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDx);
+  } else if (stringifyThreadSize(ParallelType::BIDy).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDy);
+  } else if (stringifyThreadSize(ParallelType::BIDz).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDz);
+  }
+  return c10::nullopt;
+}
+
+c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
+  if (stringifyThread(ParallelType::TIDx).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDx);
+  } else if (stringifyThread(ParallelType::TIDy).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDy);
+  } else if (stringifyThread(ParallelType::TIDz).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::TIDz);
+  } else if (stringifyThread(ParallelType::BIDx).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDx);
+  } else if (stringifyThread(ParallelType::BIDy).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDy);
+  } else if (stringifyThread(ParallelType::BIDz).compare(name()) == 0) {
+    return c10::optional<ParallelType>(ParallelType::BIDz);
+  }
+  return c10::nullopt;
+}
 
 } // namespace fuser
 } // namespace jit

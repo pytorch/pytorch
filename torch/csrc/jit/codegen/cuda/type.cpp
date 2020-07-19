@@ -40,7 +40,7 @@ static const char* data_type2string(DataType t) {
     case DataType::Half:
       return "__half";
     case DataType::Int:
-      return "size_t";
+      return "int64_t";
     case DataType::Null:
       return "nullptr";
     default:
@@ -81,6 +81,8 @@ static const char* expr_type2string(ExprType t) {
       return "TernaryOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
+    case ExprType::GridReduction:
+      return "GridReduction";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
     case ExprType::ForLoop:
@@ -331,21 +333,18 @@ static const char* memory_type2string(MemoryType t) {
   return nullptr;
 }
 
-static DataType at_type2data_type(at::ScalarType t) {
+static const char* broadcast_type2string(BroadcastType t) {
   switch (t) {
-    case at::ScalarType::Bool:
-      return DataType::Bool;
-    case at::ScalarType::Float:
-      return DataType::Float;
-    case at::ScalarType::Half:
-      return DataType::Half;
-    case at::ScalarType::Int:
-      return DataType::Int;
+    case BroadcastType::Null:
+      return "";
+    case BroadcastType::WithStride:
+      return "sb";
+    case BroadcastType::WithoutStride:
+      return "b";
     default:
-      break;
+      TORCH_INTERNAL_ASSERT(false, "No string found for Broadcast type.");
+      return nullptr;
   }
-  TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
-  return DataType::Null;
 }
 
 static const char* thread_size2string(ParallelType t) {
@@ -402,7 +401,36 @@ bool is_logical_op(const BinaryOpType& bot) {
 }
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
-  return at_type2data_type(scalar_type);
+  switch (scalar_type) {
+    case at::ScalarType::Bool:
+      return DataType::Bool;
+    case at::ScalarType::Float:
+      return DataType::Float;
+    case at::ScalarType::Half:
+      return DataType::Half;
+    case at::ScalarType::Long:
+      return DataType::Int;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+      return DataType::Null;
+  }
+}
+
+at::ScalarType data_type_to_aten(const DataType& data_type) {
+  switch (data_type) {
+    case DataType::Bool:
+      return at::ScalarType::Bool;
+    case DataType::Float:
+      return at::ScalarType::Float;
+    case DataType::Half:
+      return at::ScalarType::Half;
+    case DataType::Int:
+      return at::ScalarType::Long;
+    default:
+      break;
+  }
+  TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+  return at::ScalarType::Undefined;
 }
 
 std::ostream& operator<<(std::ostream& out, const ValType vtype) {
@@ -437,7 +465,14 @@ std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
 }
 
-c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
+TORCH_CUDA_API std::ostream& operator<<(
+    std::ostream& out,
+    const BroadcastType bt) {
+  return out << broadcast_type2string(bt);
+}
+
+TORCH_CUDA_API c10::optional<std::string> inline_op_str(
+    const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;

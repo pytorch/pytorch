@@ -470,6 +470,15 @@ void IrGraphGenerator::handle(const ReductionOp* op) {
   addArc(op, op->out());
 }
 
+void IrGraphGenerator::handle(const GridReduction* op) {
+  printExpr(op, "Grid Reduction");
+
+  // inputs & outputs
+  addArc(op, op->reduction_op());
+  addArc(op->reduction_buffer(), op);
+  addArc(op->sync_buffer(), op);
+}
+
 void IrGraphGenerator::handle(const ForLoop* for_loop) {
   printExpr(for_loop, "ForLoop");
   addArc(for_loop->index(), for_loop);
@@ -488,8 +497,11 @@ void IrGraphGenerator::handle(const IfThenElse* if_then_else) {
 }
 
 void IrGraphGenerator::handle(const Allocate* allocate) {
-  printExpr(allocate, "Allocate");
-  addArc(allocate->extent(), allocate);
+  std::stringstream msg;
+  msg << "Allocate( memory type = " << allocate->getMemoryType() << ")";
+
+  printExpr(allocate, msg.str());
+  addArc(allocate->size(), allocate);
   addArc(allocate->buffer(), allocate);
 }
 

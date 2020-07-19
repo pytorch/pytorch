@@ -180,7 +180,8 @@ namespace jit {
   _(GPU_FusionCacheBcast)                           \
   _(GPU_FusionCacheComplex)                         \
   _(GPU_FusionCacheMultiConsumer)                   \
-  _(GPU_FusionConstCheck)
+  _(GPU_FusionConstCheck)                           \
+  _(GPU_FusionSymbolicReduction)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

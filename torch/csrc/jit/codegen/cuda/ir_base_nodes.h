@@ -316,44 +316,45 @@ class TORCH_CUDA_API Scope {
   std::vector<Expr*> exprs_;
 };
 
-/*
- * A Expr represents a "computation." These are functions that takes inputs
- * and produce outputs, inputs and outputs all being Vals. There are
- * specializations of BinaryOp which takes 2 inputs and produces 1 output, and
- * UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
- * immutable. Conceptually, Exprs could always be manipulated using unique
- * pointers, and we could add this later. However, for now Exprs can be replaced
- * in a fusion, but they cannot be modified in place.
- *
- * The IR is static single assignment (SSA). Values can only be defined as an
- * output of an Expr once. If they are re-defined the original definition is
- * deleted from the program, as opposed to an ordered redefinition of the value
- * in the program.
- *
- * Note: Registering an Expr with a Fusion is actually 2 parts, one part is done
- * in the Expr constructor, so that should be called on anything that inherits
- * Expr. The issue with having registration in Expr's constructor, is that the
- * constructor of an Expr will set ouputs and inputs. This information is
- * important for registration with Fuser, so it can track the dependency chain.
- *
- * Adding an Expr:
- * Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
- * in their own header file. The following is what is currently needed for Expr
- * definitions:
- * 1) Definition inheriting from Expr.
- *     - Members must be private or protected
- *     - Accessor functions for members
- *     - Constructors need to register with the Fusion after inputs/outputs are
- *        defined
- *     - Implementation of bool sameAs(...)
- * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
- * 3) Default mutator function should be added to mutator.h/.cpp
- * 4) Printing functions should be added to ir_iostream.h/.cpp
- * 5) Lower case convenience functions should be added to arith.h/.cpp (If user
- *  facing)
- * 6) An enum value must be added to ExprType in type.h 7) A string
- *  entry must be added in expr_type_string_map
- */
+//  A Expr represents a "computation." These are functions that takes inputs
+//  and produce outputs, inputs and outputs all being Vals. There are
+//  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
+//  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
+//  immutable. Conceptually, Exprs could always be manipulated using unique
+//  pointers, and we could add this later. However, for now Exprs can be
+//  replaced in a fusion, but they cannot be modified in place.
+
+//  The IR is static single assignment (SSA). Values can only be defined as an
+//  output of an Expr once. If they are re-defined the original definition is
+//  deleted from the program, as opposed to an ordered redefinition of the value
+//  in the program.
+
+//  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
+//  done in the Expr constructor, so that should be called on anything that
+//  inherits Expr. The issue with having registration in Expr's constructor, is
+//  that the constructor of an Expr will set ouputs and inputs. This information
+//  is important for registration with Fuser, so it can track the dependency
+//  chain.
+
+//  Adding an Expr:
+//  Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
+//  in their own header file. The following is what is currently needed for Expr
+//  definitions:
+//  1) Definition inheriting from Expr.
+//      - Members must be private or protected
+//      - Accessor functions for members
+//      - Constructors need to register with the Fusion after inputs/outputs are
+//         defined
+//      - Implementation of bool sameAs(...)
+//  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//  3) Default mutator function should be added to mutator.h/.cpp
+//  4) Printing functions should be added to ir_iostream.h/.cpp
+//  5) Lower case convenience functions should be added to arith.h/.cpp (If user
+//   facing)
+//  6) An enum value must be added to ExprType in type.h
+//  7) A string entry must be added in expr_type_string_map
+//  8) Entry added to ir_graphviz .cpp/.h
+
 class TORCH_CUDA_API Expr : public Statement {
  public:
   Expr() = delete;

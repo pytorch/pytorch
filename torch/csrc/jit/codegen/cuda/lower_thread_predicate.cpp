@@ -11,7 +11,7 @@ namespace fuser {
 namespace {
 
 Val* threadPredicate(ParallelType pt) {
-  return eq(new NamedScalar(stringifyThread(pt), DataType::Int), new Int(0));
+  return eq(NamedScalar::getParallelIndex(pt), new Int(0));
 }
 
 Bool* getThreadPredicate(const ir_utils::ParallelTypeBitmap& bits) {

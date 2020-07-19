@@ -478,10 +478,6 @@ __device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
   }
 }
 
-__device__ unsigned atomic_inc(unsigned* sync_flag, unsigned max_val) {
-  return atomicInc(sync_flag, max_val - 1);
-}
-
 /** Reduces per-thread values across thread blocks.
 
 Function parameters:
@@ -528,7 +524,7 @@ template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK,
           typename T, typename Func>
 __device__ void gridReduce(T& out, T inp_val, Func reduction_op,
                            volatile T* work_buf,
-                           unsigned* sync_flags,
+                           Tensor<int64_t, 1> sync_flags,
                            T* shared_buf) {
   const auto seg_size =
       size_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
@@ -555,8 +551,8 @@ __device__ void gridReduce(T& out, T inp_val, Func reduction_op,
   __shared__ bool last_block;
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
     __threadfence();
-    auto old = atomic_inc(&sync_flags[seg_idx], seg_size);
-    last_block = old == seg_size - 1;
+    auto old = atomicAdd(  (unsigned long long*) &sync_flags[seg_idx], 1);
+    last_block = old + 1 == seg_size;
   }
   __syncthreads();
 

@@ -127,19 +127,23 @@ TensorIndex* Index::getGlobalProducerIndex(
   std::vector<Val*> p_inds;
   auto p_root = TensorDomain::noReductions(producer->getRootDomain());
   // Number of root dims that are broadcasted
-  size_t bcast_dims = 0;
+  size_t implicit_bcast_dims = 0;
   {
     auto c_root = consumer->getRootDomain();
     size_t it_c = 0, it_p = 0;
     while (it_c < c_root.size() && it_p < p_root.size()) {
       const bool is_bcast = p_root[it_p]->isBroadcast();
-      if (c_root[it_c]->isBroadcast() && !is_bcast) {
+      if (c_root[it_c]->isBroadcast() && !p_root[it_p]->isBroadcast()) {
         it_c++;
       } else {
-        if (!is_bcast) {
+        if (!p_root[it_p]->isBroadcast()) {
           p_inds.push_back(c_inds[it_c]);
         } else {
-          bcast_dims++;
+          if (p_root[it_p]->getBroadcastType() == BroadcastType::WithStride) {
+            p_inds.push_back(new Int(0));
+          } else {
+            implicit_bcast_dims++;
+          }
         }
         it_c++;
         it_p++;
@@ -147,7 +151,7 @@ TensorIndex* Index::getGlobalProducerIndex(
     }
   }
   TORCH_INTERNAL_ASSERT(
-      p_inds.size() == p_root.size() - bcast_dims,
+      p_inds.size() == p_root.size() - implicit_bcast_dims,
       "Dimensionality error in code generator while computing tensor indices.");
 
   std::vector<Val*> strided_inds;
@@ -263,16 +267,42 @@ TensorIndex* Index::getGlobalConsumerIndex(
           computed_inds.size() == root_dom.size(),
       "Dimensionality error in code generator while computing indexing.");
 
-  if (computed_inds.size() == root_dom.size())
+  if (computed_inds.size() == root_dom.size()) {
     for (size_t i = 0; i < root_dom.size(); i++) {
       // Do this backwards so erase offset will be right
       auto axis = root_dom.size() - i - 1;
-      if (root_dom[axis]->isReduction() || root_dom[i]->isBroadcast())
+      if (root_dom[axis]->isReduction())
         computed_inds.erase(computed_inds.begin() + axis);
     }
+  }
+
+  {
+    size_t root_i = 0, inds_i = 0;
+    while (root_i < root_dom.size() && inds_i < computed_inds.size()) {
+      if (root_dom[root_i]->isReduction()) {
+        root_i++;
+      } else {
+        if (root_dom[root_i]->getBroadcastType() ==
+            BroadcastType::WithoutStride) {
+          computed_inds.erase(computed_inds.begin() + inds_i);
+          root_i++;
+        } else {
+          if (root_dom[root_i]->getBroadcastType() ==
+              BroadcastType::WithStride) {
+            computed_inds[inds_i] = new Int(0);
+          }
+          root_i++;
+          inds_i++;
+        }
+      }
+    }
+  }
 
   std::vector<Val*> strided_inds;
   for (size_t i = 0; i < computed_inds.size(); i++) {
+    if (computed_inds[i]->isZeroInt()) {
+      continue;
+    }
     std::stringstream ss;
     ss << "T" << consumer->name() << ".stride[" << i << "]";
     strided_inds.push_back(

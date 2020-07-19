@@ -35,16 +35,13 @@ void ReplayTransformations::handle(Split* s) {
   }
 
   auto mapped = (*it).second;
-  TORCH_INTERNAL_ASSERT(
-      s->factor()->isConst(),
-      "Transform traversal does not support splitting on non-const values.");
   // Make sure this ID is a leaf ID (meaning it has no uses we generated)
   TORCH_INTERNAL_ASSERT(
       leaf_ids_.find(mapped) != leaf_ids_.end(),
       "Transform traversal failed, modified a node but it was not a leaf node.");
 
   // Replay the split onto mapped
-  auto outs = IterDomain::split(mapped, s->factor()->value().value());
+  auto outs = IterDomain::split(mapped, s->factor());
   // Remove mapped from the leaf IDs
   leaf_ids_.erase(mapped);
 
