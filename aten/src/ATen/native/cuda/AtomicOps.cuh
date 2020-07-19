@@ -13,6 +13,7 @@ struct AtomicAddIntegerImplNew;
 using add_op = std::integral_constant<int, 0>;
 using sub_op = std::integral_constant<int, 1>;
 using mul_op = std::integral_constant<int, 2>;
+using div_op = std::integral_constant<int, 3>;
 
 // Integer addition functions.
 template<typename T>
@@ -215,32 +216,73 @@ struct gpuAtomic<sub_op> {
 
 template <>
 struct gpuAtomic<mul_op> {
-  template <typename T>
-  inline __device__ void operator() (T * address, T val) {
+  inline __device__ void operator() (uint8_t * address, uint8_t val) {
+    
+  }
+
+  inline __device__ void operator() (int8_t * address, int8_t val) {
+    
+  }
+
+  inline __device__ void operator() (int16_t * address, int16_t val) {
+    
+  }
+
+  inline __device__ void operator() (int32_t * address, int32_t val) {
+    
+  }
+
+  inline __device__ void operator() (int64_t * address, int64_t val) {
+    
+  }
+
+  inline __device__ void operator() (at::Half * address, at::Half val) {
+    
+  }
+
+  inline __device__ void operator() (at::BFloat16 * address, at::BFloat16 val) {
     
   }
 
   inline __device__ void operator() (bool * address, bool val) {
     
   }
+    
+  inline __device__ void operator() (double * address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull;
+    unsigned long long int assumed;
+
+    do {
+      assumed = old;
+      old = atomicCAS(address_as_ull, assumed,
+                      __double_as_longlong(val *
+                                           __longlong_as_double(assumed)));
+
+      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+  }
+
+  inline __device__ void operator() (float * address, float val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull;
+    unsigned long long int assumed;
+
+    do {
+      assumed = old;
+      old = atomicCAS(address_as_ull, assumed,
+                      __float_as_int(val *
+                                     __int_as_float(assumed)));
+
+      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+  }
+
+  template <typename T>
+  inline __device__ void operator() (c10::complex<T> * address, c10::complex<T> val) {
+    operator()(&address->real_, val.real_);
+    operator()(&address->imag_, val.imag_);
+  }
 };
 
-}}}                             // namespace at::native::atomic_ops
-
-// template <>
-// struct gpuAtomic<add_op> {
-//   template <typename T>
-//   inline void operator() (T * address, T val) {
-    
-//   }
-// };
-
-// template <>
-// struct gpuAtomic<sub_op> {
-//   inline void operator() (uint8_t * address, uint8_t val) {
-
-//   }
-// };
-
-
-
+}}}                             // namespace at::native::atomic_op
