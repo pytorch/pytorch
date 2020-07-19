@@ -605,6 +605,10 @@ struct CAFFE2_API IValue final {
   OptionalArray<int64_t> toOptionalIntArray();
 
   /// @private [doxygen private]
+  /// Only for use in generated code.
+  OptionalArray<double> toOptionalDoubleArray();
+
+  /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
