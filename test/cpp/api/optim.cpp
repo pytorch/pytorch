@@ -422,7 +422,7 @@ TEST(OptimTest, ExternalVectorOfParameters) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   SGD optimizer(parameters, 1.0);
@@ -442,7 +442,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);

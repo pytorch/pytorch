@@ -9,11 +9,13 @@ namespace fuser {
 
 /* ITER VISITOR */
 
-std::vector<Statement*> IterVisitor::next(Statement* statement) {
+std::vector<Statement*> IterVisitor::next(
+    Statement* statement,
+    bool respect_compute_at) {
   if (statement->isVal())
     return next(static_cast<Val*>(statement));
   else if (statement->isExpr())
-    return next(static_cast<Expr*>(statement));
+    return next(static_cast<Expr*>(statement), respect_compute_at);
   else
     TORCH_INTERNAL_ASSERT(
         false, "IterVisitor could not detect type in next_dispatch.");
@@ -26,13 +28,44 @@ std::vector<Statement*> IterVisitor::next(Val* v) {
   return {};
 }
 
-std::vector<Statement*> IterVisitor::next(Expr* expr) {
+std::vector<Statement*> IterVisitor::next(Expr* expr, bool respect_compute_at) {
   FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-  return {expr->inputs().begin(), expr->inputs().end()};
+  std::vector<Statement*> next_stmts{expr->inputs().begin(),
+                                     expr->inputs().end()};
+  if (respect_compute_at) {
+    TORCH_INTERNAL_ASSERT(
+        expr->outputs().size() == 1,
+        "Expressions with multiple outputs are not supported");
+    if (expr->output(0)->getValType().value() == ValType::TensorView) {
+      auto out = expr->output(0)->as<const TensorView>();
+      // Move input TVs that are computed at this expression backward
+      // so that they are visited later. If multiple inputs are
+      // computed at, move TVs that are computed at an inner loop nest
+      // further backward.
+      std::stable_sort(
+          next_stmts.begin(),
+          next_stmts.end(),
+          [out](const Statement* stmt0, const Statement* stmt1) {
+            std::array<const Statement*, 2> inputs{stmt0, stmt1};
+            std::array<int, 2> compute_at_axes{-1, -1};
+            for (int i = 0; i < 2; ++i) {
+              if (inputs[i]->getValType().value() == ValType::TensorView) {
+                auto tv = inputs[i]->as<TensorView>();
+                if (tv->getComputeAtView() == out) {
+                  compute_at_axes[i] = tv->getRelativeComputeAtAxis();
+                }
+              }
+            }
+            return compute_at_axes[0] < compute_at_axes[1];
+          });
+    }
+  }
+  return next_stmts;
 }
 
-// Remove any stmt in stmts that is in visited
 namespace {
+
+// Remove any stmt in stmts that is in visited
 void remove_visited(
     std::vector<Statement*>& stmts,
     const std::unordered_set<Statement*>& visited) {
@@ -47,50 +80,52 @@ void remove_visited(
     to_erase.pop_back();
   }
 }
+
 } // namespace
 
 void IterVisitor::traverseFrom(
     Fusion* const fusion,
     const std::vector<Val*>& from,
-    bool traverseAllPaths) {
+    bool traverseAllPaths,
+    bool respectComputeAt) {
   FusionGuard fg(fusion);
   std::unordered_set<Statement*> visited;
   stmt_stack.clear();
   stmt_stack.emplace_back(from.rbegin(), from.rend());
+  // true when returning to a node after vistiting all its input
+  // nodes. Nodes are only visited when this is true.
+  bool all_inputs_visited = false;
 
   while (!stmt_stack.empty()) {
-    auto next_stmts = next(stmt_stack.back().back());
-
-    // Remove statements we already visited if we're not traversing all paths
-    if (!traverseAllPaths)
-      remove_visited(next_stmts, visited);
-
-    // Traverse down until we get to a leaf
-    while (!next_stmts.empty()) {
-      stmt_stack.emplace_back(next_stmts.rbegin(), next_stmts.rend());
-      next_stmts = next(stmt_stack.back().back());
-      // Remove statements we already visited if we're not traversing all paths
-      if (!traverseAllPaths)
-        remove_visited(next_stmts, visited);
-    }
-
-    // Traverse back up
-    // Mark visited
-    visited.emplace(stmt_stack.back().back());
-    // Handle
-    handle(stmt_stack.back().back());
-    // Remove
-    stmt_stack.back().pop_back();
-
-    while (!stmt_stack.empty() && stmt_stack.back().empty()) {
+    auto& current_inputs = stmt_stack.back();
+    // When current_inputs is empty, all the input nodes have been
+    // visited. Return to the output node by popping the stack. Record
+    // all inputs are visited.
+    if (current_inputs.empty()) {
       stmt_stack.pop_back();
-      if (!stmt_stack.empty()) {
-        // Mark visited
-        visited.emplace(stmt_stack.back().back());
-        // Handle
-        handle(stmt_stack.back().back());
-        // Remove
-        stmt_stack.back().pop_back();
+      all_inputs_visited = true;
+      continue;
+    }
+    const auto& stmt = current_inputs.back();
+    // Visit stmt when all_inputs_visited is true.
+    if (all_inputs_visited) {
+      // Mark visited
+      visited.insert(stmt);
+      // Handle
+      handle(stmt);
+      current_inputs.pop_back();
+      all_inputs_visited = false;
+    } else {
+      // Visit input nodes.
+      auto next_stmts = next(stmt, respectComputeAt);
+      if (!traverseAllPaths) {
+        remove_visited(next_stmts, visited);
+      }
+      if (next_stmts.empty()) {
+        all_inputs_visited = true;
+      } else {
+        stmt_stack.emplace_back(next_stmts.rbegin(), next_stmts.rend());
+        all_inputs_visited = false;
       }
     }
   }
@@ -100,7 +135,8 @@ void IterVisitor::traverse_(
     Fusion* const fusion,
     bool from_outputs_only,
     bool breadth_first,
-    bool traverse_all_paths) {
+    bool traverse_all_paths,
+    bool respect_compute_at) {
   FusionGuard fg(fusion);
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
@@ -109,7 +145,8 @@ void IterVisitor::traverse_(
     auto term_outs = IterVisitor::getTerminatingOutputs(fusion);
     std::vector<Val*> term_val_outs(term_outs.begin(), term_outs.end());
     if (!term_val_outs.empty())
-      traverseFrom(fusion, term_val_outs, traverse_all_paths);
+      traverseFrom(
+          fusion, term_val_outs, traverse_all_paths, respect_compute_at);
     return;
   }
 
@@ -120,28 +157,31 @@ void IterVisitor::traverse_(
       leaves.push_back(val);
 
   if (!leaves.empty())
-    traverseFrom(fusion, leaves, traverse_all_paths);
+    traverseFrom(fusion, leaves, traverse_all_paths, respect_compute_at);
 }
 
 void IterVisitor::traverse(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first) {
-  traverse_(fusion, from_outputs_only, breadth_first, false);
+    bool breadth_first,
+    bool respect_compute_at) {
+  traverse_(
+      fusion, from_outputs_only, breadth_first, false, respect_compute_at);
 }
 
 void IterVisitor::traverseAllPaths(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first) {
-  traverse_(fusion, from_outputs_only, breadth_first, true);
+    bool breadth_first,
+    bool respect_compute_at) {
+  traverse_(fusion, from_outputs_only, breadth_first, true, respect_compute_at);
 }
 
 namespace {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct Exprs : public IterVisitor {
+class Exprs : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
 
@@ -161,7 +201,7 @@ struct Exprs : public IterVisitor {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct Inputs : public IterVisitor {
+class Inputs : public IterVisitor {
  private:
   std::unordered_set<Val*> inputs;
 
@@ -179,6 +219,7 @@ struct Inputs : public IterVisitor {
     return inps.inputs;
   }
 };
+
 } // namespace
 
 std::unordered_set<Val*> IterVisitor::getTerminatingOutputs(
@@ -186,10 +227,12 @@ std::unordered_set<Val*> IterVisitor::getTerminatingOutputs(
   FusionGuard fg(fusion);
 
   std::unordered_set<Val*> used_vals;
-  for (auto expr : Exprs::getExprs(
-           fusion,
-           std::vector<Val*>(
-               fusion->outputs().begin(), fusion->outputs().end()))) {
+
+  const auto exprs = Exprs::getExprs(
+      fusion,
+      std::vector<Val*>(fusion->outputs().begin(), fusion->outputs().end()));
+
+  for (auto expr : exprs) {
     for (auto inp : expr->inputs())
       used_vals.emplace(inp);
   }
@@ -209,7 +252,7 @@ std::unordered_set<Val*> IterVisitor::getInputsTo(
 
 namespace {
 
-struct AllVals : public IterVisitor {
+class AllVals : public IterVisitor {
  private:
   std::unordered_set<Val*> vals;
 
@@ -342,8 +385,45 @@ void BackwardVisitor::traverseFrom(
 /* DEPENDENCY CHECKING */
 
 namespace {
+
+// Looks for and returns all values in between dependencies and vals, including
+// them.
+struct Dependencies : public IterVisitor {
+  std::unordered_set<Val*> dependencies_;
+  std::unordered_set<Val*> vals;
+
+  std::vector<Statement*> next(Val* v) override {
+    if (dependencies_.find(v) != dependencies_.end())
+      return std::vector<Statement*>();
+    return IterVisitor::next(v);
+  }
+
+  void handle(Val* val) override {
+    vals.emplace(val);
+  }
+
+  Dependencies(
+      std::unordered_set<Val*> _dependencies,
+      const std::vector<Val*>& of)
+      : dependencies_(std::move(_dependencies)) {
+    traverseFrom(of[0]->fusion(), of, false);
+  };
+
+ public:
+  static std::unordered_set<Val*> getAllVals(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of) {
+    if (of.empty())
+      return std::unordered_set<Val*>();
+
+    Dependencies deps(dependencies, of);
+    return deps.vals;
+  }
+};
+
 // Looks for and returns
-struct DependencyChains : public IterVisitor {
+class DependencyChains : public IterVisitor {
+ public:
   std::deque<std::deque<Val*>> dep_chains;
   bool is_dependency = false;
   std::unordered_set<Val*> dependencies_;
@@ -394,6 +474,7 @@ struct DependencyChains : public IterVisitor {
     return dp.dep_chains[0];
   }
 
+  // I don't think this is actually hooked up, but leaving for now.
   static std::deque<std::deque<Val*>> getDependencyChains(
       Val* dependency,
       Val* of) {
@@ -403,14 +484,14 @@ struct DependencyChains : public IterVisitor {
     return dp.dep_chains;
   }
 
-  static std::deque<std::deque<Val*>> getDependencyChainsTo(Val* dependency) {
+  static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency) {
     DependencyChains dp(dependency, true);
     if (dp.dep_chains.empty())
       return std::deque<std::deque<Val*>>();
     return dp.dep_chains;
   }
 
-  static std::deque<std::deque<Val*>> getDependencyChainsTo(
+  static std::deque<std::deque<Val*>> getAllUseChains(
       const std::unordered_set<Val*>& dependencies) {
     DependencyChains dp(dependencies, true);
     if (dp.dep_chains.empty())
@@ -437,9 +518,14 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChains(
   return DependencyChains::getDependencyChains(dependency, of);
 }
 
-std::deque<std::deque<Val*>> DependencyCheck::getAllDependencyChainsTo(
-    Val* dependency) {
-  return DependencyChains::getDependencyChainsTo(dependency);
+std::deque<std::deque<Val*>> DependencyCheck::getAllUseChains(Val* producer) {
+  return DependencyChains::getAllUseChains(producer);
+}
+
+std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
+    const std::unordered_set<Val*>& dependencies,
+    const std::vector<Val*>& of) {
+  return Dependencies::getAllVals(dependencies, of);
 }
 
 } // namespace fuser

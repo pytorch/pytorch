@@ -421,8 +421,14 @@ class ShapePropagator {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
       // its most constrained form.
-      if (stack[i].isTensor())
-        node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+      auto tensor_type = node->outputs()[i]->type()->cast<TensorType>();
+      if (stack[i].isTensor() && tensor_type) {
+        // gradient information isn't always available or part of represenative
+        // inputs, maintain original grad property
+        auto tensor_grad = tensor_type->requiresGrad();
+        node->outputs()[i]->setType(TensorType::create(stack[i].toTensor())
+                                        ->withRequiresGrad(tensor_grad));
+      }
     }
     return true;
   }
@@ -805,6 +811,7 @@ class ShapePropagator {
             "aten::neg(Tensor self) -> Tensor",
             "aten::t(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
+            "aten::logit(Tensor self, float? eps=None) -> Tensor",
             "aten::tanh(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
             "aten::asin(Tensor self) -> Tensor",
@@ -1958,6 +1965,8 @@ class ShapePropagator {
       broadcastBinary(node, tensor_types, 0, 1);
       return PropagateShapeOnNodeByRunningIt(node);
     } else if (
+        node->matches(
+            "aten::logit(Tensor self, float? eps = None) -> Tensor") ||
         node->matches("aten::neg(Tensor self) -> Tensor") ||
         node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
         node->matches("aten::tanh(Tensor self) -> Tensor")) {
