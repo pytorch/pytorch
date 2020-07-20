@@ -6,6 +6,7 @@ circular dependency problems
 
 import contextlib
 import collections
+import enum
 import inspect
 import weakref
 import warnings
@@ -724,7 +725,15 @@ def _qualified_name(obj):
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
-    name = obj.__name__
+    if getattr(obj, "__name__", None):
+        name = obj.__name__
+    # Enum classes do not have `__name__` attr, instead they have `name`.
+    elif isinstance(obj, enum.Enum):
+        name = obj.name
+    else:
+        raise RuntimeError("Could not get name of python class object")
+
+
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
 
