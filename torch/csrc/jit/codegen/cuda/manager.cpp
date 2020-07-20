@@ -75,21 +75,14 @@ class CudaFusionManager {
     return graph_cache_[repr];
   };
 
-  void runFusionNode(
+  std::vector<at::Tensor> runFusionNode(
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
-      const at::ArrayRef<IValue> inputs,
-      const std::vector<at::Tensor>& outputs) {
+      const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    if (kernel_cache_.find(kernel_id) != kernel_cache_.end()) {
-      // TODO: update launch config for specific sizes;
-      //       maybe we should store it in CudaKernel and compute it later
-
-      FusionExecutor* fe = kernel_cache_[kernel_id];
-      fe->runFusion(inputs, outputs);
-
-    } else {
+    FusionExecutor* fe;
+    if (kernel_cache_.find(kernel_id) == kernel_cache_.end()) {
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
@@ -98,17 +91,16 @@ class CudaFusionManager {
       // TODO: update the API to let `scheduleFusion` consume & return a fusion
       // magic scheduler updates fusion instance via transformation and setup
       // launch configurations;
-      Fusion fusion_copy = Fusion(*fusion);
-      scheduleFusion(&fusion_copy, inputs);
+      scheduleFusion(fusion.get(), inputs);
 
       CompileOptions options;
       options.device = getDevice(inputs);
 
-      auto fe = new FusionExecutor();
-      fe->compileFusion(fusion.get(), options);
-      kernel_cache_[kernel_id] = fe;
-      fe->runFusion(inputs, outputs);
+      kernel_cache_[kernel_id] = std::make_unique<FusionExecutor>();
+      kernel_cache_[kernel_id]->compileFusion(fusion.get(), options);
     }
+    fe = kernel_cache_[kernel_id].get();
+    return fe->runFusion(inputs);
   }
 
  private:
@@ -124,7 +116,7 @@ class CudaFusionManager {
   };
 
   std::unordered_map<std::string, int32_t> graph_cache_;
-  std::unordered_map<int64_t, FusionExecutor*> kernel_cache_;
+  std::unordered_map<int64_t, std::unique_ptr<FusionExecutor>> kernel_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -172,12 +164,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       ShapeTypePropagate(graph);
     }
 
-    FusionExecutor executor;
-    auto fusion = parseJitIR(graph);
-    scheduleFusion(fusion.get(), inputs);
-
-    executor.compileFusion(fusion.get());
-    auto outputs = executor.runFusion(inputs);
+    auto outputs =
+        CudaFusionManager::getManager().runFusionNode(kernel_id, graph, inputs);
 
     drop(stack, inputs.size());
     stack.insert(
