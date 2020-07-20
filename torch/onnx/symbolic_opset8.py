@@ -39,14 +39,14 @@ import warnings
 #   Upsample: moved scales from attribute to input.
 #   Scan
 
-black_listed_operators = [
+blocked_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
     "index_fill", "index_copy"
 ]
 
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+for blocked_op in blocked_operators:
+    vars()[blocked_op] = _black_list_in_opset(blocked_op)
 
 
 def _interpolate(name, dim, interpolate_mode):
