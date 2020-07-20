@@ -851,6 +851,14 @@ void initJITBindings(PyObject* module) {
     return graph;
   });
   m.def("parse_schema", parseSchema);
+  m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
+    std::ostringstream s;
+    auto type = unifyTypeList(types, s);
+    if (!type) {
+      throw std::runtime_error(s.str());
+    }
+    return type.value();
+  });
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
