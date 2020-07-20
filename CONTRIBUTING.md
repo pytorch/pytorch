@@ -238,7 +238,7 @@ To build the documentation:
 
 1. Build and install PyTorch
 
-2. Install the prequesities
+2. Install the prerequisites
 
 ```bash
 cd docs
