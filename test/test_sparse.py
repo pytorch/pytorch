@@ -1746,6 +1746,16 @@ class TestSparse(TestCase):
         x = self.sparse_tensor(i, v, torch.Size([3, 0]), device=1)
         check_device(x, 1)
 
+        i = self.index_tensor([[2]]).cuda(1)
+        v = self.value_tensor([5]).cuda(1)
+        x = torch.sparse_coo_tensor(i, v, torch.Size([3]))
+        check_device(x, 1)
+
+        i = self.index_tensor([[2]]).cuda(1)
+        v = self.value_empty(1, 0).cuda(1)
+        x = torch.sparse_coo_tensor(i, v, torch.Size([3, 0]))
+        check_device(x, 1)
+
         x = self.sparse_empty(3, device=1)
         check_device(x, 1)
 
@@ -1978,6 +1988,12 @@ class TestSparse(TestCase):
             for values_device in ['cuda', 'cpu']:
                 for sparse_device in ['cuda', 'cpu', None]:
                     for test_empty_tensor in [True, False]:
+                        if sparse_device is None and indices_device != values_device:
+                            self.assertRaises(RuntimeError, lambda: torch.sparse_coo_tensor(
+                                torch.tensor(([0], [2]), device=indices_device),
+                                self.value_empty(1, 0).to(values_device),
+                                (1, 3, 0), device=sparse_device))
+                            continue
                         if test_empty_tensor:
                             t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
                                                         self.value_empty(1, 0).to(values_device),

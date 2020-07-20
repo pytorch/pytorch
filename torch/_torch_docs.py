@@ -5710,9 +5710,7 @@ Args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if None, infers data type from :attr:`values`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
+        Default: if None, the device of indices must match device of values, otherwise an exception is raised. 
     {requires_grad}
 
 

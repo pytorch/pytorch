@@ -229,7 +229,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
 }
 
 Tensor internal_new_from_data(
-    c10::DispatchKey dispatch_key,
+    std::pair<c10::DispatchKey, c10::DeviceIndex> dispatch_key,
     at::ScalarType scalar_type,
     c10::optional<Device> device_opt,
     PyObject* data,
@@ -251,7 +251,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(dispatch_key)));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(dispatch_key.first), dispatch_key.second));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -262,7 +262,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key.first));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -272,7 +272,7 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = tensor_from_numpy(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key.first));
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -293,7 +293,9 @@ Tensor internal_new_from_data(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
         inferred_scalar_type, tensor.dtype().itemsize(), data);
   }
-  auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+  auto device = device_opt.has_value()
+      ? *device_opt
+      : at::Device(computeDeviceType(dispatch_key.first), dispatch_key.second);
   pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
@@ -305,6 +307,27 @@ Tensor internal_new_from_data(
   // a to() call but I need to think harder about what exactly we should trace
   // in this case.
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+}
+
+Tensor internal_new_from_data(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    c10::optional<Device> device_opt,
+    PyObject* data,
+    bool copy_variables,
+    bool copy_numpy,
+    bool type_inference,
+    bool pin_memory = false
+    ) {
+  return internal_new_from_data(
+    std::make_pair(dispatch_key, -1),
+    scalar_type,
+    std::move(device_opt),
+    data,
+    copy_variables,
+    copy_numpy,
+    type_inference,
+    pin_memory);
 }
 
 Tensor new_from_data_copy(
@@ -595,6 +618,20 @@ Tensor indexing_tensor_from_data(
   }
 }
 
+void check_expected_devices(
+    const c10::optional<Device>& device_opt,
+    const Tensor& values,
+    PyObject* indices_data) {
+  if (THPVariable_Check(indices_data) && !device_opt.has_value() ) {
+    auto var_indices_tensor =
+        reinterpret_cast<THPVariable*>(indices_data)->cdata;
+    std::stringstream msg;
+    msg << "Expected indices and values to be on the same device, but got: values "
+        << values.device() << ", indices: " << var_indices_tensor.device();
+    TORCH_CHECK(values.device() == var_indices_tensor.device(), msg.str().data());
+  }
+}
+
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -605,27 +642,55 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   ParsedArgs<6> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    enum {
+      ARG_INDICES = 0,
+      ARG_VALUES,
+      ARG_TYPE,
+      ARG_DEVICE,
+      ARG_REQUIRES_GRAD,
+      ARGS_COUNT
+    };
     bool type_inference = r.isNone(2);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 3, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
+    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
-    return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+    check_expected_devices(device_guard.original_device(), values, r.pyobject(ARG_INDICES));
+    auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
+    Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+    return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
-    bool type_inference = r.isNone(3);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 4, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
-    return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
+    enum {
+      ARG_INDICES = 0,
+      ARG_VALUES,
+      ARG_SIZE,
+      ARG_TYPE,
+      ARG_DEVICE,
+      ARG_REQUIRES_GRAD,
+      ARGS_COUNT
+    };
+    bool type_inference = r.isNone(ARG_TYPE);
+    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+    check_expected_devices(device_guard.original_device(), values, r.pyobject(ARG_INDICES));
+    auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
+    Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+    return at::sparse_coo_tensor(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 2) {
-    const auto inferred_dispatch_key = typeIdWithDefault(r, 2, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(2));
-    return at::sparse_coo_tensor(r.intlist(0), options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(3));
+    enum {
+      ARG_SIZE = 0,
+      ARG_TYPE,
+      ARG_DEVICE,
+      ARG_REQUIRES_GRAD,
+      ARGS_COUNT
+    };
+    const auto inferred_dispatch_key = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+    return at::sparse_coo_tensor(r.intlist(ARG_SIZE), options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
@@ -651,7 +716,9 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
   at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
   Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
-  Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+  check_expected_devices(device_guard.original_device(), values, r.pyobject(0));
+  auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
+  Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
   return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 
