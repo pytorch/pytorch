@@ -62,6 +62,7 @@ class Unflatten(Module):
 
     Examples:
         >>> input = torch.randn(2, 50)
+        >>> # With tuple of ints
         >>> m = nn.Sequential(
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, (2, 5, 5))
@@ -69,6 +70,7 @@ class Unflatten(Module):
         >>> output = m(output)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
+        >>> # With torch.Size
         >>> m = nn.Sequential(
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, torch.Size([2, 5, 5]))
@@ -76,6 +78,7 @@ class Unflatten(Module):
         >>> output = m(output)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
+        >>> # With namedshape (tuple of tuples)
         >>> m = nn.Sequential(
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
