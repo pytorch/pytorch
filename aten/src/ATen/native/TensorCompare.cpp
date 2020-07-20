@@ -119,7 +119,7 @@ static inline TensorIterator build_is_infinity_op_iterator(Tensor& result, const
 }
 
 Tensor isposinf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
+  Tensor result = at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::native::isposinf_out(result, self);
   return result;
 }
@@ -136,7 +136,7 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor isneginf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
+  Tensor result = at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::native::isneginf_out(result, self);
   return result;
 }
