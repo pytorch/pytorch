@@ -18218,19 +18218,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-                if nd > 0:
-                    for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
-                        # Randomly change a dim to a negative dim representation of itself.
-                        if random_negative:
-                            random_idx = random.randint(0, len(src_sequence) - 1)
-                            src_sequence = list(src_sequence)
-                            src_sequence[random_idx] = src_sequence[random_idx] - nd
-                            src_sequence = tuple(src_sequence)
-                        # Sequence Inputs
-                        dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
-                        torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
-                        np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
-                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+                if nd == 0:
+                    continue
+
+                for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
+                    # Randomly change a dim to a negative dim representation of itself.
+                    if random_negative:
+                        random_idx = random.randint(0, len(src_sequence) - 1)
+                        src_sequence = list(src_sequence)
+                        src_sequence[random_idx] = src_sequence[random_idx] - nd
+                        src_sequence = tuple(src_sequence)
+                    # Sequence Inputs
+                    dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
+                    torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
+                    np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
+                    self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+        # Move dim to same position
+        x = torch.randn(2, 3, 5, 7, 11)
+        torch_fn = partial(torch.movedim, src=(0, 1), dst=(0, 1))
+        np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
+        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+        torch_fn = partial(torch.movedim, src=1, dst=2)
+        np_fn = partial(np.moveaxis, source=1, destination=2)
+        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
