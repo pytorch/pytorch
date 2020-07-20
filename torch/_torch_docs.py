@@ -104,17 +104,18 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
-add_docstr(torch.abs,
-           r"""
-abs(input, out=None) -> Tensor
+add_docstr(torch.abs, r"""
+abs(input, *, out=None) -> Tensor
 
-Computes the element-wise absolute value of the given :attr:`input` tensor.
+Computes the absolute value of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = |\text{input}_{i}|
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -130,17 +131,18 @@ absolute(input, out=None) -> Tensor
 Alias for :func:`torch.abs`
 """.format(**common_args))
 
-add_docstr(torch.acos,
-           r"""
-acos(input, out=None) -> Tensor
+add_docstr(torch.acos, r"""
+acos(input, *, out=None) -> Tensor
 
-Returns a new tensor with the arccosine  of the elements of :attr:`input`.
+Computes the inverse cosine of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos^{-1}(\text{input}_{i})
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2821,18 +2823,21 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
-add_docstr(torch.isinf,
-           r"""
+add_docstr(torch.isinf, r"""
 isinf(input) -> Tensor
 
-Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
-Complex values are infinite when their real and/or imaginary part is infinite.
+Tests if each element of :attr:`input` is infinite
+(positive or negative infinity) or not.
+
+.. note::
+    Complex values are infinite when their real or imaginary part is
+    infinite.
 
     Arguments:
-        {input}}
+        {input}
 
     Returns:
-        Tensor: a boolean tensor with True where :attr:`input` is `+/-INF` and False elsewhere
+        A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
 
     Example::
 
