@@ -2,7 +2,7 @@ import torch
 import copy
 from typing import Dict, Any
 
-_supported_types = [torch.nn.Conv2d, torch.nn.Linear]
+_supported_types = {torch.nn.Conv2d, torch.nn.Linear}
 
 def max_over_ndim(input, axis_list, keepdim=False):
     ''' Applies 'torch.max' over the given axises
@@ -23,7 +23,7 @@ def min_over_ndim(input, axis_list, keepdim=False):
 def channel_range(input, axis=0):
     ''' finds the range of weights associated with a specific channel
     '''
-    size_of_tensor_dim = len(input.size())
+    size_of_tensor_dim = input.ndim
     axis_list = list(range(size_of_tensor_dim))
     axis_list.remove(axis)
 
@@ -41,8 +41,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     if type(module1) not in _supported_types or type(module2) not in _supported_types:
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
-    if module1.weight.size()[output_axis] != module2.weight.size()[input_axis]:
-        raise TypeError("Incompatible tensors")
+    if module1.weight.size(output_axis) != module2.weight.size(input_axis):
+        raise TypeError("Number of output channels of first arg do not match \
+        number input channels of second arg")
 
     weight1 = module1.weight
     weight2 = module2.weight
@@ -60,9 +61,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
     # pads axis to (1D) tensors to then be broadcasted
-    size1 = [1] * len(weight1.size())
+    size1 = [1] * weight1.ndim
     size1[output_axis] = weight1.size(output_axis)
-    size2 = [1] * len(weight2.size())
+    size2 = [1] * weight2.ndim
     size2[input_axis] = weight2.size(input_axis)
 
     scaling_factors = torch.reshape(scaling_factors, size2)
@@ -83,11 +84,21 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     are not that different than the current modules (determined by converged_test),
     then the modules have converged enough that further equalizing is not necessary
 
+    Implementation of this referced section 4.1 of this paper https://arxiv.org/pdf/1906.04721.pdf
+
+    Args:
+        model: a model (nn.module) that equalization is to be applied on
+        paired_modules_list: a list of lists where each sublist is a pair of two
+            submodules found in the model, for each pair the two submodules generally
+            have to be adjacent in the model to get expected/reasonable results
+        threshold: a number used by the converged function to determine what degree
+            similarity between models is necessary for them to be called equivalent
+        inplace: determines if function is inplace or not
     '''
     if not inplace:
         model = copy.deepcopy(model)
 
-    name_to_module = {}
+    name_to_module : Dict[str, torch.nn.Module] = {}
     previous_name_to_module: Dict[str, Any] = {}
     name_set = {name for pair in paired_modules_list for name in pair}
 
