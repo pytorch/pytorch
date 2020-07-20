@@ -5,7 +5,6 @@
 #include <THC/THCAllocator.h>
 #include <THC/THCBlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <THC/THCCachingHostAllocator.h>
 #include <THC/THCSleep.h>
 #include <THC/THCStorage.h>
