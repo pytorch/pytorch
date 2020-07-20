@@ -670,7 +670,14 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   return futureWork_;
 }
 
-struct CheckFutureWork {
+class CheckFutureWorkBase {
+ public:
+  virtual ~CheckFutureWorkBase() = default;
+
+  virtual void markFutureCompleted() = 0;
+};
+
+struct CheckFutureWork : public CheckFutureWorkBase {
   CheckFutureWork(
       c10::intrusive_ptr<c10::ivalue::Future> futureWork,
       std::vector<at::Tensor>& outputs)
@@ -696,8 +703,8 @@ void ncclKernelCompletionCallback(
     cudaStream_t /* unused */,
     cudaError_t /* unused */,
     void* userData) {
-  auto castedUserData =
-      dynamic_cast<CheckFutureWork*>((CheckFutureWork*)userData);
+  auto castedUserDataBase = static_cast<CheckFutureWorkBase*>(userData);
+  auto castedUserData = dynamic_cast<CheckFutureWork*>(castedUserDataBase);
 
   TORCH_CHECK(
       castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
