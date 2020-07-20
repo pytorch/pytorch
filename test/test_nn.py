@@ -9001,6 +9001,37 @@ add_test(NewModuleTest(
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
 
+class _LayerNormWithNonDefaultWeight(nn.LayerNorm):
+    def __init__(self, normalized_shape, eps, elementwise_affine):
+        super().__init__(normalized_shape, eps, elementwise_affine)
+        self.weight.data = 0.1 * torch.ones_like(self.weight.data)
+
+class TestLayerNormWithNonDefaultWeight(NewModuleTest):
+    def __init__(self):
+        super().__init__(
+            constructor=lambda: _LayerNormWithNonDefaultWeight((16,), 1e-5, True),
+            input_size=(4, 4, 16),
+            check_gradgrad=True,
+            fullname='LayerNormWithNonDefaultWeight')
+
+    def compare_two_gradients(self, test_case, module, input):
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+
+        grads1 = torch.autograd.grad(module(input).sum(), input, create_graph=False)[0]
+        grads2 = torch.autograd.grad(module(input).sum(), input, create_graph=True)[0]
+
+        atol = 1e-5
+        rtol = 1e-3
+        test_case.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
+        torch.set_num_threads(num_threads)
+
+    def _do_test(self, test_case, module, input):
+        self.compare_two_gradients(test_case, module, input)
+        super()._do_test(test_case, module, input)
+
+add_test(TestLayerNormWithNonDefaultWeight())
 
 # The following are helpers for TestNN.test_affine_*
 if torch.cuda.is_available():
