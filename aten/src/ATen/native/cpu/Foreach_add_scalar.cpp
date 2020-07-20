@@ -5,7 +5,7 @@
 namespace at { namespace native {
 namespace {
 
-static std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList& tensors, Scalar scalar) {
+static std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
   std::vector<Tensor> result;
   for (int i = 0; i < tensors.size(); i++) {
     auto temp = tensors[i].add(scalar);

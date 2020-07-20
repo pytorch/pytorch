@@ -72,7 +72,7 @@ struct AddScalarFunctor {
         }
 };
 
-static std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList& tensors, Scalar scalar) {
+static std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
   std::vector<std::vector<at::Tensor>> tensor_lists; 
   std::vector<at::Tensor> vec_res;
 

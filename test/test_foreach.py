@@ -1,6 +1,5 @@
 import torch
 import torch.cuda
-from test_torch import AbstractTestCases
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestForeach(TestCase):
@@ -19,7 +18,6 @@ class TestForeach(TestCase):
                     tensors.append(torch.zeros(H, W, device=d, dtype=dt))
 
                 res = torch._foreach_add(tensors, 1)
-                
                 for t in res: 
                     self.assertEqual(t, torch.ones(H, W, device=d, dtype=dt))
 
@@ -40,7 +38,6 @@ class TestForeach(TestCase):
                     size_change += 1
 
                 res = torch._foreach_add(tensors, 1)
-                
                 size_change = 0
                 for t in res: 
                     self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=d, dtype=dt))

@@ -5,6 +5,6 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(std::vector<Tensor>(*)(TensorList&, Scalar alpha), foreach_tensor_add_scalar_stub);
+DECLARE_DISPATCH(std::vector<Tensor>(*)(TensorList, Scalar alpha), foreach_tensor_add_scalar_stub);
 
 }} // namespace at::native

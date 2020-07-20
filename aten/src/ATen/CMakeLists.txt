@@ -84,7 +84,6 @@ file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 
-file(GLOB native_foreach_cpp "native/foreach/*.cpp")
 file(GLOB native_foreach_cu "native/foreach/*.cu")
 file(GLOB native_foreach_h "native/foreach/*.h" "native/foreach/*.cuh")
 
@@ -105,7 +104,7 @@ append_filelist("jit_core_headers" ATen_CORE_HEADERS)
 append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${native_foreach_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
