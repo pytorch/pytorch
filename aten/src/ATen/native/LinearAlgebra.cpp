@@ -174,21 +174,28 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
 
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(self.dim() == 2, "input must be a matrix, got ", self.dim(), "-D tensor");
-  TORCH_CHECK(m1.dim() == 2, "mat1 must be a matrix, got ", m1.dim(), "-D tensor");
-  TORCH_CHECK(m2.dim() == 2, "mat2 must be a matrix, got ", m2.dim(), "-D tensor");
+  TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
+
+  // Array access is faster than .size(n) and .stride(n)
+  const auto self_sizes = self.sizes();
+  auto m1_strides = m1.strides();
+  auto m1_sizes = m1.sizes();
+  auto m2_strides = m2.strides();
+  auto m2_sizes = m2.sizes();
 
   TORCH_CHECK(
-      m1.size(1) == m2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      m1.size(0), "x", m1.size(1), " and ", m2.size(0), "x", m2.size(1), ")");
+      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
+      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
 
   TORCH_CHECK(
-      self.size(0) == m1.size(0) && self.size(1) == m2.size(1),
+      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
       "input shape is incompatible with matrix multiplication (",
-      m1.size(0), "x", m1.size(1), " @ ", m2.size(0), "x", m2.size(1), " != ",
-      self.size(0), "x", self.size(1), ")");
+      m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
+      self_sizes[0], "x", self_sizes[1], ")");
 
-  result.resize_as_(self);
+  native::resize_(result, self_sizes);
+  const auto result_strides = result.strides();
+  const auto result_sizes = result.sizes();
 
   if (result.numel() == 0) {
     return;
@@ -202,13 +209,15 @@ static void addmm_impl_cpu_(
   Tensor c;
 
   // Cast result as matrix a
-  if (result.stride(0) == 1 &&
-      (result.size(1) == 1 || result.stride(1) >= std::max(int64_t{1}, result.size(0)))) {
+  if (result_strides[0] == 1 &&
+      (result_sizes[1] == 1 || result_strides[1] >= std::max(int64_t{1}, result_sizes[0]))) {
     transpose_c = false;
     c = result;
-  } else if (result.stride(1) == 1 &&
-             (result.size(0) == 1 || result.stride(0) >= std::max(int64_t{1}, result.size(1)))) {
+  } else if (result_strides[1] == 1 &&
+             (result_sizes[0] == 1 || result_strides[0] >= std::max(int64_t{1}, result_sizes[1]))) {
     std::swap(m1, m2);
+    std::swap(m1_sizes, m2_sizes);
+    std::swap(m1_strides, m2_strides);
     transpose_c = true;
     c = result;
   } else {
@@ -217,20 +226,20 @@ static void addmm_impl_cpu_(
     c = result.transpose(0, 1).contiguous().transpose_(0, 1);
   }
 
-  const int64_t m = c.size((transpose_c ? 1 : 0));
-  const int64_t n = c.size((transpose_c ? 0 : 1));
-  const int64_t k = m1.size((transpose_c ? 0 : 1));
+  const int64_t m = result_sizes[transpose_c ? 1 : 0];
+  const int64_t n = result_sizes[transpose_c ? 0 : 1];
+  const int64_t k = m1_sizes[transpose_c ? 0 : 1];
 
   // Cast m1 as matrix a
   bool transpose_a = false;
   Tensor a;
   /* Need lda >= max(1, (transpose_a ? k : m)) */
-  if (m1.stride(transpose_c ? 1 : 0) == 1 &&
-      m1.stride(transpose_c ? 0 : 1) >= std::max(int64_t{1}, m)) {
+  if (m1_strides[transpose_c ? 1 : 0] == 1 &&
+      m1_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, m)) {
     transpose_a = false;
     a = m1;
-  } else if (m1.stride((transpose_c ? 0 : 1)) == 1 &&
-             m1.stride((transpose_c ? 1 : 0)) >= std::max(int64_t{1}, k)) {
+  } else if (m1_strides[transpose_c ? 0 : 1] == 1 &&
+             m1_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, k)) {
     transpose_a = true;
     a = m1;
   } else {
@@ -242,12 +251,12 @@ static void addmm_impl_cpu_(
   bool transpose_b = false;
   Tensor b;
   /* Need ldm2_ >= max(1, (transpose_m2 == 'n' ? k : n)) */
-  if (m2.stride((transpose_c ? 1 : 0)) == 1 &&
-      m2.stride((transpose_c ? 0 : 1)) >= std::max(int64_t{1}, k)) {
+  if (m2_strides[transpose_c ? 1 : 0] == 1 &&
+      m2_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, k)) {
     transpose_b = false;
     b = m2;
-  } else if (m2.stride((transpose_c ? 0 : 1)) == 1 &&
-             m2.stride((transpose_c ? 1 : 0)) >= std::max(int64_t{1}, n)) {
+  } else if (m2_strides[transpose_c ? 0 : 1] == 1 &&
+             m2_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, n)) {
     transpose_b = true;
     b = m2;
   } else {
@@ -255,9 +264,9 @@ static void addmm_impl_cpu_(
     b = m2.clone(at::MemoryFormat::Contiguous);
   }
 
-  const int64_t lda = a.stride((transpose_a == transpose_c) ? 1 : 0);
-  const int64_t ldb = b.stride((transpose_b == transpose_c) ? 1 : 0);
-  const int64_t ldc = c.stride((transpose_c ? 0 : 1));
+  const int64_t lda = a.strides()[(transpose_a == transpose_c) ? 1 : 0];
+  const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
+  const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
@@ -330,8 +339,9 @@ Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2
 }
 
 Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  std::array<int64_t, 2> out_size{{mat1.size(0), mat2.size(1)}};
-  Tensor b_self = std::get<0>(expand_size(self, out_size, "addmm_out"));
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  Tensor b_self = std::get<0>(expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out"));
   {
     at::NoNamesGuard guard;
     addmm_impl_cpu_(result, b_self, mat1, mat2, beta, alpha);
@@ -350,13 +360,17 @@ Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
 }
 
 Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
-  result.resize_({ self.size(0), mat2.size(1) });
+  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
   return addmm_cpu_out(result, result, self, mat2, 0, 1);
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
-  Tensor result = at::empty({0}, self.options());
-  return mm_cpu_out(result, self, mat2);
+  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
+  return addmm_cpu_out(result, result, self, mat2, 0, 1);
 }
 
 template <typename scalar_t, bool is_bmm>
