@@ -4369,7 +4369,7 @@ add_docstr(torch.movedim,
            r"""
 movedim(input, src, dst) -> Tensor
 
-Move `src` dim/s of an array to position determined by `dst`.
+Move `src` dim/s of the :attr:`input` to position determined by `dst`.
 Other dims remain in their original order.
 
 Args:
