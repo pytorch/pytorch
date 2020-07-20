@@ -3443,7 +3443,7 @@ def affine_grid(theta, size, align_corners=None):
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are condsidered to be at ```0``
+        along a unit dimension are considered to be at ```0``
         (the center of the input image).
     """
     if not torch.jit.is_scripting():

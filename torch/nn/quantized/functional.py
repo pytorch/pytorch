@@ -100,7 +100,7 @@ def adaptive_avg_pool3d(input, output_size):
     Applies a 3D adaptive average pooling over a quantized input signal composed
     of several quantized input planes.
 
-    .. note:: The input quantization paramteres propagate to the output.
+    .. note:: The input quantization parameters propagate to the output.
 
     See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
 
@@ -430,7 +430,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         input: Quaintized input
         negative_slope: The slope of the negative input
         inplace: Inplace modification of the input tensor
-        scale, zero_point: Scale and zero point of thhe output tensor.
+        scale, zero_point: Scale and zero point of the output tensor.
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
