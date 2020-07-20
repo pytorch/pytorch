@@ -8,16 +8,17 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA)
 
 
-# Tests for "universal functions (ufuncs)" which functions that accept
-# one or two tensors (unary or binary) and have common properties like
-# being methods, supporting the out kwarg, supporting broadcasting and
-# participating in type promotion.
+# Tests for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+#   - they are elementwise functions
+#   - the input shape is the output shape
+#   - they typically have method and inplace variants
+#   - they typically support the out kwarg
+#   - they typically have NumPy or SciPy references
 
 # See NumPy's universal function documentation
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
-
-
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
