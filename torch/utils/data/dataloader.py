@@ -165,6 +165,11 @@ class DataLoader(Generic[T_co]):
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
+        if num_workers == 0 and prefetch_factor != 2:
+            raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
+                             'let num_workers > 0 to enable multiprocessing.')
+        assert prefetch_factor > 0
+        
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
