@@ -1,4 +1,4 @@
-from torch.onnx.symbolic_helper import _black_list_in_opset
+from torch.onnx.symbolic_helper import _block_list_in_opset
 
 import torch.onnx.symbolic_opset9 as sym_opset9
 
@@ -44,4 +44,4 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 
 for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+    vars()[black_listed_op] = _block_list_in_opset(black_listed_op)
