@@ -33,24 +33,23 @@ class ScalarCheck : OptInDispatch {
 
  private:
   void handle(Bool* b) override {
-    same_ = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
+    same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
   void handle(Float* f) override {
-    same_ = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
+    same_ = v1_->as<Float>()->sameAs(v2_->as<Float>());
   }
 
   void handle(Half* h) override {
-    same_ = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
+    same_ = v1_->as<Half>()->sameAs(v2_->as<Half>());
   }
 
   void handle(Int* i) override {
-    same_ = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
+    same_ = v1_->as<Int>()->sameAs(v2_->as<Int>());
   }
 
   void handle(NamedScalar* ns) override {
-    same_ =
-        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
+    same_ = v1_->as<NamedScalar>()->sameAs(v2_->as<NamedScalar>());
   }
 
   ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
@@ -121,7 +120,7 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
 bool UnaryOp::sameAs(const UnaryOp* const other) const {
   if (this->type() != other->type())
     return false;
-  return static_cast<const Expr*>(this)->sameAs(other);
+  return this->as<Expr>()->sameAs(other);
 }
 
 BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
@@ -293,7 +292,7 @@ std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
 
   // out is a TensorIndex after lowering
   if (out_val->getValType() == ValType::TensorIndex) {
-    out_val = static_cast<const TensorIndex*>(out_val)->view();
+    out_val = out_val->as<TensorIndex>()->view();
   }
 
   auto vec_domain = out_val->as<TensorView>()->domain()->domain();
@@ -421,7 +420,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   }
   IterDomain* merged_id = new IterDomain(
       new Int(0),
-      static_cast<Int*>(merged_id_size),
+      merged_id_size->as<Int>(),
       outer->parallel_method(),
       outer->isReduction(),
       outer->isRFactorProduct() || inner->isRFactorProduct(),
@@ -467,7 +466,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
       new Int(0),
-      static_cast<Int*>(vo),
+      vo->as<Int>(),
       in->parallel_method(),
       in->isReduction(),
       in->isRFactorProduct(),
@@ -488,7 +487,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 Val* IterDomain::extent() const {
   if (isThread()) {
     if (extent_->getValType() == ValType::Scalar)
-      if (static_cast<Int*>(extent_)->isConst())
+      if (extent_->as<Int>()->isConst())
         return extent_;
 
     return NamedScalar::getParallelDim(parallel_method());

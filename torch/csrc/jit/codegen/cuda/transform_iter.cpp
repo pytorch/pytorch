@@ -142,7 +142,7 @@ ReplayTransformations::ReplayTransformations(
           val->getValType().value() == ValType::IterDomain,
           "Expected IterDomain only for Replay Transformations, but found ",
           val);
-      IterDomain* id = static_cast<IterDomain*>(val);
+      IterDomain* id = val->as<IterDomain>();
       TORCH_INTERNAL_ASSERT(
           this->id_map_.find(id) != this->id_map_.end(),
           "Could not find required input: ",
@@ -236,7 +236,7 @@ BestEffortReplay::BestEffortReplay(
   for (auto r_expr : r_exprs)
     for (auto inp : r_expr->inputs())
       if (inp->getValType().value() == ValType::IterDomain) {
-        auto id = static_cast<IterDomain*>(inp);
+        auto id = inp->as<IterDomain>();
         TORCH_INTERNAL_ASSERT(
             replay_expr_map.find(id) == replay_expr_map.end(),
             "Error trying to map rfactor root domain during replay. IterDomain's shouldn't have more than one use.");
@@ -257,7 +257,7 @@ BestEffortReplay::BestEffortReplay(
 
     for (auto inp : t_expr->inputs()) {
       if (inp->getValType() == ValType::IterDomain) {
-        auto t_inp = static_cast<IterDomain*>(inp);
+        auto t_inp = inp->as<IterDomain>();
         t_inps.push_back(t_inp);
         // There might not be a mapping, that could be okay.
         auto it = id_map_.find(t_inp);
@@ -314,8 +314,8 @@ BestEffortReplay::BestEffortReplay(
 
     // If the expression is a split, make sure it's split by the same ammount.
     if (r_expr->getExprType().value() == ExprType::Split) {
-      if (!static_cast<Split*>(r_expr)->factor()->sameAs(
-              static_cast<Split*>(r_expr)->factor())) {
+      if (!r_expr->as<Split>()->factor()->sameAs(
+              r_expr->as<Split>()->factor())) {
         TORCH_INTERNAL_ASSERT(!has_rfactor, err_str);
         continue;
       }
@@ -324,7 +324,7 @@ BestEffortReplay::BestEffortReplay(
     bool missing_input = std::any_of(
         t_expr->inputs().begin(), t_expr->inputs().end(), [this](Val* inp) {
           if (inp->getValType() == ValType::IterDomain) {
-            return id_map_.find(static_cast<IterDomain*>(inp)) == id_map_.end();
+            return id_map_.find(inp->as<IterDomain>()) == id_map_.end();
           }
           return false;
         });
@@ -336,7 +336,7 @@ BestEffortReplay::BestEffortReplay(
     // Take target_domain inputs out of map:
     for (auto inp : t_expr->inputs()) {
       if (inp->getValType() == ValType::IterDomain) {
-        auto t_inp = static_cast<IterDomain*>(inp);
+        auto t_inp = inp->as<IterDomain>();
         auto it = id_map_.find(t_inp);
         if (leaf_ids_.find(it->second) != leaf_ids_.end()) {
           leaf_ids_.erase(it->second);
@@ -350,9 +350,8 @@ BestEffortReplay::BestEffortReplay(
       auto r_out = r_expr->output(i);
       if (t_out->getValType() == ValType::IterDomain &&
           r_out->getValType() == ValType::IterDomain) {
-        id_map_[static_cast<IterDomain*>(t_out)] =
-            static_cast<IterDomain*>(r_out);
-        leaf_ids_[static_cast<IterDomain*>(r_out)] = counter++;
+        id_map_[t_out->as<IterDomain>()] = r_out->as<IterDomain>();
+        leaf_ids_[r_out->as<IterDomain>()] = counter++;
       }
     }
   }

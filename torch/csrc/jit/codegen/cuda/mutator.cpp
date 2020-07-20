@@ -44,7 +44,7 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
   for (decltype(td->nDims()) i = 0; i < td->nDims(); i++) {
-    IterDomain* id = static_cast<IterDomain*>(mutateAsVal(td->axis(i)));
+    IterDomain* id = mutateAsVal(td->axis(i))->as<IterDomain>();
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))
       mutated = true;
@@ -59,12 +59,11 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 }
 
 Statement* OptOutMutator::mutate(TensorView* tv) {
-  TensorDomain* td = static_cast<TensorDomain*>(mutateAsVal(tv->domain()));
+  TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
   TensorView* computeAtView = nullptr;
   if (tv->hasComputeAt())
-    computeAtView =
-        static_cast<TensorView*>(mutateAsVal(tv->getComputeAtView()));
+    computeAtView = mutateAsVal(tv->getComputeAtView())->as<TensorView>();
 
   if (!tv->domain()->sameAs(td) ||
       (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
@@ -127,7 +126,7 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 
 Statement* OptOutMutator::mutate(Allocate* a) {
   if (a->buffer()->getValType().value() == ValType::TensorView) {
-    TensorView* tv = static_cast<TensorView*>(mutateAsVal(a->buffer()));
+    TensorView* tv = mutateAsVal(a->buffer())->as<TensorView>();
     Val* ext = mutateAsVal(a->size())->asVal();
     if (ext->sameAs(a->size()) && tv->sameAs(a->buffer()))
       return a;
@@ -158,9 +157,9 @@ Statement* OptOutMutator::mutate(Split* s) {
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
-  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(m->out()));
-  IterDomain* otr = static_cast<IterDomain*>(mutateAsVal(m->outer()));
-  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(m->inner()));
+  IterDomain* ot = mutateAsVal(m->out())->as<IterDomain>();
+  IterDomain* otr = mutateAsVal(m->outer())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(m->inner())->as<IterDomain>();
 
   if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
     return m;
@@ -234,8 +233,7 @@ Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(
       out->getValType().value() == ValType::TensorView &&
       in->getValType().value() == ValType::TensorView)
-  return new BroadcastOp(
-      static_cast<TensorView*>(out), static_cast<TensorView*>(in));
+  return new BroadcastOp(out->as<TensorView>(), in->as<TensorView>());
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {
@@ -243,7 +241,7 @@ Statement* OptOutMutator::mutate(ForLoop* fl) {
   Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
 
   TORCH_INTERNAL_ASSERT(val_id->getValType() == ValType::IterDomain);
-  IterDomain* id = static_cast<IterDomain*>(val_id);
+  IterDomain* id = val_id->as<IterDomain>();
 
   bool is_mutated = !index->sameAs(fl->index());
   is_mutated = is_mutated | !id->sameAs(fl->iter_domain());
@@ -254,7 +252,7 @@ Statement* OptOutMutator::mutate(ForLoop* fl) {
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),
         "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    Expr* mutated_expr = mutated_stmt->as<Expr>();
     mutated_exprs.push_back(mutated_expr);
     // could use sameAs here, but we'd have to check the output value separately
     is_mutated = is_mutated | (mutated_expr != expr);
@@ -273,7 +271,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
       val_cond->getDataType().value() == DataType::Bool);
-  Bool* cond = static_cast<Bool*>(val_cond);
+  Bool* cond = val_cond->as<Bool>();
 
   bool is_mutated = !cond->sameAs(ite->cond());
 
@@ -283,7 +281,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),
         "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    Expr* mutated_expr = mutated_stmt->as<Expr>();
     mutated_exprs.push_back(mutated_expr);
     // could use sameAs here, but we'd have to check the output value separately
     is_mutated = is_mutated | (mutated_expr != expr);
@@ -295,7 +293,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
     TORCH_INTERNAL_ASSERT(
         mutated_stmt->isExpr(),
         "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
+    Expr* mutated_expr = mutated_stmt->as<Expr>();
     mutated_else_exprs.push_back(mutated_expr);
     // could use sameAs here, but we'd have to check the output value separately
     is_mutated = is_mutated | (mutated_expr != expr);

@@ -44,7 +44,7 @@ class ReplaySelf : public ReplayTransformations {
     // This is so rfactor ops are replayed correctly.
     IterDomain* ido = new IterDomain(
         new Int(0),
-        static_cast<Int*>(oe),
+        oe->as<Int>(),
         s->outer()->parallel_method(),
         s->outer()->isReduction(),
         s->outer()->isRFactorProduct(),
@@ -102,7 +102,7 @@ class ReplaySelf : public ReplayTransformations {
 
     IterDomain* merged_id = new IterDomain(
         new Int(0),
-        static_cast<Int*>(merged_id_size),
+        merged_id_size->as<Int>(),
         m->out()->parallel_method(),
         m->out()->isReduction(),
         m->out()->isRFactorProduct(),

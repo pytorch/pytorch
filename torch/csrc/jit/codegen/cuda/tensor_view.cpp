@@ -300,7 +300,7 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 
-  ReductionOp* this_origin = static_cast<ReductionOp*>(origin_expr);
+  ReductionOp* this_origin = origin_expr->as<ReductionOp>();
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);
@@ -404,7 +404,7 @@ TensorView* TensorView::cache_before() {
     // Iterate over origin expression inputs for cache_before on outputs
     for (Val* v : expr_inputs) {
       if (v->getValType().value() == ValType::TensorView) {
-        TensorView* origin_input = dynamic_cast<TensorView*>(v);
+        TensorView* origin_input = v->as<TensorView>();
         if (origin_input->hasComputeAt() &&
             origin_input->getComputeAtView() == this) {
           TransformReplay::replayPasC(producer, consumer, -1);
@@ -495,7 +495,7 @@ TensorView* TensorView::cache_after() {
       auto expr_outputs = expr->outputs();
       for (Val* v : expr_outputs) {
         if (v->getValType().value() == ValType::TensorView) {
-          TensorView* output = dynamic_cast<TensorView*>(v);
+          TensorView* output = v->as<TensorView>();
           if (output->hasComputeAt()) {
             TransformReplay::replayPasC(consumer, output, -1);
             auto output_ca_pos = output->getThisComputeAtAxis();

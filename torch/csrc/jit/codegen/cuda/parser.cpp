@@ -134,15 +134,14 @@ class IrParser {
 
     // mark output;
     for (auto jit_output : block->outputs()) {
-      TensorView* out =
-          static_cast<TensorView*>(value_map_[jit_output->unique()]);
+      TensorView* out = value_map_[jit_output->unique()]->as<TensorView>();
       // demote output dtype to be match PyTorch JIT graph.
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType() == at::ScalarType::Half) {
         // No need to update value_map_ after this point.
-        out = static_cast<TensorView*>(castOp(DataType::Half, out));
+        out = castOp(DataType::Half, out)->as<TensorView>();
       }
       fusion->addOutput(out);
     }

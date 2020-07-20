@@ -265,7 +265,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     return;
   }
 
-  TensorView* out = static_cast<TensorView*>(expr->output(0));
+  TensorView* out = expr->output(0)->as<TensorView>();
   // 1) Reduce loop structure
   while (compute_at_scope.size() > out->getThisComputeAtAxis() &&
          compute_at_scope.back().second != out &&
@@ -289,7 +289,7 @@ void LoopNestGenerator::handle(Expr* expr) {
   //  most, predicate, initialize, place next after allocation if exists, close
   //  to computeAt)
   if (out->hasReduction())
-    initReduction(out, static_cast<ReductionOp*>(expr)->init(), alloc_stmt);
+    initReduction(out, expr->as<ReductionOp>()->init(), alloc_stmt);
 
   //  5) Open to inner most loop
   for (decltype(out->nDims()) i = for_loops.size(); i < out->nDims(); i++)

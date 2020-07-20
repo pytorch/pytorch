@@ -16,7 +16,7 @@ Bool* UnrollPass::getThreadPredicate(TensorView* tv) {
   if (tv->getOrigin() != nullptr &&
       tv->getOrigin()->getExprType() == ExprType::BroadcastOp &&
       ir_utils::getParallelBroadcastDomains(
-          static_cast<BroadcastOp*>(tv->getOrigin()), thread_predicates_)
+          tv->getOrigin()->as<BroadcastOp>(), thread_predicates_)
           .any()) {
     return nullptr;
   }
@@ -87,7 +87,7 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
       "Error computing predicate, should be returning a Bool, but returning ",
       cond->getDataType().value());
 
-  return static_cast<Bool*>(cond);
+  return cond->as<Bool>();
 }
 } // namespace
 

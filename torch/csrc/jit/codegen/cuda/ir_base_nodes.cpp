@@ -27,12 +27,12 @@ Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
 
 Val* Statement::asVal() {
   TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
-  return static_cast<Val*>(this);
+  return this->as<Val>();
 }
 
 Expr* Statement::asExpr() {
   TORCH_INTERNAL_ASSERT(isExpr(), "Cannot cast to Expr as this is not a Expr.");
-  return static_cast<Expr*>(this);
+  return this->as<Expr>();
 }
 
 void Statement::print() const {
@@ -116,7 +116,7 @@ bool Val::isConstScalar() const {
 bool Val::isZeroInt() const {
   if (isConstScalar() && getValType().value() == ValType::Scalar &&
       getDataType().value() == DataType::Int &&
-      static_cast<const Int*>(this)->value().value() == 0)
+      this->as<Int>()->value().value() == 0)
     return true;
   return false;
 }
@@ -124,7 +124,7 @@ bool Val::isZeroInt() const {
 bool Val::isOneInt() const {
   if (isConstScalar() && getValType().value() == ValType::Scalar &&
       getDataType().value() == DataType::Int &&
-      static_cast<const Int*>(this)->value().value() == 1)
+      this->as<Int>()->value().value() == 1)
     return true;
   return false;
 }

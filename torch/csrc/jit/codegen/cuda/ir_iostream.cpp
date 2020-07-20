@@ -65,8 +65,7 @@ void IRPrinter::printHeader(
     switch (val->getValType().value()) {
       case ValType::TensorView:
         os << "Tensor<" << val->getDataType().value() << ", "
-           << TensorDomain::noReductions(
-                  static_cast<TensorView*>(val)->getRootDomain())
+           << TensorDomain::noReductions(val->as<TensorView>()->getRootDomain())
                   .size()
            << "> T" << val->name();
         break;

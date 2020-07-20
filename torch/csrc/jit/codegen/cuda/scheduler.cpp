@@ -94,7 +94,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     for (auto output : fusion->outputs()) {
       if (output->getValType() != ValType::TensorView)
         continue;
-      TensorView* out_tv = static_cast<TensorView*>(output);
+      TensorView* out_tv = output->as<TensorView>();
 
       // launch configuratoin.
       TensorView* intermediate = nullptr;
@@ -114,7 +114,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
       for (Val* inp : fusion->inputsOf(output)) {
         // scheduling of inputs shouldn't change with different fcd_reduction
         if (inp->getValType().value() == ValType::TensorView) {
-          static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
+          inp->as<TensorView>()->computeAt(intermediate, -1);
         }
       }
       // scheduling of inputs shouldn't change with different fcd_reduction
@@ -131,7 +131,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
       if (val->getValType().value() != ValType::TensorView ||
           fusion->hasInput(val))
         continue;
-      TensorView* tv = static_cast<TensorView*>(val);
+      TensorView* tv = val->as<TensorView>();
       if (fcd_reduction) {
         tv->axis(-1)->parallelize(ParallelType::TIDx);
       } else {
@@ -153,7 +153,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     for (auto output : fusion->outputs()) {
       if (output->getValType() != ValType::TensorView)
         continue;
-      TensorView* out_tv = static_cast<TensorView*>(output);
+      TensorView* out_tv = output->as<TensorView>();
 
       // Split into 128 which will be bockDim.x
       out_tv->split(0, kPwThreadX);
@@ -167,10 +167,10 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     for (auto output : fusion->outputs()) {
       if (output->getValType() != ValType::TensorView)
         continue;
-      TensorView* out_tv = static_cast<TensorView*>(output);
+      TensorView* out_tv = output->as<TensorView>();
       for (Val* inp : fusion->inputsOf(output)) {
         if (inp->getValType().value() == ValType::TensorView)
-          static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
+          inp->as<TensorView>()->computeAt(out_tv, 1);
       }
       out_tv->axis(0)->parallelize(ParallelType::BIDx);
     }
@@ -180,7 +180,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
       if (val->getValType().value() != ValType::TensorView ||
           fusion->hasInput(val))
         continue;
-      TensorView* tv = static_cast<TensorView*>(val);
+      TensorView* tv = val->as<TensorView>();
 
       // Should be true for all intermediates, but if one isn't hooked
       // up right, skip it and hope for the best for now
@@ -402,7 +402,7 @@ c10::optional<ReductionParams> scheduleReduction(
   // about the start?
   for (size_t i = 0; i < inputs.size(); ++i) {
     if (inputs[i].type()->kind() == c10::TypeKind::TensorType) {
-      const TensorView* tv = static_cast<TensorView*>(fusion->inputs()[i]);
+      const TensorView* tv = fusion->inputs()[i]->as<TensorView>();
       size_t dims = tv->getRootDomain().size();
       for (size_t j = 0; j < dims; ++j) {
         const IterDomain* id = tv->getRootDomain()[j];

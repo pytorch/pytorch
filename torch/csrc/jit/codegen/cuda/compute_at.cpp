@@ -108,7 +108,7 @@ T1 tvIterable(const T2& val_iterable) {
         TORCH_INTERNAL_ASSERT(
             v->getValType().value() == ValType::TensorView,
             "When following the computeAt dependency chain, a non TensorView value was found.");
-        return static_cast<TensorView*>(v);
+        return v->as<TensorView>();
       });
   return tv_iterable;
 }

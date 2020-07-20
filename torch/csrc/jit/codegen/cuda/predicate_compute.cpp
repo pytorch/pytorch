@@ -41,7 +41,7 @@ std::vector<Bool*> PredicateCompute::computePredicates(const TensorIndex* ti) {
       TORCH_INTERNAL_ASSERT(
           pred->getValType().value() == ValType::Scalar &&
           pred->getDataType().value() == DataType::Bool);
-      preds.push_back(static_cast<Bool*>(pred));
+      preds.push_back(pred->as<Bool>());
     } else {
       preds.push_back(new Bool(true));
     }

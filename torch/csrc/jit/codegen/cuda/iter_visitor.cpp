@@ -13,9 +13,9 @@ std::vector<Statement*> IterVisitor::next(
     Statement* statement,
     bool respect_compute_at) {
   if (statement->isVal())
-    return next(static_cast<Val*>(statement));
+    return next(statement->as<Val>());
   else if (statement->isExpr())
-    return next(static_cast<Expr*>(statement), respect_compute_at);
+    return next(statement->as<Expr>(), respect_compute_at);
   else
     TORCH_INTERNAL_ASSERT(
         false, "IterVisitor could not detect type in next_dispatch.");
@@ -37,7 +37,7 @@ std::vector<Statement*> IterVisitor::next(Expr* expr, bool respect_compute_at) {
         expr->outputs().size() == 1,
         "Expressions with multiple outputs are not supported");
     if (expr->output(0)->getValType().value() == ValType::TensorView) {
-      auto out = expr->output(0)->as<const TensorView>();
+      auto out = expr->output(0)->as<TensorView>();
       // Move input TVs that are computed at this expression backward
       // so that they are visited later. If multiple inputs are
       // computed at, move TVs that are computed at an inner loop nest
@@ -276,9 +276,9 @@ class AllVals : public IterVisitor {
 
 std::vector<Statement*> BackwardVisitor::next(Statement* stmt) {
   if (stmt->isVal())
-    return next(static_cast<Val*>(stmt));
+    return next(stmt->as<Val>());
   else if (stmt->isExpr())
-    return next(static_cast<Expr*>(stmt));
+    return next(stmt->as<Expr>());
   else
     TORCH_INTERNAL_ASSERT(
         false, "BackwardVisitor could not detect type in next_dispatch.");
@@ -434,7 +434,7 @@ class DependencyChains : public IterVisitor {
       std::deque<Val*> deps;
       for (auto stack : stmt_stack) {
         if (stack.back()->isVal())
-          deps.push_back(static_cast<Val*>(stack.back()));
+          deps.push_back(stack.back()->as<Val>());
       }
       // Order as dependency -> of
       dep_chains.emplace_back(deps.rbegin(), deps.rend());

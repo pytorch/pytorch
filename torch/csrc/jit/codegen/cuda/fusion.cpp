@@ -280,11 +280,9 @@ bool Fusion::inFusion(const Statement* stmt) const {
   Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
 
   if (stmt->isExpr())
-    infusion &=
-        expr_set_.find(static_cast<Expr*>(nonconst_stmt)) != expr_set_.end();
+    infusion &= expr_set_.find(nonconst_stmt->as<Expr>()) != expr_set_.end();
   if (stmt->isVal())
-    infusion &=
-        val_set_.find(static_cast<Val*>(nonconst_stmt)) != val_set_.end();
+    infusion &= val_set_.find(nonconst_stmt->as<Val>()) != val_set_.end();
 
   return infusion;
 }
@@ -421,9 +419,9 @@ StmtNameType Fusion::registerStatement(Statement* stmt) {
     return stmt->name();
 
   if (stmt->isVal()) {
-    return registerVal(static_cast<Val*>(stmt));
+    return registerVal(stmt->as<Val>());
   } else if (stmt->isExpr()) {
-    return registerExpr(static_cast<Expr*>(stmt));
+    return registerExpr(stmt->as<Expr>());
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -507,8 +505,7 @@ StmtNameType Fusion::getExprName() {
 bool Fusion::hasRNG() {
   for (auto expr : exprs(true))
     if (expr->getExprType() == ExprType::UnaryOp)
-      if (static_cast<UnaryOp*>(expr)->getUnaryOpType() ==
-          UnaryOpType::RandLike)
+      if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
         return true;
   return false;
 }
@@ -518,7 +515,7 @@ bool Fusion::hasReduction() {
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
-        if (static_cast<TensorView*>(out)->hasReduction())
+        if (out->as<TensorView>()->hasReduction())
           return true;
 
   return false;
@@ -528,7 +525,7 @@ bool Fusion::hasBlockReduction() {
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
-        if (static_cast<TensorView*>(out)->hasBlockReduction())
+        if (out->as<TensorView>()->hasBlockReduction())
           return true;
 
   return false;
@@ -538,7 +535,7 @@ bool Fusion::hasGridReduction() {
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
-        if (static_cast<TensorView*>(out)->hasGridReduction())
+        if (out->as<TensorView>()->hasGridReduction())
           return true;
 
   return false;

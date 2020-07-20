@@ -41,7 +41,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<TensorView*> tvs;
   for (auto val : vals)
     if (val->getValType() == ValType::TensorView)
-      tvs.push_back(static_cast<TensorView*>(val));
+      tvs.push_back(val->as<TensorView>());
 
   TORCH_CHECK(
       !tvs.empty(),
@@ -521,7 +521,7 @@ TensorView* broadcast(
     TORCH_INTERNAL_ASSERT(
         identity->getValType().value() == ValType::TensorView,
         "Expected identity op, but didn't get a TensorView back.");
-    return static_cast<TensorView*>(identity);
+    return identity->as<TensorView>();
   }
 
   std::vector<IterDomain*> out_domain;

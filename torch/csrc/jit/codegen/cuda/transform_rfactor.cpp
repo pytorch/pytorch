@@ -52,7 +52,7 @@ class ReplayRFactor : public ReplayTransformations {
     // outer IterDomain
     IterDomain* ido = new IterDomain(
         new Int(0),
-        static_cast<Int*>(oe),
+        oe->as<Int>(),
         mapped->parallel_method(),
         rfactor_outer,
         true,
@@ -127,7 +127,7 @@ class ReplayRFactor : public ReplayTransformations {
 
     IterDomain* merged_id = new IterDomain(
         new Int(0),
-        static_cast<Int*>(merged_id_size),
+        merged_id_size->as<Int>(),
         id_outer_mapped->parallel_method(),
         rfactor_output,
         true,
@@ -237,7 +237,7 @@ TensorDomain* TransformRFactor::runReplay(
         TORCH_INTERNAL_ASSERT(
             val->getValType().value() == ValType::IterDomain,
             "Invalid value type found in rfactor axes inputs.");
-        return static_cast<IterDomain*>(val);
+        return val->as<IterDomain>();
       });
 
   auto orig_td_root = orig_td->rootDomain();
@@ -361,7 +361,7 @@ TensorDomain* TransformRFactor::runReplay2(
         TORCH_INTERNAL_ASSERT(
             val->getValType().value() == ValType::IterDomain,
             "Invalid value type found in rfactor axes inputs.");
-        return static_cast<IterDomain*>(val);
+        return val->as<IterDomain>();
       });
 
   // Replay all other root domains that are iter domains, as these will match in
