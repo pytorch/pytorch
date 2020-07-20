@@ -4373,14 +4373,14 @@ Move dims of an array to new positions.
 Other dims remain in their original order.
 
 Args:
-    input (Tensor)
+    {input}
     src (int or tuple of ints): Original positions of the dims to move. These must be unique.
     dst (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
 
 Example::
 
-    >>> a = torch.randn(3,2,1)
-    >>> a
+    >>> t = torch.randn(3,2,1)
+    >>> t
     tensor([[[-0.3362],
             [-0.8437]],
 
@@ -4389,7 +4389,9 @@ Example::
 
             [[ 0.5173],
             [-0.1398]]])
-    >>> torch.moveaxis(a, 1, 0)
+    >>> torch.movedim(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.movedim(t, 1, 0)
     tensor([[[-0.3362],
             [-0.9627],
             [ 0.5173]],
@@ -4397,11 +4399,13 @@ Example::
             [[-0.8437],
             [ 0.1727],
             [-0.1398]]])
-    >>> torch.moveaxis(a, (1, 2), (0, 1))
+    >>> torch.movedim(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.movedim(t, (1, 2), (0, 1))
     tensor([[[-0.3362, -0.9627,  0.5173]],
 
             [[-0.8437,  0.1727, -0.1398]]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.narrow,
            r"""
