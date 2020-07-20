@@ -18242,15 +18242,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     random_prob = random.random()
                     if random_negative and random_prob > 0.66:
                         random_idx = random.randint(0, len(src_sequence) - 1)
-                        src_sequence = make_negative(src_sequence, random_idx)
+                        src_sequence = make_index_negative(src_sequence, random_idx)
                     elif random_negative and random_prob > 0.33:
                         random_idx = random.randint(0, len(src_sequence) - 1)
-                        dst_sequence = make_negative(dst_sequence, random_idx)
+                        dst_sequence = make_index_negative(dst_sequence, random_idx)
                     elif random_negative:
                         random_idx = random.randint(0, len(src_sequence) - 1)
-                        dst_sequence = make_negative(dst_sequence, random_idx)
+                        dst_sequence = make_index_negative(dst_sequence, random_idx)
                         random_idx = random.randint(0, len(src_sequence) - 1)
-                        src_sequence = make_negative(src_sequence, random_idx)
+                        src_sequence = make_index_negative(src_sequence, random_idx)
 
                     torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
                     np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
