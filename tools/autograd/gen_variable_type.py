@@ -284,10 +284,6 @@ if (${cond}) {
 }
 """)
 
-RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-""")
-
 SELECT = CodeTemplate("""\
 
 if (${cond}) {
@@ -341,20 +337,19 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
+# TODO(iliacher): remove Profile wrappers
 # ProfiledType templates
 # See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXED_PROFILE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${profiled_arg_types})>();
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 PROFILE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${profiled_arg_types})>();
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
