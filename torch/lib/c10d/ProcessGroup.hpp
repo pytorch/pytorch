@@ -89,6 +89,7 @@ class ProcessGroup {
 
     virtual void abort();
 
+    // TODO: add documentation to getFuture.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
    protected:

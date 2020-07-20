@@ -147,7 +147,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
   cudaEvents_.resize(devices.size());
   ncclComms_.resize(devices.size());
 
-  futureWorkNCCL_ = c10::make_intrusive<c10::ivalue::Future>(
+  futureWork_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()));
 }
 
@@ -279,11 +279,6 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
   TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
-}
-
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
-    getFuture() {
-  return futureWorkNCCL_;
 }
 
 void ProcessGroupNCCL::parseNcclBlockingWait() {
@@ -671,46 +666,44 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 }
 
-struct checkFuture {
-  checkFuture(
-      std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
-      std::vector<at::Tensor>& outputs,
-      int work_counter,
-      int input_size,
-      std::mutex& mutex)
-      : work_(std::move(work)),
-        outputs_(outputs),
-        work_counter_(work_counter),
-        input_size_(input_size),
-        mutex_(mutex){};
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
+    getFuture() {
+  return futureWork_;
+}
+
+struct CheckFutureWork {
+  CheckFutureWork(
+      c10::intrusive_ptr<c10::ivalue::Future> futureWork,
+      std::vector<at::Tensor>& outputs)
+      : futureWork_(futureWork), outputs_(outputs), workCounter_(0){};
 
  public:
-  std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
-  std::vector<at::Tensor>& outputs_;
-  bool markFutureCompletedCheck() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    work_counter_ += 1;
-    return work_counter_ == input_size_;
-  };
   void markFutureCompleted() {
-    at::launch(([this] {
-      work_->getFuture()->markCompleted(torch::jit::IValue(outputs_));
+    at::launch(([this]() {
+      workCounter_++;
+      if (workCounter_ == outputs_.size()) {
+        futureWork_->markCompleted(torch::jit::IValue(outputs_));
+      }
     }));
-  }
+  };
 
  private:
-  int work_counter_;
-  int input_size_;
-  std::mutex& mutex_;
+  c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
+  std::vector<at::Tensor>& outputs_;
+  std::atomic<int> workCounter_;
 };
 
-void cudaStreamCallback(
+void ncclKernelCompletionCallback(
     cudaStream_t /* unused */,
     cudaError_t /* unused */,
     void* userData) {
-  auto hostfuncdata = (checkFuture*)userData;
-  if (hostfuncdata->markFutureCompletedCheck())
-    hostfuncdata->markFutureCompleted();
+  auto castedUserData =
+      dynamic_cast<CheckFutureWork*>((CheckFutureWork*)userData);
+
+  TORCH_CHECK(
+      castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
+
+  castedUserData->markFutureCompleted();
 };
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -729,8 +722,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
-
-  int work_counter = 0;
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -752,6 +743,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
+  auto checkFutObj =
+      std::make_shared<CheckFutureWork>(work->getFuture(), outputs);
+
   {
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -760,12 +754,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
       cudaStreamAddCallback(
-          ncclStream,
-          cudaStreamCallback,
-          (void*)std::make_shared<checkFuture>(
-              work, outputs, work_counter, inputs.size(), mutex_)
-              .get(),
-          0);
+          ncclStream, ncclKernelCompletionCallback, checkFutObj.get(), 0);
     }
   }
 

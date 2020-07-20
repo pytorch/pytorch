@@ -3095,14 +3095,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            return process_group.allreduce(bucket.get_tensors()).get_future()
+            allreduce_future = process_group.allreduce(bucket.get_tensors()).get_future()
+
+            def fut_then(fut):
+                # Multiply result by 10.
+                return [10 * t for t in fut.wait()]
+
+            return allreduce_future.then(fut_then)
 
         # Register DDP Communication Hook
         gpu_model._register_comm_hook(None, allreduce_hook)
 
-        # check whether the grads are equal to what allreduce returns.
+        # check whether the grads are equal to what allreduce returns multuplied by 10.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
-        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+        self._run_and_verify_hook(gpu_model, 8, 2.5 * torch.ones(2, 2))
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_init(self):

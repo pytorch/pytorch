@@ -72,8 +72,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     void abort() override;
 
-    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
-
     // Let current stream wait on the completing of the NCCL work
     // Throws on exceptions. Blocking operation, which will wait for work
     // completion.
@@ -82,6 +80,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     // The cached list of CUDA devices to operate on
@@ -105,9 +105,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
 
-    // Store a Future object associated with WorkNCCL.
-    c10::intrusive_ptr<c10::ivalue::Future> futureWorkNCCL_;
-
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
     virtual std::exception_ptr checkForNCCLErrors(
@@ -129,6 +126,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Reference to the store so that we can write aborted communicators
     // to the store.
     std::shared_ptr<Store> store_;
+
+    // Store a Future object associated with WorkNCCL.
+    c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
 
     friend class ProcessGroupNCCL;
   };
