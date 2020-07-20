@@ -250,7 +250,10 @@ class DeviceTypeTestBase(TestCase):
 
                     @wraps(test)
                     def instantiated_test(self, test=test, dtype=dtype, op=op):
-                        device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                        device_arg = cls.get_primary_device()
+                        if hasattr(test, 'num_required_devices'):
+                            device_arg = cls.get_all_devices()
+
                         # Sets precision and runs test
                         # Note: precision is reset after the test is run
                         guard_precision = self.precision
