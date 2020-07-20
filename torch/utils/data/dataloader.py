@@ -169,7 +169,7 @@ class DataLoader(Generic[T_co]):
             raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
                              'let num_workers > 0 to enable multiprocessing.')
         assert prefetch_factor > 0
-        
+
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
@@ -1031,7 +1031,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 return self._process_data(data)
 
     def _try_put_index(self):
-        assert self._tasks_outstanding < 2 * self._num_workers
         try:
             index = self._next_index()
         except StopIteration:
