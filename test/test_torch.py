@@ -7841,11 +7841,10 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x, x_exp)
 
         # test against numpy.linalg.solve
-        for upper in [True, False]:
-            run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6))  # no broadcasting
-            run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
-            run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
-            run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
+        run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6))  # no broadcasting
+        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
+        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
+        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix
