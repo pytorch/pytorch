@@ -6,7 +6,9 @@ from .optimizer import Optimizer
 class Adam(Optimizer):
     r"""Implements Adam algorithm.
 
-    It has been proposed in `Adam: A Method for Stochastic Optimization`_.
+    The original Adam algorithm was proposed in `Adam: A Method for Stochastic Optimization`_.
+    Although this implementation applies L2 penalty, it is motivated by changes proposed in
+    `Decoupled Weight Decay Regularization`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -23,6 +25,8 @@ class Adam(Optimizer):
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
+    .. _Decoupled Weight Decay Regularization:
+        https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
     """
