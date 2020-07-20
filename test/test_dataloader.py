@@ -1154,7 +1154,7 @@ except RuntimeError as e:
         sizes_for_all_workers = [0, 4, 20]
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
-        for prefetch_factor in [2, 3 ,4]:
+        for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
             # worker 0 should return 0 batches
             # worker 1 should return 1 batches
