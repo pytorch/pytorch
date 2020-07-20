@@ -2830,14 +2830,14 @@ Tests if each element of :attr:`input` is infinite
 (positive or negative infinity) or not.
 
 .. note::
-    Complex values are infinite when their real part, imaginary part, or real and
-    imaginary parts are infinite.
+    Complex values are infinite when their real or imaginary part is
+    infinite.
 
     Arguments:
         {input}
 
     Returns:
-        A boolean tensor with True where :attr:`input` is infinite and False elsewhere
+        A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
 
     Example::
 
