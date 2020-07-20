@@ -1660,7 +1660,7 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: src (",
-              src, " dims ) should contain the same number of dims as dst (", dst, "dims)");
+              src, " dims ) should contain the same number of dims as dst (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());
@@ -1684,7 +1684,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   // Example Input
   // Variable State:
   //     normalized_src = 0, 1
-  //     normalized_src = 2, 4
+  //     normalized_dst = 2, 4
   //     self_dim = 5
   DimVector order(self_dim);
   DimVector source_dims(self_dim);
