@@ -4430,6 +4430,53 @@ void testGPU_FusionConstCheck() {
   TORCH_CHECK(one_x4->isConstScalar());
 }
 
+void testGPU_FusionUnrollWithAlloc() {
+  const std::vector<int64_t> tensor_dims_in = {128, 128};
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(tensor_dims_in.size());
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = add(tv0, new Float(0));
+  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv1);
+  fusion.addOutput(tv2);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand(tensor_dims_in, options);
+  at::Tensor cg_output = at::empty({tensor_dims_in[0]}, options);
+
+  // const at::ArrayRef<c10::IValue> inputs({input});
+
+  // Schedule
+  tv2->split(1, 32);
+  tv2->split(1, 4); // unroll
+
+  auto tv2_rf = tv2->rFactor({-3, -2});
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv2_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2_rf->axis(-2)->parallelize(ParallelType::Unroll);
+
+  tv1->computeAt(tv2_rf, -1);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({input});
+
+  auto aten_output = (input + 0).sum(1);
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0]),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
 } // namespace jit
 } // namespace torch
 

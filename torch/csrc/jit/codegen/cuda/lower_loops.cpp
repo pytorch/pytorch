@@ -25,13 +25,6 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
       break;
     }
-
-    // If we found an unroll, we want to place the allocation outside the unroll
-    if (alloc_pos < tv->nDims() &&
-        tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
-            ParallelType::Unroll) {
-      break;
-    }
     alloc_pos++;
   }
 
