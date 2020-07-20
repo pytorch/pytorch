@@ -143,6 +143,7 @@ white_list = [
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('aten::eq', datetime.date(2020, 7, 30)),
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
     ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),

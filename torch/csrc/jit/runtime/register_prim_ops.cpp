@@ -520,6 +520,14 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool",
+         [](Stack* stack) {
+           IValue x = pop(stack);
+           IValue y = pop(stack);
+           push(stack, x == y);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
          [](Stack* stack) {
            at::Tensor qtensor;
