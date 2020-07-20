@@ -2266,6 +2266,7 @@ class TestOperators(hu.HypothesisTestCase):
         D = np.zeros((first_dim,) + X.shape[1:]).astype(X.dtype)
 
         op = core.CreateOperator("SparseToDense", ["I", "X", "D"], ["Y"])
+        op_noshapeinfer = core.CreateOperator("SparseToDense", ["I", "X"], ["Y"])
 
         def sparse_to_dense(I, X, D):
             O = np.zeros(D.shape)
@@ -2273,7 +2274,14 @@ class TestOperators(hu.HypothesisTestCase):
                 O[p] += X[i]
             return [O]
 
+        def sparse_to_dense_noshapeinfer(I, X):
+            O = np.zeros((np.max(I) + 1,) + X.shape[1:]).astype(X.dtype)
+            for i, p in enumerate(I):
+                O[p] += X[i]
+            return [O]
+
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
+        self.assertReferenceChecks(gc, op_noshapeinfer, [I, X], sparse_to_dense_noshapeinfer)
         X = X.astype(np.float32)
         self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
 

@@ -360,7 +360,7 @@ def processKernelLaunches(string, stats):
 def find_closure_group(input_string, start, group):
     """Generalization for finding a balancing closure group
 
-         if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["(", ")"], then finds the first balanced parentheses.
          if group = ["{", "}"], then finds the first balanced bracket.
 
     Given an input string, a starting position in the input string, and the group type,

@@ -238,7 +238,7 @@ public:
       vst1q_f32(reinterpret_cast<float*>(ptr), values.val[0]);
     }
     else {
-      float tmp_values[size()];
+      __at_align32__ float tmp_values[size()];
       vst1q_f32_x2(reinterpret_cast<float*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
@@ -654,7 +654,7 @@ float32x4_t fill_mask(float32x4_t mask);
 template<>
 inline float32x4_t fill_mask<0, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0xFFFFFFFF, 0x0, 0x0, 0x0};
-  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+  float32x4_t tmp_mask = (float32x4_t)(int_mask);
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -666,7 +666,7 @@ inline float32x4_t fill_mask<0, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<1, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0xFFFFFFFF, 0x0, 0x0};
-  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+  float32x4_t tmp_mask = (float32x4_t)(int_mask);
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -678,7 +678,7 @@ inline float32x4_t fill_mask<1, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<2, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0x0, 0xFFFFFFFF, 0x0};
-  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+  float32x4_t tmp_mask = (float32x4_t)(int_mask);
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -690,7 +690,7 @@ inline float32x4_t fill_mask<2, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<3, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0x0, 0x0, 0xFFFFFFFF};
-  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+  float32x4_t tmp_mask = (float32x4_t)(int_mask);
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -889,7 +889,7 @@ public:
           "vld1.32 {d6, d7, d8, d9}, [%[in_ptr]]\n\t"
           : "=w" (low), "=w" (high)
           : [in_ptr] "r" (ptr)
-          :);
+          : "memory");
       return Vec256<float>(low, high);
     }
     else if (count == (size() >> 1)) {
@@ -900,7 +900,7 @@ public:
           "vld1.32 {d6, d7}, [%[in_ptr]]\n\t"
           : "=w" (low)
           : [in_ptr] "r" (ptr)
-          :);
+          : "memory");
       return Vec256<float>(low, high);
     }
     else {
@@ -918,7 +918,7 @@ public:
           "vld1.32 {d6, d7, d8, d9}, [%[in_ptr]]\n\t"
           : "=w" (low), "=w" (high)
           : [in_ptr] "r" (tmp_values)
-          :);
+          : "memory");
       return Vec256<float>(low, high);
     }
     return Vec256<float>();
@@ -932,7 +932,7 @@ public:
           :
           : [in_ptr] "r" (ptr),
             [in_low] "w" (values.val[0]), [in_high] "w" (values.val[1])
-          : "q3", "q4");
+          : "q3", "q4", "memory");
     }
     else if (count == (size() >> 1)) {
       __asm__  __volatile__ (
@@ -940,10 +940,10 @@ public:
           "vst1.32 {d6, d7}, [%[in_ptr]]\n\t"
           :
           : [in_ptr] "r" (ptr), [in_low] "w" (values.val[0])
-          : "q3");
+          : "q3", "memory");
     }
     else {
-      float tmp_values[size()];
+      __at_align32__ float tmp_values[size()];
       __asm__  __volatile__ (
           "vmov.f32 q3, %[in_low]\n\t"
           "vmov.f32 q4, %[in_high]\n\t"
@@ -951,7 +951,7 @@ public:
           :
           : [in_ptr] "r" (tmp_values),
             [in_low] "w" (values.val[0]), [in_high] "w" (values.val[1])
-          : "q3", "q4");
+          : "q3", "q4", "memory");
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
