@@ -19,7 +19,9 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
 
-# Classes and methods for the test operator database
+# Classes and methods for the operator database
+# The OpMeta class contains metadata and helpers for acquiring properties of
+# operations, like what dtypes they support.
 class OpMeta(object):
     def __init__(self,
                  name,  # the string name of the function
@@ -82,7 +84,7 @@ class OpMeta(object):
         return False
 
 
-# Metadata for unary "universal functions (ufuncs)" that accept a single
+# Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
 #   - they are elementwise functions
 #   - the input shape is the output shape
@@ -110,11 +112,13 @@ class UnaryUfuncMeta(OpMeta):
                                              has_out_kwarg=has_out_kwarg,
                                              **kwargs)
 
+# Operator database
 op_db = [
     UnaryUfuncMeta('cos',
                    dtypesIfCUDA=get_all_float_and_complex_types()),
 ]
 
+# Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncMeta)]
 
 

@@ -23,7 +23,7 @@ except ImportError:
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Each test method should have one of four signatures:
+#   (1) Each test method should have one of following five signatures:
 #
 #           (1a) testX(self, device)
 #
@@ -37,9 +37,11 @@ except ImportError:
 #                @dtypes(<list of dtypes> or <list of tuples of dtypes>)
 #                testX(self, devices, dtype)
 #
+#           (1e) @ops(<list of OpMeta instances>)
+#                testX(self, device, dtype, op_meta)
 #
-#       Note that the decorators are required for signatures (1b), (1c) and
-#       (1d).
+#
+#       Note that the decorators are required for signatures 1b--1e.
 #
 #       When a test like (1a) is called it will be given a device string,
 #       like 'cpu' or 'cuda:0.'
@@ -56,6 +58,10 @@ except ImportError:
 #
 #       Tests like (1d) take a devices argument like (1b) and a dtype
 #       argument from (1c).
+#
+#       Tests like (1e) are instantiated for each provided OpMeta instance,
+#       with dtypes specified by the OpMeta instance (unless overridden with)
+#       an additional @dtypes decorator.
 #
 #   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
