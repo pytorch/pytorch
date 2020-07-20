@@ -4,12 +4,118 @@ from functools import reduce
 from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
-from torch.testing import make_non_contiguous
-from torch.testing._internal.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
-from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
-                                                  random_symmetric_matrix, random_symmetric_psd_matrix,
-                                                  random_symmetric_pd_matrix, make_nonzero_det,
-                                                  random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+from torch.testing import \
+    (make_non_contiguous,
+     get_common_float_types, get_all_float_types,
+     get_common_float_and_complex_types_plus_half,
+     get_common_float_and_complex_types_plus_bfloat16,
+     get_all_float_and_complex_types)
+from torch.testing._internal.common_device_type import \
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA)
+from torch.testing._internal.common_utils import \
+    (prod_single_zero, random_square_matrix_of_rank,
+     random_symmetric_matrix, random_symmetric_psd_matrix,
+     random_symmetric_pd_matrix, make_nonzero_det,
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+
+
+# Classes and methods for the test operator database
+class OpMeta(object):
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 dtypes=None,  # dtypes this function is expected to work with
+                 dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
+                 dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
+                 dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 has_out_kwarg=None,  # whether this function has an out kwarg
+                 decorators=None,  # decorators to apply to generated tests
+                 tests_to_skip=None):  # regular expressions describing tests to skip
+        self.name = name
+
+        self.dtypes = dtypes
+        self.dtypesIfCPU = dtypesIfCPU
+        self.dtypesIfCUDA = dtypesIfCUDA
+        self.dtypesIfROCM = dtypesIfROCM
+
+        self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
+        inplace_name = name + "_"
+        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        self.has_out_kwarg = has_out_kwarg
+
+        self.decorators = decorators
+        self.tests_to_skip = tests_to_skip
+
+    # Returns the op (currently only supports torch.<op_name>)
+    def getOp(self):
+        return getattr(torch, self.name)
+
+    # Returns the method variant of the op (torch.Tensor.<op_name>)
+    # or None if the op has no method variant
+    def getMethod(self):
+        return self.method_variant
+
+    # Returns the inplace variant of the op (torch.Tensor.<op_name>_)
+    # or None if the op has no inplace variant
+    def getInplace(self):
+        return self.inplace_variant
+
+    # Returns True if the test should be skipped and False otherwise
+    def shouldSkip(self, test_name, *, device, dtype):
+        if self.tests_to_skip is None:
+            return False
+
+        if device is None and dtype is None:
+            full_name = test_name
+        elif dtype is None:
+            assert device is not None
+            full_name = test_name + "_" + str(torch.device(device).type)
+        else:
+            assert device is not None
+            assert dtype is not None
+            full_name = test_name + "_" + str(torch.device(device).type) + "_" + str(dtype).split('.')[1]
+
+        for regex in self.tests_to_skip:
+            if re.match(regex, full_name):
+                return True
+
+        return False
+
+
+# Metadata for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+#   - they are elementwise functions
+#   - the input shape is the output shape
+#   - they typically have method and inplace variants
+#   - they typically support the out kwarg
+#   - they typically have NumPy or SciPy references
+# See NumPy's universal function documentation
+# (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+# about the concept of ufuncs.
+class UnaryUfuncMeta(OpMeta):
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 dtypes=get_common_float_types(),
+                 dtypesIfCPU=get_common_float_and_complex_types_plus_bfloat16(),
+                 dtypesIfCUDA=get_common_float_and_complex_types_plus_half(),
+                 dtypesIfROCM=get_all_float_types(),
+                 has_out_kwarg=True,
+                 **kwargs):
+        super(UnaryUfuncMeta, self).__init__(name,
+                                             dtypes=dtypes,
+                                             dtypesIfCPU=dtypesIfCPU,
+                                             dtypesIfCUDA=dtypesIfCUDA,
+                                             dtypesIfROCM=dtypesIfROCM,
+                                             has_out_kwarg=has_out_kwarg,
+                                             **kwargs)
+
+op_db = [
+    UnaryUfuncMeta('cos',
+                   dtypesIfCUDA=get_all_float_and_complex_types()),
+]
+
+unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncMeta)]
 
 
 def index_variable(shape, max_indices):

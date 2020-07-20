@@ -250,6 +250,30 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     # Use .data here to hide the view relation between input and other temporary Tensors
     return input.data
 
+# Common type groups
+_common_float_types = (torch.float32, torch.float64)
+_common_float_types_plus_half = _common_float_types + (torch.float16,)
+_common_float_types_plus_bfloat16 = _common_float_types + (torch.bfloat16,)
+_all_float_types = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+_complex_types = (torch.complex64, torch.complex128)
+_common_float_and_complex_types_plus_bfloat16 = _common_float_types_plus_bfloat16 + _complex_types
+_common_float_and_complex_types_plus_half = _common_float_types_plus_half + _complex_types
+_all_float_and_complex_types = _all_float_types + _complex_types
+
+def get_common_float_types():
+    return _common_float_types
+
+def get_all_float_types():
+    return _all_float_types
+
+def get_common_float_and_complex_types_plus_bfloat16():
+    return _common_float_and_complex_types_plus_bfloat16
+
+def get_common_float_and_complex_types_plus_half():
+    return _common_float_and_complex_types_plus_half
+
+def get_all_float_and_complex_types():
+    return _all_float_and_complex_types
 
 def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
@@ -263,7 +287,6 @@ def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, 
 def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
                                                     include_bfloat16=False) + get_all_complex_dtypes()
-
 
 def get_all_complex_dtypes() -> List[torch.dtype]:
     return [torch.complex64, torch.complex128]

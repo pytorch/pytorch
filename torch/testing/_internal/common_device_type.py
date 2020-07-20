@@ -9,6 +9,8 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+from torch.testing import \
+    (get_all_dtypes)
 
 try:
     import psutil
@@ -205,8 +207,60 @@ class DeviceTypeTestBase(TestCase):
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test):
-        test_name = name + "_" + cls.device_type
+        # Handles tests using the ops decorator
+        if hasattr(test, "op_list"):
+            for op in test.op_list:
+                base_op_test_name = name + "_" + op.name + "_" + cls.device_type
 
+                # Acquires dtypes, using the op data if unspecified
+                dtypes = cls._get_dtypes(test)
+                if dtypes is None:
+                    if cls.device_type == 'cpu' and op.dtypesIfCPU is not None:
+                        dtypes = op.dtypesIfCPU
+                    elif (cls.device_type == 'cuda' and not TEST_WITH_ROCM
+                          and op.dtypesIfCUDA is not None):
+                        dtypes = op.dtypesIfCUDA
+                    elif (cls.device_type == 'cuda' and TEST_WITH_ROCM
+                          and op.dtypesIfROCM is not None):
+                        dtypes = op.dtypesIfROCM
+                    else:
+                        dtypes = op.dtypes
+
+                # Inverts dtypes if the function wants unsupported dtypes
+                if test.unsupported_dtypes_only is True:
+                    dtypes = [d for d in get_all_dtypes() if d not in dtypes]
+
+                for dtype in dtypes:
+                    # Constructs dtype suffix
+                    if isinstance(dtype, (list, tuple)):
+                        dtype_str = ""
+                        for d in dtype:
+                            dtype_str += "_" + str(d).split('.')[1]
+                    else:
+                        dtype_str = "_" + str(dtype).split('.')[1]
+
+                    test_name = base_op_test_name + dtype_str
+                    assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+
+                    @wraps(test)
+                    def instantiated_test(self, test=test, dtype=dtype, op=op):
+                        device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                        # Sets precision and runs test
+                        # Note: precision is reset after the test is run
+                        guard_precision = self.precision
+                        try :
+                            self.precision = self._get_precision_override(test, dtype)
+                            result = test(self, device_arg, dtype, op)
+                        finally:
+                            self.precision = guard_precision
+
+                        return result
+
+                    setattr(cls, test_name, instantiated_test)
+                return
+
+        # Handles tests that don't use the ops decorator
+        test_name = name + "_" + cls.device_type
         dtypes = cls._get_dtypes(test)
         if dtypes is None:  # Test has no dtype variants
             assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
@@ -384,6 +438,22 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
+# Decorator that defines the ops a test should be run with
+# The test signature must be:
+#   <test_name>(self, device, dtype, op_meta)
+# For example:
+# @ops(unary_ufuncs)
+# test_numerics(self, device, dtype, op_meta):
+#   <test_code>
+class ops(object):
+    def __init__(self, op_list, *, unsupported_dtypes_only=False):
+        self.op_list = op_list
+        self.unsupported_dtypes_only = unsupported_dtypes_only
+
+    def __call__(self, fn):
+        fn.op_list = self.op_list
+        fn.unsupported_dtypes_only = self.unsupported_dtypes_only
+        return fn
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
