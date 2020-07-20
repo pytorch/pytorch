@@ -704,8 +704,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_future",
-           [] (::c10d::ProcessGroup::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper>
-           {return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());},
+          [](::c10d::ProcessGroup::Work& work)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
+          },
           py::call_guard<py::gil_scoped_release>());
 
   module.def(

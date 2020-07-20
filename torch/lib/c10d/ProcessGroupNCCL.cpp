@@ -7,12 +7,11 @@
 #include <THC/THC.h>
 
 #include <ATen/Parallel.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
-
-#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace c10d {
 
@@ -682,7 +681,7 @@ struct CheckFutureWork {
     at::launch(([this]() {
       workCounter_++;
       if (workCounter_ == outputs_.size()) {
-        futureWork_->markCompleted(torch::jit::IValue(outputs_));
+        futureWork_->markCompleted(at::IValue(outputs_));
       }
     }));
   };
