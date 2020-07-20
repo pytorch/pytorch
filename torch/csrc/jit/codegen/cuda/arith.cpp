@@ -455,6 +455,8 @@ TensorView* reductionOp(
 
   TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
 
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)
