@@ -8067,8 +8067,8 @@ C10_MAPPINGS = collections.OrderedDict(
         # This substitution is not permissible, because there's another copy of this
         # function in torch/cuda.h
         # ("cuda::device_count", ("hip::device_count", API_C10)),
-        ("cuda::current_device", ("hip::current_device", API_C10)),
-        ("cuda::set_device", ("hip::set_device", API_C10)),
+        # ("cuda::current_device", ("hip::current_device", API_C10)),
+        # ("cuda::set_device", ("hip::set_device", API_C10)),
         ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
         ("getStreamFromPool", ("getStreamFromPool", API_C10)),
         ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStream", API_C10)),
