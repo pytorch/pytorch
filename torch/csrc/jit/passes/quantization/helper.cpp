@@ -14,13 +14,14 @@ struct FuncArg {
 using AtenFuncArgs = std::vector<FuncArg>;
 using CallFuncArgs = std::vector<FuncArg>;
 
-// White lists for quantizable operators
+// Lists of allowed quantizable operators
 std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
     "hardswish",
     "elu",
+    "celu",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -35,6 +36,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "hardswish_",
     "elu",
     "elu_",
+    "celu",
+    "celu_",
     "batch_norm",
     "layer_norm",
     "group_norm",
