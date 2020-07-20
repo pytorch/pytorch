@@ -427,10 +427,9 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
     case DataType::Int:
       return at::ScalarType::Long;
     default:
-      break;
+      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+      return at::ScalarType::Undefined;
   }
-  TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
-  return at::ScalarType::Undefined;
 }
 
 std::ostream& operator<<(std::ostream& out, const ValType vtype) {

@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <c10/core/DeviceType.h>
@@ -16,6 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// TODO: Should this actually be in launch params?
 struct TORCH_CUDA_API CompileOptions {
   c10::Device device = c10::Device(c10::DeviceType::CUDA, 0);
 };
@@ -23,9 +23,8 @@ struct TORCH_CUDA_API CompileOptions {
 class TORCH_CUDA_API FusionExecutor {
  public:
   FusionExecutor() {}
-  FusionExecutor(CompileOptions options) : options_(options) {}
 
-  void compileFusion(Fusion* fusion);
+  void compileFusion(Fusion* fusion, CompileOptions options = CompileOptions());
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,

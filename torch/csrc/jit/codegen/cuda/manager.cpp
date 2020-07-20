@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
@@ -11,8 +11,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <unordered_map>
+
+#include <c10/core/DeviceType.h>
+
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 
 namespace torch {
 namespace jit {
@@ -20,14 +23,28 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-// CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
+c10::Device getDevice(const at::ArrayRef<IValue>& inputs) {
+  // find device in inputs.
+  for (const auto& input : inputs) {
+    if (input.isTensor()) {
+      auto dev = input.toTensor().device();
+      TORCH_INTERNAL_ASSERT(
+          dev.is_cuda(), "Could only fuser operations on cuda device");
+      return dev;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      false, "Could not detect device of inputs to a fusion.");
+}
+
+// CudaFusionManager holds a FusionExecutor and handles all interfacing
 // including compilation and execution.
 //
 // We cache two maps here:
 //   a. string of graph -> kernel_id
-//   b. kernel_id -> CudaKernel
+//   b. kernel_id -> FusionExecutor
 //
-// This allows CudaKernel reuse across nodes;
+// This allows FusionExecutor reuse across nodes;
 class CudaFusionManager {
  public:
   static CudaFusionManager& getManager() {
@@ -53,17 +70,7 @@ class CudaFusionManager {
     // create new graph_cache_ entry;
     if (graph_cache_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
-
       graph_cache_[repr] = kernel_id;
-
-      // create entry for cached kernel;
-      // Note: use make_pair instead of uniform initialization list here since
-      //       it doesn't work under some env that we still support.
-      //       eg. cuda9.2 + gcc5.4
-      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
-
-      // TODO: we should compile here using profiled information:
-      //       size (range) / stride (contiguity)
     }
     return graph_cache_[repr];
   };
@@ -74,46 +81,33 @@ class CudaFusionManager {
       const at::ArrayRef<IValue> inputs,
       const std::vector<at::Tensor>& outputs) {
     std::lock_guard<std::mutex> guard(mutex_);
-    TORCH_CHECK(
-        kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
-    if (auto cuda_kernel_opt = kernel_cache_[kernel_id].getKernelPtr(inputs)) {
+    if (kernel_cache_.find(kernel_id) != kernel_cache_.end()) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel_opt, inputs, outputs);
-    } else {
-      // TODO: this should somehow be done after kernel compilation.
-      //       we will want compileKernel to return a heuristic
-      auto cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(inputs);
 
+      FusionExecutor* fe = kernel_cache_[kernel_id];
+      fe->runFusion(inputs, outputs);
+
+    } else {
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       // TODO: pass contiguity infor as well as size req, so we can apply proper
       //       transform to computation
-      cuda_kernel->setFusionPtr(parseJitIR(graph));
-      TORCH_INTERNAL_ASSERT(
-          cuda_kernel->fusion() != nullptr,
-          "parser failed to construct a fusion from PyTorch JIT graph\n");
+      auto fusion = parseJitIR(graph);
 
       // TODO: update the API to let `scheduleFusion` consume & return a fusion
       // magic scheduler updates fusion instance via transformation and setup
       // launch configurations;
-      scheduleFusion(cuda_kernel->fusion(), inputs);
+      Fusion fusion_copy = Fusion(*fusion);
+      scheduleFusion(&fusion_copy, inputs);
 
-      // find device in inputs.
-      for (const auto& input : inputs) {
-        if (input.isTensor()) {
-          const auto& device = input.toTensor().device();
-          TORCH_INTERNAL_ASSERT(
-              device.is_cuda(), "Could only fuser operations on cuda device");
-          cuda_kernel->setDevice(device.index());
-          break;
-        }
-      }
+      CompileOptions options;
+      options.device = getDevice(inputs);
 
-      // NVRTC compile kernel
-      compileKernel(cuda_kernel);
-
-      runKernel(cuda_kernel, inputs, outputs);
+      auto fe = new FusionExecutor();
+      fe->compileFusion(fusion.get(), options);
+      kernel_cache_[kernel_id] = fe;
+      fe->runFusion(inputs, outputs);
     }
   }
 
@@ -130,7 +124,7 @@ class CudaFusionManager {
   };
 
   std::unordered_map<std::string, int32_t> graph_cache_;
-  std::unordered_map<int64_t, CudaKernelCache> kernel_cache_;
+  std::unordered_map<int64_t, FusionExecutor*> kernel_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -177,49 +171,11 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       }
       ShapeTypePropagate(graph);
     }
-    /*
-    // TODO: Delete the shape inference here once we switch to
-    //       ExpressionEvaluator to allocate outputs
-    // shape inference in graph to allocate outputs
-    // update shape information per the new inputs;
-    EraseShapeInformation(shape_inf_graph);
-    for (size_t i = 0; i < nInputs; i++) {
-      shape_inf_graph->inputs()[i]->setType(inputs[i].type());
-    }
-    // shape inference
-    ShapeTypePropagate(shape_inf_graph);
 
-    // we need to construct outputs;
-    std::vector<at::Tensor> outputs;
-    for (const auto* output : shape_inf_graph->outputs()) {
-      const auto type = output->type()->expect<TensorType>();
-      // Expect output to be tensor;
-      TORCH_CHECK(
-          type && type->isComplete(),
-          "Complete TensorType for output is expected.");
-
-      const auto device = *(type->device());
-      const auto scalar_type = *(type->scalarType());
-
-      auto options = at::TensorOptions()
-                         .dtype(scalar_type)
-                         .layout(at::kStrided)
-                         .device(device)
-                         .requires_grad(type->requires_grad());
-
-      // TODO: We should infer output shape from `inputs`
-      const auto sizes = extractSizes(type);
-      const auto strides = extractStrides(type);
-
-      const auto tensor = at::empty_strided(sizes, strides, options);
-      outputs.push_back(tensor);
-    }
-    CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs);
-    */
     FusionExecutor executor;
     auto fusion = parseJitIR(graph);
     scheduleFusion(fusion.get(), inputs);
+
     executor.compileFusion(fusion.get());
     auto outputs = executor.runFusion(inputs);
 

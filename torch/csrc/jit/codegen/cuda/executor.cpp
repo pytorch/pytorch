@@ -1,11 +1,13 @@
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
+#include <ATen/cuda/Exceptions.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAStream.cpp>
 
 namespace torch {
 namespace jit {
@@ -30,7 +32,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   return code;
 }
 
-void FusionExecutor::compileFusion(Fusion* fusion) {
+void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   TORCH_INTERNAL_ASSERT(
       !fusion->outputs().empty(), "No output found for this kernel, aborting.");
 
@@ -41,6 +43,7 @@ void FusionExecutor::compileFusion(Fusion* fusion) {
 
   fusion_ = *fusion;
   FusionGuard fg(&fusion_);
+  options_ = options;
 
   fusion_id = ++fusion_id_counter;
   has_random = fusion->hasRNG();

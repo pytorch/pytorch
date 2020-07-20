@@ -46,24 +46,6 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
   arguments_.push_back(std::move(tensor_arg));
 }
 
-// Push a tensor to the arguments
-void KernelArgumentHolder::push(
-    const at::Tensor& val,
-    c10::optional<at::IntArrayRef> broadcasted_size) {
-  changed_ = true;
-  ExtractSizeStride ess(val, std::move(broadcasted_size));
-  int nDims = ess.sizes.size();
-
-  c10::ScalarType dtype = val.scalar_type();
-  std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
-  tensor_arg->setPointer(val.data_ptr());
-  for (int i = 0; i < nDims; i++) {
-    tensor_arg->setSize(i, ess.sizes[i]);
-    tensor_arg->setStride(i, ess.strides[i]);
-  }
-  arguments_.push_back(std::move(tensor_arg));
-}
-
 // Push a scalar or integer to the arguments
 void KernelArgumentHolder::push(const IValue& val) {
   changed_ = true;

@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -145,27 +147,6 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
         numel = mul(numel, out0->axis(i)->rawExtent());
       }
     }
-    if (fcd_reduction) {
-      // assuming all output to be the same shape;
-      fusion->setLaunchConfig(
-          LaunchConfigType::TIDx, new Int(kFcdReductionThreadX));
-      fusion->setLaunchConfig(LaunchConfigType::TIDy, new Int(1));
-      fusion->setLaunchConfig(LaunchConfigType::TIDz, new Int(1));
-      fusion->setLaunchConfig(LaunchConfigType::BIDx, numel);
-      fusion->setLaunchConfig(LaunchConfigType::BIDy, new Int(1));
-      fusion->setLaunchConfig(LaunchConfigType::BIDz, new Int(1));
-    } else {
-      fusion->setLaunchConfig(
-          LaunchConfigType::TIDx, new Int(kNonFcdReductionThreadX));
-      fusion->setLaunchConfig(
-          LaunchConfigType::TIDy, new Int(kNonFcdReductionThreadY));
-      fusion->setLaunchConfig(LaunchConfigType::TIDz, new Int(1));
-      fusion->setLaunchConfig(LaunchConfigType::BIDx, numel);
-      fusion->setLaunchConfig(LaunchConfigType::BIDy, new Int(1));
-      fusion->setLaunchConfig(LaunchConfigType::BIDz, new Int(1));
-    }
-    fusion->setLaunchConfig(LaunchConfigType::Compatible, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::SharedMemory, new Int(0));
   } else {
     // Run through outputs, grab all inputs of outputs
     // squeeze with computeAt to set overall structure.
@@ -219,16 +200,6 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
         numel = mul(numel, out0->axis(i)->rawExtent());
       }
     }
-    Val* tid_x = new Int(kPwThreadX);
-    Val* bid_x = numel;
-    fusion->setLaunchConfig(LaunchConfigType::TIDx, tid_x);
-    fusion->setLaunchConfig(LaunchConfigType::TIDy, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::TIDz, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::BIDx, bid_x);
-    fusion->setLaunchConfig(LaunchConfigType::BIDy, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::BIDz, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::Compatible, new Int(1));
-    fusion->setLaunchConfig(LaunchConfigType::SharedMemory, new Int(0));
   }
   return true;
 }
@@ -560,21 +531,6 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(1)->parallelize(ParallelType::BIDx);
     }
   }
-
-  // Communicate Blocking for Kernel Launch
-  // TODO: This will be replaced in favor of passing blocking
-  // args in the future
-  fusion->setLaunchConfig(
-      LaunchConfigType::TIDx, new Int(rparams.block_dim_x_));
-  fusion->setLaunchConfig(
-      LaunchConfigType::TIDy, new Int(rparams.block_dim_y_));
-  fusion->setLaunchConfig(LaunchConfigType::TIDz, new Int(1));
-  fusion->setLaunchConfig(LaunchConfigType::BIDx, new Int(rparams.grid_dim_x_));
-  fusion->setLaunchConfig(LaunchConfigType::BIDy, new Int(rparams.grid_dim_y_));
-  fusion->setLaunchConfig(LaunchConfigType::BIDz, new Int(1));
-  fusion->setLaunchConfig(LaunchConfigType::SharedMemory, new Int(0));
-  fusion->setLaunchConfig(LaunchConfigType::Compatible, new Int(1));
-
   return rparams;
 }
 

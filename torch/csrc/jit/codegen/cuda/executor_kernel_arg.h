@@ -143,12 +143,6 @@ class KernelArgumentHolder {
   // Push a tensor to the arguments
   void push(const at::Tensor& tensor);
 
-  // We want to get rid of this version, it's a hack for now because we don't
-  // have great broadcast support for translation.
-  void push(
-      const at::Tensor& tensor,
-      c10::optional<at::IntArrayRef> broadcasted_size);
-
   // Push a scalar or integer to the arguments
   void push(const IValue& val);
 
