@@ -28,7 +28,7 @@ D_SPARSE = 3
 D_DENSE = 2
 D_HID = 3
 D_OUT = 1
-NUM_TRAINERS = 4
+NUM_TRAINERS = 2
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
 TRAINER_RANKS = list(range(NUM_TRAINERS))

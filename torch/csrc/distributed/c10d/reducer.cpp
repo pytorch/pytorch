@@ -76,6 +76,7 @@ Reducer::Reducer(
     for (size_t replica_index = 0; replica_index < replica_count;
          replica_index++) {
       const auto variable_count = replicas_[replica_index].size();
+      std::cout << "For rank: " << process_group_->getRank() << " have: " << variable_count << " parameters.\n";
       grad_accumulators_[replica_index].resize(variable_count);
       for (size_t variable_index = 0; variable_index < variable_count;
            variable_index++) {
@@ -424,6 +425,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   if (!has_marked_unused_parameters_ && find_unused_parameters_) {
     has_marked_unused_parameters_ = true;
     for (const auto& unused_index : unused_parameters_) {
+        std::cout << "Rank: " << process_group_->getRank() << " marking unused index as ready: " << unused_index.variable_index << std::endl;
       mark_variable_ready(unused_index);
     }
   }
@@ -526,6 +528,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         c10::impl::VirtualGuardImpl{deviceType};
     const c10::Stream currentStream =
         guard.getStream(replica.contents.device());
+    std::cout << "QUEUEING trhe callback" << std::endl;
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::unique_lock<std::mutex> lock(this->mutex_);
       // Run callback with the current stream
@@ -827,6 +830,7 @@ void Reducer::prepare_for_backward(
   }
 
   // Find accumulator functions that don't show up in this graph.
+  std::cout << "rank: " << process_group_->getRank() << " func_ size: " << func_.size() << std::endl;
   for (const auto& it : func_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
@@ -834,6 +838,7 @@ void Reducer::prepare_for_backward(
       continue;
     }
 
+    std::cout << "Rank: " << process_group_->getRank() << " pusing back 1 unused param\n";
     unused_parameters_.push_back(it.second);
   }
 }

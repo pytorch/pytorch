@@ -437,6 +437,7 @@ class DistributedDataParallel(Module):
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
         # are used in the forward pass in the order they are defined.
+        print(f"Creating reducer with {len(parameters[0])} params")
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
