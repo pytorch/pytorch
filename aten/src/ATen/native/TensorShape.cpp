@@ -1658,15 +1658,15 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
-Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
-  TORCH_CHECK(src.size() == dst.size(), "moveaxis: Invalid source or destination dims: src (",
+Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: src (",
               src, " dims ) should contain the same number of dims as dst (", dst, "dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());
   DimVector normalized_dst(dst.size());
 
-  auto wrap_dims = [&self_dim](IntArrayRef vec, DimVector& normalized_vec) {
+  auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
     for (int i = 0; i < vec.size(); i++) {
       normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
     }
@@ -1676,9 +1676,9 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   wrap_dims(dst, normalized_dst);
 
   auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "moveaxis: repeated dim in `src` (", src, ")");
+  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `src` (", src, ")");
   auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "moveaxis: repeated dim in `dst` (", dst, ")");
+  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `dst` (", dst, ")");
 
   // Algorithm Walkthrough
   // Example Input
@@ -1733,8 +1733,8 @@ Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   return self.permute(order);
 }
 
-Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
-  return at::moveaxis(self, IntArrayRef{src}, IntArrayRef{dst});
+Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
 }} // at::native

@@ -4365,17 +4365,17 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
-add_docstr(torch.moveaxis,
+add_docstr(torch.movedim,
            r"""
-moveaxis(input, src, dst) -> Tensor
+movedim(input, src, dst) -> Tensor
 
-Move axes of an array to new positions.
-Other axes remain in their original order.
+Move dims of an array to new positions.
+Other dims remain in their original order.
 
 Args:
     input (Tensor)
-    src (int or tuple of ints): Original positions of the axes to move. These must be unique.
-    dst (int or tuple of ints): Destination positions for each of the original axes. These must also be unique.
+    src (int or tuple of ints): Original positions of the dims to move. These must be unique.
+    dst (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
 
 Example::
 

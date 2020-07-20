@@ -18182,30 +18182,30 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertGreater(x[1] - x[0], (end - start) / steps)
 
     @dtypes(torch.int64, torch.float, torch.complex128)
-    def test_moveaxis_invalid(self, device, dtype):
+    def test_movedim_invalid(self, device, dtype):
         shape = self._rand_shape(4, min_size=5, max_size=10)
         x = self._generate_input(shape, dtype, device, False)
 
         # Invalid `src` and `dst` dimension
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch.moveaxis(x, 5, 0)
+            torch.movedim(x, 5, 0)
 
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch.moveaxis(x, 0, 5)
+            torch.movedim(x, 0, 5)
 
         # Mismatch in size of `src` and `dst`
-        with self.assertRaisesRegex(RuntimeError, "moveaxis: Invalid source or destination dims:"):
-            torch.moveaxis(x, (1, 0), (0, ))
+        with self.assertRaisesRegex(RuntimeError, "movedim: Invalid source or destination dims:"):
+            torch.movedim(x, (1, 0), (0, ))
 
-        with self.assertRaisesRegex(RuntimeError, "moveaxis: repeated dim in `src`"):
-            torch.moveaxis(x, (0, 0), (0, 1))
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `src`"):
+            torch.movedim(x, (0, 0), (0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "moveaxis: repeated dim in `dst`"):
-            torch.moveaxis(x, (0, 1), (1, 1))
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `dst`"):
+            torch.movedim(x, (0, 1), (1, 1))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.int64, torch.float, torch.complex128)
-    def test_moveaxis(self, device, dtype):
+    def test_movedim(self, device, dtype):
         for nd in range(5):
             shape = self._rand_shape(nd, min_size=5, max_size=10)
             x = self._generate_input(shape, dtype, device, with_extremal=False)
@@ -18214,7 +18214,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     if random_negative:
                         src_dim = src_dim - nd
                     # Integer Inputs
-                    torch_fn = partial(torch.moveaxis, src=src_dim, dst=dst_dim)
+                    torch_fn = partial(torch.movedim, src=src_dim, dst=dst_dim)
                     np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
@@ -18228,7 +18228,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             src_sequence = tuple(src_sequence)
                         # Sequence Inputs
                         dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
-                        torch_fn = partial(torch.moveaxis, src=src_sequence, dst=dst_sequence)
+                        torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
                         np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
                         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
@@ -19070,6 +19070,19 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
+    def test_movedim_view(self, device):
+        t = torch.zeros(3, 3, device=device)
+        out = torch.movedim(t, (0, 1), (1, 0))
+
+        self.assertTrue(self.is_view_of(t, out))
+
+        # Randomly change values in output
+        # and verify that original is changed
+        # as well.
+        for _ in range(3):
+            idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
+            out[idx_1, idx_2] = random.random()
+            self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
 
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
