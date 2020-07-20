@@ -7889,6 +7889,20 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 API_PYTORCH,
             ),
         ),
+        # CUDAFunctions
+        #("cuda::CUDAFunctions", ("hip::HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
+        #("CUDAFunctions", ("HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
+        #(
+        #    "cuda::current_device",
+        #    ("hip::current_deviceMasqueradingAsCUDA", API_PYTORCH),
+        #),
+        #("current_device", ("current_deviceMasqueradingAsCUDA", API_PYTORCH)),
+        #(
+        #    "cuda::set_device",
+        #    ("hip::set_deviceMasqueradingAsCUDA", API_PYTORCH),
+        #),
+        #("set_device", ("set_deviceMasqueradingAsCUDA", API_PYTORCH)),
+        # End of CUDAFunctions
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (
@@ -8067,8 +8081,10 @@ C10_MAPPINGS = collections.OrderedDict(
         # This substitution is not permissible, because there's another copy of this
         # function in torch/cuda.h
         # ("cuda::device_count", ("hip::device_count", API_C10)),
-        # ("cuda::current_device", ("hip::current_device", API_C10)),
-        # ("cuda::set_device", ("hip::set_device", API_C10)),
+        ("cuda::current_device", ("hip::current_device", API_C10)),
+        ("current_device", ("current_device", API_C10)),
+        ("cuda::set_device", ("hip::set_device", API_C10)),
+        ("set_device", ("set_device", API_C10)),
         ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
         ("getStreamFromPool", ("getStreamFromPool", API_C10)),
         ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStream", API_C10)),
