@@ -4387,14 +4387,30 @@ void testGPU_FusionCacheMultiConsumer() {
   tv1->computeAt(tv2, -1);
   tv3->computeAt(tv4, -1);
 
-  // Passes
   auto tv5 = tv1->cache_before();
   auto tv6 = tv3->cache_before();
 
   // Fails because tensor must be recomputed twice
   // auto tv7 = tv0->cache_after();
 
-  return;
+  constexpr int N = 800;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({input});
+
+  auto aten_output = (input + 1) + 2;
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().sum());
+  TORCH_CHECK(
+      aten_output.allclose(outputs[1], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[1]).abs().sum());
 }
 
 void testGPU_FusionConstCheck() {
