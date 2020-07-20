@@ -18211,9 +18211,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x = self._generate_input(shape, dtype, device, with_extremal=False)
             for random_negative in [True, False]:
                 for src_dim, dst_dim in permutations(range(nd), r=2):
-                    if random_negative:
+                    random_prob = random.random()
+
+                    if random_negative and random_prob > 0.66:
                         src_dim = src_dim - nd
-                    # Integer Inputs
+                    elif random_negative and random_prob > 0.33:
+                        dst_dim = dst_dim - nd
+                    elif random_negative:
+                        src_dim = src_dim - nd
+                        dst_dim = dst_dim - nd
+
+                    # Integer `src` and `dst`
                     torch_fn = partial(torch.movedim, src=src_dim, dst=dst_dim)
                     np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
@@ -18221,15 +18229,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 if nd == 0:
                     continue
 
+                def make_index_negative(sequence, idx):
+                    sequence = list(sequence)
+                    sequence[random_idx] = sequence[random_idx] - nd
+                    return tuple(src_sequence)
+
                 for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
-                    # Randomly change a dim to a negative dim representation of itself.
-                    if random_negative:
-                        random_idx = random.randint(0, len(src_sequence) - 1)
-                        src_sequence = list(src_sequence)
-                        src_sequence[random_idx] = src_sequence[random_idx] - nd
-                        src_sequence = tuple(src_sequence)
-                    # Sequence Inputs
+                    # Sequence `src` and `dst`
                     dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
+
+                    # Randomly change a dim to a negative dim representation of itself.
+                    random_prob = random.random()
+                    if random_negative and random_prob > 0.66:
+                        random_idx = random.randint(0, len(src_sequence) - 1)
+                        src_sequence = make_negative(src_sequence, random_idx)
+                    elif random_negative and random_prob > 0.33:
+                        random_idx = random.randint(0, len(src_sequence) - 1)
+                        dst_sequence = make_negative(dst_sequence, random_idx)
+                    elif random_negative:
+                        random_idx = random.randint(0, len(src_sequence) - 1)
+                        dst_sequence = make_negative(dst_sequence, random_idx)
+                        random_idx = random.randint(0, len(src_sequence) - 1)
+                        src_sequence = make_negative(src_sequence, random_idx)
+
                     torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
                     np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
