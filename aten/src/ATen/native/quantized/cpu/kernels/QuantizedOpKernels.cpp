@@ -636,15 +636,13 @@ void qclamp_with_tensors_kernel(
     const Tensor& min_tensor,
     const Tensor& max_tensor,
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    Tensor qx_fp = qx.dequantize();
-    Tensor min_tensor_fp = min_tensor.dequantize();
-    Tensor max_tensor_fp = max_tensor.dequantize();
+  Tensor qx_fp = qx.dequantize();
+  Tensor min_tensor_fp = min_tensor.dequantize();
+  Tensor max_tensor_fp = max_tensor.dequantize();
 
-    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_tensor_fp);
-    qy = at::native::quantize_per_tensor(
-          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
-  });
+  Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_tensor_fp);
+  qy = at::native::quantize_per_tensor(
+        qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
 }
 
 void qclamp_with_min_tensor_kernel(
@@ -652,14 +650,12 @@ void qclamp_with_min_tensor_kernel(
     const Tensor& min_tensor,
     Scalar max_scalar,
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    Tensor qx_fp = qx.dequantize();
-    Tensor min_tensor_fp = min_tensor.dequantize();
+  Tensor qx_fp = qx.dequantize();
+  Tensor min_tensor_fp = min_tensor.dequantize();
 
-    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_scalar);
-    qy = at::native::quantize_per_tensor(
-          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
-  });
+  Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_tensor_fp, max_scalar);
+  qy = at::native::quantize_per_tensor(
+        qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
 }
 
 void qclamp_with_max_tensor_kernel(
@@ -667,14 +663,12 @@ void qclamp_with_max_tensor_kernel(
     Scalar min_scalar,
     const Tensor& max_tensor,
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
-    Tensor qx_fp = qx.dequantize();
-    Tensor max_tensor_fp = max_tensor.dequantize();
+  Tensor qx_fp = qx.dequantize();
+  Tensor max_tensor_fp = max_tensor.dequantize();
 
-    Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_scalar, max_tensor_fp);
-    qy = at::native::quantize_per_tensor(
-          qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
-  });
+  Tensor qy_fp = at::clamp_with_tensors(qx_fp, min_scalar, max_tensor_fp);
+  qy = at::native::quantize_per_tensor(
+        qy_fp, qx.q_scale(), qx.q_zero_point(), qx.scalar_type());
 }
 
 void qthreshold_kernel(

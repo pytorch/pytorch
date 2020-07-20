@@ -145,9 +145,7 @@ Tensor clamp_quantized_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
-    qy = quantized_clamp_impl(qx, min, max);
-  });
+  qy = quantized_clamp_impl(qx, min, max);
   return qy;
 }
 Tensor clamp_with_tensors_quantized_cpu(
@@ -155,9 +153,7 @@ Tensor clamp_with_tensors_quantized_cpu(
     const Tensor& min,
     const Tensor& max) {
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
-    qy = quantized_clamp_with_tensors_impl(qx, min, max);
-  });
+  qy = quantized_clamp_with_tensors_impl(qx, min, max);
   return qy;
 }
 
@@ -166,9 +162,7 @@ Tensor clamp_with_min_tensor_quantized_cpu(
     const Tensor& min,
     Scalar max) {
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
-    qy = quantized_clamp_with_min_tensor_impl(qx, min, max);
-  });
+  qy = quantized_clamp_with_min_tensor_impl(qx, min, max);
   return qy;
 }
 
@@ -177,9 +171,7 @@ Tensor clamp_with_max_tensor_quantized_cpu(
     Scalar min,
     const Tensor& max) {
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "clamp", [&]() {
-    qy = quantized_clamp_with_max_tensor_impl(qx, min, max);
-  });
+  qy = quantized_clamp_with_max_tensor_impl(qx, min, max);
   return qy;
 }
 
