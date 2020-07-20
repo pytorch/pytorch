@@ -43,26 +43,46 @@ class Flatten(Module):
 
 class Unflatten(Module):
     r"""
-    Unflattens a tensor into another tensor of shape (N, C, H, W). For use with :class:`~nn.Sequential`.
-    Args:
-        dim: tensor dimension to be unflattened
-        unflattened_size: shape of the output tensor
+    Unflattens a tensor into another tensor of a desired shape. For use with :class:`~nn.Sequential`.
+
+    * :attr:`dim` specifies the dimension of the input tensor to be flattened, and it can 
+    be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
+
+    * :attr:`unflattened_size` is the size of the unflattened dimension of the tensor and it can be a
+    `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
+    :attr:`dim` is an `int`.
 
     Shape:
         - Input: :math:`(N, *dims)`
         - Output: :math:`(N, C_out, H_out, W_out)`
 
+    Args:
+        dim (Union[int, str]): Dimension to be flattened
+        unflattened_size (Union[tuple, torch.Size]): Size of the output tensor
 
     Examples::
+        >>> input = torch.randn(2, 50)
         >>> m = nn.Sequential(
-        >>>     nn.Linear(49152, 49152),
-        >>>     nn.Unflatten(1, (3, 128, 128))
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten(1, (2, 5, 5))
         >>> )
-
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
         >>> m = nn.Sequential(
-        >>>     nn.Linear(49152, 49152),
-        >>>     nn.Unflatten('features', (('C', 3), ('H', 128), ('W',128)))
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten(1, torch.Size([2, 5, 5]))
         >>> )
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
+        >>> m = nn.Sequential(
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
+        >>> )
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
     """
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]
