@@ -4369,7 +4369,7 @@ add_docstr(torch.movedim,
            r"""
 movedim(input, src, dst) -> Tensor
 
-Move dims of an array to new positions.
+Move `src` dim/s of an array to position determined by `dst`.
 Other dims remain in their original order.
 
 Args:
@@ -4377,7 +4377,7 @@ Args:
     src (int or tuple of ints): Original positions of the dims to move. These must be unique.
     dst (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
 
-Example::
+Examples::
 
     >>> t = torch.randn(3,2,1)
     >>> t
