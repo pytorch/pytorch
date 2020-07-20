@@ -60,7 +60,7 @@ class Unflatten(Module):
         dim (Union[int, str]): Dimension to be flattened
         unflattened_size (Union[tuple, torch.Size]): Size of the output tensor
 
-    Examples::
+    Examples:
         >>> input = torch.randn(2, 50)
         >>> m = nn.Sequential(
         >>>     nn.Linear(50, 50),
