@@ -500,8 +500,8 @@ public:
     return *this;
   }
 
-  TensorIteratorConfig& dont_resize_outputs() {
-    resize_outputs_ = false;
+  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+    resize_outputs_ = resize_outputs;
     return *this;
   }
 
@@ -516,7 +516,7 @@ public:
     // WARNING:
     //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
     //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
     static_shape_ = c10::make_optional(DimVector(shape));
     return *this;
   }

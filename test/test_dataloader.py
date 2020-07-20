@@ -10,6 +10,7 @@ import signal
 import unittest
 import itertools
 import warnings
+import tempfile
 from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
@@ -820,6 +821,16 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
+    def test_typing(self):
+        from typing import List
+        # Make sure there is no TypeError
+
+        class SomeDatasetClass(Dataset[List[torch.Tensor]]):
+            pass
+
+        def _create_dataloader(is_train: bool) -> DataLoader[List[torch.Tensor]]:
+            pass
+
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
     def test_fd_limit_exceeded(self):
@@ -1580,8 +1591,8 @@ except RuntimeError as e:
                             fail(fail_reason + ', and had no exception')
                     _, alive = psutil.wait_procs(worker_psutil_ps, timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT))
                     if len(alive) > 0:
-                        self.fail(get_fail_msg('worker process (pid(s) {}) did not terminate'.format(
-                            ', '.join(str(p.pid) for p in alive))))
+                        fail('worker process (pid(s) {}) did not terminate'.format(
+                            ', '.join(str(p.pid) for p in alive)))
                     if exit_method is None:
                         if loader_p.exitcode != 0:
                             fail('loader process had nonzero exitcode {}'.format(loader_p.exitcode))
@@ -1719,6 +1730,19 @@ except RuntimeError as e:
 
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_numpy_memmap(self):
+        import numpy as np
+
+        with tempfile.TemporaryFile() as f:
+            arr = np.array([[0, 1], [2, 3], [4, 5], [6, 7]])
+            arr_memmap = np.memmap(f, dtype=arr.dtype, mode='w+', shape=arr.shape)
+            arr_memmap[:] = arr[:]
+            arr_new = np.memmap(f, dtype=arr.dtype, mode='r', shape=arr.shape)
+            tensor = _utils.collate.default_collate(list(arr_new))
+
+        self.assertTrue((tensor == tensor.new_tensor([[0, 1], [2, 3], [4, 5], [6, 7]])).all().item())
 
     def test_default_collate_bad_sequence_type(self):
         batch = [['X'], ['X', 'X']]
@@ -2005,6 +2029,7 @@ class TestSetAffinity(TestCase):
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
             self.assertEqual(sample, [2])
+
 
 
 if __name__ == '__main__':

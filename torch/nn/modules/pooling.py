@@ -714,7 +714,7 @@ class FractionalMaxPool2d(Module):
         >>> output = m(input)
 
     .. _Fractional MaxPooling:
-        http://arxiv.org/abs/1412.6071
+        https://arxiv.org/abs/1412.6071
     """
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
@@ -778,7 +778,7 @@ class FractionalMaxPool3d(Module):
         >>> output = m(input)
 
     .. _Fractional MaxPooling:
-        http://arxiv.org/abs/1412.6071
+        https://arxiv.org/abs/1412.6071
     """
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
@@ -1099,7 +1099,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
         >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
         >>> # target output size of 10x7
-        >>> m = nn.AdaptiveMaxPool2d((None, 7))
+        >>> m = nn.AdaptiveAvgPool2d((None, 7))
         >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
 
@@ -1133,7 +1133,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
         >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
         >>> # target output size of 7x9x8
-        >>> m = nn.AdaptiveMaxPool3d((7, None, None))
+        >>> m = nn.AdaptiveAvgPool3d((7, None, None))
         >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
 

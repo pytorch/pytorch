@@ -128,6 +128,7 @@ class CallbackManager {
         rf.sorted_active_tls_handles_,
         /* is_start */ true,
         rf);
+    rf.called_start_callbacks_ = true;
   }
 
   void runEndCallbacks(RecordFunction& rf) {
@@ -204,22 +205,63 @@ class CallbackManager {
 std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
-// Points to the currently active RecordFunction
-thread_local RecordFunction* current_record_func_ = nullptr;
-
 inline CallbackManager& manager() {
   static CallbackManager _manager;
   return _manager;
 }
 
-} // namespace
+thread_local bool tls_record_function_enabled_ = true;
 
-/* static */
-double RecordFunctionCallback::sample_zero_one() {
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
+
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
   static thread_local auto gen =
       std::make_unique<std::mt19937>(std::random_device()());
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(*gen);
+}
+
+} // namespace
+
+bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
+  // first check whether this callback is interested in
+  // the given scope type
+  if (!checkScope(scope)) {
+    return false;
+  }
+  // if we have registered should_run_ function, use it
+  if (should_run_) {
+    return should_run_(*this);
+  }
+  // otherwise potentially do the uniform sampling
+  if (sampling_prob_ != 1.0) {
+    // model the low probability events as events happening
+    // with prob. kLowProb followed by another sampling with
+    // prob. (sampling_prob_ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution
+    if (sampling_prob_ < kLowProb) {
+      if (tries_left_ == 0) {
+        tries_left_ = sample_geometric();
+        return (sample_zero_one() < sampling_prob_ / kLowProb);
+      } else {
+        --tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < sampling_prob_);
+    }
+  }
+  return true;
 }
 
 RecordFunctionCallbacks _getTLSCallbacks() {
@@ -280,23 +322,17 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+  return tls_record_function_enabled_;
 }
 
 void enableRecordFunction(bool enable) {
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
+  tls_record_function_enabled_ = enable;
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   if (hasCallbacks() && isRecordFunctionEnabled()) {
     manager().init(*this);
   }
-}
-
-void RecordFunction::_setCurrent() {
-  parent_ = current_record_func_;
-  current_record_func_ = this;
-  is_current_ = true;
 }
 
 /* static */
@@ -344,19 +380,10 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::end() {
-  if (active) {
+  if (active && called_start_callbacks_) {
     manager().runEndCallbacks(*this);
-    active = false;
   }
-  if (is_current_) {
-    current_record_func_ = parent_;
-    is_current_ = false;
-  }
-}
-
-/* static */
-RecordFunction* RecordFunction::current() {
-  return current_record_func_;
+  active = false;
 }
 
 } // namespace at

@@ -9,6 +9,7 @@
   update_s3_htmls: &update_s3_htmls
     machine:
       image: ubuntu-1604:201903-01
+    resource_class: medium
     steps:
     - checkout
     - setup_linux_system_environment
@@ -30,10 +31,10 @@
     - run:
         name: define PIP_UPLOAD_FOLDER
         command: |
-          our_upload_folder=nightly
+          our_upload_folder=nightly/
           # On tags upload to test instead
           if [[ -n "${CIRCLE_TAG}" ]]; then
-            our_upload_folder=test
+            our_upload_folder=test/
           fi
           echo "export PIP_UPLOAD_FOLDER=${our_upload_folder}" >> ${BASH_ENV}
     - run:

@@ -72,7 +72,7 @@ class ObserverBase(ABC, nn.Module):
 class _ObserverBase(ObserverBase):
     r"""Internal common base for all qint/quint8 observers.
 
-    This base is for commonly used paramters used internally.
+    This base is for commonly used parameters used internally.
     Users should use `~torch.quantization.observer.ObserverBase` as a base class
     for custom observers.
 
@@ -354,7 +354,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
 
-    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+    .. note:: Only works with ``torch.per_tensor_affine`` quantization scheme.
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
@@ -828,10 +828,10 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        prev_zeros = False
+        same_values = False
         if min_val.numel() > 0 and max_val.numel() > 0:
-            prev_zeros = (min_val.item() == 0) and (max_val.item() == 0)
-        if min_val.numel() == 0 or max_val.numel() == 0 or prev_zeros:
+            same_values = min_val.item() == max_val.item()
+        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
             min_val = torch.min(x)
             max_val = torch.max(x)
             self.min_val.resize_(min_val.shape)
