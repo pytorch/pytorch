@@ -95,20 +95,13 @@ class ShadowModule(nn.Module):
         self.quantized_module = quantized_module
 
     def forward(self, x):
-        self.float_module(x)
-        print(self.float_module.activation_post_process.count)
-        if x.is_quantized:
-            x = x.dequantize()
+        a = self.float_module(x.dequantize())
         self.quantized_module(x)
         # hooks should already been added, running the data here is the calibration
 
         output_logger, input_logger = get_matching_activations(self.float_module, self.quantized_module)
         correct_quantized_bias_V2(output_logger, input_logger, self.float_module, self.quantized_module)
-        y = self.quantized_module(x)
-        if y.is_quantized:
-            return y.dequantize()
-        else:
-            return y
+        return a
 
 
 
@@ -127,10 +120,22 @@ def sequential_bias_correction(float_model, quantized_model, img_data, white_lis
 
     # format the data
     # the shadow takes care of everything :O
+    # for data in img_data:
+    #     with torch.no_grad():
+    #         print(data[0].dtype)
+    #         quantized_model(data[0])
+    #         # break
+    stack = None
     for data in img_data:
         with torch.no_grad():
-            quantized_model(data[0])
+            if stack is None:
+                stack = data[0]
+            else:
+                stack = torch.cat((stack, data[0]))
             break
+    # stack = tuple(img_data)
+    print(stack.size())
+    quantized_model(stack)
 
     strip_hooks_and_qconfigs(quantized_model)
     strip_shadow(quantized_model)
@@ -152,7 +157,7 @@ def add_shadow(float_model, quantized_model, white_list = [nn.Linear, nnq.Linear
             add_shadow(float_mod, mod, white_list)
 
         if type(float_mod) in white_list:
-            reassign[name] = ShadowModule(mod, float_mod)
+            reassign[name] = ShadowModule(float_mod, mod)
 
     for key, value in reassign.items():
         quantized_model._modules[key] = value
@@ -218,8 +223,6 @@ def correct_quantized_bias_V2(expected_output, expected_input, float_model, qmod
 
                 if quantized_weight.is_quantized:
                     quantized_weight = quantized_weight.dequantize()
-                # if float_weight.is_quantized:
-                #     float_weight = float_weight.dequantize()
 
                 error_matrix = float_weight - quantized_weight
 
@@ -479,15 +482,11 @@ def get_matching_activations(float_module, q_module):
         the matching float and quantized activations
     """
     float_dict = {}
-    # print("float module: ", float_module)
-    # return
     get_logger_entries(float_module, float_dict)
 
     quantized_dict = {}
     get_logger_entries(q_module, quantized_dict)
 
-    print(float_dict.keys())
-    print(quantized_dict.keys())
     output_logger = {}
     input_logger = {}
 
@@ -498,7 +497,6 @@ def get_matching_activations(float_module, q_module):
         output_logger[key] = {}
         output_logger[key]['float'] = float_dict[key]['activation_post_process']
         output_logger[key]['quantized'] = quantized_dict[key]['activation_post_process']
-    # print("float_dict: ", float_dict)
     return output_logger, input_logger
 
 if __name__ == "__main__":
