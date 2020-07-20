@@ -7890,18 +7890,18 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ),
         ),
         # CUDAFunctions
-        #("cuda::CUDAFunctions", ("hip::HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
-        #("CUDAFunctions", ("HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
-        #(
-        #    "cuda::current_device",
-        #    ("hip::current_deviceMasqueradingAsCUDA", API_PYTORCH),
-        #),
-        #("current_device", ("current_deviceMasqueradingAsCUDA", API_PYTORCH)),
-        #(
-        #    "cuda::set_device",
-        #    ("hip::set_deviceMasqueradingAsCUDA", API_PYTORCH),
-        #),
-        #("set_device", ("set_deviceMasqueradingAsCUDA", API_PYTORCH)),
+        ("cuda::CUDAFunctions", ("hip::HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
+        ("CUDAFunctions", ("HIPFunctionsMasqueradingAsCUDA", API_PYTORCH)),
+        (
+            "cuda::current_device",
+            ("hip::current_deviceMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        ("current_device", ("current_deviceMasqueradingAsCUDA", API_PYTORCH)),
+        (
+            "cuda::set_device",
+            ("hip::set_deviceMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        ("set_device", ("set_deviceMasqueradingAsCUDA", API_PYTORCH)),
         # End of CUDAFunctions
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
