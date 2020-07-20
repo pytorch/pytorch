@@ -78,7 +78,7 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag',
+    'expand_as', 'view_as', 'real', 'imag', 'movedim',
 })
 
 def format_return_type(returns):

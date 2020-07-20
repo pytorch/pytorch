@@ -1680,6 +1680,9 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
   TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `dst` (", dst, ")");
 
+  // TODO: The algorithm below can probably be optimized.
+  // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
+
   // Algorithm Walkthrough
   // Example Input
   // Variable State:
