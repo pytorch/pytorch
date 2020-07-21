@@ -33,7 +33,7 @@ TEST(atest, operators) {
   ASSERT_TRUE(tensor({a ^ b}).equal(a_tensor ^ b_tensor));
 }
 
-template <class T>
+template <typename T>
 void run_logical_op_test(const Tensor& exp, T func) {
   auto x_tensor = tensor({1, 1, 0, 1, 0});
   auto y_tensor = tensor({0, 1, 0, 1, 1});
@@ -57,6 +57,42 @@ TEST(atest, logical_or_operators) {
 }
 TEST(atest, logical_xor_operators) {
   run_logical_op_test(tensor({1, 0, 0, 0, 1}), logical_xor_out);
+}
+
+TEST(atest, lt_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({0, 0, 0, 0, 1}), lt_out);
+}
+
+TEST(atest, le_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({0, 1, 1, 1, 1}), le_out);
+}
+
+TEST(atest, gt_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({1, 0, 0, 0, 0}), gt_out);
+}
+
+TEST(atest, ge_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({1, 1, 1, 1, 0}), ge_out);
+}
+
+TEST(atest, eq_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({0, 1, 1, 1, 0}), eq_out);
+}
+
+TEST(atest, ne_operators) {
+  run_logical_op_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      tensor({1, 0, 0, 0, 1}), ne_out);
 }
 
 // TEST_CASE( "atest", "[]" ) {
