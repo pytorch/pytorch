@@ -3,7 +3,7 @@ import torch
 from .fake_quantize import FakeQuantize
 from .observer import MovingAverageMinMaxObserver
 
-class QuantizeBackwardFunction(torch.autograd.Function):
+class _QuantizeBackwardFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, X):
         return X
@@ -47,5 +47,5 @@ class _FakeQuantizeWithBackward(FakeQuantize):
     def forward(self, X):
         X = super(_FakeQuantizeWithBackward, self).forward(X)
         if self.quantize_backward:
-            X = QuantizeBackwardFunction.apply(X)
+            X = _QuantizeBackwardFunction.apply(X)
         return X

@@ -4,6 +4,11 @@ NON_PR_BRANCH_LIST = [
     r"/release\/.*/",
 ]
 
+PR_BRANCH_LIST = [
+    r"/gh\/.*\/head/",
+    r"/pull\/.*/",
+]
+
 RC_PATTERN = r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
 
 def gen_filter_dict(

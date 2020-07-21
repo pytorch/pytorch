@@ -55,6 +55,8 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
+    elif t == 'int[]?':
+        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -76,6 +78,10 @@ def type_argument_translations(arg):
         t = 'double'
     elif t == 'float?':
         t = 'double?'
+    elif t == 'float[]':
+        t = 'ArrayRef<double>'
+    elif t == 'float[]?':
+        t = 'ArrayRef<double>?'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
@@ -147,7 +153,7 @@ def type_argument_translations(arg):
     return t, name, default, nullable, size, annotation
 
 
-def parse_arguments(args, func_variants, declaration, func_return):
+def parse_arguments(args):
     arguments = []
     kwarg_only = False
 
@@ -174,6 +180,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
             argument_dict['kwarg_only'] = True
         arguments.append(argument_dict)
 
+    return arguments
+
+def process_arguments(arguments, func_variants, declaration, func_return):
     is_out_fn = False
     arguments_out = []
     arguments_other = []
@@ -232,6 +241,18 @@ def parse_arguments(args, func_variants, declaration, func_return):
              'default': 'c10::nullopt', 'is_nullable': True},
         ]
     )
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': False, 'is_nullable': True},
+        ]
+    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -243,6 +264,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts.append(
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
@@ -417,7 +441,8 @@ def run(paths):
                 declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
-                arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)
+                schema_order_arguments = parse_arguments(arguments)
+                arguments = process_arguments(schema_order_arguments, func.get('variants', []), declaration, return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
@@ -435,6 +460,7 @@ def run(paths):
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
+                declaration['schema_order_arguments'] = func.get('schema_order_arguments', schema_order_arguments)
                 declaration['type_method_definition_dispatch'] = \
                     parse_dispatch(fn_name, func.get('dispatch', declaration['name']))
                 declaration['python_module'] = func.get('python_module', '')

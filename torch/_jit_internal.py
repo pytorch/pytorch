@@ -4,6 +4,8 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
+import contextlib
+import collections
 import inspect
 import weakref
 import warnings
@@ -14,6 +16,7 @@ import torch
 import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
+from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
@@ -650,26 +653,25 @@ def is_optional(ann):
 
     return optional or union_optional
 
-# fake Python container type for Future/RRef
-T = TypeVar('T')
-
-class Future(Generic[T]):
-    __slots__ = ['__args__']
-
-    def __init__(self, types):
-        self.__args__ = types
-
 def is_future(ann):
     if ann is Future:
-        raise RuntimeError('Attempted to use torch.jit.Future without a '
-                           'contained type. Please add a contained type, e.g. '
-                           'torch.jit.Future[int]')
+        raise RuntimeError(
+            "Attempted to use Future without a "
+            "contained type. Please add a contained type, e.g. "
+            "Future[int]"
+        )
     return getattr(ann, "__origin__", None) is Future
 
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
 
     def is_rref(ann):
+        if ann is RRef:
+            raise RuntimeError(
+                "Attempted to use RRef without a "
+                "contained type. Please add a contained type, e.g. "
+                "RRef[int]"
+            )
         return getattr(ann, "__origin__", None) is RRef
 
 try:
@@ -767,3 +769,45 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
+
+
+def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
+    return boolean_dispatched.get(fn)
+
+
+def _get_named_tuple_properties(obj):
+    assert issubclass(obj, tuple) and hasattr(obj, '_fields')
+    fields = list(obj._fields)
+    annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
+            annotations.append(the_type)
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return type(obj).__name__, fields, annotations
+
+
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
+    return TupleType(*t)
+
+
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
