@@ -125,6 +125,36 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   });
 }
 
+template <typename scalar_t, typename acc_t=scalar_t>
+void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, MinMaxOps<scalar_t, acc_t, int32_t>{}, thrust::pair<acc_t, acc_t>(
+      at::numeric_limits<acc_t>::upper_bound(),
+      at::numeric_limits<acc_t>::lower_bound()
+  ));
+}
+
+/* void min_max_values_kernel_cuda(TensorIterator& iter) { */
+/*   if (iter.dtype(1) == kHalf) { */
+/*     min_max_values_kernel_cuda_impl<at::Half, thrust::pair<float, float>>(iter); */
+/*   } else { */
+/*     AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_max_cuda", [&]() { */
+/*       min_max_kernel_cuda_impl<scalar_t>(iter); */
+/*     }); */
+/*   } */
+/* } */
+
+void _min_max_all_kernel_impl(Tensor& min_result, Tensor& max_result, const Tensor& input) {
+  auto dtype = input.scalar_type();
+  auto iter = make_reduction("_min_max_all", min_result, max_result, input,
+                             std::vector<int64_t>{}, false, dtype);
+  TORCH_CHECK(iter.numel() > 0, "min_max on a tensor with no elements is not defined.");
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "_min_max_all_cuda", [&] {
+    _min_max_values_kernel_cuda_impl<scalar_t>(iter);
+  });
+}
+
+
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
@@ -133,5 +163,6 @@ REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
+REGISTER_DISPATCH(_min_max_all_stub, &_min_max_all_kernel_impl);
 
 }} // namespace at::native
