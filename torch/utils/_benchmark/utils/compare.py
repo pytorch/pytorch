@@ -5,7 +5,7 @@ from typing import cast, List, Optional, Tuple
 
 import numpy as np
 
-import torch.utils._benchmark.utils.common as common
+from torch.utils._benchmark.utils import common
 
 __all__ = ["Compare"]
 
