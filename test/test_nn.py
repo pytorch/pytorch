@@ -11080,6 +11080,15 @@ class TestNNDeviceType(NNTestCase):
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
+    def test_pooling_zero_stride(self, device):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
+                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                                       lambda: fn(x, kernel_size=2, stride=0))
+
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
