@@ -1659,8 +1659,8 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
-  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: src (",
-              src, " dims ) should contain the same number of dims as dst (", dst, " dims)");
+  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
+              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
 
   size_t self_dim = self.dim();
   DimVector normalized_src(src.size());
@@ -1676,9 +1676,9 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   wrap_dims(dst, normalized_dst);
 
   auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `src` (", src, ")");
+  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `source` (", src, ")");
   auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `dst` (", dst, ")");
+  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `destination` (", dst, ")");
 
   // TODO: The algorithm below can probably be optimized.
   // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
