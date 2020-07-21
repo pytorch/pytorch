@@ -303,8 +303,6 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
 }
 
 void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {

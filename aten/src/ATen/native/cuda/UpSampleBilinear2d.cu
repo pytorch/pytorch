@@ -345,8 +345,6 @@ Tensor& upsample_bilinear2d_backward_out_cuda(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_bilinear2d_backward_out_cuda");
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
@@ -359,8 +357,6 @@ Tensor upsample_bilinear2d_backward_cuda(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_bilinear2d_backward_cuda");
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
