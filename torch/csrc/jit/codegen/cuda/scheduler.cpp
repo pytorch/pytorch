@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -359,25 +360,24 @@ ReductionParams reductionHeuristic(
 // fusion is the input IR that will be modified by this function
 c10::optional<ReductionParams> scheduleReduction(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& fusion_inputs,
+    TensorView* red_tv) {
   FusionGuard fg(fusion);
 
   if (!fusion->hasReduction()) {
     return c10::nullopt;
   }
-
-  // Find Reduction TensorView
-  // TODO: This is making an assumption there is only one reduction
-  // in a kernel.  This will not be true in the long run.
-  TensorView* red_tv = nullptr;
-  for (auto& expr : fusion->exprs(/*from_outputs_only*/ true)) {
-    if (expr->type() == ExprType::ReductionOp) {
-      red_tv = expr->output(0)->as<TensorView>();
-      break;
-    }
-  }
   TORCH_INTERNAL_ASSERT(
       red_tv != nullptr, "Reduction TensorView wasn't found.");
+  TORCH_INTERNAL_ASSERT(
+      red_tv->hasReduction(), "TensorView doesn't have a reduction.");
+
+  const auto red_expr = fusion->origin(red_tv);
+
+  TORCH_INTERNAL_ASSERT(
+      red_expr->getExprType() != c10::nullopt &&
+          red_expr->getExprType().value() == ExprType::ReductionOp,
+      "TensorView doesn't have a reduction.");
 
   const bool red_on_fastest_dim =
       red_tv->axis(static_cast<int>(red_tv->nDims()) - 1)->isReduction();
@@ -394,22 +394,8 @@ c10::optional<ReductionParams> scheduleReduction(
     red_tv->merge(1, 2);
   }
 
-  EvaluationContext eval_context(fusion);
-
-  // I am making some basic assumptions
-  // 1.) I am only binding Tensor Dimension sizes.  I am not binding scalar
-  // values. 2.) I am only binding the IterDomain.extent().  Do I need to worry
-  // about the start?
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    if (inputs[i].type()->kind() == c10::TypeKind::TensorType) {
-      const TensorView* tv = fusion->inputs()[i]->as<TensorView>();
-      size_t dims = tv->getRootDomain().size();
-      for (size_t j = 0; j < dims; ++j) {
-        const IterDomain* id = tv->getRootDomain()[j];
-        eval_context.bind(id->extent(), inputs[i].toTensor().size(j));
-      }
-    }
-  }
+  EvaluationContext eval_context(
+      std::move(executor_utils::bindInputs(fusion_inputs, fusion)));
 
   // Evaluate Dimensions of Reduction TensorView
   auto red_ids = red_tv->domain()->domain();
@@ -430,21 +416,17 @@ c10::optional<ReductionParams> scheduleReduction(
       red_elems.value(), red_outputs.value(), red_on_fastest_dim);
 
   // Heuristic Definition
-  // TODO: Need to factor in unrolling
-  // TODO: Need to get rid of magic numbers.  These should be defined elsewhere.
   if (rparams.fastest_dim_) {
-    // Initially I am not going to bother with cross-block reductions or
-    // letting a block do multiple reductions to make this simple!
-
     // Do multiple reductions per block
     if (rparams.mul_reds_per_blk_) {
-      red_tv->split(1, rparams.block_dim_x_);
       // Unroll a certain number of rFactored elements
       red_tv->split(1, 4);
+      red_tv->split(1, rparams.block_dim_x_);
+      // Unroll a certain number of rFactored elements
       // Split Grid dimension to get multiple reds per block
       red_tv->split(0, rparams.block_dim_y_);
 
-      auto red_tv_rf = red_tv->rFactor({-2, -3});
+      auto red_tv_rf = red_tv->rFactor({-3, -1});
       red_tv_rf->computeAt(red_tv, 1);
 
       red_tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -452,78 +434,116 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
       red_tv_rf->axis(1)->parallelize(ParallelType::TIDy);
-      red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
-      red_tv_rf->axis(-2)->parallelize(ParallelType::Unroll);
+      red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
+      red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
+
+      Val* input = red_expr->as<ReductionOp>()->in();
+      if (!fusion->hasInput(input)) {
+        input->as<TensorView>()->computeAt(red_tv_rf, -2);
+        input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+      }
       // Do a cross-warp reduction per block
     } else {
       if (rparams.cross_block_) {
-        red_tv->split(-1, rparams.block_dim_x_);
+        red_tv->split(1, 4);
+        red_tv->split(1, rparams.block_dim_x_);
         // Split up rFactor to reduce across warps
-        red_tv->split(-2, rparams.grid_dim_y_);
-        red_tv->split(-3, rparams.block_dim_y_);
+        red_tv->split(1, rparams.grid_dim_y_);
+        red_tv->split(1, rparams.block_dim_y_);
 
-        auto red_tv_rf = red_tv->rFactor({-4});
+        auto red_tv_rf = red_tv->rFactor(
+            {-5, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
         red_tv_rf->computeAt(red_tv, 1);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
 
         // Cross-block reduction binding
-        red_tv_rf->axis(-3)->parallelize(ParallelType::BIDy);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
+        red_tv_rf->axis(-4)->parallelize(ParallelType::BIDy);
+        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
+        red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(-3)->parallelize(ParallelType::BIDy);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
+        Val* input = red_expr->as<ReductionOp>()->in();
+        if (!fusion->hasInput(input)) {
+          input->as<TensorView>()->computeAt(red_tv_rf, -2);
+          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        }
       } else {
-        red_tv->split(-1, rparams.block_dim_x_);
+        red_tv->split(1, 4);
+        red_tv->split(1, rparams.block_dim_x_);
         // Split up rFactor to reduce across warps
-        red_tv->split(-2, rparams.block_dim_y_);
+        red_tv->split(1, rparams.block_dim_y_);
 
-        auto red_tv_rf = red_tv->rFactor({-3});
+        auto red_tv_rf = red_tv->rFactor({-4, -1});
         red_tv_rf->computeAt(red_tv, 1);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
 
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
+        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
+        red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
+
+        Val* input = red_expr->as<ReductionOp>()->in();
+        if (!fusion->hasInput(input)) {
+          input->as<TensorView>()->computeAt(red_tv_rf, -2);
+          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        }
       }
     }
   } else {
     if (rparams.cross_warp_) {
       if (rparams.cross_block_) {
+        red_tv->split(1, 4);
+        red_tv->split(1, rparams.grid_dim_y_);
+        red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(0, rparams.block_dim_x_);
-        red_tv->split(2, rparams.grid_dim_y_);
-        red_tv->split(2, rparams.block_dim_y_);
-        auto red_tv_rf = red_tv->rFactor({2});
+        auto red_tv_rf = red_tv->rFactor({-4, -1});
 
         // Bindings
         red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
         red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv_rf->axis(-1)->parallelize(ParallelType::BIDy);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-2)->parallelize(ParallelType::BIDy);
+        red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(1)->parallelize(ParallelType::TIDx);
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
         red_tv->axis(-1)->parallelize(ParallelType::BIDy);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
+
+        Val* input = red_expr->as<ReductionOp>()->in();
+        if (!fusion->hasInput(input)) {
+          input->as<TensorView>()->computeAt(red_tv_rf, -2);
+          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        }
       } else {
+        red_tv->split(1, 4);
+        red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(0, rparams.block_dim_x_);
-        red_tv->split(2, rparams.block_dim_y_);
-        auto red_tv_rf = red_tv->rFactor({2});
+        auto red_tv_rf = red_tv->rFactor({-3, -1});
 
         // Bindings
         red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
         red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDy);
+        red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(1)->parallelize(ParallelType::TIDx);
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
+
+        Val* input = red_expr->as<ReductionOp>()->in();
+        if (!fusion->hasInput(input)) {
+          input->as<TensorView>()->computeAt(red_tv_rf, -2);
+          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        }
       }
     } else {
       red_tv->split(0, rparams.block_dim_x_);
@@ -531,6 +551,7 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(1)->parallelize(ParallelType::BIDx);
     }
   }
+
   return rparams;
 }
 

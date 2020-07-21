@@ -34,7 +34,8 @@ struct ReductionParams {
 // fusion is the input IR that will be modified by this function
 TORCH_CUDA_API c10::optional<ReductionParams> scheduleReduction(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& inputs);
+    const at::ArrayRef<c10::IValue>& fusion_inputs,
+    TensorView* red_tv);
 
 } // namespace cuda
 } // namespace fuser

@@ -3976,7 +3976,7 @@ void testGPU_FusionReductionScheduler() {
   const at::ArrayRef<c10::IValue> inputs({input});
 
   TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs),
+      cuda::scheduleReduction(&fusion, inputs, tv1),
       "Reduction schedule was not generated!");
 
   cuda::FusionExecutor fe;
@@ -4069,7 +4069,7 @@ void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
   const at::ArrayRef<c10::IValue> inputs({input});
 
   TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs),
+      cuda::scheduleReduction(&fusion, inputs, tv1),
       "Reduction schedule was not generated!");
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -4110,7 +4110,7 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
   const at::ArrayRef<c10::IValue> inputs({input});
 
   TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs),
+      cuda::scheduleReduction(&fusion, inputs, tv1),
       "Reduction schedule was not generated!");
 
   torch::jit::fuser::cuda::FusionExecutor fe;

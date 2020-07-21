@@ -176,6 +176,59 @@ void validateKernelOutputs(
   }
 }
 
+void safeBind(
+    EvaluationContext& ec,
+    const Val* value,
+    Int::ScalarType concrete_value) {
+  auto already_concrete_val = ec.concreteValue(value);
+
+  if (already_concrete_val.has_value()) {
+    TORCH_INTERNAL_ASSERT(
+        concrete_value == already_concrete_val.value(),
+        "Tried to bind ",
+        value,
+        " to ",
+        " concrete value, but it's already set to ",
+        already_concrete_val.value());
+  } else {
+    ec.bind(value, concrete_value);
+  }
+}
+
+EvaluationContext bindInputs(
+    const at::ArrayRef<IValue>& aten_inputs,
+    Fusion* fusion) {
+  TORCH_INTERNAL_ASSERT(
+      fusion->inputs().size() == aten_inputs.size(),
+      "Something went wrong configuring launch. Inputs no longer match.");
+
+  auto fusion_inputs = fusion->inputs();
+  EvaluationContext ec(fusion);
+
+  // This should probably move to EvaluationContext as we may want to bind
+  // input values frequently. Bind fusion input values to runtime values.
+  for (size_t i = 0; i < fusion->inputs().size(); i++) {
+    if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
+      TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
+
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].isTensor(),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      auto aten_tensor = aten_inputs[i].toTensor();
+      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
+      TORCH_INTERNAL_ASSERT(
+          aten_tensor.ndimension() == root_dom.size(),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+        safeBind(ec, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+      }
+    }
+  }
+  return std::move(ec);
+}
+
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,

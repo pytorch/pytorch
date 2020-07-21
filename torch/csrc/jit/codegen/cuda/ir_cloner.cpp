@@ -108,6 +108,10 @@ void IrCloner::handle(const ReductionOp* op) {
   clone_ = new ReductionOp(op, this);
 }
 
+void IrCloner::handle(const GridReduction* gr) {
+  clone_ = new GridReduction(gr, this);
+}
+
 void IrCloner::handle(const ForLoop* for_loop) {
   clone_ = new ForLoop(for_loop, this);
 }
