@@ -40,7 +40,7 @@ def initialize_cuda_context_rng():
 # - CUDA >= 11
 # - arch >= Ampere
 def tf32_is_not_fp32():
-    if not torch.cuda.is_available():
+    if not torch.cuda.is_available() or torch.version.cuda is None:
         return False
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
         return False

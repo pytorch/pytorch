@@ -3,6 +3,7 @@ from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
 from .fake_quantize_backward import _FakeQuantizeWithBackward
+import torch
 import torch.nn as nn
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
