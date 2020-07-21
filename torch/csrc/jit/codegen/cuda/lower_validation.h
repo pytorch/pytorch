@@ -25,10 +25,6 @@ namespace fuser {
 
 void TORCH_CUDA_API PrepareForLowering(Fusion* fusion);
 
-// Compute at can have some circular references. Before we can call any tv
-// with tv->getComputeAtAxis(i) we need to break those circular dependencies.
-void IrFixComputeAt(Fusion* fusion);
-
 // TensorViews are all based on symbolic sizes. When we first initialize them we
 // don't know if they're inputs or outputs which would mean that they have
 // runtime shapes. Intermediate tensors (those not going to global memory) do

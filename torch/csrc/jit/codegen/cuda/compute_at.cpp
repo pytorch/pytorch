@@ -387,12 +387,21 @@ void ComputeAt::setupOutputs() {
     return;
 
   std::vector<TensorView*> touched_output_order;
+  const auto& terminating_outputs =
+      FusionGuard::getCurFusion()->getTerminatingOutputs();
 
   for (auto out : FusionGuard::getCurFusion()->outputs()) {
     if (out->getValType() == ValType::TensorView) {
       if (tv_data.find(out->as<TensorView>()) != tv_data.end()) {
         if (tv_data[out->as<TensorView>()].touched()) {
-          touched_output_order.push_back(out->as<TensorView>());
+          // No need to adjust computeAt when an output is not
+          // a terminating output.
+          if (std::find(
+                  terminating_outputs.begin(),
+                  terminating_outputs.end(),
+                  out) != terminating_outputs.end()) {
+            touched_output_order.push_back(out->as<TensorView>());
+          }
         }
       }
     }

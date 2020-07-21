@@ -28,26 +28,6 @@ static void IrValidate(Fusion* fusion) {
   }
 }
 
-// Remove circular computeAt references
-void IrFixComputeAt(Fusion* fusion) {
-  std::vector<Expr*> exprs = fusion->exprs(true);
-  std::set<TensorView*> visited;
-  for (auto it = exprs.rbegin(); it != exprs.rend(); it++) {
-    Expr* expr = *it;
-    if (!ir_utils::isTVOp(expr))
-      continue;
-
-    TensorView* tv = ir_utils::asTV(expr->output(0));
-    TensorView* ctv = tv->getComputeAtView();
-
-    if (ctv != nullptr && visited.find(ctv) == visited.end()) {
-      ctv->setComputeAt(tv, (int)tv->getThisComputeAtAxis());
-      tv->clearComputeAt();
-    }
-    visited.emplace(tv);
-  }
-}
-
 void IrBuildSizesMap(Fusion* fusion) {
   // Sizes of inputs/outputs -> T.size[...]
   std::unordered_map<Val*, Val*> size_map;
@@ -119,7 +99,6 @@ void IrAdjustMemoryTypes(Fusion* fusion) {
 void PrepareForLowering(Fusion* fusion) {
   FusionGuard fg(fusion);
 
-  IrFixComputeAt(fusion);
   IrValidate(fusion);
   IrBuildSizesMap(fusion);
   IrAdjustMemoryTypes(fusion);

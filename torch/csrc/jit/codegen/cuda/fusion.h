@@ -78,6 +78,10 @@ class ExprSort : public IterVisitor {
       Fusion* fusion,
       bool from_outputs_only,
       bool respect_compute_at);
+
+  static std::vector<Expr*> getExprs(
+      Fusion* fusion,
+      const std::vector<Val*>& from);
 };
 
 class InputsOf : public IterVisitor {
@@ -228,6 +232,8 @@ class TORCH_CUDA_API Fusion final {
   const auto& outputs() const {
     return outputs_;
   }
+
+  std::vector<Val*> getTerminatingOutputs();
 
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
