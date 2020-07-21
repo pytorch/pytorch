@@ -6387,7 +6387,7 @@
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
-    QuantizedCPU: quantized_upsample_bilinear2d_cpu
+    QuantizedCPU: upsample_bilinear2d_quantized_cpu
 
 - func: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
@@ -6436,7 +6436,7 @@
   dispatch:
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
-    QuantizedCPU: quantized_upsample_nearest2d_cpu
+    QuantizedCPU: upsample_nearest2d_quantized_cpu
 
 - func: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
@@ -6449,7 +6449,7 @@
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
-    QuantizedCPU: quantized_upsample_nearest3d_cpu
+    QuantizedCPU: upsample_nearest3d_quantized_cpu
 
 - func: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
