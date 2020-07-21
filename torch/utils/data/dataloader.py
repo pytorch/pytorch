@@ -1032,7 +1032,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def _try_put_index(self):
         assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
-        
+
         try:
             index = self._next_index()
         except StopIteration:
