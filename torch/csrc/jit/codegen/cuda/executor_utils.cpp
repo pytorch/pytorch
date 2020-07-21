@@ -28,6 +28,8 @@ std::string kernelPreamble() {
   return ss.str();
 }
 
+namespace {
+
 bool validateKernelArgTensor(
     const at::Tensor& arg,
     const Val* param,
@@ -124,6 +126,8 @@ bool validateKernelArg(
     return validateKernelArgTensor(arg.toTensor(), param, device, msg);
   }
 }
+
+} // namespace
 
 void validateKernelInputs(
     Fusion* fusion,

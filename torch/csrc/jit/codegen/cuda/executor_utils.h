@@ -20,23 +20,6 @@ namespace executor_utils {
 // Include all the functions we might need in generated code
 std::string kernelPreamble();
 
-bool validateKernelArgTensor(
-    const at::Tensor& arg,
-    const Val* param,
-    c10::Device device,
-    std::stringstream& msg);
-
-bool validateKernelArgScalar(
-    const c10::TypePtr& arg_type,
-    const Val* param,
-    std::stringstream& msg);
-
-bool validateKernelArg(
-    const c10::IValue& arg,
-    const Val* param,
-    c10::Device device,
-    std::stringstream& msg);
-
 void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
