@@ -16,6 +16,11 @@ Function::Function(c10::QualifiedName name)
 
 void Function::append_instruction(OpCode op, int X, int N) {
   TORCH_CHECK(
+      op != CREATE_OBJECT,
+      "CREATE_OBJECT is not supported in mobile module. ",
+      "Workaround: instead of using arbitrary class type (class Foo()), ",
+      "define a pytorch class (class Foo(torch.nn.Module)).");
+  TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
@@ -34,7 +39,7 @@ bool Function::append_operator(
 
   auto jit_op = findOperatorFor(opname);
   if (jit_op) {
-    fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
+    fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {

@@ -778,7 +778,7 @@ class TestOperators(hu.HypothesisTestCase):
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs)
+           **hu.gcs_no_hip)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1906,6 +1906,34 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+        flatmap(lambda dtype: hu.tensor(
+            min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
+        **hu.gcs)
+    def test_constant_fill_from_tensor(self, data, gc, dc):
+        dtype = data.dtype.type
+        if data.dtype == np.dtype(np.bool):
+            dtype = np.bool
+
+        value = np.array([data.item(0)], dtype=dtype)
+        inputs = [data, value]
+        enum_type = _NUMPY_TYPE_TO_ENUM[dtype]
+
+        op = core.CreateOperator(
+            'ConstantFill',
+            ["X", "V"],
+            ["Y"],
+            dtype=enum_type,
+        )
+
+        def ref(x, v):
+            outputs = np.full(shape=data.shape, fill_value=value[0], dtype=dtype)
+            return [outputs]
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        out, = self.assertReferenceChecks(gc, op, inputs, ref)
+        self.assertEqual(dtype, out.dtype)
+
     @given(t=st.integers(1, 5),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
@@ -2238,6 +2266,7 @@ class TestOperators(hu.HypothesisTestCase):
         D = np.zeros((first_dim,) + X.shape[1:]).astype(X.dtype)
 
         op = core.CreateOperator("SparseToDense", ["I", "X", "D"], ["Y"])
+        op_noshapeinfer = core.CreateOperator("SparseToDense", ["I", "X"], ["Y"])
 
         def sparse_to_dense(I, X, D):
             O = np.zeros(D.shape)
@@ -2245,7 +2274,14 @@ class TestOperators(hu.HypothesisTestCase):
                 O[p] += X[i]
             return [O]
 
+        def sparse_to_dense_noshapeinfer(I, X):
+            O = np.zeros((np.max(I) + 1,) + X.shape[1:]).astype(X.dtype)
+            for i, p in enumerate(I):
+                O[p] += X[i]
+            return [O]
+
         self.assertReferenceChecks(gc, op, [I, X, D], sparse_to_dense)
+        self.assertReferenceChecks(gc, op_noshapeinfer, [I, X], sparse_to_dense_noshapeinfer)
         X = X.astype(np.float32)
         self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
 

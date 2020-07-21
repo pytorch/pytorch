@@ -11,7 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>

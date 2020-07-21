@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors. It also defines mathematical operations that can be performed over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -34,7 +34,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg',
+    'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
 
 ################################################################################
@@ -93,6 +93,15 @@ if sys.platform == 'win32':
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
+
+    try:
+        ctypes.CDLL('vcruntime140.dll')
+        ctypes.CDLL('msvcp140.dll')
+        if cuda_version not in ('9.2', '10.0'):
+            ctypes.CDLL('vcruntime140_1.dll')
+    except OSError:
+        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
 
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False
@@ -261,9 +270,12 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`. This type will be
-    used as default floating point type for type inference in
-    :func:`torch.tensor`.
+    r"""Sets the default floating point dtype to :attr:`d`.
+    This dtype is:
+    1. The inferred dtype for python floats in :func:`torch.tensor`.
+    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
+       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
+       otherwise it's set to ``torch.complex64``
 
     The default floating point dtype is initially ``torch.float32``.
 
@@ -271,20 +283,41 @@ def set_default_dtype(d):
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
     Example::
-
-        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
+        >>> # initial default for floating point is torch.float32
+        >>> torch.tensor([1.2, 3]).dtype
         torch.float32
+        >>> # initial default for floating point is torch.complex64
+        >>> torch.tensor([1.2, 3j]).dtype
+        torch.complex64
         >>> torch.set_default_dtype(torch.float64)
-        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        torch.complex128
 
     """
     _C._set_default_dtype(d)
 
-# If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
+def set_deterministic(d):
+    r"""Sets a global flag to force all operations to use a deterministic
+    implementation if available. If an operation that does not have a
+    deterministic implementation is called while this setting is True, the
+    operation will throw a RuntimeError.
+
+    Note that deterministic operations tend to have worse performance than
+    non-deterministic operations.
+
+    Args:
+        d (:class:`bool`): If True, force operations to be deterministic.
+                           If False, allow non-deterministic operations.
+    """
+    _C._set_deterministic(d)
+
+def is_deterministic():
+    r"""Returns True if the global deterministic flag is turned on and
+    operations are being forced to use a deterministic implementation.
+    """
+    return _C._get_deterministic()
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -358,6 +391,10 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+# If you edit these imports, please update torch/__init__.py.in as well
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
+from .serialization import save, load
+from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
@@ -478,6 +515,8 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
+
+from ._vmap_internals import vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom

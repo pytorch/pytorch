@@ -212,10 +212,7 @@ def repeat_test_for_types(dtypes):
         @wraps(f)
         def call_helper(self, *args):
             for dtype in dtypes:
-                if PY34:
-                    with TestCase.subTest(self, dtype=dtype):
-                        f(self, *args, dtype=dtype)
-                else:
+                with TestCase.subTest(self, dtype=dtype):
                     f(self, *args, dtype=dtype)
 
         return call_helper
@@ -224,8 +221,6 @@ def repeat_test_for_types(dtypes):
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -240,7 +235,6 @@ def get_test_names(test_cases):
 
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
-
 
 
 def run_tests(argv=UNITTEST_ARGS):
@@ -319,15 +313,10 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY34:  # Python [3, 3.4)
-        import importlib
-        loader = importlib.find_loader(name)
-        return loader is not None
-    else:  # Python >= 3.4
-        import importlib
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
+    import importlib
+    import importlib.util
+    spec = importlib.util.find_spec(name)
+    return spec is not None
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -729,7 +718,15 @@ class TestCase(expecttest.TestCase):
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
-    precision = 0
+    _precision: float = 0
+
+    @property
+    def precision(self) -> float:
+        return self._precision
+
+    @precision.setter
+    def precision(self, prec: float) -> None:
+        self._precision = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -871,11 +868,13 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
+            assert device is None
+            assert dtype is None
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
@@ -1102,6 +1101,9 @@ class TestCase(expecttest.TestCase):
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
+        elif isinstance(x, type) and isinstance(y, type):
+            # See TestTorch.test_assert_equal_generic_meta
+            super().assertEqual(x, y, msg=msg)
         elif is_iterable(x) and is_iterable(y):
             super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
@@ -1120,13 +1122,6 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(result, msg=msg)
         else:
             super().assertEqual(x, y, msg=msg)
-
-    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
-        prec = delta
-        if places:
-            prec = 10**(-places)
-        rtol = None if prec is None else 0
-        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
@@ -1607,7 +1602,7 @@ def do_test_empty_full(self, dtypes, layout, device):
 
     default_dtype = torch.get_default_dtype()
     check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
-    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5.), default_dtype, torch.strided, -1, None, False)
     for dtype in dtypes:
         for rg in {dtype.is_floating_point, False}:
             int64_dtype = get_int64_dtype(dtype)

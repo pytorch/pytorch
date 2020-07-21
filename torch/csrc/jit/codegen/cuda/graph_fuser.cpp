@@ -166,6 +166,8 @@ struct CudaGraphFuser {
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
+        // TODO: we are following the convention for no good reason;
+        //       we don't need tensor to come before any other inputs.
         if (input->type()->isSubtypeOf(TensorType::get())) {
           auto in_group = subgraph.insertInput(tensor_insert_idx);
           in_group->setType(input->type());
@@ -173,6 +175,7 @@ struct CudaGraphFuser {
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
         } else if (
+            // TODO: extend the supporting inputs here.
             (input->type()->isSubtypeOf(FloatType::get()) &&
              input->node()->kind() != prim::Constant) ||
             (n->kind() == aten::_grad_sum_to_size &&
@@ -181,18 +184,20 @@ struct CudaGraphFuser {
           in_group->setType(input->type());
           inputs_map[input] = in_group;
           group->addInput(input);
-        } else {
-          // We don't support passing in scalars as arguments to fused kernels,
-          // so we generally don't allow fusing tensor-scalar operations unless
-          // the scalar is constant. In those cases we inline the constants
-          // directly in the body of the fused group.
-          AT_ASSERT(input->node()->kind() == prim::Constant);
+        } else if (input->node()->kind() == prim::Constant) {
+          // inline the constants directly in the body of the fused group.
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
                 throw std::runtime_error("unexpected input");
               });
           subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
+        } else {
+          // TODO: we need to figure out what are supported input scalar
+          auto in_group = subgraph.addInput();
+          in_group->setType(input->type());
+          inputs_map[input] = in_group;
+          group->addInput(input);
         }
       }
     }

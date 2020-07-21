@@ -6,7 +6,7 @@ import functools
 import warnings
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args
+from torch.jit.frontend import get_default_args, get_jit_def
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
@@ -15,7 +15,7 @@ from torch._six import get_function_from_type, bind_method
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 # TODO: there should be a more principled way of doing this.
-blacklist = [
+ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
@@ -31,11 +31,11 @@ blacklist = [
 
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, name, self_name="RecursiveScriptModule")
+    ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
-    func = get_function_from_type(type(nn_module), method_name)
+    func = getattr(nn_module, method_name)
     if isinstance(func, ScriptMethodStub):
         return func
     # Make sure the name present in the resulting AST will match the name
@@ -59,14 +59,14 @@ def _get_valid_constant(attr, v):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
-    constants = ", ".join(typ.__name__ for typ in _constant_types)
+    constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
         '{}' object for attribute '{}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
         2. a value of type {{{}}}
         3. a list or tuple of (2)
-        """.format(type(v).__name__, attr, constants)))
+        """.format(torch.typename(type(v)), attr, constants)))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -90,7 +90,12 @@ def infer_concrete_type_builder(nn_module):
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
-        if name in class_annotations:
+        # The forward function from Module is special; never use this annotations; we
+        # need to infer type directly using JIT.  I originally wanted to write
+        # this test as isinstance(class_annotations[name], Callable) but
+        # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
+        # is also true!
+        if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
             attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
@@ -178,7 +183,7 @@ def infer_concrete_type_builder(nn_module):
         concrete_type_builder.add_overload(name, overloaded_names)
 
     for name, value in nn_module.__dict__.items():
-        if name in blacklist or name.startswith("__"):
+        if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue
@@ -231,7 +236,7 @@ def infer_concrete_type_builder(nn_module):
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(type(value).__name__)
+                    "to a TorchScript type.)").format(torch.typename(type(value)))
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # Add @property methods as failed attributes, to give a better error message.
@@ -309,7 +314,6 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -346,6 +350,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             else:
                 # use the default recursive rule to compile the module
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
@@ -371,6 +376,19 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         create_methods_from_stubs(concrete_type, stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
+
+    # Special handling so methods like __len__ work in script methods on classes derived from containers
+    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
+            '__len__' not in cpp_module._method_names():
+        script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
+    if isinstance(nn_module, torch.nn.ModuleDict) and \
+            '__contains__' not in cpp_module._method_names():
+        if len(nn_module.keys()):
+            keys = repr(list(nn_module.keys()))
+            script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+        else:
+            script_module.define("def __contains__(self, key: str):\n   return False\n")
+
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
@@ -457,18 +475,18 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func, None, None, inspect.ismethod(func))
+    signature = torch.jit.annotations.get_signature(func, None, _jit_internal.fake_range(), inspect.ismethod(func))
     if signature is None:
-        qual_name = torch.jit._qualified_name(func)
+        qual_name = _jit_internal._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
 
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
-        orig_ast = torch.jit.get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
+        orig_ast = get_jit_def(orig_fn, orig_fn.__name__, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
             _check_no_signature(overload_fn)
-            over_ast = torch.jit.get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
+            over_ast = get_jit_def(overload_fn, overload_fn.__name__, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
@@ -478,7 +496,7 @@ def check_module_initialized(mod):
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(mod).__name__))
+                           .format(torch.typename(type(mod))))
 
 def infer_methods_to_compile(nn_module):
     """
@@ -591,7 +609,7 @@ def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn, fn.__name__)
-    with torch.jit._disable_emit_hooks():
+    with torch._jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
         create_methods_from_stubs(concrete_type, (stub,))
