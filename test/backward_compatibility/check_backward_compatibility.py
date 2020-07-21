@@ -76,7 +76,7 @@ white_list = [
     ('aten::dict', datetime.date(2020, 6, 30)),
     ('aten::tensor', datetime.date(2020, 6, 30)),
     ('aten::as_tensor', datetime.date(2020, 6, 30)),
-    ('aten::split_with_sizes', datetime.date(2020, 7, 20)),
+    ('aten::split_with_sizes', datetime.date(2020, 7, 29)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
     ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
     ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
