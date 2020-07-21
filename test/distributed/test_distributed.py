@@ -21,6 +21,21 @@ from torch.testing._internal.common_distributed import (
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
+def skip_if_no_ninja(func):
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            import torch.utils.cpp_extension
+            torch.utils.cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_WARNING)
+            return 0
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]

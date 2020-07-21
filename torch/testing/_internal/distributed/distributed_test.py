@@ -120,21 +120,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-def skip_if_no_ninja(func):
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            import torch.utils.cpp_extension
-            torch.utils.cpp_extension.verify_ninja_availability()
-        except RuntimeError:
-            print(CPP_EXTENSIONS_WARNING)
-            return 0
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
 def require_backend(backends):
     if BACKEND not in backends:
         return unittest.skip("Test requires backend to be one of %s" % backends)
