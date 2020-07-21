@@ -60,4 +60,4 @@ class TestBundledInputs(TestCase):
         self.assertEqual(len(inflated), 1)
         self.assertEqual(len(inflated[0]), 1)
         self.assertEqual(raw_data.shape, decoded_data.shape)
-        self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol= 1e-01))
+        self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol=1e-01))

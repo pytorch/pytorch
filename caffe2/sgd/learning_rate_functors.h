@@ -224,6 +224,41 @@ class HillLearningRate : public LearningRateFunctor<T> {
   T end_multiplier_;
 };
 
+// slope: the learning rate changes according to 2 stages
+// 1) constantWarmup with multiplier_1
+// 2) linearly shink to multiplier_2:
+//  max{
+//     multiplier_1 + (iter - num_iter_1) * (multiplier_2 - multiplier_1) / (num_iter_2 - num_iter_1),
+//     multiplier_2
+//  }
+template <typename T>
+class SlopeLearningRate : public LearningRateFunctor<T> {
+ public:
+  SlopeLearningRate(
+      const int64_t num_iter_1,
+      const T multiplier_1,
+      const T num_iter_2,
+      const T multiplier_2)
+      : num_iter_1_(num_iter_1),
+        multiplier_1_(multiplier_1),
+        num_iter_2_(num_iter_2),
+        multiplier_2_(multiplier_2) {}
+  T operator()(const int64_t iter) const override {
+    if (iter < num_iter_1_) {
+      return multiplier_1_;
+    } else {
+      return std::max(
+        multiplier_2_,
+        multiplier_1_ + (iter - num_iter_1_) * (multiplier_2_ - multiplier_1_) / (num_iter_2_ - num_iter_1_)
+      );
+    }
+  }
+  int64_t num_iter_1_;
+  T multiplier_1_;
+  int64_t num_iter_2_;
+  T multiplier_2_;
+};
+
 template <typename T>
 class CompositeLearningRateItem {
  public:

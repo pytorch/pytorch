@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo
-from torch.testing._internal.common_utils import TestCase, load_tests, run_tests
+from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, skipIfRocm
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
 
 
@@ -266,6 +266,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
     @requires_gloo()
     @unittest.skipIf(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    @skipIfRocm
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268
