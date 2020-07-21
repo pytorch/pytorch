@@ -18222,7 +18222,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         dst_dim = dst_dim - nd
 
                     # Integer `src` and `dst`
-                    torch_fn = partial(torch.movedim, src=src_dim, dst=dst_dim)
+                    torch_fn = partial(torch.movedim, source=src_dim, destination=dst_dim)
                     np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
@@ -18252,18 +18252,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         random_idx = random.randint(0, len(src_sequence) - 1)
                         src_sequence = make_index_negative(src_sequence, random_idx)
 
-                    torch_fn = partial(torch.movedim, src=src_sequence, dst=dst_sequence)
+                    torch_fn = partial(torch.movedim, source=src_sequence, destination=dst_sequence)
                     np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
         # Move dim to same position
         x = torch.randn(2, 3, 5, 7, 11)
-        torch_fn = partial(torch.movedim, src=(0, 1), dst=(0, 1))
+        torch_fn = partial(torch.movedim, source=(0, 1), destination=(0, 1))
         np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-        torch_fn = partial(torch.movedim, src=1, dst=2)
-        np_fn = partial(np.moveaxis, source=1, destination=2)
+        torch_fn = partial(torch.movedim, source=1, destination=1)
+        np_fn = partial(np.moveaxis, source=1, destination=1)
         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):

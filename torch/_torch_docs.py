@@ -4367,15 +4367,15 @@ Example::
 
 add_docstr(torch.movedim,
            r"""
-movedim(input, src, dst) -> Tensor
+movedim(input, source, destination) -> Tensor
 
-Move `src` dim/s of the :attr:`input` to position determined by `dst`.
+Move `source` dim/s of the :attr:`input` to position determined by `destination`.
 Other dims remain in their original order.
 
 Args:
     {input}
-    src (int or tuple of ints): Original positions of the dims to move. These must be unique.
-    dst (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
+    source (int or tuple of ints): Original positions of the dims to move. These must be unique.
+    destination (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
 
 Examples::
 
