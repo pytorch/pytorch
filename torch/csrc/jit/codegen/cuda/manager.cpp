@@ -161,7 +161,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       for (size_t i = 0; i < nInputs; i++) {
         graph->inputs()[i]->setType(inputs[i].type());
       }
-      ShapeTypePropagate(graph);
+      TypePropagate(graph);
     }
 
     auto outputs =
