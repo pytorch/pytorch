@@ -352,6 +352,7 @@ Comparison Ops
     isfinite
     isinf
     isnan
+    isreal
     kthvalue
     le
     lt
@@ -387,6 +388,9 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
