@@ -4408,8 +4408,11 @@ add_docstr(torch.movedim,
            r"""
 movedim(input, source, destination) -> Tensor
 
-Move `source` dim/s of the :attr:`input` to position determined by `destination`.
-Other dims remain in their original order.
+Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
+to the position(s) in :attr:`destination`.
+
+Other dimensions of :attr:`input` that are not explicitly moved remain in
+their original order and appear at the positions not specified in :attr:`destination`.
 
 Args:
     {input}

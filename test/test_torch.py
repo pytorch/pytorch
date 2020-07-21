@@ -18186,21 +18186,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         shape = self._rand_shape(4, min_size=5, max_size=10)
         x = self._generate_input(shape, dtype, device, False)
 
-        # Invalid `src` and `dst` dimension
+        # Invalid `source` and `destination` dimension
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.movedim(x, 5, 0)
 
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.movedim(x, 0, 5)
 
-        # Mismatch in size of `src` and `dst`
+        # Mismatch in size of `source` and `destination`
         with self.assertRaisesRegex(RuntimeError, "movedim: Invalid source or destination dims:"):
             torch.movedim(x, (1, 0), (0, ))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `src`"):
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
             torch.movedim(x, (0, 0), (0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `dst`"):
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
             torch.movedim(x, (0, 1), (1, 1))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -18221,7 +18221,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         src_dim = src_dim - nd
                         dst_dim = dst_dim - nd
 
-                    # Integer `src` and `dst`
+                    # Integer `source` and `destination`
                     torch_fn = partial(torch.movedim, source=src_dim, destination=dst_dim)
                     np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
                     self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
@@ -18235,7 +18235,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     return tuple(src_sequence)
 
                 for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
-                    # Sequence `src` and `dst`
+                    # Sequence `source` and `destination`
                     dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
 
                     # Randomly change a dim to a negative dim representation of itself.
@@ -18264,6 +18264,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         torch_fn = partial(torch.movedim, source=1, destination=1)
         np_fn = partial(np.moveaxis, source=1, destination=1)
+        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+        # Empty Sequence
+        torch_fn = partial(torch.movedim, source=(), destination=())
+        np_fn = partial(np.moveaxis, source=(), destination=())
         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
