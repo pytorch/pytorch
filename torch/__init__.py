@@ -202,7 +202,7 @@ try:
 except ImportError:
     import torch._C as _C_for_compiled_check
     if _C_for_compiled_check.__file__ is None:
-        raise ImportError(textwrap.dedent(f'''
+        raise ImportError(textwrap.dedent('''
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder
                 of the PyTorch repository rather than the C extensions which
