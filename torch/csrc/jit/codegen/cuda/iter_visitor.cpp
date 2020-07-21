@@ -134,12 +134,9 @@ void IterVisitor::traverseFrom(
 void IterVisitor::traverse_(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first,
     bool traverse_all_paths,
     bool respect_compute_at) {
   FusionGuard fg(fusion);
-  if (breadth_first)
-    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 
   if (from_outputs_only) {
     auto term_outs = IterVisitor::getTerminatingOutputs(fusion);
@@ -163,18 +160,15 @@ void IterVisitor::traverse_(
 void IterVisitor::traverse(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first,
     bool respect_compute_at) {
-  traverse_(
-      fusion, from_outputs_only, breadth_first, false, respect_compute_at);
+  traverse_(fusion, from_outputs_only, false, respect_compute_at);
 }
 
 void IterVisitor::traverseAllPaths(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool breadth_first,
     bool respect_compute_at) {
-  traverse_(fusion, from_outputs_only, breadth_first, true, respect_compute_at);
+  traverse_(fusion, from_outputs_only, true, respect_compute_at);
 }
 
 namespace {

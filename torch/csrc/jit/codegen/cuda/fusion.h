@@ -77,7 +77,6 @@ class ExprSort : public IterVisitor {
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
       bool from_outputs_only,
-      bool breadth_first,
       bool respect_compute_at);
 };
 
@@ -140,20 +139,14 @@ class TORCH_CUDA_API Fusion final {
   /*
    * Return a list of topologically sorted expressions. We can start
    * by only traversing back from registered outputs, or from all terminating
-   * Vals. Can also select depth first traversal, or breadth first.1
+   * Vals.
    *
    * from_outputs_only:
    *   True - Sort from DAG associated with registered outputs
    *   False - Sort from all terminating Vals.
-   * breadth_first :
-   *   False - Sort from depth first traversal
-   *   True - Sort from breadth first traversal - Not Implemented Yet!
-   *
-   * TODO: Implement breadth_first
    */
   std::vector<Expr*> exprs(
       bool from_outputs_only = false,
-      bool breadth_first = false,
       bool respect_compute_at = false);
 
   std::unordered_set<Val*> inputsOf(Val* val);

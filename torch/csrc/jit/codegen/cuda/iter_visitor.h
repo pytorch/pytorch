@@ -81,7 +81,6 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   void traverse_(
       Fusion* const fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false,
       bool traverse_all_paths = false,
       bool respect_compute_at = false);
 
@@ -99,22 +98,18 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   // from_outputs_only = true start from outputs registered with fusion,
   // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
   // respect_compute_at = true traverse computeAt input exprs later
   void traverse(
       Fusion* const fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false,
       bool respect_compute_at = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
   // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
   // respect_compute_at = true traverse computeAt input exprs later
   void traverseAllPaths(
       Fusion* const fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false,
       bool respect_compute_at = false);
 
   static std::unordered_set<Val*> getTerminatingOutputs(Fusion* const);
