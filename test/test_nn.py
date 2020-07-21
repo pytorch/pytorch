@@ -309,33 +309,6 @@ class TestAvgPool(TestCase):
                 x.to('cuda'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2, 3), stride=2)
             self.assertTrue(not torch.isnan(y).any())
 
-class TestLayerNormWithNonDefaultWeight(TestCase):
-    def _get_layer_norm(self):
-        layer_norm = nn.LayerNorm((16,), 1e-5, True)
-        with torch.no_grad():
-            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
-        return layer_norm
-
-    def test_gradients_with_create_graph_flag(self):
-        atol = 1e-5
-        rtol = 1e-3
-
-        x = torch.randn((4, 4, 16), requires_grad=True)
-        layer_norm = self._get_layer_norm()
-
-        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
-
-        if TEST_CUDA:
-            x = x.to('cuda')
-            layer_norm = layer_norm.to('cuda')
-
-            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
-            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
-
-            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -8398,6 +8371,29 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be a tuple of tuples, but found type list"):
             nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
 
+    def test_layer_norm_grads_with_create_graph_flag(self):
+        atol = 1e-5
+        rtol = 1e-3
+
+        x = torch.randn((4, 4, 16), requires_grad=True)
+        layer_norm = nn.LayerNorm((16,), 1e-5, True)
+        with torch.no_grad():
+            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
+
+        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
+        if TEST_CUDA:
+            x = x.to('cuda')
+            layer_norm = layer_norm.to('cuda')
+
+            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -9027,6 +9023,7 @@ add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
+
 
 # The following are helpers for TestNN.test_affine_*
 if torch.cuda.is_available():
