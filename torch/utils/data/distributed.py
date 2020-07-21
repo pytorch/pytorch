@@ -1,10 +1,11 @@
 import math
+from typing import Optional, Sized
 import torch
 from . import Sampler
 import torch.distributed as dist
 
 
-class DistributedSampler(Sampler):
+class DistributedSampler(Sampler[int]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -17,7 +18,7 @@ class DistributedSampler(Sampler):
         Dataset is assumed to be of constant size.
 
     Arguments:
-        dataset: Dataset used for sampling.
+        data_source (Dataset): Dataset used for sampling.
         num_replicas (int, optional): Number of processes participating in
             distributed training. By default, :attr:`rank` is retrieved from the
             current distributed group.
@@ -47,7 +48,8 @@ class DistributedSampler(Sampler):
         ...     train(loader)
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0):
+    def __init__(self, data_source: Sized, num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None, shuffle: bool = True, seed: int = 0):
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -56,11 +58,11 @@ class DistributedSampler(Sampler):
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
             rank = dist.get_rank()
-        self.dataset = dataset
+        self.data_source = data_source
         self.num_replicas = num_replicas
         self.rank = rank
         self.epoch = 0
-        self.num_samples = int(math.ceil(len(self.dataset) * 1.0 / self.num_replicas))
+        self.num_samples = int(math.ceil(len(self.data_source) * 1.0 / self.num_replicas))
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
@@ -70,9 +72,9 @@ class DistributedSampler(Sampler):
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+            indices = torch.randperm(len(self.data_source), generator=g).tolist()
         else:
-            indices = list(range(len(self.dataset)))
+            indices = list(range(len(self.data_source)))
 
 
         # add extra samples to make it evenly divisible
@@ -85,10 +87,10 @@ class DistributedSampler(Sampler):
 
         return iter(indices)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
-    def set_epoch(self, epoch):
+    def set_epoch(self, epoch: int) -> None:
         r"""
         Sets the epoch for this sampler. When :attr:`shuffle=True`, this ensures all replicas
         use a different random ordering for each epoch. Otherwise, the next iteration of this
