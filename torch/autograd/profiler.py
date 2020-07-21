@@ -668,7 +668,7 @@ class FunctionEvent(FormattedTimesMixin):
     def append_cpu_child(self, child):
         """Append a CPU child of type FunctionEvent.
 
-        One is supposed to append only dirrect children to the event to have
+        One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
         assert(isinstance(child, FunctionEvent))
