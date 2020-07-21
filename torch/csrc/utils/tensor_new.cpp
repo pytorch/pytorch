@@ -486,6 +486,18 @@ c10::DispatchKey denseTypeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::
   auto device_type = r.isNone(device_idx) ? computeDeviceType(dispatch_key) : r.device(device_idx).type();
   return backendToDispatchKey(toDense(backendToBackendOfDeviceType(dispatchKeyToBackend(dispatch_key), device_type)));
 }
+
+std::pair<c10::DispatchKey, c10::DeviceIndex> deviceTypeIdWithDefault(PythonArgs& r, int64_t device_idx, int64_t tensor_id, c10::DispatchKey dispatch_key) {
+  auto device_type = r.isNone(device_idx) ? computeDeviceType(dispatch_key) : r.device(device_idx).type();
+  c10::DeviceIndex device_index = r.isNone(device_idx) ? -1 : r.device(device_idx).index();
+  if (THPVariable_Check(r.pyobject(tensor_id))) {
+    auto var_tensor = reinterpret_cast<THPVariable*>(r.pyobject(tensor_id))->cdata;
+    device_type = var_tensor.device().type();
+    device_index = var_tensor.device().index();
+  }
+  return std::make_pair(backendToDispatchKey(toDense(backendToBackendOfDeviceType(dispatchKeyToBackend(dispatch_key), device_type))), device_index);
+}
+
 } // namespace
 
 Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
@@ -620,15 +632,17 @@ Tensor indexing_tensor_from_data(
 
 void check_expected_devices(
     const c10::optional<Device>& device_opt,
-    const Tensor& values,
+    PyObject* values_data, 
     PyObject* indices_data) {
-  if (THPVariable_Check(indices_data) && !device_opt.has_value() ) {
+  if (!device_opt.has_value() && THPVariable_Check(indices_data) && THPVariable_Check(values_data)) {
+    auto var_values_tensor =
+        reinterpret_cast<THPVariable*>(values_data)->cdata;
     auto var_indices_tensor =
         reinterpret_cast<THPVariable*>(indices_data)->cdata;
     std::stringstream msg;
     msg << "Expected indices and values to be on the same device, but got: values "
-        << values.device() << ", indices: " << var_indices_tensor.device();
-    TORCH_CHECK(values.device() == var_indices_tensor.device(), msg.str().data());
+        << var_values_tensor.device() << ", indices: " << var_indices_tensor.device();
+    TORCH_CHECK(var_values_tensor.device() == var_indices_tensor.device(), msg.str().data());
   }
 }
 
@@ -650,15 +664,15 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
       ARG_REQUIRES_GRAD,
       ARGS_COUNT
     };
-    bool type_inference = r.isNone(2);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    bool type_inference = r.isNone(ARG_TYPE);
+    // if device is not provided, use the values device as the default_dispatch_key.
+    auto default_dispatch_key = deviceTypeIdWithDefault(r, ARG_DEVICE, ARG_VALUES, dispatch_key); 
     const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+    check_expected_devices(device_guard.original_device(), r.pyobject(ARG_VALUES), r.pyobject(ARG_INDICES));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
-    check_expected_devices(device_guard.original_device(), values, r.pyobject(ARG_INDICES));
-    auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
-    Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+    Tensor values = internal_new_from_data(default_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+    Tensor indices = internal_new_from_data(default_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     enum {
@@ -671,13 +685,14 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
       ARGS_COUNT
     };
     bool type_inference = r.isNone(ARG_TYPE);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    // if device is not provided, use the values device as the default_dispatch_key.
+    auto default_dispatch_key = deviceTypeIdWithDefault(r, ARG_DEVICE, ARG_VALUES, dispatch_key); 
     const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
-    check_expected_devices(device_guard.original_device(), values, r.pyobject(ARG_INDICES));
-    auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
-    Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+    check_expected_devices(device_guard.original_device(), r.pyobject(ARG_VALUES), r.pyobject(ARG_INDICES));
+    // if no dtype provided, infer type based on value type.
+    Tensor values = internal_new_from_data(default_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+    Tensor indices = internal_new_from_data(default_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 2) {
     enum {
@@ -712,13 +727,13 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   ParsedArgs<ARGS_COUNT> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   bool type_inference = r.isNone(ARG_TYPE);
-  const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+  // if device is not provided, use the values device as the default_dispatch_key.
+  auto default_dispatch_key = deviceTypeIdWithDefault(r, ARG_DEVICE, ARG_VALUES, dispatch_key); 
   const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
   at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
-  Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
-  check_expected_devices(device_guard.original_device(), values, r.pyobject(0));
-  auto values_dispatch_key = std::make_pair(legacyExtractDispatchKey(values.key_set()), values.device().index());
-  Tensor indices = internal_new_from_data(values_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
+  check_expected_devices(device_guard.original_device(), r.pyobject(ARG_VALUES), r.pyobject(ARG_INDICES));
+  Tensor values = internal_new_from_data(default_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES), false, true, type_inference);
+  Tensor indices = internal_new_from_data(default_dispatch_key, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES), false, true, false);
   return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 

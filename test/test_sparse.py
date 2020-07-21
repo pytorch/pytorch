@@ -1772,6 +1772,24 @@ class TestSparse(TestCase):
         # NB: non-legacy constructor allows this and moves indices
         self.assertRaises(RuntimeError, lambda: self.legacy_sparse_tensor(i, v, torch.Size([3, 0])))
 
+        # if dtype is specified, but device is not, the indices and values should be on the same device.
+        i = torch.tensor(([0], [2]), device="cuda:1", dtype=torch.long)
+        v = torch.tensor([1.], device="cuda:1")
+        x = torch.sparse_coo_tensor(i, v, dtype=torch.float64)
+        check_device(x, 1)
+
+        # if device is not specified and the indices and values are on different devices,  an exception is raised.
+        i = torch.tensor(([0], [2]), device="cuda:1", dtype=torch.long)
+        v = torch.tensor([1.], device="cuda:0")
+        self.assertRaises(RuntimeError, lambda: torch.sparse_coo_tensor(i, v, dtype=torch.float64))
+
+        # if 'device' is specified and the indices and values are in the same device, 
+        # sparse tensor is allocated on the current 'device'  
+        i = torch.tensor(([0], [2]), dtype=torch.long)
+        v = torch.tensor([1.])
+        x = torch.sparse_coo_tensor(i, v, dtype=torch.float64, device='cuda:1')
+        check_device(x, 1)
+
     def _test_new_device(self, size, device):
         with torch.cuda.device(device):
             x = torch.cuda.sparse.DoubleTensor(*size)
