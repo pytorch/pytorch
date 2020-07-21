@@ -149,7 +149,8 @@ def get_ignored_functions():
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.is_deterministic,
-        torch.set_deterministic
+        torch.set_deterministic,
+        torch.unify_type_list
     )
 
 def get_testing_overrides():
@@ -674,6 +675,9 @@ def get_testing_overrides():
         torch.unbind: lambda input, dim=0: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
+        torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
+        torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
+        torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsqueeze: lambda input, dim, out=None: -1,
         torch.var: lambda input, dim=None: -1,
         torch.var_mean: lambda input, dim=None: -1,

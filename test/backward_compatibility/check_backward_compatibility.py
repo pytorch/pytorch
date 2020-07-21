@@ -76,6 +76,7 @@ white_list = [
     ('aten::dict', datetime.date(2020, 6, 30)),
     ('aten::tensor', datetime.date(2020, 6, 30)),
     ('aten::as_tensor', datetime.date(2020, 6, 30)),
+    ('aten::split_with_sizes', datetime.date(2020, 7, 20)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
     ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
     ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
@@ -143,6 +144,7 @@ white_list = [
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('aten::eq', datetime.date(2020, 7, 30)),
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
     ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),

@@ -8326,6 +8326,51 @@ class TestNN(NNTestCase):
             torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
         self.assertEqual(len(w), 1)
 
+    def test_unflatten(self):
+        tensor_input = torch.randn(2, 50)
+
+        # Unflatten Tensor
+
+        unflatten = nn.Unflatten(dim=1, unflattened_size=(2, 5, 5))
+        tensor_output = unflatten(tensor_input)
+        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+
+        # Unflatten NamedTensor
+
+        unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
+        named_tensor_input = tensor_input.refine_names('N', 'features')
+        named_tensor_output = unflatten(named_tensor_input)
+        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+
+    def test_unflatten_invalid_arg(self):
+        # Wrong type for unflattened_size (tuple of floats)
+
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
+            nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
+
+        # Wrong type for unflattened_size (tuple of lists)
+
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
+            nn.Unflatten(dim='features', unflattened_size=(['C', 2], ['W', 5], ['H', 5]))
+
+        # Wrong type for unflattened_size (list of ints)
+
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be a tuple of ints, but found type list"):
+            nn.Unflatten(dim=1, unflattened_size=[2, 5, 5])
+
+        # Wrong type for unflattened_size (list of lists)
+
+        with self.assertRaisesRegex(
+                TypeError,
+                r"unflattened_size must be a tuple of tuples, but found type list"):
+            nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
+
 
 class TestNNInit(TestCase):
     def setUp(self):
