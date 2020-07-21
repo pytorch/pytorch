@@ -437,7 +437,7 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
       red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
-      Val* input = red_expr->as<ReductionOp>()->in();
+      Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
       if (!fusion->hasInput(input)) {
         input->as<TensorView>()->computeAt(red_tv_rf, -2);
         input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
@@ -467,7 +467,7 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
-        Val* input = red_expr->as<ReductionOp>()->in();
+        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
           input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
@@ -490,7 +490,7 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
-        Val* input = red_expr->as<ReductionOp>()->in();
+        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
           input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
@@ -518,7 +518,7 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::BIDy);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
 
-        Val* input = red_expr->as<ReductionOp>()->in();
+        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
           input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
@@ -539,7 +539,7 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
-        Val* input = red_expr->as<ReductionOp>()->in();
+        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
           input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);

@@ -203,7 +203,7 @@ EvaluationContext bindInputs(
       "Something went wrong configuring launch. Inputs no longer match.");
 
   auto fusion_inputs = fusion->inputs();
-  EvaluationContext ec(fusion);
+  EvaluationContext eval_context(fusion);
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
@@ -222,11 +222,12 @@ EvaluationContext bindInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        safeBind(ec, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+        safeBind(
+            eval_context, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
       }
     }
   }
-  return std::move(ec);
+  return eval_context;
 }
 
 NvrtcFunction nvrtcCompile(
