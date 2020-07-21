@@ -4477,6 +4477,32 @@ void testGPU_FusionUnrollWithAlloc() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+// Test isZeroInt
+void testGPU_FusionIsZeroInt() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Int* x = new Int(0);
+  Int* y = new Int(1);
+  Val* z = mul(x, y);
+  TORCH_CHECK(x->isZeroInt());
+  TORCH_CHECK(!y->isZeroInt());
+  TORCH_CHECK(!z->isZeroInt());
+}
+
+// Test isOneInt
+void testGPU_FusionIsOneInt() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Int* x = new Int(1);
+  Int* y = new Int(1);
+  Val* z = mul(x, y);
+  TORCH_CHECK(x->isOneInt());
+  TORCH_CHECK(y->isOneInt());
+  TORCH_CHECK(!z->isOneInt());
+}
+
 } // namespace jit
 } // namespace torch
 
