@@ -64,7 +64,9 @@ class CudaFusionManager {
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
     // is exactly what we wanted.
+    std::cout << "\nprior to canonical\n" << *graph << std::endl;
     Canonicalize(graph, false);
+    std::cout << "\nafter canonical\n" << *graph << std::endl;
     auto repr = graph->toString(false);
 
     // create new graph_cache_ entry;
@@ -81,26 +83,52 @@ class CudaFusionManager {
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
 
+    auto inputs_vec = dimCollapseInputs(graph, inputs);
+    const at::ArrayRef<IValue> inputs_ref = inputs_vec;   
+
     FusionExecutor* fe;
     if (kernel_cache_.find(kernel_id) == kernel_cache_.end()) {
-      // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      // TODO: pass contiguity infor as well as size req, so we can apply proper
-      //       transform to computation
-      auto fusion = parseJitIR(graph);
+      // search kernel cache failed, we need to codegen new kernel for given
+      // inputs;
+
+      auto copy = dimCollapseGraph(graph);
+      auto fusion = parseJitIR(copy);
 
       // TODO: update the API to let `scheduleFusion` consume & return a fusion
       // magic scheduler updates fusion instance via transformation and setup
       // launch configurations;
-      scheduleFusion(fusion.get(), inputs);
+      scheduleFusion(fusion.get(), inputs_ref);
 
       CompileOptions options;
-      options.device = getDevice(inputs);
+      options.device = getDevice(inputs_ref);
 
       kernel_cache_[kernel_id] = std::make_unique<FusionExecutor>();
       kernel_cache_[kernel_id]->compileFusion(fusion.get(), options);
     }
+
     fe = kernel_cache_[kernel_id].get();
-    return fe->runFusion(inputs);
+    return dimCollapseOutputs(graph, fe->runFusion(inputs_ref));
+  }
+ 
+ private:
+  // Dimension collapsing only applicable to profiling executor at this moment
+  std::vector<IValue> dimCollapseInputs(
+      std::shared_ptr<Graph>& graph,
+      const at::ArrayRef<IValue> inputs) {
+    //if (IsNewExecutorEnabled()) {
+      // collapse dimension on inputs;
+    //}
+    return inputs.vec();
+  }
+
+  std::vector<at::Tensor> dimCollapseOutputs(
+      std::shared_ptr<Graph>& graph,
+      const std::vector<at::Tensor> outputs) {
+    return outputs;
+  }
+
+  std::shared_ptr<Graph> dimCollapseGraph(std::shared_ptr<Graph>& graph) {
+    return graph->copy();
   }
 
  private:
@@ -156,12 +184,19 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
     // Only needed if we are doing codegen
     // if no shape information available, we feed current shape into the kernel;
+    // This is needed because our current broadcast on size-1 dimension 
     if (!IsNewExecutorEnabled()) {
       EraseShapeInformation(graph);
+      std::cout << "\nerased shape\n" << *graph << std::endl;
       for (size_t i = 0; i < nInputs; i++) {
         graph->inputs()[i]->setType(inputs[i].type());
       }
+      // Type propagation that's here just to cover corner case, incase type
+      // propagation failed in the original subgraph. We currently need output
+      // types in order to support fp16, where we cast input to fp32 and output
+      // back to fp16.
       TypePropagate(graph);
+      std::cout << "\npropogated Type\n" << *graph << std::endl;
     }
 
     auto outputs =
