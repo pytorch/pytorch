@@ -15,7 +15,7 @@ from .default_mappings import (
 )
 
 
-DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST = (
     set(DEFAULT_MODULE_MAPPING.values())
     | set(DEFAULT_QAT_MODULE_MAPPING.values())
     | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
@@ -409,7 +409,7 @@ def prepare_model_outputs(
     float_module,
     q_module,
     Logger=OutputLogger,
-    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST,
 ):
     r"""Prepare the model by attaching the logger to both float module
     and quantized module if they are in the white_list.
@@ -437,7 +437,7 @@ def compare_model_outputs(
     q_model,
     *data,
     Logger=OutputLogger,
-    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST,
 ):
     r"""Compare output activations between float and quantized models at
     corresponding locations for the same input. Return a dict with key corresponding

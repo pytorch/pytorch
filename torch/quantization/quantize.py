@@ -13,7 +13,7 @@ import torch.nn.intrinsic.qat as nniqat
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
-                               DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
+                               DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST)
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
 
@@ -37,7 +37,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
     """
     # TODO: Add test
     if white_list is None:
-        white_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+        white_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
 
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
@@ -100,7 +100,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         None, module is modified inplace with added observer modules and forward_hooks
     """
     if qconfig_propagation_list is None:
-        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
     # respect device affinity when adding observers
     if device is None:
         devices = get_unique_devices_(module)
@@ -196,7 +196,7 @@ def prepare(model, inplace=False, white_list=None,
         model = copy.deepcopy(model)
     propagate_qconfig_list = white_list
     if propagate_qconfig_list is None:
-        propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+        propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
     propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
