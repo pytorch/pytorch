@@ -15,7 +15,7 @@ from torch._six import get_function_from_type, bind_method
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 # TODO: there should be a more principled way of doing this.
-blacklist = [
+ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
@@ -183,7 +183,7 @@ def infer_concrete_type_builder(nn_module):
         concrete_type_builder.add_overload(name, overloaded_names)
 
     for name, value in nn_module.__dict__.items():
-        if name in blacklist or name.startswith("__"):
+        if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue
@@ -609,7 +609,7 @@ def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn, fn.__name__)
-    with torch.jit._disable_emit_hooks():
+    with torch._jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
         create_methods_from_stubs(concrete_type, (stub,))

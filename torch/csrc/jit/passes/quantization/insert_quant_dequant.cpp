@@ -192,7 +192,6 @@ DynamicQuantOps insertChooseQParamQuantDequant(
 
 Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
   auto default_false = graph->insertConstant(false);
-  Value* none = graph->insertConstant(IValue());
   Value* fp16_dtype = graph->insertConstant(IValue(c10::kHalf));
   Value* float_dtype = graph->insertConstant(IValue(c10::kFloat));
 

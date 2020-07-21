@@ -886,6 +886,9 @@
 - name: sigmoid(Tensor self) -> Tensor
   self: sigmoid_backward(grad, result)
 
+- name: logit(Tensor self, float? eps=None) -> Tensor
+  self: "GradMode::is_enabled() ? infinitely_differentiable_logit_backward(grad, self, eps) : logit_backward(grad, self, eps)"
+
 - name: sign(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
@@ -1085,7 +1088,7 @@
   self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
 
-- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   values: sparse_constructor_values_backward(grad, indices, values.sizes())
 
 - name: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
@@ -1195,6 +1198,9 @@
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
+
+- name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), result)
 
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"

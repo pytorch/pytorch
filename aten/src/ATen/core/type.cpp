@@ -24,7 +24,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
-      for (size_t i = 0; i < *ndim; ++i) {
+      size_t i = 0;
+      for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
@@ -36,6 +37,18 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         if (has_valid_strides_info) {
           out << ":" << *value->strides()[i];
         }
+      }
+      if (value->requiresGrad()) {
+        if (i++ > 0) {
+          out << ", ";
+        }
+        out << "requires_grad=" << *value->requiresGrad();
+      }
+      if (value->device()) {
+        if (i++ > 0) {
+          out << ", ";
+        }
+        out << "device=" << *value->device();
       }
       out << ")";
     }
@@ -177,6 +190,11 @@ AnyTupleTypePtr AnyTupleType::get() {
 
 AnyClassTypePtr AnyClassType::get() {
   static auto value = AnyClassType::create();
+  return value;
+}
+
+AnyEnumTypePtr AnyEnumType::get() {
+  static auto value = AnyEnumType::create();
   return value;
 }
 
@@ -1351,6 +1369,11 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  return rhs->kind() == TypeKind::AnyType ||
+      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }
 
 } // namespace c10

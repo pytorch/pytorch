@@ -8,8 +8,10 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 
 namespace torch {
@@ -96,12 +98,20 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return moveToIntrusivePtr<ivalue::PyObjectHolder>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return toIntrusivePtr<ivalue::PyObjectHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() && {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::EnumHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const & {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return toIntrusivePtr<ivalue::EnumHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
@@ -216,6 +226,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
 struct Object;
 struct PyObjectHolder;
+struct EnumHolder;
 }
 
 // Future
@@ -522,6 +533,39 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual ~PyObjectHolder() {};
+};
+
+struct ivalue::EnumHolder : c10::intrusive_ptr_target {
+ public:
+  EnumHolder(c10::QualifiedName qualified_class_name, std::string name, IValue value)
+      : qualified_class_name_(std::move(qualified_class_name)),
+        name_(std::move(name)), value_(std::move(value)) {}
+
+  bool is(const ivalue::EnumHolder& rhs) {
+    return *this == rhs;
+  }
+
+  bool operator==(const ivalue::EnumHolder& o) const {
+    return qualified_class_name_ == o.qualifiedClassName() &&
+        name_ == o.name() && value_ == o.value();
+  }
+
+  const std::string& qualifiedClassName() const {
+    return qualified_class_name_.qualifiedName();
+  }
+
+  const std::string& name() const {
+    return name_;
+  }
+
+  const IValue& value() const {
+    return value_;
+  }
+
+private:
+  c10::QualifiedName qualified_class_name_;
+  std::string name_;
+  IValue value_;
 };
 
 #undef TORCH_FORALL_TAGS
@@ -930,10 +974,17 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
+: tag(Tag::Enum), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob) {
   IValue iv;
   iv.tag = Tag::Capsule;
@@ -974,6 +1025,7 @@ inline const std::string& IValue::toStringRef() const {
 inline PyObject* IValue::toPyObject() const {
   return toPyObjectHolder()->getPyObject();
 }
+
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {

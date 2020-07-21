@@ -130,20 +130,6 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
-         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack* stack) {
-           bool create_graph = pop(stack).toBool();
-           auto retain_graph = pop(stack).toOptional<bool>();
-           IValue gradient_ivalue = pop(stack);
-           at::Tensor gradient = gradient_ivalue.isNone()
-               ? at::Tensor()
-               : gradient_ivalue.toTensor();
-           at::Tensor self = pop(stack).toTensor();
-           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-           self.backward(gradient, keep_graph, create_graph);
-         },
-         aliasAnalysisConservative()),
-     Operator(
          "aten::save(t item, str filename) -> ()",
          [](Stack* stack) {
            auto filename = pop(stack).toStringRef();
@@ -671,19 +657,20 @@ void hashValue(Stack* stack) {
   push(stack, int64_t(hash));
 }
 
+// As described in https://docs.python.org/3/library/functions.html#round
+// When a number is exactly halfway between two integers, python builtin round
+// function will round to even number. We use round(x/2)*2 to handle the
+// special halfway case. For positive 'x', round(x/2)*2 =
+// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
+// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
+// result will always be a even number. Due to symmetricity, it also applies to
+// negative cases.
+double round_to_even(double a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+}
+
 RegisterOperators reg2({
-
-    Operator(
-        "aten::__getitem__.str(str s, int index) -> str",
-        [](Stack* stack) {
-          auto index = pop(stack).toInt();
-          auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
-          char c = string.at(norm_index);
-          push(stack, std::string(&c, 1));
-        },
-        aliasAnalysisFromSchema()),
-
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
         "aten::len.any(Any[] a) -> int",
@@ -728,10 +715,6 @@ RegisterOperators reg2({
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__contains__.str_list(str[] l, str item) -> bool",
-        listContains<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort.int(int[](a!) self, bool reverse=False) -> ()",
@@ -839,18 +822,6 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ord(str string) -> int",
-        [](Stack* stack) {
-          auto string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              string.size() == 1,
-              "String for ord() must be 1 character, found ",
-              string.size());
-          uint8_t ord = string.at(0);
-          push(stack, int64_t(ord));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::chr(int i) -> str",
         [](Stack* stack) {
           auto i = pop(stack).toInt();
@@ -864,23 +835,6 @@ RegisterOperators reg2({
           push(stack, ss.str());
         },
         aliasAnalysisFromSchema()),
-#define CREATE_COPY_OP(other_type, c_type)                               \
-  Operator(                                                              \
-      "aten::copy_." #other_type "(Tensor(a!) self, " #other_type        \
-      " other) -> Tensor(a!)",                                           \
-      [](Stack* stack) {                                                 \
-        at::Tensor t;                                                    \
-        c_type other;                                                    \
-        pop(stack, t, other);                                            \
-        std::move(t) = other; /* NOLINT(bugprone-use-after-move) */      \
-        push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
-      },                                                                 \
-      aliasAnalysisFromSchema())
-
-    CREATE_COPY_OP(Tensor, at::Tensor),
-    CREATE_COPY_OP(int, int64_t),
-    CREATE_COPY_OP(float, double),
-#undef CREATE_COPY_OP
 
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
@@ -923,7 +877,7 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
+    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
@@ -934,7 +888,6 @@ RegisterOperators reg2({
         float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
     DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
@@ -1347,7 +1300,9 @@ at::Tensor interpolate(
   auto input_dim = input.dim();
   if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors), c10::make_optional(scale_factors_1));
+        input,
+        _output_size(input, 1, size, scale_factors),
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
