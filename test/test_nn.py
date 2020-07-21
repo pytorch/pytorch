@@ -11089,6 +11089,11 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, "stride should not be zero",
                                        lambda: fn(x, kernel_size=2, stride=0))
 
+                fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
+                fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
+                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                                       lambda: fn_module(x))
+
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
