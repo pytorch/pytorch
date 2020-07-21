@@ -7,10 +7,12 @@ namespace {
 
 static std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
   std::vector<Tensor> result;
-  for (int i = 0; i < tensors.size(); i++) {
-    auto temp = tensors[i].add(scalar);
-    result.push_back(temp);
-  }
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cpu", [&]() {
+    for (int i = 0; i < tensors.size(); i++) {
+      auto temp = tensors[i].add(scalar.to<scalar_t>());
+      result.push_back(temp);
+    }
+  });
   return result;
 }
 

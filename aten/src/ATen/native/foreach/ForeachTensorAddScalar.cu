@@ -3,7 +3,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/ForeachOps.h>
 #include <ATen/native/foreach/Utils.cuh>
-#include <ATen/native/foreach/Multi_tensor_apply.cuh>
+#include <ATen/native/foreach/MultiTensorApply.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -83,7 +83,7 @@ static std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tens
   tensor_lists.push_back(tensors.vec());
   tensor_lists.push_back(vec_res);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cuda", [&]() {
     multi_tensor_apply<2>(tensor_lists, AddScalarFunctor<scalar_t, scalar_t>(), scalar.to<scalar_t>());
   });
   return tensor_lists[1];

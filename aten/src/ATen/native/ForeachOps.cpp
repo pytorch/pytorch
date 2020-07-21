@@ -14,6 +14,10 @@ std::vector<Tensor> _foreach_add(TensorList tensors, Scalar scalar) {
     if (tensors[i].layout() != at::kStrided) {
       throw std::runtime_error("Only tensors with strided layouts are supported.");
     }
+
+    if (!tensors[i].is_non_overlapping_and_dense()) {
+      throw std::runtime_error("Only non overlapping and dense tensors are supported.");
+    }
   }
   return foreach_tensor_add_scalar_stub(tensors[0].device().type(), tensors, scalar);
 }

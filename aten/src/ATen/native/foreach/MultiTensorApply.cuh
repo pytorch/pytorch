@@ -29,7 +29,7 @@ void multi_tensor_apply(
     
         int loc_block_info = 0;
         int loc_tensor_info = 0;
-        for(int t = 0; t < n_tensors; t++) {   
+        for(int t = 0; t < n_tensors; t++) {
             tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
