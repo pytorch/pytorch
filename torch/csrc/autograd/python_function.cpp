@@ -171,7 +171,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       continue;
     }
     if (output == Py_None) {
-      results.emplace_back();
+      auto& info = input_info[results.size()];
+      if (info.requires_grad) {
+        results.emplace_back(info.zeros(_device_guard));
+      } else {
+        results.emplace_back();
+      }
     } else {
       if (!THPVariable_Check(output)) {
         std::string msg("expected Variable or None (got ");
@@ -774,6 +779,8 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_outputs, num_grads);
 
+    // If any of the remaining grad_inputs are None, zero them.
+    _prepare_grads(self, grad_input, false);
     return grad_input.release();
 
   } catch (python_error& e) {
