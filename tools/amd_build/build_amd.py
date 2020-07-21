@@ -118,17 +118,17 @@ def is_hip_clang():
 
 # TODO Remove once gloo submodule is recent enough to contain upstream fix.
 if is_hip_clang():
-    gloo_cmake_file="third_party/gloo/cmake/Hip.cmake"
+    gloo_cmake_file = "third_party/gloo/cmake/Hip.cmake"
     do_write = False
     with open(gloo_cmake_file, "r") as sources:
         lines = sources.readlines()
-    newlines = [line.replace(' hip_hcc ', ' amdhip64 ' ) for line in lines]
+    newlines = [line.replace(' hip_hcc ', ' amdhip64 ') for line in lines]
     if lines == newlines:
         print("%s skipped" % gloo_cmake_file)
     else:
         with open(gloo_cmake_file, "w") as sources:
-          for line in newlines:
-              sources.write(line)
+            for line in newlines:
+                sources.write(line)
         print("%s updated" % gloo_cmake_file)
 
 hipify_python.hipify(
