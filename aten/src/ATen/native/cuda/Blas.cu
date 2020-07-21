@@ -31,21 +31,6 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
           mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
           vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
     }
-
-    // In cublasSgemv, cublasDgemv, cublasCgemv, cublasZgemv (x,0).mv(0) does not
-    // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
-    // This logic could live in blas::gemv<float> and <double> if blas::gemv's interface
-    // can be extended to accept result as an argument.
-    if (std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, c10::complex<float>>::value || std::is_same<scalar_t, c10::complex<double>>::value) {
-      if (vec.size(0) == 0 && mat.size(0) != 0) {
-        if (beta == scalar_t(0)) {
-          result.zero_();
-        } else if (beta != scalar_t(1)) {
-          result.mul_(beta);
-        }
-      }
-    }
   });
   return result;
 }
