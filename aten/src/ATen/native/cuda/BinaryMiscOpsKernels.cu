@@ -80,7 +80,7 @@ void lcm_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       scalar_t g = calc_gcd(a, b);
-      return (g == 0) ? 0 : a / g * b;
+      return (g == 0) ? 0 : ::abs(a / g * b);
     });
   });
 }
