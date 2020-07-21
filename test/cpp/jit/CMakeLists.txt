@@ -25,6 +25,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
+  ${JIT_TEST_ROOT}/test_lite_trainer.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp

@@ -735,6 +735,12 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
@@ -1543,6 +1549,10 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: isreal(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: is_nonzero(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -2603,12 +2613,24 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
-- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
+- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
@@ -5067,18 +5089,6 @@
   dispatch:
     CPU: median_cpu
     CUDA: median_cuda
-
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:

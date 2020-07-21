@@ -582,6 +582,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_irparser.cpp",
         "test/cpp/jit/test_jit_type.cpp",
         "test/cpp/jit/test_lite_interpreter.cpp",
+        "test/cpp/jit/test_lite_trainer.cpp",
         "test/cpp/jit/test_misc.cpp",
         "test/cpp/jit/test_mobile_type_parser.cpp",
         "test/cpp/jit/test_module_api.cpp",
