@@ -551,7 +551,7 @@ class TestQuantizedTensor(TestCase):
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
            reduce_range=st.booleans(),
-           device=st.sampled_from(['cpu', 'cuda']),
+           device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            )
     def test_choose_qparams(self, X, reduce_range, device):
         X, (scale, zero_point, torch_type) = X
