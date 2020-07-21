@@ -530,8 +530,10 @@ class CAFFE2_API Tensor {
 
   /// Return a mutable reference to the gradient. This is conventionally
   /// used as `t.grad() = x` to set a gradient to a completely new tensor.
-  Tensor& grad() {
-    return impl_->grad();
+  /// Note that this function work with a non-const Tensor and is not
+  /// thread safe.
+  Tensor& mutable_grad() {
+    return impl_->mutable_grad();
   }
 
   /// This function returns an undefined tensor by default and returns a defined tensor
@@ -548,6 +550,18 @@ class CAFFE2_API Tensor {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  // Special C++ only overloads for std()-like functions (See gh-40287)
+  // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+  // So, for example std(0) would select the std(unbiased=False) overload
+
+  Tensor var(int dim) const {
+    return var(IntArrayRef{dim});
+  }
+
+  Tensor std(int dim) const {
+    return std(IntArrayRef{dim});
+  }
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

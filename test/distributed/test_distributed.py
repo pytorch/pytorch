@@ -10,6 +10,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
+from io import StringIO
 
 import torch
 import torch.cuda
@@ -17,6 +18,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -231,6 +233,17 @@ class Barrier(object):
             time.sleep(0.1)
 
 
+@contextmanager
+def _captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+
+
 class _DistTestBase(object):
     def _barrier(self, *args, **kwargs):
         Barrier.sync(*args, **kwargs)
@@ -278,6 +291,34 @@ class _DistTestBase(object):
             for i in range(world_size)
         }
         return rank_to_GPU
+
+    def test_dump_DDP_relevant_env_vars(self):
+        with _captured_output() as (out, err):
+            _dump_DDP_relevant_env_vars()
+            lines = out.getvalue().splitlines()
+
+        def format_line(var):
+            return "env:%s=%s" % (var, os.environ[var] if var in os.environ else "N/A")
+
+        # Check relevant env vars
+        vars = [
+            "MASTER_ADDR",
+            "MASTER_PORT",
+            "WORLD_SIZE",
+            "NCCL_TOPO_DUMP_FILE",  # N/A
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertIn(line, lines)
+        # Check irrelevant env vars
+        vars = [
+            "xxx",
+            "yyy",
+            "zzz",
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertNotIn(line, lines)
 
     # GET RANK
     def test_get_rank(self):
@@ -1905,6 +1946,45 @@ class _DistTestBase(object):
     def test_DistributedDataParallel_requires_grad(self):
         # a module without gradients shouldn't be accepted
         self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
+
+    @unittest.skipIf(
+        BACKEND != "nccl" and BACKEND != "gloo",
+        "Only NCCL and GLOO backend support DistributedDataParallel",
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_DistributedDataParallel_non_default_stream(self):
+        stream = torch.cuda.Stream()
+        rank = self.rank
+        with torch.cuda.stream(stream):
+            net = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(rank), device_ids=[rank]
+            )
+            for i in range(1000):
+                # Clear gradients manually
+                grad = net.module.weight.grad
+                if grad is not None:
+                    grad.detach_()
+                    grad.zero_()
+                # Forward + BW
+                batch = torch.tensor([rank]).float().cuda(rank)
+                loss = net(batch).sum()
+                loss.backward()
+                # For each worker, the gradient on the weight should be worker_rank.
+                grad = net.module.weight.grad
+                avg = grad.clone()
+                # All-reducing the gradient averages should give us the gradient
+                # average. If not, then one of the workers has not correctly
+                # written back the averaged gradient before this all-reduce call.
+                dist.all_reduce(avg)
+                world_size = int(os.environ["WORLD_SIZE"])
+                avg.div_(world_size)
+                expected_grad = sum(i for i in range(world_size)) / world_size
+                self.assertEqual(
+                    avg[0, 0],
+                    expected_grad,
+                    msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
+                )
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")

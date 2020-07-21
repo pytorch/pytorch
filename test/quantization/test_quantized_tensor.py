@@ -526,6 +526,17 @@ class TestQuantizedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
             qz = qy.squeeze()
 
+    def test_repeat(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        for device in get_supported_device_types():
+            q_int = torch.randint(0, 100, [3], dtype=dtype, device=device)
+            q_int_repeat = q_int.repeat(4, 2)
+            q_ref = torch._make_per_tensor_quantized_tensor(q_int_repeat, scale=scale, zero_point=zero_point)
+
+            q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+            q_repeat = q.repeat(4, 2)
+            self.assertEqual(q_ref, q_repeat)
+
     def test_qscheme_pickle(self):
         f = Foo()
         buf = io.BytesIO()
@@ -539,13 +550,14 @@ class TestQuantizedTensor(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
-           reduce_range=st.booleans()
+           reduce_range=st.booleans(),
+           device=st.sampled_from(['cpu', 'cuda']),
            )
-    def test_choose_qparams(self, X, reduce_range):
+    def test_choose_qparams(self, X, reduce_range, device):
         X, (scale, zero_point, torch_type) = X
         X = torch.from_numpy(X)
         X_scale, X_zp = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=reduce_range)
-        qparams = torch._choose_qparams_per_tensor(X, reduce_range)
+        qparams = torch._choose_qparams_per_tensor(X.to(device), reduce_range)
         np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
 
@@ -561,3 +573,15 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_cuda_quantization_does_not_pin_memory(self):
+        # Context - https://github.com/pytorch/pytorch/issues/41115
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+        q_int = torch.randint(0, 100, [1, 2, 3], device="cuda", dtype=torch.uint8)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=0.1, zero_point=0)
+
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)

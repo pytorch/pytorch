@@ -50,12 +50,15 @@ class _InternalRPCPickler:
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
 
     @classmethod
-    def _rref_receiver(cls, rref_fork_data):
-        return dist.rpc.RRef._deserialize(rref_fork_data)
+    def _py_rref_receiver(cls, rref_fork_data):
+        return dist.rpc.PyRRef._deserialize(rref_fork_data)
+
+    def _py_rref_reducer(self, py_rref):
+        rref_fork_data = py_rref._serialize()
+        return (_InternalRPCPickler._py_rref_receiver, (rref_fork_data,))
 
     def _rref_reducer(self, rref):
-        rref_fork_data = rref._serialize()
-        return (_InternalRPCPickler._rref_receiver, (rref_fork_data,))
+        return self._py_rref_reducer(rref)
 
     def serialize(self, obj):
         r"""
@@ -75,7 +78,7 @@ class _InternalRPCPickler:
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
-        p.dispatch_table[dist.rpc.PyRRef] = self._rref_reducer
+        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 

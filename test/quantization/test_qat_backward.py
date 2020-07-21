@@ -49,8 +49,12 @@ class TestQATBackward(TestCase):
         X_ref.requires_grad_()
 
         Y = fake_with_backward(X)
+
+        # If quantize_forward is false, fake_with_backward(X) should be identity
+        # Otherwise, should be quantized
         Y_ref = fake_reference(X_ref) if quantize_forward else X_ref
 
+        # Make sure that the forward functions as expected
         self.assertEqual(Y, Y_ref, rtol=tolerance, atol=tolerance)
 
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
@@ -58,6 +62,12 @@ class TestQATBackward(TestCase):
         Y.backward(dout)
         Y_ref.backward(dout)
 
+        # Behavior of backward depends on quantize_forward and quantize_backward
+        # If both are true, should be quantized output of the normal FakeQuantize backward
+        # If just quantize_backward is true, should only quantize the gradient
+        # If just quantize_forward is true, should be the normal FakeQuantize backward
+        # If both are false, should be identity
         dX_ref = fake_quantize_tensor(X_ref.grad) if quantize_backward else X_ref.grad
 
+        # Check the gradients to make sure the backward functions as expected
         self.assertEqual(X.grad, dX_ref, rtol=tolerance, atol=tolerance)

@@ -120,8 +120,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vec256(Args... vals) {
-    values = { vals... };
+  Vec256(Args... vals) : values{vals...}{
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
@@ -712,6 +711,32 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 #endif
+
+template <typename T>
+inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+  a = a + b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a - b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a / b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a % b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a * b;
+  return a;
+}
 
 template <typename T>
 inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {
