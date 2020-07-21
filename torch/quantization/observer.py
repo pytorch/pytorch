@@ -72,7 +72,7 @@ class ObserverBase(ABC, nn.Module):
 class _ObserverBase(ObserverBase):
     r"""Internal common base for all qint/quint8 observers.
 
-    This base is for commonly used paramters used internally.
+    This base is for commonly used parameters used internally.
     Users should use `~torch.quantization.observer.ObserverBase` as a base class
     for custom observers.
 

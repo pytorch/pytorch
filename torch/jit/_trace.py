@@ -660,7 +660,7 @@ def trace(
         strict (``bool``, optional): run the tracer in a strict mode or not
             (default: ``True``). Only turn this off when you want the tracer to
             record your mutable container types (currently ``list``/``dict``)
-            and you are sure that the containuer you are using in your
+            and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
 
