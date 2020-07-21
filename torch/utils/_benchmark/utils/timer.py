@@ -90,7 +90,7 @@ class Timer(object):
                     break
                 number *= 10
 
-            total_time = 0
+            total_time = 0.0
             times = []
 
             while total_time < min_run_time:
