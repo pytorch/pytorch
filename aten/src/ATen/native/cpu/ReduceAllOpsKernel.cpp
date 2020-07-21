@@ -114,14 +114,14 @@ inline void reduce_all_impl_two_outputs(
     Tensor& output1,
     Tensor& output2,
     const Tensor& input,
-    const std::pair<scalar_t, scalar_t> ident_v,
+    const std::pair<scalar_t, scalar_t>& ident_v,
     func_t1 reduce_chunk_func,
     func_t2 reduce_acc_func) {
   using scalar_t_pair = std::pair<scalar_t, scalar_t>;
   const int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
   scalar_t_pair result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
-    [&](int64_t start, int64_t end, const scalar_t_pair ident) -> scalar_t_pair {
+    [&](int64_t start, int64_t end, const scalar_t_pair& ident) -> scalar_t_pair {
       scalar_t_pair partial_out(ident);
       for (int64_t i = start; i < end; i++) {
          partial_out = reduce_chunk_func(partial_out, input_data[i]);
@@ -139,7 +139,7 @@ inline void reduce_all_impl_vec_two_outputs(
     Tensor& output1,
     Tensor& output2,
     const Tensor& input,
-    const std::pair<scalar_t, scalar_t> ident_v,
+    const std::pair<scalar_t, scalar_t>& ident_v,
     func_t reduce_acc_func,
     vec_func_t1 reduce_chunk_func1,
     vec_func_t2 reduce_chunk_func2) {
@@ -149,7 +149,7 @@ inline void reduce_all_impl_vec_two_outputs(
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   std::pair<scalar_t, scalar_t> result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
-    [&](int64_t start, int64_t end, const scalar_t_pair ident) -> scalar_t_pair {
+    [&](int64_t start, int64_t end, const scalar_t_pair& /* ident */) -> scalar_t_pair {
     scalar_t_pair partial_out = vec256::reduce2_all<scalar_t>(
         [=](Vec x, Vec y) { return reduce_chunk_func1(x, y); },
         [=](Vec x, Vec y) { return reduce_chunk_func2(x, y); },
