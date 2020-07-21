@@ -39,13 +39,13 @@ C10_DEFINE_string(
     "Shape hints in the form of Name:d0,d1:d2;");
 
 C10_DEFINE_string(
-    onnxifi_blacklist,
+    onnxifi_blocklist,
     "",
     "A list of net positions whose corresponding op will be ignored "
     "to onnxifi. Example 0-50,61,62-70");
 
 C10_DEFINE_string(
-    onnxifi_blacklist_ops,
+    onnxifi_blocklist_ops,
     "",
     "A list of operator types that will be ignored "
     "to onnxifi. Example Tanh,Mul");
@@ -59,7 +59,7 @@ C10_DEFINE_string(
 namespace caffe2 {
 namespace glow {
 
-// The list in in the form of "0-3,5,6-7" which means, we will black list ops
+// The list in in the form of "0-3,5,6-7" which means, we will block list ops
 // with net positions in [0,1,2,3,5,6,7]
 std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   std::unordered_set<int> net_position_list;
@@ -88,7 +88,7 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   return net_position_list;
 }
 
-std::unordered_set<std::string> ParseBlackListOps(const std::string& str) {
+std::unordered_set<std::string> ParseBlockListOps(const std::string& str) {
   std::unordered_set<std::string> ops;
   if (str.empty()) {
     return ops;
@@ -107,7 +107,7 @@ void onnxifi(
     const std::vector<std::string>& input_names,
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
-    const std::unordered_set<int>& blacklist,
+    const std::unordered_set<int>& blocklist,
     const ShapeInfoMap& shape_hints,
     bool use_onnx,
     size_t max_batch_size,
@@ -152,19 +152,19 @@ void onnxifi(
   // Before applying backlist, make sure the ops in the net all have an net_pos;
   caffe2::BackendTransformerBase::annotateOpIndex(net);
 
-  // Parse the blacklist
-  auto more_blacklist = ParseNetPositionList(FLAGS_onnxifi_blacklist);
-  for (const auto& b : blacklist) {
-    more_blacklist.emplace(b);
+  // Parse the blocklist
+  auto more_blocklist = ParseNetPositionList(FLAGS_onnxifi_blocklist);
+  for (const auto& b : blocklist) {
+    more_blocklist.emplace(b);
   }
 
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
-    auto blacklisted_ops = ParseBlackListOps(FLAGS_onnxifi_blacklist_ops);
+    auto blocklisted_ops = ParseBlockListOps(FLAGS_onnxifi_blocklist_ops);
     for (const auto& op : net->op()) {
-      if (blacklisted_ops.count(op.type())) {
+      if (blocklisted_ops.count(op.type())) {
         ArgumentHelper helper(op);
-        more_blacklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
+        more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
     }
   }
@@ -177,7 +177,7 @@ void onnxifi(
   // 1. for specified op, we find its input and outputs.
   // 2. for each input and output, we create a new copy op and attach it as an
   // input to the copy.
-  // 3. we blacklist these new copy operators from onnxification. This forces
+  // 3. we blocklist these new copy operators from onnxification. This forces
   // these intermediate tensors to also become outputs of the onnxifi op.
   // 4. we put the right arguments on the copy ops so TensorObserver can print
   // out the values.
@@ -211,11 +211,11 @@ void onnxifi(
     AddArgument(kNetPos, pos, &copy_op);
     AddArgument("observe_input_tensors", 1, &copy_op);
     net->add_op()->CopyFrom(copy_op);
-    more_blacklist.emplace(pos);
+    more_blocklist.emplace(pos);
   }
 
   OnnxifiTransformer ts(opts);
-  ts.transform(ws, net, weight_names, more_shape_hints, more_blacklist);
+  ts.transform(ws, net, weight_names, more_shape_hints, more_blocklist);
   if (FLAGS_onnxifi_debug_mode) {
     WriteProtoToTextFile(*net, "debug_transformed_net.pb_txt");
   }
