@@ -78,6 +78,7 @@ default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
 
+
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
