@@ -18,16 +18,6 @@ namespace profiler {
 // callbacks.
 at::Tensor record_function_enter(const std::string& name) {
   auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-  if (auto* current = rec->current()) {
-    if (current->name().str() == std::string("profiler::_record_function_enter")) {
-      // RecordFunction requires parent_ to be alive for it's entire lifetime.
-      // Since the currently active RecordFunction will only live for the lifetime
-      // of this op we need to end it early so the new RecordFunction we create is
-      // a direct child of the parent RecordFunction.
-      current->end();
-    }
-  }
-
   rec->before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
@@ -42,11 +32,6 @@ void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
-  if (auto* current = rec.current()) {
-    if (current->name().str() == std::string("profiler::_record_function_exit")) {
-      current->end();
-    }
-  }
   rec.end();
 }
 

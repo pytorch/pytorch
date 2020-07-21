@@ -786,6 +786,13 @@ void initPythonIRBindings(PyObject* module_) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); });
+  py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
+      .def(py::init([](const std::string& qualified_name, TypePtr value) {
+        return EnumType::create(
+            c10::QualifiedName(qualified_name),
+            std::move(value),
+            get_python_cu());
+      }));
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
