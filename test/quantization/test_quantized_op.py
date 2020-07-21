@@ -382,7 +382,7 @@ class TestQuantizedOps(TestCase):
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. allow a smaoll % of ff by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
