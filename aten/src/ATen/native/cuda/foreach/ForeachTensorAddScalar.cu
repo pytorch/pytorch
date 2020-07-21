@@ -2,8 +2,8 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/ForeachOps.h>
-#include <ATen/native/foreach/Utils.cuh>
-#include <ATen/native/foreach/MultiTensorApply.cuh>
+#include <ATen/native/cuda/foreach/Utils.cuh>
+#include <ATen/native/cuda/foreach/MultiTensorApply.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.

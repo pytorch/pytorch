@@ -17,7 +17,7 @@ class TestForeach(TestCase):
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
-                self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
+            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_different_size_tensors(self, device, dtype):

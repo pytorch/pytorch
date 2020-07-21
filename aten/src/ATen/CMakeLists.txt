@@ -84,8 +84,8 @@ file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 
-file(GLOB native_foreach_cu "native/foreach/*.cu")
-file(GLOB native_foreach_h "native/foreach/*.h" "native/foreach/*.cuh")
+file(GLOB native_foreach_cu "native/cuda/foreach/*.cu")
+file(GLOB native_foreach_h "native/cuda/foreach/*.h" "native/cuda/foreach/*.cuh")
 
 file(GLOB native_hip_hip "native/hip/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")

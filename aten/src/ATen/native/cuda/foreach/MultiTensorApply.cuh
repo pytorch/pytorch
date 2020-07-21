@@ -2,7 +2,7 @@
 #include <torch/cuda.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/foreach/Utils.cuh>
+#include <ATen/native/cuda/foreach/Utils.cuh>
 
 namespace at { namespace native {
 
