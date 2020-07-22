@@ -177,7 +177,7 @@ class Linear(torch.nn.Module):
             if isinstance(module, LinearPackedParams):
                 continue
             mod_str = repr(module)
-            mod_str = _addindent(mod_str, 2)
+            mod_str = nn.modules.module._addindent(mod_str, 2)
             child_lines.append('(' + key + '): ' + mod_str)
         lines = extra_lines + child_lines
 
