@@ -13,7 +13,9 @@ retry () {
 
 #until we find a way to reliably reuse previous build, this last_tag is not in use
 # last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
-tag="${CIRCLE_WORKFLOW_ID}"
+
+# DOCKER_TAG is computed in verbatim-sources/job-specs/docker_jobs.yml
+tag="$(DOCKER_TAG)"
 
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
