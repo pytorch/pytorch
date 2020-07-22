@@ -495,6 +495,29 @@
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: atleast_1d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+
+- func: atleast_2d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -724,6 +747,12 @@
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   use_c10_dispatcher: full
   variants: function
+
+- func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -1562,6 +1591,10 @@
   variants: function, method
   device_guard: False
 
+- func: isreal(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: is_nonzero(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: function, method
@@ -1833,6 +1866,11 @@
   use_c10_dispatcher: full
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
+
+- func: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    MkldnnCPU: mkldnn_max_pool3d
 
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
@@ -2638,12 +2676,24 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
-- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
+- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
@@ -5101,6 +5151,13 @@
     CPU, CUDA: max
     QuantizedCPU: max_quant
 
+# Return: (Tensor min, Tensor max)
+- func: _min_max(Tensor self) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _min_max
+
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -5916,6 +5973,7 @@
   dispatch:
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
+    MkldnnCPU: mkldnn_avg_pool3d_out
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   use_c10_dispatcher: full
@@ -5923,6 +5981,7 @@
   dispatch:
     CPU: avg_pool3d_cpu
     CUDA: avg_pool3d_cuda
+    MkldnnCPU: mkldnn_avg_pool3d
     QuantizedCPU: quantized_avg_pool3d
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
