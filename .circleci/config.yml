@@ -1326,8 +1326,6 @@ jobs:
 # Workflows
 ##############################################################################
 workflows:
-  binary_builds:
-    when: << pipeline.parameters.run_binary_tests >>
   build:
     jobs:
       - pytorch_ios_build:
