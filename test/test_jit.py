@@ -1955,7 +1955,7 @@ graph(%Ra, %Rb):
             cu = torch.jit.CompilationUnit(funcs_str)
             f_script = cu.func
             self.run_pass('constant_propagation', f_script.graph)
-            num_constants = 3  # input constant twice, None once
+            num_constants = 2  # input once, None once
             FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
             self.run_pass('cse', f_script.graph)
             FileCheck().check_count("prim::Constant", num_constants - 1, exactly=True).run(f_script.graph)
