@@ -566,6 +566,23 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   return findChildModule(module, path);
 }
 
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self) {
+  auto* instance = n->inputs()[0];
+  auto path = getModuleAccessPath(instance, self);
+  Module m = module;
+  for (const auto& p : path) {
+    if (m.attr(p).isModule()) {
+      m = m.attr(p).toModule();
+    } else {
+      return c10::nullopt;
+    }
+  }
+  return m;
+}
+
 // ==================== filter functions for matches ==============
 bool is_int_constant(
     const Match& match,
