@@ -7407,9 +7407,9 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fft,
+add_docstr(torch.legacy_fft,
            r"""
-fft(input, signal_ndim, normalized=False) -> Tensor
+legacy_fft(input, signal_ndim, normalized=False) -> Tensor
 
 Complex-to-complex Discrete Fourier Transform
 

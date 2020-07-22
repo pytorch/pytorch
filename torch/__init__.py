@@ -459,6 +459,7 @@ del ComplexFloatStorageBase
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
+import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
@@ -523,8 +524,3 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
-
-# torch.fft is currently imported after doc strings because it mimics
-#   both the torch.fft namespace and the torch.fft function
-#   (see fft/__init__.py)
-import torch.fft

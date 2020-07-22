@@ -1437,8 +1437,12 @@
     CPU, CUDA: native_group_norm_backward
 
 # FFT
+- func: fft(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: fft
 
-- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
+- func: legacy_fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 
@@ -6767,14 +6771,6 @@
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
-
-- func: fft.fft(Tensor self) -> Tensor
-  dispatch:
-    CPU: fft_fft
-    CUDA: fft_fft
-  python_module: fft
-  use_c10_dispatcher: full
-  variants: function
 
 # Note: this function is only for testing.
 - func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor

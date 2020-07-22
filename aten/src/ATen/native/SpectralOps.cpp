@@ -18,21 +18,17 @@
 
 namespace at { namespace native {
 
-Tensor fft_fft(const Tensor& self) {
-  // TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
-  // TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
+Tensor fft(const Tensor& self) {
+  TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
+  TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
 
-  // if (self.scalar_type() != ScalarType::ComplexDouble) {
-  //   TORCH_WARN("It's recommended to call torch.fft.fft with a complex double "
-  //              "tensor for numerical precision");
-  // }
+  if (self.scalar_type() != ScalarType::ComplexDouble) {
+    TORCH_WARN("It's recommended to call torch.fft.fft with a complex double "
+               "tensor for numerical precision");
+  }
 
-  // // auto as_float = view_complex_as_float(self);
-  // // auto result = native::fft(self, 1, false);
-
-  // // todo: convert 2D float to complex
-
-  return at::empty({0}, self.options());
+  auto result = native::legacy_fft(at::view_as_real(self), 1, false);
+  return at::view_as_complex(result);
 }
 
 // This is a pass-through wrapper function that does the size check and
@@ -165,7 +161,7 @@ void _cufft_clear_plan_cache(int64_t device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
-Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+Tensor legacy_fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ false, {}, normalized,
               /* onesided */ false);
