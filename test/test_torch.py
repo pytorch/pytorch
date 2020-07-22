@@ -12928,7 +12928,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype == torch.half and torch.device(device).type == 'cpu':
+            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
