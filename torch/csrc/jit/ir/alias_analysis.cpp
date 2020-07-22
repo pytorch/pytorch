@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -531,6 +532,9 @@ void AliasDb::analyzeImpl(Node* node) {
       return;
     case prim::Guard:
       makePointerTo(node->output(), node->inputs().at(0));
+      return;
+    case prim::TypeCheck:
+      makePointerTo(node->output(0), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:

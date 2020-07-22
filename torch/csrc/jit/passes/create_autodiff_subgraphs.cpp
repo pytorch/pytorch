@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -48,6 +49,7 @@ class SubgraphSlicer {
       }
     }
 
+    GRAPH_DUMP("After create_autodiff_subgraph: ", block_->owningGraph());
     // Done constructing subgraphs. Do some post-processing cleanup:
     // 1. Run CSE to delete redundanet constant nodes.
     // 2. We may need to re-inline ones that are too small.
@@ -92,6 +94,7 @@ class SubgraphSlicer {
       }
     }
 
+    GRAPH_DEBUG("Unmerging ", getHeader(n));
     SubgraphUtils::unmergeSubgraph(n);
     return true;
   }
@@ -151,6 +154,7 @@ class SubgraphSlicer {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb.moveBeforeTopologicallyValid(producer, consumer);
+    GRAPH_DEBUG("Considering merging ", getHeader(producer), " canMerge = ", canMerge);
 
     if (!canMerge) {
       return c10::nullopt;
@@ -172,6 +176,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
+  GRAPH_DUMP("After autodiff2 : ", graph);
   return diff_nodes;
 }
 } // namespace jit

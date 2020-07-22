@@ -64,10 +64,12 @@ std::atomic<size_t>& getBailoutDepth() {
 
 static bool needsGradientInProfilingMode(Block* b) {
   for (auto n : b->nodes()) {
-    if (n->kind() == prim::BailOut) {
-      auto ptt = n->output()->type()->expect<TensorType>();
-      if (ptt->requiresGrad() && *ptt->requiresGrad()) {
-        return true;
+
+    for (auto o : n->outputs()) {
+      if (auto ptt = o->type()->cast<TensorType>()) {
+        if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+          return true;
+        }
       }
     }
 
@@ -105,24 +107,20 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
   GRAPH_DUMP("Before running optimizations:", copy);
   runOptimization(copy, true);
-  if (tensorExprFuserEnabled()) {
-    GRAPH_DUMP("Before fusion:", copy);
-    FuseTensorExprs(copy);
-  } else {
-    GRAPH_DUMP("Before removing profiling nodes:", copy);
-    removeProfilingNodes(copy->block());
-  }
+  GRAPH_DUMP("Before removing profiling nodes:", copy);
+  removeProfilingNodes(copy->block());
   GRAPH_DUMP("After fusion:", copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   specializeAutogradZero(*copy);
 
   runRequiredPasses(copy);
-  PeepholeOptimize(copy);
+  //PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy, false);
 
-  if (false && needsGradientInProfilingMode(copy->block())) {
+  if (needsGradientInProfilingMode(copy->block())) {
+    GRAPH_DEBUG("Running CreateAutodiffSubgraphs");
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -136,9 +134,10 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     }
     InlineAutodiffSubgraphs(
         copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+        /* getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold :*/ 1);
 
   } else {
+    GRAPH_DEBUG("Running no needsGradientInProfilingMode version");
     runNondiffOptimization(copy, true);
   }
   EliminateDeadCode(copy);

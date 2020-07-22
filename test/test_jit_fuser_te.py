@@ -96,6 +96,21 @@ class TestFuser(JitTestCase):
         #                 'got {}'.format(graph))
         # self.assertTrue([node.kind() for node in graph.nodes()].count(FUSION_GROUP) == 1)
 
+    def test_mul_nick(self):
+
+        @torch.jit.script
+        def test_fuse(a, b):
+            c = a * b
+            d = c * b
+            return d
+
+        x = torch.ones(1, requires_grad = True)
+        y = torch.ones(1, requires_grad = True)
+        test_fuse(x, y)
+        b = test_fuse(x, y)
+        warmup_backward(b)
+
+
     def _test_fused_abs(self, device='cpu'):
         def func(x):
             return x.abs() * 2

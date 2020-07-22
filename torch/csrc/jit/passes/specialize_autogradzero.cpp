@@ -1,8 +1,17 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include "ATen/core/interned_strings.h"
+#include "jit/ir/ir.h"
+#include "jit/jit_log.h"
+#include "jit/passes/dead_code_elimination.h"
 
 namespace torch {
 namespace jit {
+
+
+bool isBackwardGraph(Graph& g) {
+  return std::any_of(g.nodes().begin(), g.nodes().end(), [](Node* n){return n->kind() == prim::AutogradAnyNonZero; });
+}
 
 // propagate autograd zero information through a gradient graph and
 // remove grad_of blocks if present.
@@ -14,28 +23,96 @@ void specializeAutogradZero(Graph& g) {
   enum class State { Nonzero, Zero, Unknown };
   std::unordered_map<Value*, State> state;
 
-  for (Value* input : g.inputs()) {
-    const auto& tp = input->type();
-    if (auto tt = tp->cast<TensorType>()) {
-      if (tt->undefined()) {
-        if (*tt->undefined()) {
-          state[input] = State::Zero;
-        } else {
-          state[input] = State::Nonzero;
-        }
-      } else {
-        state[input] = State::Unknown;
+
+
+  auto block = g.block();
+
+  if (getProfilingMode()) {
+
+    if (isBackwardGraph(g)) {
+
+      auto vif = g.create(prim::If, {}, g.outputs().size());
+      auto true_block = vif->addBlock();
+      auto false_block = vif->addBlock();
+      auto value_map = [](Value* v) { return v; };
+      true_block->cloneFrom(g.block(), value_map);
+      // block for specialize_autogradzero to optimize
+      block = true_block;
+      false_block->cloneFrom(g.block(), value_map);
+
+      auto ret = g.return_node();
+      for (size_t i = 0; i < ret->inputs().size(); i++) {
+        auto ogo = ret->input(i);
+        auto ngo = vif->output(i);
+        ngo->copyMetadata(ogo);
+        ret->replaceInput(i, ngo);
       }
-    } else if (
-        tp->isSubtypeOf(TensorType::get()) ||
-        tp->isSubtypeOf(ListType::ofTensors())) {
-      state[input] = State::Nonzero;
-    } else {
-      state[input] = State::Unknown;
+      
+      // remove all original nodes
+      // for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
+      //   it.destroyCurrent();
+      // }
+
+      g.prependNode(vif);
+
+      // insert type checks on inputs
+      WithInsertPoint wip{vif};
+      Value* cond = g.insertConstant(true);
+      Value* check_result = nullptr;
+      //for (auto inp : g.inputs()) {
+      for (size_t i = 0; i < g.inputs().size(); i++) {
+        auto inp = g.inputs()[i];
+        if (auto tt = inp->type()->cast<TensorType>()) {
+          // TODO: consider using a specialized op
+          auto guard = g.create(prim::TypeCheck, {inp, cond}, 2);
+          g.insertNode(guard);
+          // we ignore go0 as we autodiff only non side-effectful ops
+          auto go0 = guard->output(0);
+          cond = guard->output(1);
+          check_result = guard->output(1);
+          go0->setType(inp->type());
+          check_result->setType(BoolType::get());
+          // set state
+          if (tt->undefined()) {
+            state[true_block->inputs()[i]] = *tt->undefined() ? State::Zero : State::Nonzero;
+          }
+          else {
+            state[true_block->inputs()[i]] = State::Unknown;
+          }
+        }
+      }
+      // since we already know there are AnyAutogradNonZero it means
+      // we would at least have one check
+      TORCH_INTERNAL_ASSERT(check_result);
+      vif->addInput(check_result);
+
+      EliminateDeadCode(g.block());
+      GRAPH_DUMP("specialize_autogradzero ", &g);
     }
+  } else {
+      for (Value* input : g.inputs()) {
+        const auto& tp = input->type();
+        if (auto tt = tp->cast<TensorType>()) {
+          if (tt->undefined()) {
+            if (*tt->undefined()) {
+              state[input] = State::Zero;
+            } else {
+              state[input] = State::Nonzero;
+            }
+          } else {
+            state[input] = State::Unknown;
+          }
+        } else if (
+            tp->isSubtypeOf(TensorType::get()) ||
+            tp->isSubtypeOf(ListType::ofTensors())) {
+          state[input] = State::Nonzero;
+        } else {
+          state[input] = State::Unknown;
+        }
+      }
   }
 
-  for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
 
     switch (n->kind()) {
