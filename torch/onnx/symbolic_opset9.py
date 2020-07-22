@@ -2423,3 +2423,35 @@ def take(g, self, index):
     out = index_select(g, self_flattened, 0, index)
     out = reshape_as(g, out, index)
     return out
+
+
+def _kl_div_log_target(g, input, target):
+    diff_ = sub(g, target, input)
+    exp_ = exp(g, target)
+    output = mul(g, exp_, diff_)
+    return output
+
+
+def _kl_div_non_log_target(g, input, target):
+    log_ = log(g, target)
+    diff_ = sub(g, log_, input)
+    output_pos = mul(g, target, diff_)
+    zeros_ = zeros_like(g, output_pos)
+    mask_ = gt(g, target, g.op("Constant", value_t=torch.tensor(0)))
+    output = where(g, mask_, output_pos, zeros_)
+    return output
+
+
+@parse_args('v', 'v', 'i', 'b')
+def kl_div(g, input, target, reduction, log_target):
+    if log_target:
+        output = _kl_div_log_target(g, input, target)
+    else:
+        output = _kl_div_non_log_target(g, input, target)
+
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output)
+    elif reduction == 2:
+        return g.op("ReduceSum", output)
