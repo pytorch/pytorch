@@ -112,6 +112,26 @@ void IrCloner::handle(const Merge* merge) {
   clone_ = new Merge(merge, this);
 }
 
+void IrCloner::handle(const kir::TensorIndex* node) {
+  clone_ = new kir::TensorIndex(node, this);
+}
+
+void IrCloner::handle(const kir::Allocate* node) {
+  clone_ = new kir::Allocate(node, this);
+}
+
+void IrCloner::handle(const kir::ForLoop* node) {
+  clone_ = new kir::ForLoop(node, this);
+}
+
+void IrCloner::handle(const kir::IfThenElse* node) {
+  clone_ = new kir::IfThenElse(node, this);
+}
+
+void IrCloner::handle(const kir::GridReduction* node) {
+  clone_ = new kir::GridReduction(node, this);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

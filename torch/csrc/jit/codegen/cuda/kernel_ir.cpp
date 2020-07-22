@@ -1,5 +1,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 
 namespace torch {
 namespace jit {
@@ -21,6 +22,14 @@ TensorIndex::TensorIndex(const TensorView* view, std::vector<Val*> indices)
           }),
       "Cannot index with a value other than an int.");
 }
+
+TensorIndex::TensorIndex(const TensorIndex* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner),
+      view_(ir_cloner->clone(src->view_)),
+      indices_(ir_cloner->clone(src->indices_)) {}
+
+Scope::Scope(const Scope* src, IrCloner* ir_cloner)
+    : exprs_(ir_cloner->clone(src->exprs_)) {}
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
   auto it = exprs_.begin();
@@ -62,7 +71,6 @@ bool Scope::contains(Expr* expr) const {
   return false;
 }
 
-// TODO: remove
 void Scope::clear() {
   exprs_ = std::vector<Expr*>();
 }
@@ -87,6 +95,13 @@ ForLoop::ForLoop(
   }
 }
 
+ForLoop::ForLoop(const ForLoop* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      index_(ir_cloner->clone(src->index_)),
+      iter_domain_(ir_cloner->clone(src->iter_domain_)),
+      body_(&src->body_, ir_cloner),
+      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
+
 IfThenElse::IfThenElse(
     Bool* cond,
     const std::vector<Expr*>& if_body,
@@ -101,6 +116,13 @@ IfThenElse::IfThenElse(
   for (auto* expr : else_body)
     else_body_.push_back(expr);
 }
+
+IfThenElse::IfThenElse(const IfThenElse* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      cond_(src->cond_),
+      body_(&src->body_, ir_cloner),
+      else_body_(&src->else_body_, ir_cloner),
+      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
 
 Val* TensorIndex::index(int i) const {
   TORCH_INTERNAL_ASSERT(
@@ -150,6 +172,12 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      buffer_(ir_cloner->clone(src->buffer_)),
+      memory_type_(src->memory_type_),
+      size_(ir_cloner->clone(src->size_)) {}
+
 GridReduction::GridReduction(ReductionOp* reduction_op)
     : Expr(ExprType::GridReduction), reduction_op_(reduction_op) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
@@ -163,6 +191,12 @@ GridReduction::GridReduction(
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
+
+GridReduction::GridReduction(const GridReduction* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_(ir_cloner->clone(src->reduction_op_)),
+      reduction_buffer_(ir_cloner->clone(src->reduction_buffer_)),
+      sync_buffer_(ir_cloner->clone(src->sync_buffer_)) {}
 
 } // namespace kir
 } // namespace fuser

@@ -67,6 +67,12 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const Split*) override;
   void handle(const Merge*) override;
 
+  void handle(const kir::TensorIndex*) override;
+  void handle(const kir::Allocate*) override;
+  void handle(const kir::ForLoop*) override;
+  void handle(const kir::IfThenElse*) override;
+  void handle(const kir::GridReduction*) override;
+
  private:
   // The destination Fusion container
   Fusion* fusion_ = nullptr;

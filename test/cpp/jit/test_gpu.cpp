@@ -486,7 +486,6 @@ void testGPU_FusionCopy() {
   before_lowering_ir << clone;
   ASSERT_EQ(original_ir.str(), before_lowering_ir.str());
 
-#if 0 // TODO: re-enable after the kernel IR split is complete
   // Test copy after lowering (including assignment operator)
   Fusion before_lowering = clone;
   clone = original_fusion;
@@ -505,7 +504,6 @@ void testGPU_FusionCopy() {
     lower.printKernel(clone_kernel);
   }
   ASSERT_EQ(original_kernel.str(), clone_kernel.str());
-#endif
 }
 
 void testGPU_FusionMove() {
@@ -563,7 +561,6 @@ void testGPU_FusionMove() {
   another_ir << another_fusion;
   ASSERT_EQ(original_ir.str(), another_ir.str());
 
-#if 0 // TODO: re-enable after the kernel IR split is complete
   // Lower the fusion IR
   std::stringstream kernel;
   GPULower lower(&another_fusion);
@@ -579,7 +576,6 @@ void testGPU_FusionMove() {
   std::stringstream moved_lowered_ir;
   moved_lowered_ir << fusion;
   ASSERT_EQ(lowered_ir.str(), moved_lowered_ir.str());
-#endif
 }
 
 void testGPU_FusionSimpleArith() {
@@ -1073,13 +1069,11 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
     TORCH_CHECK(false);
   }
 
-#if 0 // TODO: re-enable after the kernel IR split is complete
   cuda::FusionExecutor fe;
   fe.compileFusion(fusion.get());
   auto outputs = fe.runFusion({input1, input2});
   at::Tensor output_ref = input1 * input2 * input1;
   TORCH_CHECK(output_ref.equal(outputs[0]));
-#endif
 }
 
 void testGPU_FusionForLoop() {
