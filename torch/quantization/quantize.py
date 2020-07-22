@@ -74,6 +74,7 @@ def _observer_forward_hook(self, input, output):
     return self.activation_post_process(output)
 
 def _observer_forward_pre_hook(self, input):
+    # print(input[0].size())
     self.activation_pre_process(input[0])
     return None
 
@@ -111,9 +112,6 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
                 child.register_forward_hook(_observer_forward_hook)
-                if prehook is not None:
-                    child.add_module('activation_pre_process', prehook())
-                    child.register_forward_pre_hook(_observer_forward_pre_hook)
         else:
             add_observer_(child, non_leaf_module_list, device, prehook)
 
@@ -130,7 +128,17 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
         # All post forward hooks are preserved and will be executed after the observer before convert
         handle = module.register_forward_hook(_observer_forward_hook)
         module._forward_hooks.move_to_end(handle.id, last=False)
-        if prehook is not None:
+    elif hasattr(module, 'qconfig') and module.qconfig is not None and \
+        len(module._modules) == 1 and ('_packed_params' in module._modules):
+        activation = module.qconfig.activation()
+        if device is not None:
+            activation.to(device)
+        module.add_module('activation_post_process', activation)
+        module.register_forward_hook(_observer_forward_hook)
+
+    if (prehook is not None) and (not isinstance(module, torch.nn.Sequential)):
+        if len(module._modules) == 0 or (len(module._modules) == 1 and \
+        ('activation_post_process' in module._modules) or ('_packed_params' in module._modules)):
             module.add_module('activation_pre_process', prehook())
             module.register_forward_pre_hook(_observer_forward_pre_hook)
 
@@ -178,6 +186,10 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     if not inplace:
         model = copy.deepcopy(model)
     propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
+    # for name, mod in model.named_modules():
+    #     print(getattr(model, 'qconfig', None))
+    # print("checking to see if qconfigs propagated")
+    # print("prehook: ", prehook)
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
