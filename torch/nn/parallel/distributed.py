@@ -669,20 +669,19 @@ class DistributedDataParallel(Module):
             >>>     return work.get_future()
 
         Example::
-            Below is an example of fp16_compress hook that first calls allreduce with float16
-            grad bucket tensors. Then, it decompresses the result of allreduce as float32.
+            Below is an example of a Parallel SGD algorithm where gradients are encoded before
+            allreduce, and then decoded after allreduce.
 
-            >>> ddp._register_comm_hook(state = None, hook = fp16_compress)
+            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
 
-            >>> def fp16_compress(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     compressed_tensors = dist.GradBucket(bucket.get_tensors().to(torch.float16))
-            >>>     work = dist.allreduce(compressed_tensors)
-            >>>     allreduce_future = work.get_future()
-            >>>     # Define the then callback to decompress.
-            >>>     def decompress(fut):
-            >>>         decompressed_tensors = fut.wait().to(torch.float32)
-            >>>         return decompressed_tensors
-            >>>     return allreduce_future.then(decompress)
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>>     encoded_tensors = encode(bucket.get_tensors()) # encode gradients
+            >>>     fut = process_group.allreduce(encoded_tensors).get_future()
+            >>>     # Define the then callback to decode.
+            >>>     def decode(fut):
+            >>>         decoded_tensors = decode(fut.wait()) # decode gradients
+            >>>         return decoded_tensors
+            >>>     return fut.then(decode)
 
         """
         self._check_comm_hook(hook)
