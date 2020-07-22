@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <jit/passes/inliner.h>
 
 C10_DECLARE_bool();
 
@@ -125,6 +126,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& copy) {
   ClearProfilingInformation(copy);
+  Inline(*copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
   // clear any residual undefinedness
