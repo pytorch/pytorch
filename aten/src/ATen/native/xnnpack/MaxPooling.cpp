@@ -187,7 +187,7 @@ Tensor max_pool2d(
       MemoryFormat::ChannelsLast,
       input_padded_contig_nhwc.names());
 
-  Operator max_pool_op;
+  xnn_operator_t max_pool_op{};
 
   const xnn_status create_status = xnn_create_max_pooling2d_nhwc_f32(
       parameters.padding[Layout::Parameter::height],                  // input_padding_top
@@ -206,14 +206,16 @@ Tensor max_pool2d(
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
-      max_pool_op.get());                                             // operator
+      &max_pool_op);                                                  // operator
+
+  Operator max_pool_scoped_op(max_pool_op);
 
   TORCH_CHECK(
       xnn_status_success == create_status,
       "xnn_create_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status setup_status = xnn_setup_max_pooling2d_nhwc_f32(
-      max_pool_op.get(),                                            // operator
+      max_pool_op,                                                  // operator
       input_padded_contig_nhwc.size(Layout::Activation4D::batch),   // batch_size
       input_padded_contig_nhwc.size(Layout::Activation4D::height),  // input_height
       input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
@@ -226,7 +228,7 @@ Tensor max_pool2d(
       "xnn_setup_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      max_pool_op.get(),        // operator
+      max_pool_op,              // operator
       caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
