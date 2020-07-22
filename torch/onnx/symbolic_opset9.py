@@ -1501,7 +1501,8 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         if sym_help._is_packed_list(data):
             unsqueezed = [g.op("Unsqueeze", t, axes_i=[0]) for t in sym_help._unpack_list(data)]
             return g.op("Concat", *unsqueezed, axis_i=0)
-    dtype = value.type().scalarType()
+        else:
+            dtype = value.type().scalarType()
     return g.op("Cast", data, to_i=sym_help.cast_pytorch_to_onnx[dtype])
 
 @parse_args('v', 'i', 'v', 'v', 'v')
