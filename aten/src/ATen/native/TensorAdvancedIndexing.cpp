@@ -58,6 +58,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/Parallel.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <functional>
@@ -565,7 +566,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   else {
     TORCH_CHECK(false,
                 "reduce argument must be either of add, subtract, multiply or divide.");
-  } 
+  }
 }
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
@@ -575,6 +576,14 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "scatter_(): Expected floating or complex type for self.");
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  if (op == SCATTER_GATHER_OP::REDUCE_DIVIDE) {
+    TORCH_WARN_ONCE("scatter_ with \"divide\" reduction operation is deprecated in pytorch 1.6 and will "
+    "be removed in pytorch 1.7");
+  } else if (op == SCATTER_GATHER_OP::REDUCE_SUBTRACT){
+    TORCH_WARN_ONCE("scatter_ with \"subtract\" reduction operation is deprecated in pytorch 1.6 and will "
+    "be removed in pytorch 1.7");
+
+  }
   scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
   return self;
 }
@@ -586,6 +595,14 @@ Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & in
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "scatter_(): Expected floating or complex type for self.");
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  if (op == SCATTER_GATHER_OP::REDUCE_DIVIDE) {
+    TORCH_WARN_ONCE("scatter_ with \"divide\" reduction operation is deprecated in pytorch 1.6 and will "
+    "be removed in pytorch 1.7");
+  } else if (op == SCATTER_GATHER_OP::REDUCE_SUBTRACT){
+    TORCH_WARN_ONCE("scatter_ with \"subtract\" reduction operation is deprecated in pytorch 1.6 and will "
+    "be removed in pytorch 1.7");
+
+  }
   scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
 }

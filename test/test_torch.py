@@ -12791,7 +12791,10 @@ class TestTorchDeviceType(TestCase):
         ]
 
         for input, src, result, operation in test_data:
-            input.scatter_(0, index, src, reduce=operation)
+            if operation == "divide" or operation == "subtract":
+                self.assertWarnsRegex(UserWarning, 'deprecated', lambda: input.scatter_(0, index, src, reduce=operation))
+            else:
+                input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
     @onlyCPU
@@ -12822,7 +12825,10 @@ class TestTorchDeviceType(TestCase):
         ]
 
         for input, src, result, operation in test_data:
-            input.scatter_(0, index, src, reduce=operation)
+            if operation == "divide" or operation == "subtract":
+                self.assertWarnsRegex(UserWarning, 'deprecated', lambda: input.scatter_(0, index, src, reduce=operation))
+            else:
+                input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
     # TODO: remove this after scatter_add_ is deprecated.
