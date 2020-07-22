@@ -64,9 +64,6 @@ if TEST_SCIPY:
 if TEST_NUMPY:
     import numpy as np
 
-NO_HALF_TENSORTYPES = [torch.float,
-                       torch.double]
-
 DOUBLE_TENSORTYPES = [torch.double]
 
 
@@ -9445,7 +9442,7 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyCUDA
-    @dtypes(*NO_HALF_TENSORTYPES)
+    @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
     def test_rnn_fused(self, device, dtype):
 
