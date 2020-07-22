@@ -256,8 +256,8 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
-set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
-set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
+set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
+set(TORCH_ROOT "${PROJECT_SOURCE_DIR}")
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -274,7 +274,12 @@ endif()
 
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
+  if(USE_DISTRIBUTED)
+    add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+    target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
+    add_dependencies(process_group_agent torch c10d)
+    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
+  endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -339,11 +344,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
     )
 
+  set(GENERATED_TESTING_PYTHON
+    "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
+    )
+
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
+    ${GENERATED_TESTING_PYTHON}
     )
 
   add_custom_command(
@@ -370,6 +380,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
+    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
     "${TOOLS_PATH}/autograd/gen_autograd_functions.py"

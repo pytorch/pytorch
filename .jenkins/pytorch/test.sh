@@ -85,7 +85,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Suppress vptr violations arising from multiple copies of pybind11
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -150,7 +150,7 @@ test_python_nn() {
 }
 
 test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 

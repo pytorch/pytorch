@@ -73,6 +73,7 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
 ")
     try_run(NCCL_VERSION_MATCHED compile_result ${PROJECT_BINARY_DIR} ${file}
           RUN_OUTPUT_VARIABLE NCCL_VERSION_FROM_HEADER
+          CMAKE_FLAGS  "-DINCLUDE_DIRECTORIES=${NCCL_INCLUDE_DIRS}"
           LINK_LIBRARIES ${NCCL_LIBRARIES})
     if (NOT NCCL_VERSION_MATCHED)
       message(FATAL_ERROR "Found NCCL header version and library version do not match! \
