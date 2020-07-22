@@ -174,8 +174,8 @@ constexpr auto with_explicit_optional_tensors(KernelFunc) {
 
 template<class TargetSignature, class FuncPtr>
 constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr kernel_func) {
-    constexpr auto with_tensoroptions_scattered = detail::with_scattered_tensor_options(kernel_func);
-    constexpr auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_tensoroptions_scattered);
+    auto with_tensoroptions_scattered = detail::with_scattered_tensor_options(kernel_func);
+    auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_tensoroptions_scattered);
     static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
     return result;
 };
