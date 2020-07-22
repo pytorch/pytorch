@@ -2510,7 +2510,7 @@ For a 3-D tensor the output is specified by::
 
 :attr:`input` and :attr:`index` must have the same number of dimensions.
 It is also required that ``index.size(d) <= input.size(d)`` for all
-dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`input`.
+dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`index`.
 """ + r"""
 Args:
     input (Tensor): the source tensor
