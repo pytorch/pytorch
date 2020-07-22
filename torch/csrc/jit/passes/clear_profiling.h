@@ -10,6 +10,8 @@ namespace torch {
 namespace jit {
 
 TORCH_API void ClearProfilingInformation(const std::shared_ptr<Graph>& graph);
+TORCH_API void UnprofileBlock(Block* start_block);
+TORCH_API void UnprofileGraphInputs(Graph* graph);
 
 } // namespace jit
 } // namespace torch

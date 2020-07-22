@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
+void UnprofileGraphInputs(Graph* graph) {
   for (auto i : graph->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
       i->setType(unshapedType(i->type()));
@@ -13,7 +13,7 @@ static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
   }
 }
 
-static void unprofileBlock(Block* start_block) {
+void UnprofileBlock(Block* start_block) {
   std::vector<Block*> stack;
   stack.push_back(start_block);
 
@@ -40,8 +40,8 @@ static void unprofileBlock(Block* start_block) {
 // so we could run them in `preoptimizeGraph` and
 // in `runProfilingInsensitiveOptimizations`
 void ClearProfilingInformation(const std::shared_ptr<Graph>& graph) {
-  unprofileGraphInputs(graph);
-  unprofileBlock(graph->block());
+  UnprofileGraphInputs(graph.get());
+  UnprofileBlock(graph->block());
   GRAPH_DUMP("After ClearProfilingInformation: ", graph);
 }
 
