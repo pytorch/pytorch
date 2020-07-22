@@ -142,23 +142,6 @@ bool is_nonzero(const Tensor& self) {
 
 namespace {
 
-inline at::Tensor scalar_to_tensor_default_dtype(
-    Scalar s,
-    const Device device = at::kCPU) {
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_dtype()));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_complex_dtype()));
-  } else {
-    AT_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
-}
-
 static Tensor wrapped_scalar_tensor(
     Scalar scalar,
     Device device,
