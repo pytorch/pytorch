@@ -15,7 +15,7 @@ import torch.utils._benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
 from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -609,6 +609,7 @@ class TestBenchmarkUtils(TestCase):
         ])
         compare.print()
 
+    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
     def test_fuzzer(self):
         fuzzer = benchmark_utils.Fuzzer(
             parameters=[
