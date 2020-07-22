@@ -9502,12 +9502,12 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(hy1, hy2)
 
                     check_rnn_grads(rnn, rnn_device)
-                    self.assertEqual(inp.grad.data, inp_cu.grad.data)
+                    self.assertEqual(inp.grad, inp_cu.grad)
                     if is_lstm:
-                        self.assertEqual(hx[0].grad.data, hx_device[0].grad.data)
-                        self.assertEqual(hx[1].grad.data, hx_device[1].grad.data)
+                        self.assertEqual(hx[0].grad, hx_device[0].grad)
+                        self.assertEqual(hx[1].grad, hx_device[1].grad)
                     else:
-                        self.assertEqual(hx.grad.data, hx_device.grad.data)
+                        self.assertEqual(hx.grad, hx_device.grad)
 
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
