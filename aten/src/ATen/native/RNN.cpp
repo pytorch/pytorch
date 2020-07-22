@@ -707,7 +707,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
 
     const auto gates = params.linear_hh(hx).add_(
         pre_compute_input ? input : params.linear_ih(input));
-    auto chunked_gates = gates.unsafe_chunk(4, 1);
+    auto chunked_gates = gates.chunk(4, 1);
     auto ingate = chunked_gates[0].sigmoid_();
     auto forgetgate = chunked_gates[1].sigmoid_();
     auto cellgate = chunked_gates[2].tanh_();
@@ -738,9 +738,9 @@ struct GRUCell : Cell<Tensor, cell_params> {
       return std::move(std::get<0>(result));
     }
     const auto chunked_igates = pre_compute_input
-        ? input.unsafe_chunk(3, 1)
-        : params.linear_ih(input).unsafe_chunk(3, 1);
-    auto chunked_hgates = params.linear_hh(hidden).unsafe_chunk(3, 1);
+        ? input.chunk(3, 1)
+        : params.linear_ih(input).chunk(3, 1);
+    auto chunked_hgates = params.linear_hh(hidden).chunk(3, 1);
     const auto reset_gate =
         chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
     const auto input_gate =
@@ -1477,7 +1477,7 @@ _thnn_differentiable_lstm_cell_backward(
   if (hidden_bias.defined()) {
     gates = gates + hidden_bias;
   }
-  auto chunked_gates = gates.unsafe_chunk(4, 1);
+  auto chunked_gates = gates.chunk(4, 1);
   Tensor i = chunked_gates[0].sigmoid();
   Tensor f = chunked_gates[1].sigmoid();
   Tensor c = chunked_gates[2].tanh();
@@ -1524,11 +1524,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   if (hidden_bias.defined()){
     h_g = h_g + hidden_bias;
   }
-  auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
+  auto chunked_input_gates = in_g.chunk(3, 1);
   Tensor ir = chunked_input_gates[0];
   Tensor ii = chunked_input_gates[1];
   Tensor in = chunked_input_gates[2];
-  auto chunked_hidden_gates = h_g.unsafe_chunk(3, 1);
+  auto chunked_hidden_gates = h_g.chunk(3, 1);
   Tensor hr = chunked_hidden_gates[0];
   Tensor hi = chunked_hidden_gates[1];
   Tensor hn = chunked_hidden_gates[2];

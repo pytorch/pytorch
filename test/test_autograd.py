@@ -166,31 +166,6 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.))
 
-    def test_function_returns_undefined_tensor(self):
-        class MyFunction(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x * 2
-
-            @staticmethod
-            def backward(ctx, grad):
-                return None
-
-        # Test that undefined tensors returned from custom backward function
-        # are propagated as undefined and not tensor full of zeroes
-        x = torch.ones(1, requires_grad=True)
-
-        MyFunction.apply(x).backward()
-        self.assertIsNone(x.grad)
-
-        MyFunction.apply(x ** 2).backward()
-        self.assertIsNone(x.grad)
-
-        MyFunction.apply(x).sum().backward()
-        self.assertIsNone(x.grad)
-
-        self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
-
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -2692,10 +2667,10 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
-                 'aten::copy_', 'aten::empty']
-        top_level_names = ['aten::mul', 'aten::add']
+        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'is_complex',
+                 'is_complex', 'empty', 'is_complex', 'add', 'to', 'empty_strided',
+                 'copy_', 'is_complex', 'is_complex', 'empty']
+        top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
@@ -2718,11 +2693,8 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             torch.ops._TorchScriptTesting.take_an_instance(inst)
 
-        found_event = False
-        for e in prof.function_events:
-            if e.name == '_TorchScriptTesting::take_an_instance':
-                found_event = True
-        self.assertTrue(found_event)
+        self.assertEqual(len(prof.function_events), 1)
+        self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
 
     def test_profiler_propagation(self):
         def foo(x):
@@ -2861,9 +2833,9 @@ class TestAutograd(TestCase):
 
         top_level_expected_events_and_shapes = [
             (None, [[30, 20]]),
-            ('aten::addmm', [[30], [128, 20], [20, 30], [], []]),
+            ('addmm', [[30], [128, 20], [20, 30], [], []]),
             (None, [[40, 30]]),
-            ('aten::addmm', [[40], [128, 30], [30, 40], [], []])
+            ('addmm', [[40], [128, 30], [30, 40], [], []])
         ]
 
         expected_iter = iter(top_level_expected_events_and_shapes)
@@ -2964,8 +2936,8 @@ class TestAutograd(TestCase):
             stats,
             "cpu_memory_usage",
             allocs=[
-                "aten::empty",
-                "aten::rand",
+                "empty",
+                "rand",
                 "test_user_scope_alloc",
             ],
             deallocs=[
@@ -2982,8 +2954,8 @@ class TestAutograd(TestCase):
                 "cuda_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
-                    "aten::to",
-                    "aten::empty_strided",
+                    "to",
+                    "empty_strided",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",
@@ -2993,8 +2965,8 @@ class TestAutograd(TestCase):
                 stats,
                 "cpu_memory_usage",
                 allocs=[
-                    "aten::rand",
-                    "aten::empty",
+                    "rand",
+                    "empty",
                 ]
             )
 
@@ -3007,9 +2979,9 @@ class TestAutograd(TestCase):
                 "cpu_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
-                    "aten::rand",
-                    "aten::empty",
-                    "aten::to_mkldnn",
+                    "rand",
+                    "empty",
+                    "to_mkldnn",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",
@@ -3027,8 +2999,8 @@ class TestAutograd(TestCase):
             stats,
             "cpu_memory_usage",
             allocs=[
-                "aten::rand",
-                "aten::empty",
+                "rand",
+                "empty",
             ]
         )
 
@@ -3050,11 +3022,11 @@ class TestAutograd(TestCase):
         events = p.function_events
         important_events = [
             'outer',
-            'aten::mul',
-            'aten::add',
+            'mul',
+            'add',
             'inner',
-            'aten::sub',
-            'aten::div'
+            'sub',
+            'div'
         ]
         idx = 0
         for info in events:
@@ -6456,27 +6428,6 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
-    def test_inplace_view_multi_output_unsafe(self, device):
-        for f in [lambda t: t.unsafe_split(1),
-                  lambda t: t.unsafe_split_with_sizes((1, 1, 1)),
-                  lambda t: t.unsafe_chunk(3)]:
-            a = torch.randn(3, 3, device=device, requires_grad=True)
-            b = a + a
-            s1, s2, s3 = f(b)
-            s1.mul_(s2)
-            s1.sum().backward()
-
-    def test_inplace_view_multi_output_safe(self, device):
-        for f in [lambda t: t.split(1),
-                  lambda t: t.split_with_sizes((1, 1, 1)),
-                  lambda t: t.chunk(3)]:
-            a = torch.randn(3, 3, device=device, requires_grad=True)
-            b = a + a
-            s1, s2, s3 = f(b)
-            with warnings.catch_warnings(record=True) as w:
-                s1.mul_(s2)
-            self.assertIn('Consider using `unsafe_` version', str(w[0].message))
-
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
@@ -6538,32 +6489,6 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
-    def _test_atleast(self, device, torch_fn):
-        # 0-dim
-        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), s)
-        gradgradcheck(lambda x: torch_fn(x), s)
-
-        # 1-dim
-        a = torch.rand(4, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), a)
-        gradgradcheck(lambda x: torch_fn(x), a)
-
-        # 2,3,4-dim
-        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
-        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
-        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
-
-        input_tuple = (s, a, b, c, d)
-        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-
-    def test_atleast(self, device):
-        self._test_atleast(device, torch.atleast_1d)
-        self._test_atleast(device, torch.atleast_2d)
-        self._test_atleast(device, torch.atleast_3d)
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):

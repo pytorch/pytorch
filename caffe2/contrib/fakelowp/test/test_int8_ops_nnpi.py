@@ -22,21 +22,15 @@ class Int8OpsTest(serial.SerializedTestCase):
 
     @given(
         n=st.integers(2, 1024),
-        rand_seed=st.integers(0, 65534),
-        non_zero_offset=st.booleans()
+        rand_seed=st.integers(0, 65534)
     )
     @settings(max_examples=100)
-    def test_int8_quantize(self, n, rand_seed, non_zero_offset):
+    def test_int8_quantize(self, n, rand_seed):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
-        if non_zero_offset:
-            X_fp32 = np.random.uniform(-1, 1, size=(n, n)).astype(np.float16) \
-                .astype(np.float32)
-        else:
-            X_fp32 = np.random.rand(n, n).astype(np.float16).astype(np.float32)
-
+        X_fp32 = np.random.rand(n, n).astype(np.float16).astype(np.float32)
         W_fp32 = np.identity(n, dtype=np.float32)
         b_fp32 = np.zeros((n,), dtype=np.float32)
 

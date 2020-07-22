@@ -197,7 +197,7 @@ Note that the bang (!) is added after the opening comment """! - this seems to d
 
 ### Other Notes
 
-Useful for Xcode, currently off
+Useful for xcode, currently off
 GENERATE_DOCSET = NO
 
 Look at search engine integration, xml output, etc

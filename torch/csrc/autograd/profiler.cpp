@@ -24,6 +24,8 @@ namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 
+  constexpr auto kProfilerConfigIValuesSize = 3;
+  constexpr auto kEventIValuesSize = 11;
   enum EventIValueIdx {
     KIND = 0,
     NAME,
@@ -35,15 +37,13 @@ namespace {
     CUDA_RECORDED,
     CUDA_MEM_USAGE,
     CUDA_DEVICE,
-    CUDA_US,
-    NUM_EVENT_IVALUE_IDX // must be last in list
+    CUDA_US
   };
 
   enum ProfilerIValueIdx {
     STATE = 0,
     REPORT_INPUT_SHAPES,
     PROFILE_MEMORY,
-    NUM_PROFILER_CFG_IVALUE_IDX // must be last in list
   };
 
 CUDAStubs default_stubs;
@@ -400,7 +400,7 @@ ProfilerConfig::~ProfilerConfig() = default;
 
 at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
-  eventIValueList.reserve(NUM_PROFILER_CFG_IVALUE_IDX);
+  eventIValueList.reserve(kProfilerConfigIValuesSize);
   eventIValueList.emplace_back(static_cast<int64_t>(state));
   eventIValueList.emplace_back(report_input_shapes);
   eventIValueList.emplace_back(profile_memory);
@@ -414,10 +414,10 @@ ProfilerConfig ProfilerConfig::fromIValue(
       "Expected IValue to contain type c10::impl::GenericList");
   auto ivalues = profilerConfigIValue.toList();
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() == NUM_PROFILER_CFG_IVALUE_IDX,
+      ivalues.size() == kProfilerConfigIValuesSize,
       c10::str(
           "Expected exactly ",
-          NUM_PROFILER_CFG_IVALUE_IDX,
+          kProfilerConfigIValuesSize,
           " ivalues to resconstruct ProfilerConfig."));
   return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
@@ -510,9 +510,9 @@ void Event::record(bool record_cuda) {
       "Expected IValue to contain type c10::impl::GenericList");
   auto ivalues = eventIValue.toList();
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() >= NUM_EVENT_IVALUE_IDX,
+      ivalues.size() >= kEventIValuesSize,
       "Expected at least ",
-      NUM_EVENT_IVALUE_IDX,
+      kEventIValuesSize,
       " elements to reconstruct Event.");
 
   Event evt(
@@ -537,7 +537,7 @@ void Event::record(bool record_cuda) {
 
 at::IValue Event::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
-  eventIValueList.reserve(NUM_EVENT_IVALUE_IDX);
+  eventIValueList.reserve(kEventIValuesSize);
   eventIValueList.emplace_back(static_cast<int64_t>(kind_));
   eventIValueList.emplace_back(std::string(name_.str()));
   eventIValueList.emplace_back(thread_id_);
@@ -666,6 +666,11 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 
 void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
+#else
+  RECORD_FUNCTION(op.schema().name(), *stack);
+#endif
   op.callBoxed(stack);
 }
 

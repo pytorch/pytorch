@@ -15,7 +15,7 @@ namespace opt {
 // Add Tile ops for some input tensors
 void inBatchBroadcast(
     NetDef* net,
-    const std::unordered_set<std::string>& to_broadcast_blobs,
+    std::unordered_set<std::string>& to_broadcast_blobs,
     int32_t batch_size,
     ShapeInfoMap& shape_hints);
 

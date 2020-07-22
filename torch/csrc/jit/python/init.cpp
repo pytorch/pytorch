@@ -544,10 +544,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
-             std::set<MobileOptimizerType>& optimization_blocklist,
+             std::set<MobileOptimizerType>& optimization_blacklist,
              std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
-                module, optimization_blocklist, preserved_methods);
+                module, optimization_blacklist, preserved_methods);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -851,14 +851,6 @@ void initJITBindings(PyObject* module) {
     return graph;
   });
   m.def("parse_schema", parseSchema);
-  m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
-    std::ostringstream s;
-    auto type = unifyTypeList(types, s);
-    if (!type) {
-      throw std::runtime_error(s.str());
-    }
-    return type.value();
-  });
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(

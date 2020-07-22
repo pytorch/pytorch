@@ -668,7 +668,7 @@ if _enabled:
             cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x)
         )
 
-    _compiled_methods_allowlist = {
+    _compiled_methods_whitelist = {
         "forward",
         "register_buffer",
         "register_parameter",
@@ -716,7 +716,7 @@ if _enabled:
             continue
         if (
             name not in RecursiveScriptModule.__dict__
-            and name not in _compiled_methods_allowlist
+            and name not in _compiled_methods_whitelist
         ):
             setattr(RecursiveScriptModule, method.__name__, _make_fail(name))
 

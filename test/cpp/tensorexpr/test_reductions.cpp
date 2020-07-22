@@ -619,7 +619,7 @@ void testReduceRfactor() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactorInternal() {
+void testReduce3DRfactor() {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -654,7 +654,7 @@ void testReduce3DRfactorInternal() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorInner() {
+void testReduce3DRfactor2() {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -689,7 +689,7 @@ void testReduce3DRfactorInner() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorOuter() {
+void testReduce3DRfactor3() {
   KernelScope kernel_scope;
 
   const int M = 10;

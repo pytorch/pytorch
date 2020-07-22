@@ -88,7 +88,7 @@ class ProcessGroupMPI : public ProcessGroup {
 
     int sourceRank() const override;
 
-    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override;
+    bool wait() override;
 
     void abort() override;
 

@@ -355,7 +355,6 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
 
     nn.Flatten
-    nn.Unflatten
 
 Quantized Functions
 --------------------
