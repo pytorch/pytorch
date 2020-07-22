@@ -44,7 +44,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast
+    deviceCountAtLeast, expectedAlertNondeterministic
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -8858,7 +8858,8 @@ def add_test(test, decorator=None):
         setattr(TestNN, test_name, fn)
 
     test_name = test.get_name()
-    add(test_name, lambda self, test=test: test(self))
+    if not hasattr(test, 'test_cpu') or test.test_cpu:
+        add(test_name, lambda self, test=test: test(self))
     cuda_test_name = test_name + '_cuda'
     # With dtype enable, it's good enough to test against three floating types
     kwargs = {}
@@ -10087,6 +10088,24 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
         issue_24823_2()
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_2d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_3d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, 3, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
