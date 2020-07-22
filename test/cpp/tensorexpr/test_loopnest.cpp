@@ -265,6 +265,59 @@ void testExprSplitWithMask01() {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
+void testSplitWithTailWithLoopOptions() {
+  KernelScope kernel_scope;
+  const int M = 21;
+  Buffer a_buf("a", kFloat, {M});
+  Buffer b_buf("b", kFloat, {M});
+  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+    return a_buf(m) + b_buf(m) + 1.0f;
+  });
+  For *outer, *inner, *tail;
+
+  LoopNest l({tensor});
+  auto loops = NodeFinder<For>::find(l.root_stmt());
+  ASSERT_GT(loops.size(), 0);
+  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  l.splitWithTail(loops[0], 4, &outer, &inner, &tail);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(inner, nullptr);
+  ASSERT_NE(tail, nullptr);
+
+  // Outer loop carries loop axis bindings.
+  ASSERT_TRUE(outer->loop_options().is_gpu_block_index());
+  ASSERT_EQ(outer->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+
+  // Inner loop has none.
+  ASSERT_TRUE(inner->loop_options().isDefault());
+
+  // Tail loop has none.
+  ASSERT_TRUE(tail->loop_options().isDefault());
+}
+
+void testSplitWithMaskWithLoopOptions() {
+  KernelScope kernel_scope;
+  const int M = 21;
+  Buffer a_buf("a", kFloat, {M});
+  Buffer b_buf("b", kFloat, {M});
+  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+    return a_buf(m) + b_buf(m) + 1.0f;
+  });
+  For *outer, *inner;
+
+  LoopNest l({tensor});
+  auto loops = NodeFinder<For>::find(l.root_stmt());
+  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  l.splitWithMask(loops[0], 4, &outer, &inner);
+
+  // Outer loop carries loop axis bindings.
+  ASSERT_TRUE(outer->loop_options().is_gpu_block_index());
+  ASSERT_EQ(outer->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+
+  // Inner loop has none.
+  ASSERT_TRUE(inner->loop_options().isDefault());
+}
+
 void testScheduleBroadcastAddBuffer() {
   KernelScope kernel_scope;
   const int M = 4;
