@@ -147,7 +147,7 @@ YAML_SOURCES = [
     File("job-specs/pytorch-job-specs.yml"),
     # File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
-    # File("job-specs/job-specs-custom.yml"),
+    File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
     File("job-specs/binary_update_htmls.yml"),
     File("job-specs/binary-build-tests.yml"),
