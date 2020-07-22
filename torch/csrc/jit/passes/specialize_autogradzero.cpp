@@ -13,6 +13,14 @@ bool isBackwardGraph(Graph& g) {
   return std::any_of(g.nodes().begin(), g.nodes().end(), [](Node* n){return n->kind() == prim::AutogradAnyNonZero; });
 }
 
+void replaceBlockInputsWithGraph(Graph* g, Block* b) {
+  TORCH_INTERNAL_ASSERT(g->inputs().size() == b->inputs().size());
+  for (int i = g->inputs().size() - 1; i >= 0; i--) {
+    b->inputs()[i]->replaceAllUsesWith(g->inputs()[i]);
+    b->eraseInput(i);
+  }
+}
+
 // propagate autograd zero information through a gradient graph and
 // remove grad_of blocks if present.
 // Note: this is a very limited pass. It only propagates autograd zeros for
@@ -36,9 +44,11 @@ void specializeAutogradZero(Graph& g) {
       auto false_block = vif->addBlock();
       auto value_map = [](Value* v) { return v; };
       true_block->cloneFrom(g.block(), value_map);
+      replaceBlockInputsWithGraph(&g, true_block);
       // block for specialize_autogradzero to optimize
       block = true_block;
       false_block->cloneFrom(g.block(), value_map);
+      replaceBlockInputsWithGraph(&g, false_block);
 
       auto ret = g.return_node();
       for (size_t i = 0; i < ret->inputs().size(); i++) {
@@ -74,10 +84,10 @@ void specializeAutogradZero(Graph& g) {
           check_result->setType(BoolType::get());
           // set state
           if (tt->undefined()) {
-            state[true_block->inputs()[i]] = *tt->undefined() ? State::Zero : State::Nonzero;
+            state[inp] = *tt->undefined() ? State::Zero : State::Nonzero;
           }
           else {
-            state[true_block->inputs()[i]] = State::Unknown;
+            state[inp] = State::Unknown;
           }
         }
       }
@@ -85,8 +95,6 @@ void specializeAutogradZero(Graph& g) {
       // we would at least have one check
       TORCH_INTERNAL_ASSERT(check_result);
       vif->addInput(check_result);
-
-      EliminateDeadCode(g.block());
       GRAPH_DUMP("specialize_autogradzero ", &g);
     }
   } else {
