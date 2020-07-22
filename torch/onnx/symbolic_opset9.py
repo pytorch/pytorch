@@ -2456,4 +2456,4 @@ def kl_div(g, input, target, reduction, log_target):
     elif reduction == 2:
         return g.op("ReduceSum", output)
     else:
-        return _unimplemented("kl_div", "reuction enum other than 0, 1, or 2.")
+        return _unimplemented("kl_div", "reduction other than none, mean, or sum.")
