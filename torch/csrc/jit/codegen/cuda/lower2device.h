@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <ostream>
 
@@ -30,11 +31,11 @@ class TORCH_CUDA_API GPULower {
 
   std::string getKernel(const std::string& kernel_name = "CUDAGeneratedKernel");
 
-  std::vector<Allocate*> global_allocations() {
+  std::vector<kir::Allocate*> global_allocations() {
     return global_allocations_;
   }
 
-  std::vector<Allocate*> sync_allocations() {
+  std::vector<kir::Allocate*> sync_allocations() {
     return sync_allocations_;
   }
 
@@ -42,11 +43,11 @@ class TORCH_CUDA_API GPULower {
   void lower();
 
   // List of global buffers (not including buffers for grid syncronization)
-  std::vector<Allocate*> global_allocations_;
+  std::vector<kir::Allocate*> global_allocations_;
 
   // List of syncronization buffers that must be initialized to 0 when running
   // the fusion
-  std::vector<Allocate*> sync_allocations_;
+  std::vector<kir::Allocate*> sync_allocations_;
 
   std::vector<Expr*> lowered_exprs_;
   Fusion* fusion_ = nullptr;

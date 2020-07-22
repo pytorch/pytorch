@@ -261,61 +261,6 @@ class TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-class TORCH_CUDA_API Scope {
- public:
-  Scope() = default;
-  Scope(const Scope* src, IrCloner* ir_cloner);
-
-  const std::vector<Expr*>& exprs() const {
-    return exprs_;
-  }
-
-  void push_back(Expr* e) {
-    exprs_.push_back(e);
-  }
-
-  void insert(std::vector<Expr*>::iterator it, Expr* expr) {
-    exprs_.insert(it, expr);
-  }
-
-  void erase(std::vector<Expr*>::iterator it) {
-    exprs_.erase(it);
-  }
-
-  bool empty() const {
-    return exprs_.empty();
-  }
-
-  auto size() const {
-    return exprs_.size();
-  }
-
-  auto& operator[](size_t i) {
-    return exprs_[i];
-  }
-
-  auto& operator[](size_t i) const {
-    return exprs_[i];
-  }
-
-  // Insert expr before ref
-  void insert_before(Expr* ref, Expr* expr);
-
-  // Insert expr after ref
-  void insert_after(Expr* ref, Expr* expr);
-
-  bool contains(Expr* expr) const;
-
-  void erase(Expr* ref);
-
-  bool sameAs(const Scope& other) const;
-
-  void clear();
-
- private:
-  std::vector<Expr*> exprs_;
-};
-
 //  A Expr represents a "computation." These are functions that takes inputs
 //  and produce outputs, inputs and outputs all being Vals. There are
 //  specializations of BinaryOp which takes 2 inputs and produces 1 output, and

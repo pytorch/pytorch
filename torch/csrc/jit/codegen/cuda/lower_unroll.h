@@ -62,7 +62,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   const std::vector<Expr*>& incoming_exprs_;
 
   // Keep all for loops conveniently to make unrolling easier
-  std::vector<ForLoop*> for_loops;
+  std::vector<kir::ForLoop*> for_loops;
 
   // Map from TensorView
   const ThreadPredicateMap& thread_predicates_;
@@ -74,7 +74,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   void handle(Expr*) final;
 
   // Open the for loop.
-  void handle(ForLoop*) final;
+  void handle(kir::ForLoop*) final;
 
   // Constructor
   UnrollPass(

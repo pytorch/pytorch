@@ -27,10 +27,10 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   void pushBack(Expr*);
 
   // Open the for loop.
-  void handle(ForLoop*) final;
+  void handle(kir::ForLoop*) final;
 
   // Open the for loop.
-  void handle(IfThenElse*) final;
+  void handle(kir::IfThenElse*) final;
 
   // Remake operations with TensorIndex
   void handle(UnaryOp*) final;
@@ -38,7 +38,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   void handle(TernaryOp*) final;
   void handle(ReductionOp*) final;
   void handle(BroadcastOp*) final;
-  void handle(Allocate* expr) final {
+  void handle(kir::Allocate* expr) final {
     pushBack(expr);
   }
 
@@ -52,7 +52,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   // to be able to carry both around because when we push back to a scope it
   // could be either the body or else body of the IfThenElse. However, we want
   // to understand the nesting of IfThenElse/ForLoop nodes.
-  Scope* active_scope = nullptr;
+  kir::Scope* active_scope = nullptr;
   Expr* active_scope_expr = nullptr;
 };
 

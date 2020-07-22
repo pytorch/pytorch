@@ -35,7 +35,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
 
   // Keep all for loops conveniently to make unrolling easier, basically just a
   // stack of the active for_loops
-  std::vector<ForLoop*> for_loops;
+  std::vector<kir::ForLoop*> for_loops;
 
   // Track the active computeAt scope, and what view we're "computeAt-ing" into
   std::vector<std::pair<IterDomain*, TensorView*>> compute_at_scope;

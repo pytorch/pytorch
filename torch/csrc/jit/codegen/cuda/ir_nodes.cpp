@@ -292,7 +292,7 @@ std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
 
   // out is a TensorIndex after lowering
   if (out_val->getValType() == ValType::TensorIndex) {
-    out_val = out_val->as<TensorIndex>()->view();
+    out_val = out_val->as<kir::TensorIndex>()->view();
   }
 
   auto vec_domain = out_val->as<TensorView>()->domain()->domain();
@@ -314,32 +314,6 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
     }
   }
   return parallel_domains;
-}
-
-GridReduction::GridReduction(ReductionOp* _reduction_op)
-    : Expr(ExprType::GridReduction), reduction_op_(_reduction_op) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-
-GridReduction::GridReduction(
-    ReductionOp* _reduction_op,
-    Allocate* _reduction_buffer,
-    Allocate* _sync_buffer)
-    : Expr(ExprType::GridReduction),
-      reduction_op_(_reduction_op),
-      reduction_buffer_(_reduction_buffer),
-      sync_buffer_(_sync_buffer) {}
-
-GridReduction::GridReduction(const GridReduction* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      reduction_op_(ir_cloner->clone(src->reduction_op_)),
-      reduction_buffer_(ir_cloner->clone(src->reduction_buffer_)),
-      sync_buffer_(ir_cloner->clone(src->sync_buffer_)) {}
-
-bool GridReduction::sameAs(const GridReduction* other) const {
-  return reduction_op_->sameAs(other->reduction_op()) &&
-      reduction_buffer_->sameAs(other->reduction_buffer()) &&
-      sync_buffer_->sameAs(other->sync_buffer());
 }
 
 IterDomain::IterDomain(
@@ -973,159 +947,6 @@ bool Merge::sameAs(const Merge* const other) const {
   return (
       out()->sameAs(other->out()) && outer()->sameAs(other->outer()) &&
       inner()->sameAs(other->inner()));
-}
-
-ForLoop::ForLoop(
-    Val* _index,
-    IterDomain* _iter_domain,
-    const std::vector<Expr*>& _body,
-    Expr* _parent_scope)
-    : Expr(ExprType::ForLoop),
-      index_{_index},
-      iter_domain_{_iter_domain},
-      parent_scope_{_parent_scope} {
-  TORCH_INTERNAL_ASSERT(
-      _index->isAnInt(),
-      "Cannot create a for loop with an index that is not an int.");
-  addInput(_index);
-  addInput(_iter_domain);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-  for (Expr* expr : _body)
-    body().push_back(expr);
-}
-
-ForLoop::ForLoop(const ForLoop* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      index_(ir_cloner->clone(src->index_)),
-      iter_domain_(ir_cloner->clone(src->iter_domain_)),
-      body_(&src->body_, ir_cloner),
-      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
-
-bool ForLoop::sameAs(const ForLoop* other) const {
-  if (this->iter_domain() != other->iter_domain())
-    return false;
-  if (!(constBody().sameAs(other->constBody())))
-    return false;
-  return other == this;
-}
-
-IfThenElse::IfThenElse(
-    Bool* _cond,
-    const std::vector<Expr*>& _if_body,
-    const std::vector<Expr*>& _else_body,
-    Expr* _parent_scope)
-    : Expr(ExprType::IfThenElse), cond_{_cond}, parent_scope_(_parent_scope) {
-  addInput(_cond);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-
-  for (auto* expr : _if_body)
-    body_.push_back(expr);
-  for (auto* expr : _else_body)
-    else_body_.push_back(expr);
-}
-
-IfThenElse::IfThenElse(const IfThenElse* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      cond_(src->cond_),
-      body_(&src->body_, ir_cloner),
-      else_body_(&src->else_body_, ir_cloner),
-      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
-
-bool IfThenElse::sameAs(const IfThenElse* other) const {
-  if (!(this->cond()->sameAs(other->cond()) &&
-        this->constBody().sameAs(other->constBody()) &&
-        this->constElseBody().sameAs(other->constElseBody())))
-    return false;
-  return true;
-}
-
-TensorIndex::TensorIndex(const TensorIndex* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner),
-      view_(ir_cloner->clone(src->view_)),
-      indices_(ir_cloner->clone(src->indices_)) {}
-
-bool TensorIndex::sameAs(const TensorIndex* const other) const {
-  if (nDims() != other->nDims())
-    return false;
-
-  if (!view()->sameAs(other->view()))
-    return false;
-
-  for (decltype(nDims()) i = 0; i < nDims(); i++)
-    if (!(index(i)->sameAs(other->index(i))))
-      return false;
-
-  return true;
-}
-
-Val* TensorIndex::index(int i) const {
-  TORCH_INTERNAL_ASSERT(
-      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
-  if (i < 0)
-    i += nDims();
-  assert(i >= 0 && i < nDims());
-  return indices_[i];
-}
-
-Allocate::Allocate(Val* _buffer, MemoryType _memory_type, Val* _size)
-    : Expr(ExprType::Allocate),
-      buffer_(_buffer),
-      memory_type_(_memory_type),
-      size_(_size) {
-  if (size_ != nullptr) {
-    TORCH_INTERNAL_ASSERT(
-        size_->isOneInt() ||
-            buffer_->getValType().value() == ValType::TensorView,
-        "Cannot allocate a non-TensorView buffer with a size != 1, received buffer: ",
-        buffer_);
-  } else {
-    if (buffer_->getValType().value() == ValType::TensorView) {
-      auto tv = buffer_->as<TensorView>();
-      size_ = tv->nDims() == 0 ? new Int(1) : tv->axis(0)->extent();
-      for (size_t i = 1; i < tv->nDims(); i++) {
-        size_ = mul(size_, tv->axis(i)->extent());
-      }
-
-      if ((memory_type_ == MemoryType::Local ||
-           memory_type_ == MemoryType::Shared)) {
-        if (!size_->isConstScalar()) {
-          std::stringstream flat_size;
-          IRPrinter irp(flat_size);
-          irp.print_inline(size_);
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "Allocations must be based on constant integers for the memory type ",
-              memory_type_,
-              " but tried to alloc ",
-              buffer_,
-              " with size ",
-              flat_size.str(),
-              ".");
-        }
-      }
-    }
-  }
-  addInput(size_);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      buffer_(ir_cloner->clone(src->buffer_)),
-      memory_type_(src->memory_type_),
-      size_(ir_cloner->clone(src->size_)) {}
-
-bool Allocate::sameAs(const Allocate* other) const {
-  if (!this->buffer_->sameAs(other->buffer()))
-    return false;
-  if (!this->size()->sameAs(other->size()))
-    return false;
-  if (this->getMemoryType() != other->getMemoryType())
-    return false;
-  if (this->type() != other->type())
-    return false;
-
-  return true;
 }
 
 NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)

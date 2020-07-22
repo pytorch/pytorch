@@ -78,7 +78,7 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
   return tv;
 }
 
-Statement* OptOutMutator::mutate(TensorIndex* ti) {
+Statement* OptOutMutator::mutate(kir::TensorIndex* ti) {
   std::vector<Statement*> inds;
   for (auto* ind : ti->indices())
     inds.push_back(mutateAsVal(ind));
@@ -97,7 +97,7 @@ Statement* OptOutMutator::mutate(TensorIndex* ti) {
   for (decltype(inds.size()) i{0}; i < inds.size(); i++)
     valInds[i] = inds[i]->asVal();
 
-  Val* mutated_val = new TensorIndex(ti->view(), valInds);
+  Val* mutated_val = new kir::TensorIndex(ti->view(), valInds);
   registerMutation(ti, mutated_val);
   return mutated_val;
 }
@@ -124,21 +124,21 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
 
-Statement* OptOutMutator::mutate(Allocate* a) {
+Statement* OptOutMutator::mutate(kir::Allocate* a) {
   if (a->buffer()->getValType().value() == ValType::TensorView) {
     TensorView* tv = mutateAsVal(a->buffer())->as<TensorView>();
     Val* ext = mutateAsVal(a->size())->asVal();
     if (ext->sameAs(a->size()) && tv->sameAs(a->buffer()))
       return a;
     FusionGuard::getCurFusion()->removeExpr(a);
-    return new Allocate(tv, a->getMemoryType(), a->size());
+    return new kir::Allocate(tv, a->getMemoryType(), a->size());
   } else {
     Val* buffer = mutateAsVal(a->buffer())->asVal();
     Val* ext = mutateAsVal(a->size())->asVal();
     if (ext->sameAs(a->size()) && buffer->sameAs(a->buffer()))
       return a;
     FusionGuard::getCurFusion()->removeExpr(a);
-    return new Allocate(buffer, a->getMemoryType(), a->size());
+    return new kir::Allocate(buffer, a->getMemoryType(), a->size());
   }
 }
 
@@ -211,17 +211,18 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
-Statement* OptOutMutator::mutate(GridReduction* gr) {
+Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
   ReductionOp* reduction_op = mutate(gr->reduction_op())->as<ReductionOp>();
-  Allocate* reduction_buffer = mutate(gr->reduction_buffer())->as<Allocate>();
-  Allocate* sync_buffer = mutate(gr->sync_buffer())->as<Allocate>();
+  kir::Allocate* reduction_buffer =
+      mutate(gr->reduction_buffer())->as<kir::Allocate>();
+  kir::Allocate* sync_buffer = mutate(gr->sync_buffer())->as<kir::Allocate>();
 
   if (reduction_op->sameAs(gr->reduction_op()) &&
       reduction_buffer->sameAs(gr->reduction_buffer()) &&
       sync_buffer->sameAs(gr->sync_buffer()))
     return gr;
 
-  return new GridReduction(reduction_op, reduction_buffer, sync_buffer);
+  return new kir::GridReduction(reduction_op, reduction_buffer, sync_buffer);
 }
 
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
@@ -236,7 +237,7 @@ Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   return new BroadcastOp(out->as<TensorView>(), in->as<TensorView>());
 }
 
-Statement* OptOutMutator::mutate(ForLoop* fl) {
+Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
   Val* index = mutateAsVal(fl->index())->asVal();
   Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
 
@@ -259,14 +260,14 @@ Statement* OptOutMutator::mutate(ForLoop* fl) {
   }
 
   if (is_mutated) {
-    auto newFL = new ForLoop(index, id, mutated_exprs, fl->parentScope());
+    auto newFL = new kir::ForLoop(index, id, mutated_exprs, fl->parentScope());
     return newFL;
   }
 
   return fl;
 }
 
-Statement* OptOutMutator::mutate(IfThenElse* ite) {
+Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   Val* val_cond = mutateAsVal(ite->cond())->asVal();
   TORCH_INTERNAL_ASSERT(
       val_cond->getValType().value() == ValType::Scalar &&
@@ -300,7 +301,7 @@ Statement* OptOutMutator::mutate(IfThenElse* ite) {
   }
 
   if (is_mutated) {
-    auto newITE = new IfThenElse(
+    auto newITE = new kir::IfThenElse(
         cond, ite->body().exprs(), ite->elseBody().exprs(), ite->parentScope());
     return newITE;
   }

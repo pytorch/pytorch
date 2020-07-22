@@ -187,7 +187,7 @@ void IRPrinter::handle(const IterDomain* id) {
     os << "rf";
 }
 
-void IRPrinter::handle(const TensorIndex* ti) {
+void IRPrinter::handle(const kir::TensorIndex* ti) {
   os << "T" << ti->view()->name();
   if (ti->nDims() == 0) {
     os << "[ 0 ]";
@@ -429,7 +429,7 @@ void IRPrinter::handle(const ReductionOp* rop) {
     return;
   }
 
-  auto out = rop->out()->as<TensorIndex>();
+  auto out = rop->out()->as<kir::TensorIndex>();
   auto vec_domain = out->view()->domain()->domain();
 
   bool has_block_reduce = out->view()->hasBlockReduction();
@@ -477,14 +477,14 @@ void IRPrinter::handle(const ReductionOp* rop) {
   }
 }
 
-void IRPrinter::handle(const GridReduction* gr) {
+void IRPrinter::handle(const kir::GridReduction* gr) {
   // Check if we've lowered yet.
   const auto rop = gr->reduction_op();
   TORCH_INTERNAL_ASSERT(
       rop->out()->getValType() == ValType::TensorIndex,
       "GridReduction node is a lowered node but did not find the output to be a TensorIndex.");
 
-  const auto out = rop->out()->as<TensorIndex>();
+  const auto out = rop->out()->as<kir::TensorIndex>();
   TORCH_INTERNAL_ASSERT(out->view()->hasGridReduction());
 
   const auto vec_domain = out->view()->domain()->domain();
@@ -576,7 +576,7 @@ void IRPrinter::handle(const BroadcastOp* bop) {
   }
 }
 
-void IRPrinter::handle(const ForLoop* fl) {
+void IRPrinter::handle(const kir::ForLoop* fl) {
   if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
@@ -604,7 +604,7 @@ void IRPrinter::handle(const ForLoop* fl) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const IfThenElse* ite) {
+void IRPrinter::handle(const kir::IfThenElse* ite) {
   indent();
 
   // IF
@@ -632,7 +632,7 @@ void IRPrinter::handle(const IfThenElse* ite) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const Allocate* a) {
+void IRPrinter::handle(const kir::Allocate* a) {
   indent();
   if (a->buffer()->getValType().value() == ValType::TensorView) {
     auto tv = a->buffer()->as<TensorView>();

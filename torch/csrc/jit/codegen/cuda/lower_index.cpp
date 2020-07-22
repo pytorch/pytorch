@@ -16,11 +16,11 @@ void IndexLowering::pushBack(Expr* expr) {
     active_scope->push_back(expr);
 }
 
-void IndexLowering::handle(IfThenElse* ite) {
+void IndexLowering::handle(kir::IfThenElse* ite) {
   Expr* prev_scope_expr = active_scope_expr;
-  Scope* prev_scope = active_scope;
+  kir::Scope* prev_scope = active_scope;
 
-  auto new_ite = new IfThenElse(ite->cond(), {}, {}, prev_scope_expr);
+  auto new_ite = new kir::IfThenElse(ite->cond(), {}, {}, prev_scope_expr);
   pushBack(new_ite);
   active_scope_expr = new_ite;
   active_scope = &new_ite->body();
@@ -39,11 +39,12 @@ void IndexLowering::handle(IfThenElse* ite) {
   active_scope_expr = prev_scope_expr;
 }
 
-void IndexLowering::handle(ForLoop* fl) {
+void IndexLowering::handle(kir::ForLoop* fl) {
   Expr* prev_scope_expr = active_scope_expr;
-  Scope* prev_scope = active_scope;
+  kir::Scope* prev_scope = active_scope;
 
-  auto newFl = new ForLoop(fl->index(), fl->iter_domain(), {}, prev_scope_expr);
+  auto newFl =
+      new kir::ForLoop(fl->index(), fl->iter_domain(), {}, prev_scope_expr);
   pushBack(newFl);
 
   active_scope_expr = newFl;
@@ -63,7 +64,7 @@ void IndexLowering::handle(UnaryOp* uop) {
     return;
   }
 
-  TensorIndex* out = Index::getConsumerIndex(
+  kir::TensorIndex* out = Index::getConsumerIndex(
       ir_utils::asTV(uop->out()), scope_utils::getLoops(active_scope_expr));
   Val* in = uop->in();
   if (ir_utils::isTV(in))
@@ -80,7 +81,7 @@ void IndexLowering::handle(BinaryOp* bop) {
     return;
   }
 
-  TensorIndex* out = Index::getConsumerIndex(
+  kir::TensorIndex* out = Index::getConsumerIndex(
       ir_utils::asTV(bop->out()), scope_utils::getLoops(active_scope_expr));
 
   Val* lhs = bop->lhs();
@@ -107,7 +108,7 @@ void IndexLowering::handle(TernaryOp* top) {
     return;
   }
 
-  TensorIndex* out = Index::getConsumerIndex(
+  kir::TensorIndex* out = Index::getConsumerIndex(
       ir_utils::asTV(top->out()), scope_utils::getLoops(active_scope_expr));
   Val* in1 = top->in1();
   Val* in2 = top->in2();
@@ -161,7 +162,7 @@ void IndexLowering::handle(ReductionOp* rop) {
   }
   auto loops = scope_utils::getLoops(active_scope_expr);
 
-  TensorIndex* out = Index::getConsumerIndex(out_tv, loops);
+  kir::TensorIndex* out = Index::getConsumerIndex(out_tv, loops);
   Val* in = rop->in();
   in = Index::getProducerIndex(
       ir_utils::asTV(in), ir_utils::asTV(rop->out()), loops);
@@ -213,12 +214,13 @@ void IndexLowering::handle(ReductionOp* rop) {
     TensorView* reduce_sync_tv =
         new TensorView(new TensorDomain({sync_id}), DataType::Int);
 
-    auto reduce_buffer = new Allocate(reduce_buffer_tv, MemoryType::Global);
-    auto sync_buffer = new Allocate(reduce_sync_tv, MemoryType::Global);
+    auto reduce_buffer =
+        new kir::Allocate(reduce_buffer_tv, MemoryType::Global);
+    auto sync_buffer = new kir::Allocate(reduce_sync_tv, MemoryType::Global);
 
     pushBack(reduce_buffer);
     pushBack(sync_buffer);
-    pushBack(new GridReduction(
+    pushBack(new kir::GridReduction(
         block_reduction == nullptr
             ? new ReductionOp(rop->getReductionOpType(), rop->init(), out, in)
             : block_reduction,
@@ -237,7 +239,7 @@ void IndexLowering::handle(BroadcastOp* bop) {
       "Cannot have a broadcast operation on something other than a tensor view, but received ",
       bop);
 
-  TensorIndex* out = Index::getConsumerIndex(
+  kir::TensorIndex* out = Index::getConsumerIndex(
       ir_utils::asTV(bop->out()), scope_utils::getLoops(active_scope_expr));
   Val* in = bop->in();
   if (ir_utils::isTV(in))

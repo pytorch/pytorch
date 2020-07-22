@@ -69,7 +69,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   }
 
   // Create the allocation node
-  Allocate* alloc = new Allocate(tv, MemoryType::Local, size);
+  kir::Allocate* alloc = new kir::Allocate(tv, MemoryType::Local, size);
 
   // Place the allocation
   if (alloc_pos == 0) {
@@ -93,7 +93,7 @@ void LoopNestGenerator::openFor(std::pair<IterDomain*, TensorView*> id_pair) {
   compute_at_scope.push_back(id_pair);
   IterDomain* id = id_pair.first;
   if (for_loops.size() > 0) {
-    ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
+    kir::ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
     for_loops.push_back(new_scope);
   } else {
     for_loops.push_back(scope_utils::openFor(nullptr, id));
@@ -173,24 +173,24 @@ void LoopNestGenerator::initReduction(
   // The for loop that we will place the initialization within (alloc_pos - 1),
   // if one exists. Once we're done this inner_fl will be the inner most loop
   // containing the init_stmt
-  ForLoop* inner_fl = nullptr;
+  kir::ForLoop* inner_fl = nullptr;
   if (alloc_pos >= 1)
     inner_fl = for_loops[alloc_pos - 1];
 
   // Work through the iter domains that we need to initialize on, outside to
   // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
-    ForLoop* new_fl;
+    kir::ForLoop* new_fl;
 
     if (id->isThread()) {
       // If based on a thread, make sure we get the named Int right
       std::stringstream ss;
       ss << id->parallel_method();
-      new_fl = new ForLoop(
+      new_fl = new kir::ForLoop(
           new NamedScalar(ss.str(), DataType::Int), id, {}, inner_fl);
     } else {
       // Otherwise it's just a new int-
-      new_fl = new ForLoop(new Int(), id, {}, inner_fl);
+      new_fl = new kir::ForLoop(new Int(), id, {}, inner_fl);
     }
 
     if (init_loop_nest == nullptr) {
@@ -268,7 +268,7 @@ void LoopNestGenerator::handle(Expr* expr) {
           " cannot lower ",
           out->getValType().value());
 
-      pushBack(new Allocate(out, MemoryType::Local, new Int(1)));
+      pushBack(new kir::Allocate(out, MemoryType::Local, new Int(1)));
     }
     pushBack(expr);
     return;

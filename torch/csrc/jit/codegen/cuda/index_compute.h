@@ -79,44 +79,46 @@ class IndexCompute : public BackwardVisitor {
 class Index {
  private:
   // Producer indexing if it's in shared or local memory
-  static TensorIndex* getProducerIndex_impl(
+  static kir::TensorIndex* getProducerIndex_impl(
       const TensorView* producer,
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
-  static TensorIndex* getConsumerIndex_impl(
+  static kir::TensorIndex* getConsumerIndex_impl(
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Producer if it's in global memory
-  static TensorIndex* getGlobalProducerIndex(
+  static kir::TensorIndex* getGlobalProducerIndex(
       const TensorView* producer,
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
-  static TensorIndex* getGlobalConsumerIndex(
+  static kir::TensorIndex* getGlobalConsumerIndex(
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
  public:
   // Indexing functions
   // Consumer = Producer
   // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
   // Producer indexing dispatch
-  static TensorIndex* getProducerIndex(
+  static kir::TensorIndex* getProducerIndex(
       const TensorView* producer,
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer index dispatch
-  static TensorIndex* getConsumerIndex(
+  static kir::TensorIndex* getConsumerIndex(
       const TensorView* consumer,
-      const std::vector<ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Will run inds through back prop index computation for tv
-  static TensorIndex* manualBackprop(TensorView tv, std::vector<Val*> inds);
+  static kir::TensorIndex* manualBackprop(
+      TensorView tv,
+      std::vector<Val*> inds);
 };
 
 } // namespace fuser

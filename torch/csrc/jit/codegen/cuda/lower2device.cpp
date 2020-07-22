@@ -17,7 +17,7 @@ namespace {
 
 class GridReductionBuffers : OptOutDispatch {
  public:
-  static std::vector<Allocate*> getGlobalAllocs(
+  static std::vector<kir::Allocate*> getGlobalAllocs(
       const std::vector<Expr*>& exprs) {
     GridReductionBuffers fgr;
     for (auto expr : exprs) {
@@ -26,7 +26,8 @@ class GridReductionBuffers : OptOutDispatch {
     return fgr.global_allocations_;
   }
 
-  static std::vector<Allocate*> getSyncAllocs(const std::vector<Expr*>& exprs) {
+  static std::vector<kir::Allocate*> getSyncAllocs(
+      const std::vector<Expr*>& exprs) {
     GridReductionBuffers fgr;
     for (auto expr : exprs) {
       fgr.handle(expr);
@@ -35,8 +36,8 @@ class GridReductionBuffers : OptOutDispatch {
   }
 
  private:
-  std::vector<Allocate*> global_allocations_;
-  std::vector<Allocate*> sync_allocations_;
+  std::vector<kir::Allocate*> global_allocations_;
+  std::vector<kir::Allocate*> sync_allocations_;
 
   GridReductionBuffers() = default;
 
@@ -44,13 +45,13 @@ class GridReductionBuffers : OptOutDispatch {
     OptOutDispatch::handle(expr);
   }
 
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for (auto expr : fl->body().exprs()) {
       OptOutDispatch::handle(expr);
     }
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->body().exprs()) {
       OptOutDispatch::handle(expr);
     }
@@ -60,7 +61,7 @@ class GridReductionBuffers : OptOutDispatch {
     }
   }
 
-  void handle(GridReduction* gr) final {
+  void handle(kir::GridReduction* gr) final {
     global_allocations_.push_back(gr->reduction_buffer());
     sync_allocations_.push_back(gr->sync_buffer());
   }
@@ -98,7 +99,7 @@ std::ostream& GPULower::printKernel(
     std::ostream& os,
     const std::string& kernel_name) {
   FusionGuard fg(fusion_);
-  std::vector<Allocate*> allocs;
+  std::vector<kir::Allocate*> allocs;
   allocs.insert(
       allocs.end(), global_allocations_.begin(), global_allocations_.end());
   allocs.insert(
@@ -109,7 +110,7 @@ std::ostream& GPULower::printKernel(
       allocs.begin(),
       allocs.end(),
       global_tensors.begin(),
-      [](Allocate* alloc) { return alloc->buffer(); });
+      [](kir::Allocate* alloc) { return alloc->buffer(); });
 
   IRPrinter irp(os);
   irp.printKernel(lowered_exprs_, kernel_name, global_tensors);

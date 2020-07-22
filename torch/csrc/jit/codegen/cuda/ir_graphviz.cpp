@@ -350,7 +350,7 @@ void IrGraphGenerator::handle(const IterDomain* id) {
   }
 }
 
-void IrGraphGenerator::handle(const TensorIndex* ti) {
+void IrGraphGenerator::handle(const kir::TensorIndex* ti) {
   graph_def_ << "    " << getid(ti) << " [label=\"TensorIndex\", "
              << "shape=rarrow, color=gray, fontsize=10];\n";
 
@@ -470,7 +470,7 @@ void IrGraphGenerator::handle(const ReductionOp* op) {
   addArc(op, op->out());
 }
 
-void IrGraphGenerator::handle(const GridReduction* op) {
+void IrGraphGenerator::handle(const kir::GridReduction* op) {
   printExpr(op, "Grid Reduction");
 
   // inputs & outputs
@@ -479,7 +479,7 @@ void IrGraphGenerator::handle(const GridReduction* op) {
   addArc(op->sync_buffer(), op);
 }
 
-void IrGraphGenerator::handle(const ForLoop* for_loop) {
+void IrGraphGenerator::handle(const kir::ForLoop* for_loop) {
   printExpr(for_loop, "ForLoop");
   addArc(for_loop->index(), for_loop);
   addArc(for_loop->iter_domain(), for_loop);
@@ -488,7 +488,7 @@ void IrGraphGenerator::handle(const ForLoop* for_loop) {
   }
 }
 
-void IrGraphGenerator::handle(const IfThenElse* if_then_else) {
+void IrGraphGenerator::handle(const kir::IfThenElse* if_then_else) {
   printExpr(if_then_else, "IfThenElse");
   addArc(if_then_else->cond(), if_then_else);
   if (if_then_else->parentScope()) {
@@ -496,7 +496,7 @@ void IrGraphGenerator::handle(const IfThenElse* if_then_else) {
   }
 }
 
-void IrGraphGenerator::handle(const Allocate* allocate) {
+void IrGraphGenerator::handle(const kir::Allocate* allocate) {
   std::stringstream msg;
   msg << "Allocate( memory type = " << allocate->getMemoryType() << ")";
 

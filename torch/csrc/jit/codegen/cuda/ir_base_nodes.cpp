@@ -107,6 +107,7 @@ class ConstCheck : OptOutConstDispatch {
 };
 
 } // namespace
+
 bool Val::isConstScalar() const {
   if (!isScalar())
     return false;
@@ -139,62 +140,6 @@ c10::optional<DataType> Val::getDataType() const {
 
 Expr* Val::getOrigin() {
   return (fusion_->origin(this));
-}
-
-Scope::Scope(const Scope* src, IrCloner* ir_cloner)
-    : exprs_(ir_cloner->clone(src->exprs_)) {}
-
-void Scope::insert_before(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if ((*it)->sameAs(ref))
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(it, expr);
-}
-
-void Scope::insert_after(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(++it, expr);
-}
-
-void Scope::erase(Expr* ref) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.erase(it);
-}
-
-bool Scope::contains(Expr* expr) const {
-  for (auto e : exprs_)
-    if (e == expr)
-      return true;
-  return false;
-}
-
-bool Scope::sameAs(const Scope& other) const {
-  if (other.exprs().size() != this->exprs().size())
-    return false;
-  for (decltype(exprs().size()) i{0}; i < exprs().size(); i++)
-    if (other.exprs()[i] != exprs()[i])
-      return false;
-  return true;
-}
-
-void Scope::clear() {
-  this->exprs_ = std::vector<Expr*>();
 }
 
 // We don't register with the active fusion in Expr as this needs to be done

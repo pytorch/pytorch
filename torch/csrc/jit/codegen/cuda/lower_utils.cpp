@@ -13,26 +13,26 @@ namespace {
 
 class Loops : private OptInDispatch {
  private:
-  std::deque<ForLoop*> loops;
-  void handle(ForLoop* fl) final {
+  std::deque<kir::ForLoop*> loops;
+  void handle(kir::ForLoop* fl) final {
     loops.insert(loops.begin(), fl);
   }
 
-  void handle(IfThenElse* ite) final {}
+  void handle(kir::IfThenElse* ite) final {}
 
   void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
   }
 
  public:
-  static std::vector<ForLoop*> getLoops(Expr* scope) {
+  static std::vector<kir::ForLoop*> getLoops(Expr* scope) {
     Loops loops;
     Expr* it = scope;
     while (it != nullptr) {
       loops.handle(it);
       it = scope_utils::getParent(it);
     }
-    return std::vector<ForLoop*>(loops.loops.begin(), loops.loops.end());
+    return std::vector<kir::ForLoop*>(loops.loops.begin(), loops.loops.end());
   }
 };
 
@@ -40,11 +40,11 @@ class forLoopCount : private OptInDispatch {
  private:
   unsigned int count_ = 0;
 
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     count_++;
   }
 
-  void handle(IfThenElse* ite) final {}
+  void handle(kir::IfThenElse* ite) final {}
 
   void handle(Expr* expr) final {
     OptInDispatch::handle(expr);
@@ -65,11 +65,11 @@ class forLoopCount : private OptInDispatch {
 class scopePushBack : private OptInDispatch {
  private:
   Expr* expr_;
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     fl->body().push_back(expr_);
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     ite->body().push_back(expr_);
   }
 
@@ -93,11 +93,11 @@ class scopeInsertBefore : private OptInDispatch {
  private:
   Expr* ref_;
   Expr* expr_;
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     fl->body().insert_before(ref_, expr_);
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     ite->body().insert_before(ref_, expr_);
   }
 
@@ -121,11 +121,11 @@ class parentScope : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
 
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     parent_ = fl->parentScope();
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     parent_ = ite->parentScope();
   }
 
@@ -143,11 +143,11 @@ class parentScope : private OptInDispatch {
 
 class scopeClearExprs : private OptInDispatch {
  private:
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     fl->body().clear();
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     ite->body().clear();
   }
 
@@ -176,15 +176,15 @@ class CloneLoopNest : public OptOutMutator {
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
 
-  Statement* mutate(ForLoop* fl) final {
+  Statement* mutate(kir::ForLoop* fl) final {
     std::vector<Expr*> mutated_exprs;
     for (Expr* expr : fl->body().exprs()) {
       mutated_exprs.push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
     }
     if (fl == to_clone_)
-      return new ForLoop(
+      return new kir::ForLoop(
           fl->index(), fl->iter_domain(), mutated_exprs, parent_scope_);
-    return new ForLoop(
+    return new kir::ForLoop(
         fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
   }
 
@@ -192,7 +192,7 @@ class CloneLoopNest : public OptOutMutator {
       : parent_scope_(_parent_scope), to_clone_(_to_clone) {}
 
  public:
-  static ForLoop* getClone(ForLoop* _to_clone, Expr* _parent_scope) {
+  static kir::ForLoop* getClone(kir::ForLoop* _to_clone, Expr* _parent_scope) {
     TORCH_INTERNAL_ASSERT(
         _to_clone != nullptr,
         "Tried to clone a scope, but received a nullptr.");
@@ -214,7 +214,7 @@ class ReplaceExprsInScope : public OptOutDispatch {
   explicit ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> replacement_map)
       : replacement_map_(std::move(replacement_map)) {}
 
-  void handleScope(Scope& scope) {
+  void handleScope(kir::Scope& scope) {
     for (size_t i = 0; i < scope.size(); ++i) {
       const auto it = replacement_map_.find(scope[i]);
       if (it == replacement_map_.end()) {
@@ -229,11 +229,11 @@ class ReplaceExprsInScope : public OptOutDispatch {
     OptOutDispatch::handle(expr);
   }
 
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     handleScope(fl->body());
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     handleScope(ite->body());
     handleScope(ite->elseBody());
   }
@@ -246,7 +246,7 @@ class FirstInnerMostScope : private OptInDispatch {
  private:
   Expr* active_scope = nullptr;
 
-  void handle(ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for (auto expr : fl->body().exprs()) {
       if (ir_utils::isScope(expr)) {
         active_scope = expr;
@@ -256,7 +256,7 @@ class FirstInnerMostScope : private OptInDispatch {
     active_scope = nullptr;
   }
 
-  void handle(IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->body().exprs()) {
       if (ir_utils::isScope(expr)) {
         active_scope = expr;
@@ -299,9 +299,9 @@ class FirstInnerMostScope : private OptInDispatch {
 } // namespace
 
 // Grab the ForLoop starting from scope working out
-std::vector<ForLoop*> getLoops(Expr* scope) {
+std::vector<kir::ForLoop*> getLoops(Expr* scope) {
   if (scope == nullptr)
-    return std::vector<ForLoop*>();
+    return std::vector<kir::ForLoop*>();
   assertScope(scope);
   return Loops::getLoops(scope);
 }
@@ -337,15 +337,15 @@ Expr* getParent(Expr* scope) {
 }
 
 // Open a new inner most for loop
-ForLoop* openFor(Expr* scope, IterDomain* id) {
-  ForLoop* new_scope = nullptr;
+kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
+  kir::ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     std::stringstream ss;
     ss << id->parallel_method();
-    new_scope =
-        new ForLoop(new NamedScalar(ss.str(), DataType::Int), id, {}, scope);
+    new_scope = new kir::ForLoop(
+        new NamedScalar(ss.str(), DataType::Int), id, {}, scope);
   } else {
-    new_scope = new ForLoop(new Int(), id, {}, scope);
+    new_scope = new kir::ForLoop(new Int(), id, {}, scope);
   }
   if (scope != nullptr)
     pushBack(scope, new_scope);
@@ -368,7 +368,7 @@ Expr* clearScope(Expr* scope) {
   return scope;
 }
 
-ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope) {
+kir::ForLoop* cloneLoopNest(kir::ForLoop* to_clone, Expr* parent_scope) {
   return CloneLoopNest::getClone(to_clone, parent_scope);
 }
 
@@ -389,17 +389,18 @@ Expr* firstInnerMostScope(Expr* scope) {
 
 namespace ir_utils {
 
-std::vector<Val*> indices(std::vector<ForLoop*> loops) {
+std::vector<Val*> indices(std::vector<kir::ForLoop*> loops) {
   std::vector<Val*> inds(loops.size());
-  std::transform(loops.begin(), loops.end(), inds.begin(), [](ForLoop* fl) {
-    return fl->index();
-  });
+  std::transform(
+      loops.begin(), loops.end(), inds.begin(), [](kir::ForLoop* fl) {
+        return fl->index();
+      });
   return inds;
 }
 
-std::vector<IterDomain*> iterDomains(std::vector<ForLoop*> loops) {
+std::vector<IterDomain*> iterDomains(std::vector<kir::ForLoop*> loops) {
   std::vector<IterDomain*> ids(loops.size());
-  std::transform(loops.begin(), loops.end(), ids.begin(), [](ForLoop* fl) {
+  std::transform(loops.begin(), loops.end(), ids.begin(), [](kir::ForLoop* fl) {
     return fl->iter_domain();
   });
   return ids;
@@ -450,10 +451,10 @@ bool isScope(const Expr* expr) {
       expr->getExprType() == ExprType::IfThenElse;
 }
 
-ForLoop* asForLoop(Statement* stmt) {
+kir::ForLoop* asForLoop(Statement* stmt) {
   Expr* expr = asExpr(stmt);
   TORCH_INTERNAL_ASSERT(expr->getExprType() == ExprType::ForLoop);
-  return expr->as<ForLoop>();
+  return expr->as<kir::ForLoop>();
 }
 
 const TensorView* asConstTV(const Val* val) {
@@ -465,7 +466,7 @@ bool isUnrolledFor(const Expr* expr) {
   if (expr->getExprType() != ExprType::ForLoop) {
     return false;
   }
-  return expr->as<ForLoop>()->iter_domain()->parallel_method() ==
+  return expr->as<kir::ForLoop>()->iter_domain()->parallel_method() ==
       ParallelType::Unroll;
 }
 
@@ -578,7 +579,7 @@ ParallelTypeBitmap getParallelBroadcastDomains(
     const ThreadPredicateMap& preds) {
   const Val* bop_out = bop->out();
   if (bop_out->getValType().value() == ValType::TensorIndex) {
-    bop_out = bop_out->as<TensorIndex>()->view();
+    bop_out = bop_out->as<kir::TensorIndex>()->view();
   }
   TORCH_INTERNAL_ASSERT(
       bop_out->getValType().value() == ValType::TensorView,

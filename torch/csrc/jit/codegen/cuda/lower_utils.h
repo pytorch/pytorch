@@ -17,7 +17,7 @@ class ThreadPredicateMap;
 namespace scope_utils {
 
 // Grab the ForLoop starting from scope working out
-std::vector<ForLoop*> getLoops(Expr* scope);
+std::vector<kir::ForLoop*> getLoops(Expr* scope);
 
 // Track how far our for loop scope is
 unsigned int computeForDepth(Expr* scope);
@@ -32,7 +32,7 @@ void insertBefore(Expr* scope, Expr* ref, Expr* expr);
 Expr* getParent(Expr* scope);
 
 // Open a new inner most for loop
-ForLoop* openFor(Expr* scope, IterDomain*);
+kir::ForLoop* openFor(Expr* scope, IterDomain*);
 
 // Close the inner most for loop
 Expr* closeScope(Expr* scope);
@@ -42,7 +42,7 @@ Expr* clearScope(Expr* scope);
 
 // Provide a new for loop matching the one provided, sets parent_scope as
 // parent_scope, but does not insert into parent scope.
-ForLoop* cloneLoopNest(ForLoop* to_clone, Expr* parent_scope);
+kir::ForLoop* cloneLoopNest(kir::ForLoop* to_clone, Expr* parent_scope);
 
 // Run through a scope and replace expressions inside with replacement_map
 void replaceExprsInScope(
@@ -55,9 +55,9 @@ Expr* firstInnerMostScope(Expr* scope);
 
 namespace ir_utils {
 
-std::vector<Val*> indices(std::vector<ForLoop*>);
+std::vector<Val*> indices(std::vector<kir::ForLoop*>);
 
-std::vector<IterDomain*> iterDomains(std::vector<ForLoop*>);
+std::vector<IterDomain*> iterDomains(std::vector<kir::ForLoop*>);
 
 bool isTV(const Val* const);
 
@@ -73,7 +73,7 @@ Expr* asExpr(Statement*);
 
 TensorView* asTV(Val*);
 
-ForLoop* asForLoop(Statement*);
+kir::ForLoop* asForLoop(Statement*);
 
 const TensorView* asConstTV(const Val* const);
 

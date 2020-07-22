@@ -27,7 +27,7 @@ class TORCH_CUDA_API Bool : public Val {
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
-  Bool(bool _value)
+  explicit Bool(bool _value)
       : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
 
   Bool(const Bool* src, IrCloner* ir_cloner);
@@ -67,7 +67,7 @@ class TORCH_CUDA_API Float : public Val {
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
 
-  Float(ScalarType _value)
+  explicit Float(ScalarType _value)
       : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
 
   Float(const Float* src, IrCloner* ir_cloner);
@@ -105,7 +105,7 @@ class TORCH_CUDA_API Half : public Val {
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
 
-  Half(float _value)
+  explicit Half(float _value)
       : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
 
   Half(const Half* src, IrCloner* ir_cloner);
@@ -142,7 +142,7 @@ class TORCH_CUDA_API Int : public Val {
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
-  Int(ScalarType _value)
+  explicit Int(ScalarType _value)
       : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
 
   Int(const Int* src, IrCloner* ir_cloner);

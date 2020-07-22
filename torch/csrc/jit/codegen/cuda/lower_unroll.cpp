@@ -60,7 +60,7 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
     }
   }
   std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
-      new TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
+      new kir::TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
 
   if (thread_pred != nullptr) {
     all_preds.push_back(thread_pred);
@@ -93,7 +93,7 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
 
 // This function is one huge mess that should be refactored.
 // It handles the unrolling and predicate generation
-void UnrollPass::handle(ForLoop* fl) {
+void UnrollPass::handle(kir::ForLoop* fl) {
   // Setup for loop scoping
   for_loops.push_back(fl);
   bool prev_unroll = within_unroll;
@@ -139,7 +139,7 @@ void UnrollPass::handle(ForLoop* fl) {
         "Error unrolling loops, expected an unrolled loop but wasn't found.");
 
     // This is the outer most loop that needs to be unrolled
-    ForLoop* first_unroll = *it;
+    kir::ForLoop* first_unroll = *it;
 
     // Indicies inside the unroll
     while (it != for_loops.end()) {
@@ -155,16 +155,16 @@ void UnrollPass::handle(ForLoop* fl) {
     Bool* unroll_predicate =
         getPredicate(out, unroll_pred_inds, getThreadPredicate(out));
     // Make the IfThenElse controlling the unrolling
-    IfThenElse* unroll_ite =
-        new IfThenElse(unroll_predicate, {}, {}, first_unroll->parentScope());
+    kir::IfThenElse* unroll_ite = new kir::IfThenElse(
+        unroll_predicate, {}, {}, first_unroll->parentScope());
 
     // Get the loop nest for the unrolled path
-    ForLoop* unrolled_loop =
+    kir::ForLoop* unrolled_loop =
         scope_utils::cloneLoopNest(first_unroll, unroll_ite);
     unroll_ite->body().push_back(unrolled_loop);
 
     // Loop nest for inlined path
-    ForLoop* inlined_loop =
+    kir::ForLoop* inlined_loop =
         scope_utils::cloneLoopNest(first_unroll, unroll_ite);
     unroll_ite->elseBody().push_back(inlined_loop);
 
@@ -182,8 +182,8 @@ void UnrollPass::handle(ForLoop* fl) {
       Bool* inline_predicate = getPredicate(
           out, ir_utils::indices(for_loops), getThreadPredicate(out));
 
-      IfThenElse* inline_ite =
-          new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
+      kir::IfThenElse* inline_ite = new kir::IfThenElse(
+          inline_predicate, {expr}, {}, inner_most_inlined_loop);
       std::unordered_map<Expr*, Expr*> inline_replacement_map;
       inline_replacement_map.emplace(std::pair<Expr*, Expr*>(expr, inline_ite));
       scope_utils::replaceExprsInScope(
@@ -205,8 +205,8 @@ void UnrollPass::handle(ForLoop* fl) {
 
       // If we need a predicate, put expr inside an if then else
       if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
-        IfThenElse* inline_ite =
-            new IfThenElse(pred, {expr}, {}, for_loops.back());
+        kir::IfThenElse* inline_ite =
+            new kir::IfThenElse(pred, {expr}, {}, for_loops.back());
         for_loops.back()->body().insert_before(expr, inline_ite);
         for_loops.back()->body().erase(expr);
       }

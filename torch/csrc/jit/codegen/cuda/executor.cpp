@@ -1,6 +1,8 @@
+
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 

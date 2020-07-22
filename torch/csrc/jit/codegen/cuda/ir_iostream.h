@@ -13,34 +13,40 @@ namespace fuser {
 
 class Fusion;
 
+// Hierarchal dispatch functions for handle
 class Statement;
-
-class Val;
 class Expr;
+class Val;
 
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class ReductionOp;
-class GridReduction;
-class BroadcastOp;
-
-class ForLoop;
-class IfThenElse;
-
+// Vals
+class IterDomain;
 class TensorDomain;
 class TensorView;
-class IterDomain;
-class TensorIndex;
-
-class Split;
-class Merge;
-
 class Bool;
 class Float;
 class Half;
 class Int;
-class Add;
+class NamedScalar;
+
+// Exprs
+class Split;
+class Merge;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
+
+// Kernel IR
+namespace kir {
+
+class TensorIndex;
+class Allocate;
+class ForLoop;
+class IfThenElse;
+class GridReduction;
+
+} // namespace kir
 
 /*
  * Define pretty printing functions for all nodes. handle is used so we can take
@@ -98,7 +104,7 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const TensorIndex*) override;
+  void handle(const kir::TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -110,12 +116,12 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const BinaryOp*) override;
   void handle(const TernaryOp*) override;
   void handle(const ReductionOp*) override;
-  void handle(const GridReduction*) override;
+  void handle(const kir::GridReduction*) override;
   void handle(const BroadcastOp*) override;
 
-  void handle(const ForLoop*) override;
-  void handle(const IfThenElse*) override;
-  void handle(const Allocate*) override;
+  void handle(const kir::ForLoop*) override;
+  void handle(const kir::IfThenElse*) override;
+  void handle(const kir::Allocate*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;

@@ -59,7 +59,6 @@ class Val;
 class IterDomain;
 class TensorDomain;
 class TensorView;
-class TensorIndex;
 class Bool;
 class Float;
 class Half;
@@ -73,11 +72,18 @@ class UnaryOp;
 class BinaryOp;
 class TernaryOp;
 class ReductionOp;
-class GridReduction;
 class BroadcastOp;
+
+// Kernel IR
+namespace kir {
+
+class TensorIndex;
+class Allocate;
 class ForLoop;
 class IfThenElse;
-class Allocate;
+class GridReduction;
+
+} // namespace kir
 
 /*
  * By default, all IR nodes are handled in this dispatch, and will call an empty
@@ -103,7 +109,7 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const IterDomain*) {}
   virtual void handle(const TensorDomain*) {}
   virtual void handle(const TensorView*) {}
-  virtual void handle(const TensorIndex*) {}
+  virtual void handle(const kir::TensorIndex*) {}
   virtual void handle(const Bool*) {}
   virtual void handle(const Float*) {}
   virtual void handle(const Half*) {}
@@ -117,11 +123,11 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const BinaryOp*) {}
   virtual void handle(const TernaryOp*) {}
   virtual void handle(const ReductionOp*) {}
-  virtual void handle(const GridReduction*) {}
+  virtual void handle(const kir::GridReduction*) {}
   virtual void handle(const BroadcastOp*) {}
-  virtual void handle(const ForLoop*) {}
-  virtual void handle(const IfThenElse*) {}
-  virtual void handle(const Allocate*) {}
+  virtual void handle(const kir::ForLoop*) {}
+  virtual void handle(const kir::IfThenElse*) {}
+  virtual void handle(const kir::Allocate*) {}
 };
 
 class TORCH_CUDA_API OptOutDispatch {
@@ -144,7 +150,7 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(IterDomain*) {}
   virtual void handle(TensorDomain*) {}
   virtual void handle(TensorView*) {}
-  virtual void handle(TensorIndex*) {}
+  virtual void handle(kir::TensorIndex*) {}
   virtual void handle(Bool*) {}
   virtual void handle(Float*) {}
   virtual void handle(Half*) {}
@@ -158,11 +164,11 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(BinaryOp*) {}
   virtual void handle(TernaryOp*) {}
   virtual void handle(ReductionOp*) {}
-  virtual void handle(GridReduction*) {}
+  virtual void handle(kir::GridReduction*) {}
   virtual void handle(BroadcastOp*) {}
-  virtual void handle(ForLoop*) {}
-  virtual void handle(IfThenElse*) {}
-  virtual void handle(Allocate*) {}
+  virtual void handle(kir::ForLoop*) {}
+  virtual void handle(kir::IfThenElse*) {}
+  virtual void handle(kir::Allocate*) {}
 };
 
 class TORCH_CUDA_API OptInConstDispatch {
@@ -191,7 +197,7 @@ class TORCH_CUDA_API OptInConstDispatch {
   virtual void handle(const TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
-  virtual void handle(const TensorIndex*) {
+  virtual void handle(const kir::TensorIndex*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorIndex.");
   }
   virtual void handle(const Bool*) {
@@ -229,19 +235,19 @@ class TORCH_CUDA_API OptInConstDispatch {
   virtual void handle(const ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
-  virtual void handle(const GridReduction*) {
+  virtual void handle(const kir::GridReduction*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GridReduction.");
   }
   virtual void handle(const BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
-  virtual void handle(const ForLoop*) {
+  virtual void handle(const kir::ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
   }
-  virtual void handle(const Allocate*) {
+  virtual void handle(const kir::Allocate*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
   }
-  virtual void handle(const IfThenElse*) {
+  virtual void handle(const kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
   }
 };
@@ -272,7 +278,7 @@ class TORCH_CUDA_API OptInDispatch {
   virtual void handle(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
-  virtual void handle(TensorIndex*) {
+  virtual void handle(kir::TensorIndex*) {
     AT_ERROR("Handle not overriden for TensorIndex.");
   }
   virtual void handle(Bool*) {
@@ -310,19 +316,19 @@ class TORCH_CUDA_API OptInDispatch {
   virtual void handle(ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
-  virtual void handle(GridReduction*) {
+  virtual void handle(kir::GridReduction*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GridReduction.");
   }
   virtual void handle(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
-  virtual void handle(ForLoop*) {
+  virtual void handle(kir::ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
   }
-  virtual void handle(Allocate*) {
+  virtual void handle(kir::Allocate*) {
     AT_ERROR("Handle not overriden for Allocate.");
   }
-  virtual void handle(IfThenElse*) {
+  virtual void handle(kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
   }
 };
@@ -370,7 +376,7 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
   virtual Statement* mutate(TensorView*);
-  virtual Statement* mutate(TensorIndex*);
+  virtual Statement* mutate(kir::TensorIndex*);
   virtual Statement* mutate(Bool*);
   virtual Statement* mutate(Float*);
   virtual Statement* mutate(Half*);
@@ -384,11 +390,11 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(BinaryOp*);
   virtual Statement* mutate(TernaryOp*);
   virtual Statement* mutate(ReductionOp*);
-  virtual Statement* mutate(GridReduction*);
+  virtual Statement* mutate(kir::GridReduction*);
   virtual Statement* mutate(BroadcastOp*);
-  virtual Statement* mutate(ForLoop*);
-  virtual Statement* mutate(IfThenElse*);
-  virtual Statement* mutate(Allocate*);
+  virtual Statement* mutate(kir::ForLoop*);
+  virtual Statement* mutate(kir::IfThenElse*);
+  virtual Statement* mutate(kir::Allocate*);
 };
 
 class TORCH_CUDA_API OptInMutator {
@@ -427,7 +433,7 @@ class TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
   }
-  virtual Statement* mutate(TensorIndex*) {
+  virtual Statement* mutate(kir::TensorIndex*) {
     AT_ERROR("Mutate not overriden for TensorIndex.");
   }
   virtual Statement* mutate(Bool*) {
@@ -462,19 +468,19 @@ class TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
   }
-  virtual Statement* mutate(GridReduction*) {
+  virtual Statement* mutate(kir::GridReduction*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GridReduction.");
   }
   virtual Statement* mutate(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");
   }
-  virtual Statement* mutate(ForLoop*) {
+  virtual Statement* mutate(kir::ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
   }
-  virtual Statement* mutate(Allocate*) {
+  virtual Statement* mutate(kir::Allocate*) {
     AT_ERROR("Mutate not overriden for Allocate.");
   }
-  virtual Statement* mutate(IfThenElse*) {
+  virtual Statement* mutate(kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IfThenElse.");
   }
 };

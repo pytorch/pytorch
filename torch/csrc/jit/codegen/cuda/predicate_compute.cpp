@@ -8,7 +8,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-bool PredicateCompute::hasPredicates(const TensorIndex* ti) {
+bool PredicateCompute::hasPredicates(const kir::TensorIndex* ti) {
   std::vector<Bool*> preds;
   for (auto ind : ti->indices())
     if (FusionGuard::getCurFusion()->origin(ind) != nullptr)
@@ -16,7 +16,8 @@ bool PredicateCompute::hasPredicates(const TensorIndex* ti) {
   return false;
 }
 
-std::vector<Bool*> PredicateCompute::computePredicates(const TensorIndex* ti) {
+std::vector<Bool*> PredicateCompute::computePredicates(
+    const kir::TensorIndex* ti) {
   const TensorView* tv = ti->view();
   const std::vector<IterDomain*>& root = tv->getRootDomain();
 
