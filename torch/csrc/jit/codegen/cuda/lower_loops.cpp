@@ -25,26 +25,35 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
       break;
     }
+    // If we found an unroll, we want to place the allocation outside the unroll
+    if (alloc_pos < tv->nDims() &&
+        tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
+            ParallelType::Unroll) {
+      break;
+    }
     alloc_pos++;
   }
 
   // Grab the dimensions the allocation will be based on
   std::vector<Val*> alloc_dims;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
-    IterDomain* dim = tv->getComputeAtAxis(i).first;
+    IterDomain* compute_at_dim = tv->getComputeAtAxis(i).first;
+    IterDomain* local_dim = tv->axis(i);
     if (
         // If shared memory, don't use any IDs bound to a grid dimension
-        (tv->memory_type_ == MemoryType::Shared && dim->isBlockDim()) ||
+        (tv->memory_type_ == MemoryType::Shared &&
+         compute_at_dim->isBlockDim()) ||
         // If local memory, don't use any IDs bound to a grid or block dimension
-        (tv->memory_type_ == MemoryType::Local && dim->isThread()) ||
+        (tv->memory_type_ == MemoryType::Local && compute_at_dim->isThread()) ||
         // If we're reducing this dimension, don't use it in the allocation
         // computation
-        dim->isReduction() ||
+        local_dim->isReduction() ||
         // If this is a broadcast dimension, don't use it in the allocation
         // computation
-        dim->isBroadcast())
+        local_dim->isBroadcast()) {
       continue;
-    alloc_dims.push_back(dim->extent());
+    }
+    alloc_dims.push_back(compute_at_dim->extent());
   }
 
   // Multiply all the dimensions we're going to use for the allocation together
@@ -282,8 +291,9 @@ void LoopNestGenerator::handle(Expr* expr) {
   Expr* alloc_stmt = nullptr;
   //  3) Allocate the output.
   if (!FusionGuard::getCurFusion()->hasInput(out) &&
-      !FusionGuard::getCurFusion()->hasOutput(out))
+      !FusionGuard::getCurFusion()->hasOutput(out)) {
     alloc_stmt = pushAlloc(out);
+  }
 
   //  4) If this is a reduction, initialize the output (open for loops to inner
   //  most, predicate, initialize, place next after allocation if exists, close

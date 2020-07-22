@@ -1219,8 +1219,8 @@ void testGPU_FusionSimplePWise() {
   tv3->merge(0);
 
   // Split by n_threads
-  tv3->split(-1, 128 * 2);
-  tv3->split(-1, 128);
+  tv3->split(0, 128);
+  tv3->split(0, 4);
 
   // For all inputs, computeAt the output inline, temporaries should be squeezed
   // between them
@@ -1229,7 +1229,7 @@ void testGPU_FusionSimplePWise() {
 
   // Parallelize TV3
   tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->axis(-2)->parallelize(ParallelType::TIDy);
+  tv3->axis(-2)->parallelize(ParallelType::Unroll);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
