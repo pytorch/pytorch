@@ -13,7 +13,6 @@ class adaroundObeserver(torch.quantization.observer.MinMaxObserver):
 def loss_function(model, input):
     # model should contain its scaling parameters
     # its activation_post_process should have an observer with V
-
     scale = something
     weights = something
     beta = something

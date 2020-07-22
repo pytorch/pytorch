@@ -1503,35 +1503,17 @@ class _DistTestBase(object):
         self._barrier()
 
     # AllToAll
-    def _test_all_to_all_single_equal_split_helper(
-        self,
-        group,
-        group_id,
-        rank,
-        cuda=False,
-        rank_to_GPU=None,
-    ):
+    def _test_all_to_all_single_equal_split_helper(self, group, group_id, rank):
         if group_id is not None:
             size = len(group)
             in_tensor = torch.ones([size, size]) * rank
             expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
             out_tensor = torch.ones([size, size]) * -1
-            if cuda:
-                in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
-                expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
-                out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
             dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
             self.assertEqual(out_tensor, expected_tensor)
         self._barrier()
 
-    def _test_all_to_all_single_unequal_split_helper(
-        self,
-        group,
-        group_id,
-        rank,
-        cuda=False,
-        rank_to_GPU=None,
-    ):
+    def _test_all_to_all_single_unequal_split_helper(self, group, group_id, rank):
         if group_id is not None:
             size = len(group)
             in_splits = [i + 1 for i in group]
@@ -1539,10 +1521,6 @@ class _DistTestBase(object):
             in_tensor = torch.ones([sum(in_splits), size]) * rank
             out_tensor = torch.ones([(rank + 1) * size, size])
             expected_tensor = torch.cat([torch.ones([rank + 1, size]) * i for i in group])
-            if cuda:
-                in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
-                expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
-                out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
             dist.all_to_all_single(
                 out_tensor, in_tensor, out_splits, in_splits, group=group_id)
             self.assertEqual(out_tensor, expected_tensor)
@@ -1562,106 +1540,32 @@ class _DistTestBase(object):
                 self.assertEqual(t1, t2)
         self._barrier()
 
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     def test_all_to_all_single_equal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    def test_all_to_all_single_equal_split_cuda(self):
-        group, group_id, rank = self._init_global_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_equal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
-
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     def test_all_to_all_single_unequal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
-
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    def test_all_to_all_single_unequal_split_cuda(self):
-        group, group_id, rank = self._init_global_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_unequal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     def test_all_to_all(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_helper(group, group_id, rank)
 
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     @skip_if_small_worldsize
     def test_all_to_all_single_equal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    @skip_if_small_worldsize
-    def test_all_to_all_single_equal_split_group_cuda(self):
-        group, group_id, rank = self._init_group_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_equal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
-
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     @skip_if_small_worldsize
     def test_all_to_all_single_unequal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
-
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    @skip_if_small_worldsize
-    def test_all_to_all_single_unequal_split_group_cuda(self):
-        group, group_id, rank = self._init_global_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_unequal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     @skip_if_small_worldsize
@@ -1669,51 +1573,15 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_helper(group, group_id, rank)
 
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     def test_all_to_all_single_equal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    def test_all_to_all_single_equal_split_full_group_cuda(self):
-        group, group_id, rank = self._init_full_group_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_equal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
-
-    @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
-    )
+    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
     def test_all_to_all_single_unequal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
-
-    @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
-    )
-    @skip_if_no_gpu
-    @skip_if_rocm
-    def test_all_to_all_single_unequal_split_full_group_cuda(self):
-        group, group_id, rank = self._init_full_group_test()
-        rank_to_GPU = self._init_multigpu_helper()
-        self._test_all_to_all_single_unequal_split_helper(
-            group,
-            group_id,
-            rank,
-            True,
-            rank_to_GPU,
-        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     def test_all_to_all_full_group(self):
