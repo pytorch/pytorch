@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 namespace torch {
@@ -9,13 +10,11 @@ namespace fuser {
 
 /* ITER VISITOR */
 
-std::vector<Statement*> IterVisitor::next(
-    Statement* statement,
-    bool respect_compute_at) {
+std::vector<Statement*> IterVisitor::next(Statement* statement) {
   if (statement->isVal())
     return next(statement->as<Val>());
   else if (statement->isExpr())
-    return next(statement->as<Expr>(), respect_compute_at);
+    return next(statement->as<Expr>());
   else
     TORCH_INTERNAL_ASSERT(
         false, "IterVisitor could not detect type in next_dispatch.");
@@ -28,38 +27,10 @@ std::vector<Statement*> IterVisitor::next(Val* v) {
   return {};
 }
 
-std::vector<Statement*> IterVisitor::next(Expr* expr, bool respect_compute_at) {
+std::vector<Statement*> IterVisitor::next(Expr* expr) {
   FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
   std::vector<Statement*> next_stmts{expr->inputs().begin(),
                                      expr->inputs().end()};
-  if (respect_compute_at) {
-    TORCH_INTERNAL_ASSERT(
-        expr->outputs().size() == 1,
-        "Expressions with multiple outputs are not supported");
-    if (expr->output(0)->getValType().value() == ValType::TensorView) {
-      auto out = expr->output(0)->as<TensorView>();
-      // Move input TVs that are computed at this expression backward
-      // so that they are visited later. If multiple inputs are
-      // computed at, move TVs that are computed at an inner loop nest
-      // further backward.
-      std::stable_sort(
-          next_stmts.begin(),
-          next_stmts.end(),
-          [out](const Statement* stmt0, const Statement* stmt1) {
-            std::array<const Statement*, 2> inputs{stmt0, stmt1};
-            std::array<int, 2> compute_at_axes{-1, -1};
-            for (int i = 0; i < 2; ++i) {
-              if (inputs[i]->getValType().value() == ValType::TensorView) {
-                auto tv = inputs[i]->as<TensorView>();
-                if (tv->getComputeAtView() == out) {
-                  compute_at_axes[i] = tv->getRelativeComputeAtAxis();
-                }
-              }
-            }
-            return compute_at_axes[0] < compute_at_axes[1];
-          });
-    }
-  }
   return next_stmts;
 }
 
@@ -86,8 +57,7 @@ void remove_visited(
 void IterVisitor::traverseFrom(
     Fusion* const fusion,
     const std::vector<Val*>& from,
-    bool traverseAllPaths,
-    bool respectComputeAt) {
+    bool traverseAllPaths) {
   FusionGuard fg(fusion);
   std::unordered_set<Statement*> visited;
   stmt_stack.clear();
@@ -117,7 +87,7 @@ void IterVisitor::traverseFrom(
       all_inputs_visited = false;
     } else {
       // Visit input nodes.
-      auto next_stmts = next(stmt, respectComputeAt);
+      auto next_stmts = next(stmt);
       if (!traverseAllPaths) {
         remove_visited(next_stmts, visited);
       }
@@ -134,15 +104,13 @@ void IterVisitor::traverseFrom(
 void IterVisitor::traverse_(
     Fusion* const fusion,
     bool from_outputs_only,
-    bool traverse_all_paths,
-    bool respect_compute_at) {
+    bool traverse_all_paths) {
   FusionGuard fg(fusion);
 
   if (from_outputs_only) {
     auto term_val_outs = fusion->getTerminatingOutputs();
     if (!term_val_outs.empty())
-      traverseFrom(
-          fusion, term_val_outs, traverse_all_paths, respect_compute_at);
+      traverseFrom(fusion, term_val_outs, traverse_all_paths);
     return;
   }
 
@@ -153,21 +121,17 @@ void IterVisitor::traverse_(
       leaves.push_back(val);
 
   if (!leaves.empty())
-    traverseFrom(fusion, leaves, traverse_all_paths, respect_compute_at);
+    traverseFrom(fusion, leaves, traverse_all_paths);
 }
 
-void IterVisitor::traverse(
-    Fusion* const fusion,
-    bool from_outputs_only,
-    bool respect_compute_at) {
-  traverse_(fusion, from_outputs_only, false, respect_compute_at);
+void IterVisitor::traverse(Fusion* const fusion, bool from_outputs_only) {
+  traverse_(fusion, from_outputs_only, false);
 }
 
 void IterVisitor::traverseAllPaths(
     Fusion* const fusion,
-    bool from_outputs_only,
-    bool respect_compute_at) {
-  traverse_(fusion, from_outputs_only, true, respect_compute_at);
+    bool from_outputs_only) {
+  traverse_(fusion, from_outputs_only, true);
 }
 
 namespace {

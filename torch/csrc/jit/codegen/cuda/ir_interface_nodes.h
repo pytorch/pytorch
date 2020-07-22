@@ -246,12 +246,19 @@ class TORCH_CUDA_API TensorView : public Val {
 
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
-  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+  std::pair<int, TensorView*> getComputeAtPos(int pos) {
+    pos = normalizeAxisPos(pos);
     TORCH_INTERNAL_ASSERT(
         nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
     if (!hasComputeAt() || getThisComputeAtAxis() <= (unsigned int)pos)
-      return std::pair<IterDomain*, TensorView*>(axis(pos), this);
-    return compute_at_view_->getComputeAtAxis(getComputeAtRelPos(pos));
+      return std::make_pair(pos, this);
+    return compute_at_view_->getComputeAtPos(getComputeAtRelPos(pos));
+  }
+
+  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+    const auto computeAtPos = getComputeAtPos(pos);
+    return std::make_pair(
+        computeAtPos.second->axis(computeAtPos.first), computeAtPos.second);
   }
 
   const std::vector<IterDomain*>& getRootDomain() const;
@@ -357,6 +364,13 @@ class TORCH_CUDA_API TensorView : public Val {
   }
 
  private:
+  int normalizeAxisPos(int pos) const {
+    if (pos < 0) {
+      pos += nDims();
+    }
+    return pos;
+  }
+
   // In Cache Before, for the origin expr of the original tensor,
   // we create a new operation where the original tensor is replaced
   // with the new cache tensor. This function creates a new expr

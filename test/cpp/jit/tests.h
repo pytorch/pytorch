@@ -185,7 +185,14 @@ namespace jit {
   _(GPU_FusionUnrollWithAlloc)                      \
   _(GPU_FusionIsZeroInt)                            \
   _(GPU_FusionIsOneInt)                             \
-  _(GPU_FusionComputeAtNonterminatingOutput)
+  _(GPU_FusionComputeAtNonterminatingOutput)        \
+  _(GPU_FusionTraversalOrder1)                      \
+  _(GPU_FusionTraversalOrder2)                      \
+  _(GPU_FusionTraversalOrder3)                      \
+  _(GPU_FusionTraversalOrder4)                      \
+  _(GPU_FusionTraversalOrder5)                      \
+  _(GPU_FusionTraversalOrder6)                      \
+  _(GPU_FusionTraversalOrder7)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

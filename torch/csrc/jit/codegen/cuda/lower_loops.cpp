@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+
+#include <numeric>
 
 namespace torch {
 namespace jit {
@@ -313,6 +314,215 @@ void LoopNestGenerator::handle(Expr* expr) {
     popFor();
 }
 
+namespace {
+
+TensorView* findOutputTensor(Expr* expr) {
+  TORCH_INTERNAL_ASSERT(
+      expr->outputs().size() <= 1, "Unexpected number of outputs");
+  if (expr->outputs().size() != 1) {
+    return nullptr;
+  }
+  auto out = expr->output(0);
+  if (out->getValType() != ValType::TensorView) {
+    return nullptr;
+  }
+  return out->as<TensorView>();
+}
+
+void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
+  TORCH_INTERNAL_ASSERT(expr->outputs().size() <= 1);
+
+  TensorView* out_tv = findOutputTensor(expr);
+  if (out_tv == nullptr) {
+    target = nullptr;
+    score = 0;
+    return;
+  }
+
+  if (!out_tv->hasComputeAt()) {
+    target = out_tv;
+    // No computeAt, so this should come last.
+    score = std::numeric_limits<unsigned>::max();
+    return;
+  }
+
+  auto axis = out_tv->getRelativeComputeAtAxis();
+  target = out_tv->getComputeAtView();
+  std::tie(axis, target) = target->getComputeAtPos(axis);
+
+  score = axis;
+}
+
+// Type definitions for brevity
+using ExprListT = std::vector<Expr*>;
+using TargetGroupMapT = std::unordered_map<TensorView*, ExprListT>;
+using ExprTargetMapT = std::unordered_map<Expr*, TensorView*>;
+using ScoreT = unsigned;
+using ExprScoreMapT = std::unordered_map<const Expr*, ScoreT>;
+
+void sanityCheck(
+    const ExprListT& exprs,
+    const ExprListT& reordered_exprs,
+    const ExprScoreMapT& scores,
+    const ExprTargetMapT& target_map,
+    const TargetGroupMapT& computed_at_exprs) {
+  const auto num_exprs = exprs.size();
+  TORCH_INTERNAL_ASSERT(scores.size() == num_exprs);
+  TORCH_INTERNAL_ASSERT(
+      reordered_exprs.size() + target_map.size() == num_exprs);
+  int num_computed_exprs = std::accumulate(
+      computed_at_exprs.begin(),
+      computed_at_exprs.end(),
+      0,
+      [](int acc, const std::pair<TensorView*, ExprListT>& p) {
+        return acc + p.second.size();
+      });
+  TORCH_INTERNAL_ASSERT(num_computed_exprs == target_map.size());
+}
+
+// Arrange exprs into loop-nest groups. Loop-nest groups are
+// disjoint grouping of expressions based on the expression
+// where each expression is computed at.
+void groupExpressions(
+    Expr* expr,
+    ExprListT& reordered_exprs,
+    ExprTargetMapT& target_map,
+    TargetGroupMapT& computed_at_exprs,
+    ExprScoreMapT& scores) {
+  TensorView* target_tensor = nullptr;
+  ScoreT score;
+  findTargetTensor(expr, target_tensor, score);
+  scores.emplace(expr, score);
+  if (target_tensor == nullptr) {
+    reordered_exprs.push_back(expr);
+  } else {
+    target_map.emplace(expr, target_tensor);
+    if (computed_at_exprs.find(target_tensor) == computed_at_exprs.end()) {
+      computed_at_exprs.emplace(target_tensor, TargetGroupMapT::mapped_type());
+    }
+    auto& exprs = computed_at_exprs[target_tensor];
+    exprs.push_back(expr);
+  }
+}
+
+// Sort each loop-nest group based on axis (i.e., score)
+void sortGroup(TensorView* target, ExprListT& exprs, ExprScoreMapT& scores) {
+  std::stable_sort(
+      exprs.begin(),
+      exprs.end(),
+      [&scores](const Expr* expr1, const Expr* expr2) {
+        return scores[expr1] < scores[expr2];
+      });
+}
+
+void mergeNonRootGroupsIntoRootGroups(
+    TargetGroupMapT& computed_at_exprs,
+    ExprTargetMapT& target_map) {
+  for (auto it = computed_at_exprs.begin(); it != computed_at_exprs.end();) {
+    TensorView* target = it->first;
+    if (target->hasComputeAt()) {
+      Expr* target_expr = target->getOrigin();
+      TensorView* target_of_target = target_map.at(target_expr);
+      auto& target_group = computed_at_exprs.at(target_of_target);
+      auto pos =
+          std::find(target_group.begin(), target_group.end(), target_expr);
+      TORCH_INTERNAL_ASSERT(pos != target_group.end());
+      target_group.insert(pos, it->second.begin(), it->second.end());
+      // Upate the target map
+      for (auto& inserted_expr : it->second) {
+        TORCH_INTERNAL_ASSERT(target_map.at(inserted_expr) == target);
+        target_map.at(inserted_expr) = target_of_target;
+      }
+      it = computed_at_exprs.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+// Merge root loop-nests into reordered_exprs
+void mergeGroupsIntoSortedList(
+    TargetGroupMapT& computed_at_exprs,
+    ExprListT& reordered_exprs) {
+  while (computed_at_exprs.size() > 0) {
+    // Find the root loop-nest that has no dependency with the other
+    // loop-nests
+    TensorView* cur_target = computed_at_exprs.begin()->first;
+    for (auto& group : computed_at_exprs) {
+      auto target = group.first;
+      if (cur_target == target)
+        continue;
+      if (DependencyCheck::isDependencyOf(target, cur_target)) {
+        cur_target = target;
+      }
+    }
+    // cur_target can be visited
+    reordered_exprs.insert(
+        reordered_exprs.end(),
+        computed_at_exprs.at(cur_target).begin(),
+        computed_at_exprs.at(cur_target).end());
+    computed_at_exprs.erase(cur_target);
+  }
+}
+
+// Reorder exprs so that LoopNestGenerator::handle(Expr*) can generate
+// correct loop nests. Vector exprs is assumed to be topologically
+// sorted, but that is not sufficient as tensors computed at
+// outer loops need to be located earlier.
+void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
+  ExprListT reordered_exprs;
+  // expr -> target
+  ExprTargetMapT target_map;
+  // target -> [computed at expressions]
+  TargetGroupMapT computed_at_exprs;
+  // score of each expression that is calculated based on the
+  // computeAt axis. A lower score of an expression means it should be
+  // placed earlier in the expression list. This is a requirement for
+  // the loop-nest generation of this class to work.
+  ExprScoreMapT scores;
+
+  // 1. Group expressions by target tensors. Non-grouped expressions
+  // are copied into reordered_exprs.
+  for (auto& expr : exprs) {
+    groupExpressions(
+        expr, reordered_exprs, target_map, computed_at_exprs, scores);
+  }
+
+  sanityCheck(exprs, reordered_exprs, scores, target_map, computed_at_exprs);
+
+  // If no computeAt found, no need to reorder.
+  if (computed_at_exprs.size() == 0) {
+    return;
+  }
+
+  // 2. Sort each loop-nest group based on axis (i.e., score)
+  for (auto& group : computed_at_exprs) {
+    sortGroup(group.first, group.second, scores);
+  }
+
+  // 3. Merge non-root loop-nests into root loop-nests
+  mergeNonRootGroupsIntoRootGroups(computed_at_exprs, target_map);
+
+  // At this point, only root loop-nests (i.e., no computeAt'ed)
+  // should exist.
+  for (auto& group : computed_at_exprs) {
+    // Make usre only root loop-nests exist.
+    TensorView* target = group.first;
+    TORCH_INTERNAL_ASSERT(!target->hasComputeAt());
+  }
+
+  sanityCheck(exprs, reordered_exprs, scores, target_map, computed_at_exprs);
+
+  mergeGroupsIntoSortedList(computed_at_exprs, reordered_exprs);
+
+  // Reordering completed. Reordered exprs exist in reordered_exprs.
+
+  TORCH_INTERNAL_ASSERT(exprs.size() == reordered_exprs.size());
+  exprs = std::move(reordered_exprs);
+}
+
+} // namespace
+
 // Generate the loop nest structure and place it in lowered_exprs
 void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion_);
@@ -320,8 +530,12 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   // Initialize members of the class
   lowered_exprs = std::vector<Expr*>();
 
-  for (auto* expr : exprs)
+  auto reordered = exprs;
+  reorderExprsForComputeAt(reordered);
+
+  for (auto* expr : reordered) {
     handle(expr);
+  }
 }
 
 } // namespace fuser
