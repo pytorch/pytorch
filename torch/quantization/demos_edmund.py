@@ -9,6 +9,8 @@ import torch.quantization._numeric_suite as ns
 from torchvision.models.quantization.mobilenet import mobilenet_v2
 import os
 
+# from torchvision.train import train_one_epoch, evaluate, load_data
+
 import torch.quantization
 # from torch.nn.quantized import (Quantize, DeQuantize)
 
@@ -107,10 +109,6 @@ def load_model(model_file):
     model.to('cpu')
     return model
 
-def print_size_of_model(model):
-    torch.save(model.state_dict(), "temp.p")
-    print('Size (MB):', os.path.getsize("temp.p")/1e6)
-    os.remove('temp.p')
 
 def prepare_data_loaders(data_path):
     train_batch_size = 30
@@ -152,31 +150,6 @@ def prepare_data_loaders(data_path):
 
     return data_loader, data_loader_test
 
-
-###################################
-#     loading data set plus custom metrics (sqnr)
-
-def sqnr(og_tensor, quantized_tensor):
-    # quantized_tensor.dequantize()
-    print(og_tensor)
-    print(quantized_tensor)
-    a = torch.norm(og_tensor)
-    b = torch.norm(og_tensor - quantized_tensor)
-    return 20*torch.log10(a/b)
-
-def report_sqnr(og_model, qmodel, names):
-    sum = 0
-    names = { x for pair in names for x in pair}
-    for name in names:
-        sum += sqnr(get_module(og_model, name), get_module(qmodel, name))
-    print("sum of sqnrs among tensors: ", sum)
-
-def get_module(model, name):
-    curr = model
-    name = name.split('.')
-    for subname in name:
-        curr = curr._modules[subname]
-    return curr
 
 def grab_names(model):
     input = []
@@ -227,9 +200,83 @@ def mobilenet_download():
 
     return model, data_loader, data_loader_test
 
-def chain_module_download():
-    model = ChainModule(True)
-    return
+def imagenet_download():
+    data_path = '/mnt/fair/imagenet_full_size/'
+    data_loader, data_loader_test = prepare_data_loaders(data_path)
+
+    model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)
+    print("done loading")
+    return model, data_loader, data_loader_test
+
+def quantize_model(model, data_loader, per_tensor=True):
+    criterion = nn.CrossEntropyLoss()
+    num_calibration_batches = 10
+
+    model = copy.deepcopy(model)
+    if per_tensor:
+        model.qconfig = torch.quantization.default_qconfig
+    else:
+        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+    # unquantized_model = copy.deepcopy(model)
+
+    model = torch.quantization.prepare(model, inplace=False)
+    evaluate(model,criterion, data_loader, num_calibration_batches)
+    model = torch.quantization.convert(model, inplace=False)
+
+    return model
+
+def correct_bias_demo(input_model, data_loader, data_loader_test):
+    eval_batch_size = 30
+    num_eval_batches = 10
+    num_calibration_batches = 10
+    criterion = nn.CrossEntropyLoss()
+    model = copy.deepcopy(input_model)
+
+    count = 0
+    for data in data_loader:
+        with torch.no_grad():
+            print(data[0].size())
+            print(count)
+            count += 1
+
+    # throwing on the equalization
+    model.eval()
+    model.fuse_model()
+    input_revised = grab_names(model)
+    _equalize.equalize(model, input_revised, 1e-4)
+    results = []
+
+    quantized_tensor_model = quantize_model(model, data_loader, True)
+    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per tensor quantization accuracy results, no bias correction')
+    results.append('Per tensor quantization accuracy results, no bias correction')
+
+    quantized_channel_model = quantize_model(model, data_loader, False)
+    top1, top5 = evaluate(quantized_channel_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per channel quantization accuracy results, no bias correction')
+    results.append('Per channel quantization accuracy results, no bias correction')
+
+    _correct_bias.sequential_bias_correction(quantized_tensor_model, model, data_loader_test)
+    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per tensor quantization accuracy results, with bias correction')
+    results.append('Per tensor quantization accuracy results, with bias correction')
+
+    _correct_bias.sequential_bias_correction(quantized_channel_model, model, data_loader_test)
+    top1, top5 = evaluate(quantized_channel_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per channel quantization accuracy results, with bias correction')
+    results.append('Per channel quantization accuracy results, with bias correction')
+
+    for result in results:
+        print(result)
 
 
 def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
@@ -239,82 +286,62 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 
     criterion = nn.CrossEntropyLoss()
 
+    model = copy.deepcopy(input_model)
+    count =0
+    for data in data_loader:
+        print(data[0].size())
+        print(count)
+        count+=1
     def eval(quantize = True, per_tensor = True, equalize = False):
+        results = []
         model = copy.deepcopy(input_model)
         input_revised = grab_names(model)
-        if quantize:
-            model.eval()
-            model.fuse_model()
-            if equalize:
-                input_revised = grab_names(model)
-                _equalize.equalize(model, input_revised, 1e-4)
+        model.eval()
+        model.fuse_model()
+        if equalize:
+            input_revised = grab_names(model)
+            _equalize.equalize(model, input_revised, 1e-4)
 
-            if per_tensor:
-                model.qconfig = torch.quantization.default_qconfig
-            else:
-                model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        unquantized_model = copy.deepcopy(model)
+        model = quantize_model(model, data_loader, per_tensor)
 
-            unquantized_model = copy.deepcopy(model)
-
-            model = torch.quantization.prepare(model, inplace=False)
-            evaluate(model,criterion, data_loader, num_calibration_batches)
-            model = torch.quantization.convert(model, inplace=False)
-
-            for name, module in model.named_modules():
-                if hasattr(module, 'qconfig'):
-                    # print(name)
-                    del module.qconfig
-
-            if equalize:
-                top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
-                print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
-                print("correcting bias?")
-
-
-                # ns.prepare_model_outputs(unquantized_model, model, _correct_bias.MeanLogger)
-                qconfig_debug = torch.quantization.QConfig(activation=_correct_bias.MeanLogger, weight=None)
-                unquantized_model.qconfig = qconfig_debug
-                model.qconfig = qconfig_debug
-                white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
-
-                torch.quantization.prepare(unquantized_model, inplace=True, white_list=white_list, prehook=_correct_bias.MeanLogger)
-                torch.quantization.prepare(model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=_correct_bias.MeanLogger)
-                count =0
-                for data in data_loader_test:
-                    with torch.no_grad():
-                        count += 1
-                        if count != 34:
-                            output = unquantized_model(data[0])
-                            q_output = model(data[0])
-                            # print("sqnr score: ", _correct_bias.compute_error(output, q_output))
-                        else:
-                            pass
-                print("finished bias calibrating")
-                # compare_dict = ns.get_matching_activations(unquantized_model, model)
-                output_logger, input_logger = _correct_bias.get_matching_activations(unquantized_model, model)
-
-                _correct_bias.correct_quantized_bias_V2(output_logger, input_logger, unquantized_model, model)
-
+        for name, module in model.named_modules():
+            if hasattr(module, 'qconfig'):
+                del module.qconfig
 
         top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
-        print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
-        # report_sqnr(float_model, model, input_revised)
+        # print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+        results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+        # print('Pre bias correction')
+        results.append('Pre bias correction')
 
-    # eval(False)
-    # print("\nno quantize")
-    # eval(True, True, False)
-    # print("\nper tensor, no equalize")
-    # eval(True, False, False)
-    # print("\nper channel, no equalize")
-    eval(True, True, True)
+        _correct_bias.sequential_bias_correction(unquantized_model, model, data_loader_test)
+        # _correct_bias.parallel_bias_correction(unquantized_model, model, data_loader_test)
+
+        top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+        # print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+        results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+        # print('Post bias correction')
+        results.append('Post bias correction')
+        return results
+
+    results = eval(model, True, True)
+    for result in results:
+        print(result)
     print("\nper tensor, with equalize")
-    eval(True, False, True)
+    results = eval(model, False, True)
+    for result in results:
+        print(result)
     print("\nper channel, with equalize")
     print("is it christmas :O")
 
 
 if __name__ == "__main__":
     # linear_playground()
-    equalize_accuracy_demo(*mobilenet_download())
+    # equalize_accuracy_demo(*mobilenet_download())
+    # imagenet_download()
+    # equalize_accuracy_demo(*imagenet_download())
+    correct_bias_demo(*imagenet_download())
+    # prepare_data_loaders('/mnt/fair/imagenet_full_size/')
     # bias_correction_demo()
     # main()
