@@ -1,10 +1,7 @@
 #include <torch/csrc/jit/mobile/module.h>
 
-#include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/pickler.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 #include <caffe2/serialize/inline_container.h>
@@ -46,13 +43,8 @@ class ScriptModuleSerializer {
       : writer_(writer_func) {}
 
   void serialize(const IValue object) {
-    // Serialize the model object
+    // Serialize just the data
     writeArchive("data", object);
-
-    // Acquires and sets minimum (dynamic) version
-    for (auto& item : file_streams_) {
-      writer_.setMinVersion(item.value().minVersion());
-    }
   }
 
   void writeArchive(const std::string& archive_name, const IValue& value) {
@@ -80,51 +72,10 @@ class ScriptModuleSerializer {
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
-
-    // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
-      convertNamedType(wroteType);
-    }
-  }
-
-  void convertNamedType(const c10::NamedTypePtr& class_type) {
-    if (converted_types_.count(class_type)) {
-      return;
-    }
-    converted_types_.insert(class_type);
-    auto qualname = type_name_uniquer_.getUniqueName(class_type);
-    const std::string qualifier = qualname.prefix();
-    PythonPrint* pp = file_streams_.find(qualifier);
-
-    auto type_printer =
-        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-      auto namedType = t->cast<c10::NamedType>();
-      if (namedType && namedType->name()) {
-        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-      }
-      return c10::nullopt;
-    };
-    if (!pp) {
-      pp = &file_streams_.insert(
-          qualifier,
-          PythonPrint(
-              constant_table_,
-              class_deps_,
-              type_printer,
-              /*enforce_importable=*/true));
-    }
-    pp->printNamedType(class_type);
   }
 
   caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::IValue> constant_table_;
-  std::unordered_set<c10::NamedTypePtr> converted_types_;
-  std::vector<c10::NamedTypePtr> class_deps_;
   TypeNameUniquer type_name_uniquer_;
-
-  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
-  // created
-  OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
 void Module::save_data(std::ostream& out) const {

@@ -49,7 +49,11 @@ bool isWeight(Module& module, Value* v) {
   for (const Use& u : v->uses()) {
     Node* n = u.user;
     if (n->kind() == prim::CallMethod) {
-      auto m = getInvokedModule(module, n, self);
+      auto m_opt = getInvokedModuleOpt(module, n, self);
+      if (!m_opt.has_value()) {
+        return false;
+      }
+      auto m = *m_opt;
       auto g = m.get_method(n->s(attr::name)).graph();
       auto call_method_result = isWeight(m, g->inputs()[u.offset]);
       if (result.has_value()) {
@@ -886,7 +890,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
             module_instance->node()->kind() == prim::GetAttr &&
             module_instance->node()->s(attr::name).find("_observer_") ==
                 std::string::npos) {
-          m = getInvokedModule(module, n, graph->inputs()[0]);
+          m = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
