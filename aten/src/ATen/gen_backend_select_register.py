@@ -30,7 +30,9 @@ UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 
 FUNCTION_REGISTRATION = CodeTemplate("""\
-  m.impl("aten::${op_name_with_overload_name}", c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(${function_name})));
+  m.impl("aten::${op_name_with_overload_name}",
+          c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(
+              TORCH_FN(${function_name})));
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
