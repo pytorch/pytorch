@@ -53,7 +53,7 @@ static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& i
 
 namespace at { namespace native {
 
-template <typename func_t>
+template <bool support_dynamic_cast=true, typename func_t>
 void gpu_kernel(TensorIterator& iter, const func_t& f) {
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
@@ -66,12 +66,12 @@ void gpu_kernel(TensorIterator& iter, const func_t& f) {
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_kernel(sub_iter, f);
+      gpu_kernel<support_dynamic_cast>(sub_iter, f);
     }
     return;
   }
 
-  gpu_kernel_impl(iter, f);
+  gpu_kernel_impl<support_dynamic_cast>(iter, f);
 }
 
 template<typename func_t>
@@ -104,7 +104,7 @@ struct BUnaryFunctor {
     arg2_t b;
 };
 
-template <typename func_t>
+template <bool support_dynamic_cast=true, typename func_t>
 void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
@@ -120,13 +120,13 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
     AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
     iter.remove_operand(1);
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
-    gpu_kernel(iter, af);
+    gpu_kernel<support_dynamic_cast>(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
     BUnaryFunctor<func_t> bf(f, iter.scalar_value<arg2_t>(2));
     iter.remove_operand(2);
-    gpu_kernel(iter, bf);
+    gpu_kernel<support_dynamic_cast>(iter, bf);
   } else {
-    gpu_kernel(iter, f);
+    gpu_kernel<support_dynamic_cast>(iter, f);
   }
 }
 

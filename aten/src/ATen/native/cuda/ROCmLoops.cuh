@@ -305,7 +305,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 } // namespace modern
 
 
-template <typename func_t>
+template <bool unused=true, typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;

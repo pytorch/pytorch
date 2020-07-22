@@ -157,7 +157,7 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename func_t>
+template <bool support_dynamic_cast, typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
@@ -175,9 +175,12 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   int64_t numel = iter.numel();
 
   bool contiguous = iter.is_contiguous();
-  bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+  const bool dynamic_casting = c10::guts::if_constexpr<support_dynamic_cast>(
+    [&](){ return needs_dynamic_casting<func_t>::check(iter); },
+    [](){ return false; }
+  );
 
-  if (!dynamic_casting) {
+  auto launch_kernel_without_dynamic_casting = [&]() {
     if (contiguous) {
       launch_vectorized_kernel(numel, f, data);
     } else {
@@ -187,23 +190,31 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       auto storer = memory::StoreWithoutCast();
       launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     }
-  } else {
-    at::detail::Array<ScalarType, traits::arity> dtypes;
-    for (int i = 0; i < traits::arity; i++) {
-      dtypes[i] = iter.tensor(i + 1).scalar_type();
-    }
-    auto loader = memory::LoadWithCast<traits::arity>(dtypes);
-    auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
-    if (contiguous) {
-      auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
-      auto output_offset_calculator = TrivialOffsetCalculator<1>();
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
-    } else {
-      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
-      auto output_offset_calculator = make_output_offset_calculator(iter);
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
-    }
+  };
+
+  if (!dynamic_casting) {
+    launch_kernel_without_dynamic_casting();
   }
+
+  c10::guts::if_constexpr<support_dynamic_cast>([&]() {
+    if (dynamic_casting) {
+      at::detail::Array<ScalarType, traits::arity> dtypes;
+      for (int i = 0; i < traits::arity; i++) {
+        dtypes[i] = iter.tensor(i + 1).scalar_type();
+      }
+      auto loader = memory::LoadWithCast<traits::arity>(dtypes);
+      auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
+      if (contiguous) {
+        auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
+        auto output_offset_calculator = TrivialOffsetCalculator<1>();
+        launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+      } else {
+        auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+        auto output_offset_calculator = make_output_offset_calculator(iter);
+        launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
+      }
+    }
+  });
 }
 
 }} // namespace at::native
