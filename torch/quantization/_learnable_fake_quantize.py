@@ -240,13 +240,13 @@ class _LearnableFakeQuantize(nn.Module):
             .toggle_observer_update(enabled=True)
 
     @torch.jit.export
-    def enable_static_observeration(self):
+    def enable_static_observation(self):
         r"""Enables static observer accumulating data from input but doesn't
         update the quantization parameters. Forward path returns the original X.
         """
         self.toggle_qparam_learning(enabled=False) \
             .toggle_fake_quant(enabled=False) \
-            .toggle_observer_update(enabled=False)
+            .toggle_observer_update(enabled=True)
 
     @torch.jit.export
     def toggle_observer_update(self, enabled=True):
@@ -266,9 +266,9 @@ class _LearnableFakeQuantize(nn.Module):
         return self
 
     @torch.jit.export
-    def print_quantization_params(self):
-        print('Scale: {:.6f}, Zero Point: {}'
-              .format(float(self.scale), int(self.zero_point)))
+    def observe_quant_params(self):
+        print('_LearnableFakeQuantize Scale: {}'.format(self.scale.detach()))
+        print('_LearnableFakeQuantize Zero Point: {}'.format(self.zero_point.detach()))
 
     @torch.jit.export
     def calculate_qparams(self):
