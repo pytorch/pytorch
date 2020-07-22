@@ -12952,7 +12952,7 @@ class TestTorchDeviceType(TestCase):
             return
 
         # Ensure that masks are expanded to match tensor properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+        if False:#IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
             # TODO .to() for bfloat16 does not work on windows
             a = torch.ones(100, 100, device=device, dtype=dtype)
         else:
@@ -12968,7 +12968,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a_masked, a[0, :])
 
         # Ensure that tensor is expanded to match mask properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
+        if False:#IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
             a = torch.ones(100, device=device, dtype=dtype)
         else:
             a = torch.rand(100, device=device).mul(100).to(maskType)
