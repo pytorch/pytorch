@@ -254,8 +254,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_resnet(self):
         model = torchvision.models.resnet50(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        y = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), test_with_inputs=[y])
+        self.run_test(model, (x,))
 
     def test_shufflenet(self):
         model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
