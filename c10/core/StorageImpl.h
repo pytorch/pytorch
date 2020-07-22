@@ -3,9 +3,9 @@
                             // AT_ASSERTM in this file.
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Exception.h>
 #include <c10/core/ScalarType.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
