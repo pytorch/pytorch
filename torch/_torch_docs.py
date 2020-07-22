@@ -1541,7 +1541,7 @@ and :attr:`other`.
 :attr:`dim` dimension should be 3.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
-size 3.
+size 3. Note that this might be unexpected.
 
 Args:
     {input}
