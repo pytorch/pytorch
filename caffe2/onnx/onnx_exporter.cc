@@ -103,6 +103,31 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
   return shape_node;
 }
 
+} // namespace
+
+::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
+    caffe2::TensorProto::DataType t) {
+#define CAFFE2_TO_ONNX_TYPE(x)   \
+  case (caffe2::TensorProto::x): \
+    return ::ONNX_NAMESPACE::TensorProto::x
+  switch (t) {
+    CAFFE2_TO_ONNX_TYPE(FLOAT);
+    CAFFE2_TO_ONNX_TYPE(BOOL);
+    CAFFE2_TO_ONNX_TYPE(INT8);
+    CAFFE2_TO_ONNX_TYPE(UINT8);
+    CAFFE2_TO_ONNX_TYPE(UINT16);
+    CAFFE2_TO_ONNX_TYPE(INT16);
+    CAFFE2_TO_ONNX_TYPE(INT32);
+    CAFFE2_TO_ONNX_TYPE(INT64);
+    CAFFE2_TO_ONNX_TYPE(FLOAT16);
+    default:
+      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t
+                   << ", fallback to FLOAT";
+      return ::ONNX_NAMESPACE::TensorProto::FLOAT;
+  }
+#undef CAFFE2_TO_ONNX_TYPE
+}
+
 void collectExternalsFromIfOpSubnet(
     const NetDef* net,
     std::vector<std::string>* input,
@@ -133,9 +158,6 @@ void rewriteSubnet(
     Argument* arg,
     std::map<std::string, std::string> oldname_to_newname) {
   NetDef* net = arg->mutable_n();
-  // clear external inputs and outputs since they're no longer valid
-  net->mutable_external_input()->Clear();
-  net->mutable_external_output()->Clear();
   for (auto& op : *(net->mutable_op())) {
     for (auto& input : *(op.mutable_input())) {
       if (oldname_to_newname.find(input) != oldname_to_newname.end()) {
@@ -223,72 +245,6 @@ void ssaRewriteForIfOp(
   }
 }
 
-void revertRenamedExternalOutput(
-    OperatorDef* op,
-    const std::unordered_map<std::string, std::string>&
-        renamed_external_outputs) {
-  for (auto& input : *(op->mutable_input())) {
-    const auto it = renamed_external_outputs.find(input);
-    if (it != renamed_external_outputs.end()) {
-      input = it->second;
-    }
-  }
-  for (auto& output : *(op->mutable_output())) {
-    const auto it = renamed_external_outputs.find(output);
-    if (it != renamed_external_outputs.end()) {
-      output = it->second;
-    }
-  }
-}
-
-void revertRenamedExternalOutputForIfOp(
-    OperatorDef* if_op,
-    const std::unordered_map<std::string, std::string>&
-        renamed_external_outputs) {
-  ArgumentHelper helper(*if_op);
-  Argument *then_arg = nullptr, *else_arg = nullptr;
-
-  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
-    then_arg = getArgumentFromName(if_op, "then_net");
-    NetDef* net = then_arg->mutable_n();
-    for (auto& op : *(net->mutable_op())) {
-      revertRenamedExternalOutput(&op, renamed_external_outputs);
-    }
-  }
-  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
-    else_arg = getArgumentFromName(if_op, "else_net");
-    NetDef* net = else_arg->mutable_n();
-    for (auto& op : *(net->mutable_op())) {
-      revertRenamedExternalOutput(&op, renamed_external_outputs);
-    }
-  }
-}
-
-} // namespace
-
-::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
-    caffe2::TensorProto::DataType t) {
-#define CAFFE2_TO_ONNX_TYPE(x)   \
-  case (caffe2::TensorProto::x): \
-    return ::ONNX_NAMESPACE::TensorProto::x
-  switch (t) {
-    CAFFE2_TO_ONNX_TYPE(FLOAT);
-    CAFFE2_TO_ONNX_TYPE(BOOL);
-    CAFFE2_TO_ONNX_TYPE(INT8);
-    CAFFE2_TO_ONNX_TYPE(UINT8);
-    CAFFE2_TO_ONNX_TYPE(UINT16);
-    CAFFE2_TO_ONNX_TYPE(INT16);
-    CAFFE2_TO_ONNX_TYPE(INT32);
-    CAFFE2_TO_ONNX_TYPE(INT64);
-    CAFFE2_TO_ONNX_TYPE(FLOAT16);
-    default:
-      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t
-                   << ", fallback to FLOAT";
-      return ::ONNX_NAMESPACE::TensorProto::FLOAT;
-  }
-#undef CAFFE2_TO_ONNX_TYPE
-}
-
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
     caffe2::NetDef* pred_net) {
@@ -332,13 +288,13 @@ std::unordered_map<std::string, std::string> SsaRewrite(
         }
       }
       // Special SSA Rewrite for subnet of If Operator
-      if (op.type() == "If" || op.type() == "AsyncIf") {
+      if (op.type() == "If") {
         ssaRewriteForIfOp(&op, &blob_versions, &is_initialized_tensor);
       }
       for (auto& output : *op.mutable_output()) {
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
-          if (op.type() != "If" && op.type() != "AsyncIf") {
+          if (op.type() != "If") {
             if (is_initialized_tensor.count(output) == 0) {
               it->second += 1;
             } else {
@@ -382,11 +338,17 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     // Use the mapping to find if the input or output of an op was a renamed
     // external output. If so replace it with its original name.
     for (auto& op : *pred_net->mutable_op()) {
-      // If/AsyncIf needs special handling
-      if (op.type() == "If" || op.type() == "AsyncIf") {
-        revertRenamedExternalOutputForIfOp(&op, renamed_external_outputs);
-      } else {
-        revertRenamedExternalOutput(&op, renamed_external_outputs);
+      for (auto& input : *op.mutable_input()) {
+        const auto it = renamed_external_outputs.find(input);
+        if (it != renamed_external_outputs.end()) {
+          input = it->second;
+        }
+      }
+      for (auto& output : *op.mutable_output()) {
+        const auto it = renamed_external_outputs.find(output);
+        if (it != renamed_external_outputs.end()) {
+          output = it->second;
+        }
       }
     }
   }

@@ -14,14 +14,13 @@ struct FuncArg {
 using AtenFuncArgs = std::vector<FuncArg>;
 using CallFuncArgs = std::vector<FuncArg>;
 
-// Lists of allowed quantizable operators
+// White lists for quantizable operators
 std::vector<std::string> _static_quantizable_call_funcs = {
     "conv2d",
     "linear",
     "batch_norm",
     "hardswish",
     "elu",
-    "celu",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -36,8 +35,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "hardswish_",
     "elu",
     "elu_",
-    "celu",
-    "celu_",
     "batch_norm",
     "layer_norm",
     "group_norm",
@@ -564,23 +561,6 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   auto* instance = n->inputs()[0];
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
-}
-
-c10::optional<Module> getInvokedModuleOpt(
-    const Module& module,
-    Node* n,
-    Value* self) {
-  auto* instance = n->inputs()[0];
-  auto path = getModuleAccessPath(instance, self);
-  Module m = module;
-  for (const auto& p : path) {
-    if (m.attr(p).isModule()) {
-      m = m.attr(p).toModule();
-    } else {
-      return c10::nullopt;
-    }
-  }
-  return m;
 }
 
 // ==================== filter functions for matches ==============

@@ -790,7 +790,6 @@ class TestCuda(TestCase):
                                     "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device('cpu'))
 
-    @skipIfRocm
     @skipCUDANonDefaultStreamIf(True)
     def test_streams(self):
         default_stream = torch.cuda.current_stream()

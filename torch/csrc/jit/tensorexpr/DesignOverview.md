@@ -111,5 +111,5 @@ The code for constructing such an expression could look like this:
 # Memory model
 TBD
 
-# Integration with PyTorch JIT
+# Integartion with PyTorch JIT
 TBD

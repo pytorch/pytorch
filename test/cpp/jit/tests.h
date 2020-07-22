@@ -95,7 +95,6 @@ namespace jit {
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)                \
   _(LiteInterpreterDict)               \
-  _(MobileNamedParameters)             \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)

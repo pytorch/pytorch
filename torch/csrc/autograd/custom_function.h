@@ -303,7 +303,16 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       }
       continue;
     }
-    results.emplace_back(outputs[i]);
+    if (!outputs[i].defined()) {
+      auto& info = input_info_[results.size()];
+      if (info.requires_grad) {
+        results.emplace_back(info.zeros(_device_guard));
+      } else {
+        results.emplace_back();
+      }
+    } else {
+      results.emplace_back(outputs[i]);
+    }
   }
   return results;
 }

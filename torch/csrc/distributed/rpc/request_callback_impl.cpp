@@ -339,13 +339,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
   const auto& forkId = uprc.forkId();
   auto& ctx = RRefContext::getInstance();
 
-  c10::intrusive_ptr<OwnerRRef> ownerRRef;
-  if (rrefId == forkId) {
-    // Creating an owner RRef on self, should already exist in owners map
-    ownerRRef = ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
-  } else {
-    ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-  }
+  auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
 
   if (rrefId != forkId) {

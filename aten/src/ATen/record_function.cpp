@@ -128,7 +128,6 @@ class CallbackManager {
         rf.sorted_active_tls_handles_,
         /* is_start */ true,
         rf);
-    rf.called_start_callbacks_ = true;
   }
 
   void runEndCallbacks(RecordFunction& rf) {
@@ -205,12 +204,13 @@ class CallbackManager {
 std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
+// Points to the currently active RecordFunction
+thread_local RecordFunction* current_record_func_ = nullptr;
+
 inline CallbackManager& manager() {
   static CallbackManager _manager;
   return _manager;
 }
-
-thread_local bool tls_record_function_enabled_ = true;
 
 // Low probability constant
 const double kLowProb = 0.001;
@@ -322,17 +322,23 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return tls_record_function_enabled_;
+  return c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
 }
 
 void enableRecordFunction(bool enable) {
-  tls_record_function_enabled_ = enable;
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, enable);
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   if (hasCallbacks() && isRecordFunctionEnabled()) {
     manager().init(*this);
   }
+}
+
+void RecordFunction::_setCurrent() {
+  parent_ = current_record_func_;
+  current_record_func_ = this;
+  is_current_ = true;
 }
 
 /* static */
@@ -380,10 +386,19 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::end() {
-  if (active && called_start_callbacks_) {
+  if (active) {
     manager().runEndCallbacks(*this);
+    active = false;
   }
-  active = false;
+  if (is_current_) {
+    current_record_func_ = parent_;
+    is_current_ = false;
+  }
+}
+
+/* static */
+RecordFunction* RecordFunction::current() {
+  return current_record_func_;
 }
 
 } // namespace at

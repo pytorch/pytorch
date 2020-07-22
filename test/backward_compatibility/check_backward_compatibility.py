@@ -76,7 +76,6 @@ white_list = [
     ('aten::dict', datetime.date(2020, 6, 30)),
     ('aten::tensor', datetime.date(2020, 6, 30)),
     ('aten::as_tensor', datetime.date(2020, 6, 30)),
-    ('aten::split_with_sizes', datetime.date(2020, 7, 29)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
     ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
     ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
@@ -112,9 +111,9 @@ white_list = [
     ('aten::to_here(RRef(t) self, double timeout*)', datetime.date(2020, 6, 30)),
     ('aten::local_value', datetime.date(2020, 6, 30)),
     ('aten::log', datetime.date(2020, 7, 30)),
-    ('aten::__and__', datetime.date(2020, 7, 30)),
-    ('aten::__or__', datetime.date(2020, 7, 30)),
-    ('aten::__xor__', datetime.date(2020, 7, 30)),
+    ('aten::__and__', datetime.date(2020, 6, 30)),
+    ('aten::__or__', datetime.date(2020, 6, 30)),
+    ('aten::__xor__', datetime.date(2020, 6, 30)),
     ('aten::split', datetime.date(2020, 6, 30)),
     ('aten::add', datetime.date(2020, 7, 30)),
     ('aten::__upsample_bilinear', datetime.date(2020, 7, 30)),
@@ -134,17 +133,12 @@ white_list = [
     ('aten::_sparse_coo_tensor_with_dims', datetime.date(2020, 7, 30)),
     ('aten::_sparse_coo_tensor_with_dims_and_tensors', datetime.date(2020, 7, 30)),
     ('aten::to', datetime.date(2020, 7, 15)),
-    ('aten::__lshift__', datetime.date(2020, 7, 30)),
-    ('aten::__rshift__', datetime.date(2020, 7, 30)),
-    ('aten::__round_to_zero_floordiv', datetime.date(2020, 7, 30)),
-    ('aten::gcd', datetime.date(2020, 7, 30)),
 ]
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
-    ('aten::eq', datetime.date(2020, 7, 30)),
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
     ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),

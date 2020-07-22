@@ -14,7 +14,7 @@ bool ProcessGroupTest::WorkTest::isSuccess() const {
   return true;
 }
 
-bool ProcessGroupTest::WorkTest::wait(std::chrono::milliseconds /* unused */) {
+bool ProcessGroupTest::WorkTest::wait() {
   return true;
 }
 

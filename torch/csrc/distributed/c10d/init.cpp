@@ -699,7 +699,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
-          py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def(

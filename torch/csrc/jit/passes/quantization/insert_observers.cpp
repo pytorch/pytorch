@@ -176,11 +176,10 @@ class ModuleCloneHelper {
       // remapping type for module instance
       if (node->kind() == prim::CallMethod) {
         Value* instance = node->inputs()[0];
-        auto child_opt = getInvokedModuleOpt(source, node, self);
-        if (child_opt.has_value()) {
-          auto qconfig = module_qconfig_map.at(child_opt->_ivalue());
-          instance->setType(type_remap_fn(instance->type(), qconfig));
-        }
+        auto path = getModuleAccessPath(instance, self);
+        auto child = findChildModule(source, path);
+        auto qconfig = module_qconfig_map.at(child._ivalue());
+        instance->setType(type_remap_fn(instance->type(), qconfig));
       }
       // We don't remap output and the remapping of module type
       // will be done in CallMethod, we don't support type remapping
@@ -909,10 +908,8 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        auto m_opt = getInvokedModuleOpt(module, n, graph->inputs()[0]);
-        if (m_opt.has_value()) {
-          invoked_methods.push_back(std::make_pair(*m_opt, n->s(attr::name)));
-        }
+        invoked_methods.push_back(std::make_pair(
+            getInvokedModule(module, n, graph->inputs()[0]), n->s(attr::name)));
       }
 
       for (Block* subblock : n->blocks()) {
@@ -1053,11 +1050,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // for CallFunction start with actual input
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
-          auto m_opt = getInvokedModuleOpt(module, n, self);
-          if (!m_opt.has_value()) {
-            continue;
-          }
-          auto m = *m_opt;
+          auto m = getInvokedModule(module, n, self);
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else {
@@ -1372,11 +1365,7 @@ InsertObserversHelper::insertObserversFor(
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
-          auto m_opt = getInvokedModuleOpt(module, n, self);
-          if (!m_opt.has_value()) {
-            continue;
-          }
-          m = *m_opt;
+          m = getInvokedModule(module, n, self);
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else { // CallFunction

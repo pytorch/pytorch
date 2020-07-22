@@ -1,7 +1,6 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/dispatch/ObservedOperators.h>
 
 namespace c10 {
 namespace impl {
@@ -25,7 +24,6 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , kernels_()
 , catchAllKernel_()
 , cpp_signature_()
-, is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created

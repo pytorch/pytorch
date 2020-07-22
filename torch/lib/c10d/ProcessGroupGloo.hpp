@@ -96,7 +96,7 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
+    bool wait() override;
 
     void abort() override;
 
@@ -113,7 +113,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     int sourceRank() const override;
 
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
+    bool wait() override;
 
     void abort() override;
 
@@ -203,13 +203,6 @@ class ProcessGroupGloo : public ProcessGroup {
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
-
-  std::shared_ptr<ProcessGroup::Work> alltoall_base(
-      at::Tensor& outputTensor,
-      at::Tensor& inputTensor,
-      std::vector<int64_t>& outputCounts,
-      std::vector<int64_t>& inputCounts,
-      const AllToAllOptions& opts = AllToAllOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,

@@ -1326,8 +1326,7 @@ void testLLVMRFactorReduction() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// TODO: disabled since this doesn't work.
-void DISABLED_testLLVMRFactorVectorizedReduction() {
+void testLLVMRFactorVectorizedReduction() {
   KernelScope kernel_scope;
 
   int M = 128;

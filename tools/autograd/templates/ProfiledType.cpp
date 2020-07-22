@@ -6,8 +6,6 @@
 
 #include "torch/csrc/autograd/function.h"
 
-#include "ATen/quantized/Quantizer.h"
-
 // ${generated_comment}
 
 // NOTE See [Sharded File] comment in VariableType
