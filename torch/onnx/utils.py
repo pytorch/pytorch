@@ -424,6 +424,9 @@ def _model_to_graph(model, args, verbose=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
+    if training is None or training == TrainingMode.EVAL or (training == TrainingMode.PRESERVE and not is_originally_training):
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
@@ -545,9 +548,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                                                              f)
             graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                             output_names, operator_export_type,
-                                                            example_outputs,
-                                                            _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size,
+                                                            example_outputs, _retain_param_name,
+                                                            val_do_constant_folding,
+                                                            fixed_batch_size=fixed_batch_size, training=training,
                                                             enable_jit_freeze_module=enable_jit_freeze_module)
 
             # TODO: Don't allocate a in-memory string for the protobuf
