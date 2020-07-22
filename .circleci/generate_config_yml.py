@@ -10,9 +10,9 @@ import shutil
 import sys
 from collections import OrderedDict, namedtuple
 
-import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+# import cimodel.data.binary_build_definitions as binary_build_definitions
+# import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+# import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.bazel_definitions
 import cimodel.data.simple.binary_smoketest
@@ -83,26 +83,26 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_definitions.get_workflow_jobs,
+        # pytorch_build_definitions.get_workflow_jobs,
+        # cimodel.data.simple.macos_definitions.get_workflow_jobs,
+        # cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
-        cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.ge_config_tests.get_workflow_jobs,
-        cimodel.data.simple.bazel_definitions.get_workflow_jobs,
-        caffe2_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
+        # cimodel.data.simple.mobile_definitions.get_workflow_jobs,
+        # cimodel.data.simple.ge_config_tests.get_workflow_jobs,
+        # cimodel.data.simple.bazel_definitions.get_workflow_jobs,
+        # caffe2_build_definitions.get_workflow_jobs,
+        # cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.nightly_android.get_workflow_jobs,
-        windows_build_definitions.get_windows_workflows,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
+        # cimodel.data.simple.nightly_android.get_workflow_jobs,
+        # windows_build_definitions.get_windows_workflows,
+        # binary_build_definitions.get_post_upload_jobs,
+        # binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
-        binary_build_definitions.get_binary_build_jobs,
-        binary_build_definitions.get_nightly_tests,
-        binary_build_definitions.get_nightly_uploads,
+        # binary_build_definitions.get_binary_build_jobs,
+        # binary_build_definitions.get_nightly_tests,
+        # binary_build_definitions.get_nightly_uploads,
     ]
 
     docker_builder_functions = [
@@ -140,14 +140,14 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
-    File("build-parameters/caffe2-build-params.yml"),
+    # File("build-parameters/caffe2-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
     File("job-specs/pytorch-job-specs.yml"),
-    File("job-specs/caffe2-job-specs.yml"),
+    # File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
-    File("job-specs/job-specs-custom.yml"),
+    # File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
     File("job-specs/binary_update_htmls.yml"),
     File("job-specs/binary-build-tests.yml"),
