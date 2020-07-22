@@ -45,6 +45,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn.init
    onnx
    optim
+   complex_numbers
    quantization
    rpc
    torch.random <random>

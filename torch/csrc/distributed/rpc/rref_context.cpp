@@ -273,6 +273,9 @@ void RRefContext::delAllUsersAndUnforkedOwners(
     for (auto& rrefId : unforkedOwners) {
       LOG(INFO) << "Removing unforked OwnerRRef with RRefId: " << rrefId;
       auto iter = owners_.find(rrefId);
+      TORCH_CHECK(
+          iter != owners_.end(),
+          c10::str("Did not find OwnerRRef with RRefId: ", rrefId));
       owners_.erase(iter);
     }
   }
