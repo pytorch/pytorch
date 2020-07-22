@@ -1408,7 +1408,7 @@ lu = boolean_dispatch(
     func_name='lu')
 lu.__doc__ = _lu_impl.__doc__
 
-def clamp(input, min=None, max=None, out=None):
+def clamp(input, min=None, max=None, *, out=None):
     r"""
     Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and returns a tensor:
 
@@ -1422,10 +1422,10 @@ def clamp(input, min=None, max=None, out=None):
         input (Tensor): the input tensor
         min (Tensor or Number): lower-bound of the range to be clamped to
         max (Tensor or Number): upper-bound of the range to be clamped to
-        out (Tensor, optional): the output tensor.
+    Keyword args:
+        out (Tensor, optional): the output tensor
 
     Example::
-
         >>> a = torch.randn(4)
         >>> a
         tensor([-1.7120,  0.1734, -0.0478, -0.0922])
@@ -1446,11 +1446,11 @@ def clamp(input, min=None, max=None, out=None):
 
     Args:
         input (Tensor): the input tensor
+    Keyword args:
         min (Tensor or Number): minimal value of each element in the output
-        out (Tensor, optional): the output tensor.
+        out (Tensor, optional): the output tensor
 
     Example::
-
         >>> a = torch.randn(4)
         >>> a
         tensor([-0.0299, -2.3184,  2.1593, -0.8883])
@@ -1470,11 +1470,11 @@ def clamp(input, min=None, max=None, out=None):
 
     Args:
         input (Tensor): the input tensor
+    Keyword args:
         max (Tensor or Number): maximal value of each element in the output
-        out (Tensor, optional): the output tensor.
+        out (Tensor, optional): the output tensor
 
     Example::
-
         >>> a = torch.randn(4)
         >>> a
         tensor([ 0.7753, -0.4702, -0.4599,  1.1899])

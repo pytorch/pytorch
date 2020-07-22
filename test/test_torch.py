@@ -7078,33 +7078,30 @@ class TestTorchDeviceType(TestCase):
         X_clamped = torch.tensor(np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals))
         return X, X_clamped
 
-    def test_clamp(self, device):
-        # Test most common dtypes
-        dtypes = (torch.float, torch.int64)
+    @dtypes(torch.int64, torch.float32)
+    def test_clamp(self, device, dtype):
+        # Create min/max argument product
+        args = product((torch.linspace(-15, 15, 100, dtype=dtype, device=device), -1, None),
+                       (torch.linspace(15, -15, 100, dtype=dtype, device=device), 1, None))
 
-        for dtype in dtypes:
-            # Create min/max argument product
-            args = product((torch.linspace(-15, 15, 100, dtype=dtype, device=device), -1, None),
-                           (torch.linspace(15, -15, 100, dtype=dtype, device=device), 1, None))
+        for min_val, max_val in args:
+            if min_val is None and max_val is None:
+                continue
 
-            for min_val, max_val in args:
-                if min_val is None and max_val is None:
-                    continue
+            X, Y_expected = self.generate_clamp_baseline(device, dtype,
+                                                         min_vals=min_val,
+                                                         max_vals=max_val,
+                                                         with_nans=False)
 
-                X, Y_expected = self.generate_clamp_baseline(device, dtype, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val,
-                                                             with_nans=False)
+            Y_actual = torch.clamp(X, min_val, max_val)
+            self.assertEqual(Y_expected, Y_actual)
 
-                Y_actual = torch.clamp(X, min_val, max_val)
-                self.assertEqual(Y_expected, Y_actual)
+            Y_out = torch.empty_like(X)
+            torch.clamp(X, min=min_val, max=max_val, out=Y_out)
+            self.assertEqual(Y_expected, Y_out)
 
-                Y_out = torch.empty_like(X)
-                torch.clamp(X, min=min_val, max=max_val, out=Y_out)
-                self.assertEqual(Y_expected, Y_out)
-
-                X.clamp_(min_val, max_val)
-                self.assertEqual(Y_expected, X)
+            X.clamp_(min_val, max_val)
+            self.assertEqual(Y_expected, X)
 
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)

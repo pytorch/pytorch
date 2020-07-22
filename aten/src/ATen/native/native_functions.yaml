@@ -782,7 +782,7 @@
   dispatch:
     CPU: clamp_with_tensors
     CUDA: clamp_with_tensors
-    QuantizedCPU: quantized_clamp_with_tensors
+    QuantizedCPU: clamp_with_tensors_quantized_cpu
 
 - func: clamp_with_tensors_(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
   variants: function, method
@@ -813,7 +813,7 @@
   dispatch:
     CPU: clamp_with_min_tensor
     CUDA: clamp_with_min_tensor
-    QuantizedCPU: quantized_clamp_with_min_tensor
+    QuantizedCPU: clamp_with_min_tensor_quantized_cpu
 
 - func: clamp_with_tensors_.min_tensor(Tensor(a!) self, Tensor min, Scalar max) -> Tensor(a!)
   variants: function, method
@@ -832,7 +832,7 @@
   dispatch:
     CPU: clamp_with_max_tensor
     CUDA: clamp_with_max_tensor
-    QuantizedCPU: quantized_clamp_with_max_tensor
+    QuantizedCPU: clamp_with_max_tensor_quantized_cpu
 
 - func: clamp_with_tensors_.max_tensor(Tensor(a!) self, Scalar min, Tensor max) -> Tensor(a!)
   variants: function, method
