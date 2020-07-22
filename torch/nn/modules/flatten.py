@@ -54,7 +54,7 @@ class Unflatten(Module):
 
     Shape:
         - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, C_{out}, H_{out}, W_{out})`
+        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
 
     Args:
         dim (Union[int, str]): Dimension to be flattened
