@@ -175,11 +175,18 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   
+  if(HIP_COMPILER STREQUAL clang)
+    set(hip_library_name amdhip64)
+  else()
+    set(hip_library_name hip_hcc)
+  endif()
+  message("HIP library name: ${hip_library_name}")
+
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
   # setup, hcc is only used for linking, but it should be used to
   # compile the *_hip.cc files as well.
-  find_library(PYTORCH_HIP_HCC_LIBRARIES hip_hcc HINTS ${HIP_PATH}/lib)
+  find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
@@ -187,7 +194,7 @@ if(HIP_FOUND)
   # however currently it's just the lib name
   find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
   set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)

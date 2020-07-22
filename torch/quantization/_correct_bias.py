@@ -219,11 +219,12 @@ def parallel_bias_correction(float_model, quantized_model, img_data, white_list 
 
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
     torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+    # final batch in a dataset might be smaller than the previous batches so
+    # the last batch is possibly ignored to avoid an adding error with the
+    # mean logger
     batch_size = None
     for data in img_data:
         with torch.no_grad():
-            print("executed")
-            print(data[0].size())
             if batch_size is None:
                 batch_size = data[0].size(0) # getting batch size
             if data[0].size(0) == batch_size:
