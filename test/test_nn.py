@@ -8371,6 +8371,29 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be a tuple of tuples, but found type list"):
             nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
 
+    def test_layer_norm_grads_with_create_graph_flag(self):
+        atol = 1e-5
+        rtol = 1e-3
+
+        x = torch.randn((4, 4, 16), requires_grad=True)
+        layer_norm = nn.LayerNorm((16,), 1e-5, True)
+        with torch.no_grad():
+            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
+
+        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
+        if TEST_CUDA:
+            x = x.to('cuda')
+            layer_norm = layer_norm.to('cuda')
+
+            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
