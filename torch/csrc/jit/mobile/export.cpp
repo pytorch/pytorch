@@ -18,21 +18,6 @@ char const* toString(OpCode op);
 
 namespace {
 
-static IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-static IValue Table(
-    const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
-}
-
-} // namespace
-
 class ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(const std::string& filename)
@@ -77,6 +62,8 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   TypeNameUniquer type_name_uniquer_;
 };
+
+}
 
 void Module::save_data(std::ostream& out) const {
   ScriptModuleSerializer serializer(
