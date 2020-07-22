@@ -1757,13 +1757,16 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
   auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
 
+  int64_t rest_dim = self.dim() - src.size();
+  TORCH_INTERNAL_ASSERT(std::distance(source_dims.begin(), source_iter)  == rest_dim);
+  TORCH_INTERNAL_ASSERT(std::distance(destination_dims.begin(), destination_iter)  == rest_dim);
+
   // Update the position of the remaining dimensions.
   // `source_dims` now contains the original position
   // `destination_dims` contains the new position it will shifted to
   // after considering the user inputs.
   // Variable State:
   //     order = 2, 3, 0, 4, 1
-  int64_t rest_dim = self.dim() - src.size();
   for (int64_t i = 0; i < rest_dim; ++i) {
       order[destination_dims[i]] = source_dims[i];
   }
