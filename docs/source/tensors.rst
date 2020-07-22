@@ -292,7 +292,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand
    .. automethod:: expand_as
    .. automethod:: exponential_
-   .. automethod:: fft
+   .. automethod:: legacy_fft
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip

@@ -369,7 +369,7 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
+    legacy_fft
     ifft
     rfft
     irfft
