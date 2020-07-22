@@ -1083,18 +1083,26 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
-def threshold(input, threshold, value, inplace=False):
+def _threshold(input, threshold, value, inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                _threshold, (input,), input, threshold, value, inplace=inplace)
     if inplace:
         result = _VF.threshold_(input, threshold, value)
     else:
         result = _VF.threshold(input, threshold, value)
     return result
 
+# We define this function as _threshold because it takes an argument
+# named threshold, which clobbers the recursive reference to the
+# function needed for __torch_function__ support
+threshold = _threshold
 
 threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
@@ -2068,6 +2076,10 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps)
     return torch.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
@@ -2492,12 +2504,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     else:
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
-        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()),
-                      stacklevel=2)
-    if input.numel() != target.numel():
-        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.numel(), input.numel()))
+        raise ValueError("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                         "Please ensure they have the same size.".format(target.size(), input.size()))
 
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
@@ -3435,7 +3443,7 @@ def affine_grid(theta, size, align_corners=None):
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are condsidered to be at ```0``
+        along a unit dimension are considered to be at ```0``
         (the center of the input image).
     """
     if not torch.jit.is_scripting():
