@@ -57,6 +57,38 @@
     - THTensor* source
 ]]
 [[
+  name: _th_masked_select
+  cname: maskedSelect
+  cpu_bool: True
+  cpu_bfloat16: True
+  variants:
+    - function
+  backends:
+    - CPU
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - THByteTensor* mask
+]]
+[[
+  name: _th_masked_select_bool
+  cname: maskedSelectBool
+  cpu_bool: True
+  cpu_bfloat16: True
+  variants:
+    - function
+  backends:
+    - CPU
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - THBoolTensor* mask
+]]
+[[
   name: _th_nonzero
   cname: nonzero
   cpu_half: True
