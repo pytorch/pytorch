@@ -41,8 +41,6 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
-  _(SplitWithTailWithLoopOptions)           \
-  _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
   _(ScheduleInlineFunc01)                   \
