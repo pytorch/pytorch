@@ -946,7 +946,8 @@ void LoopNest::splitWithTail(
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1020,7 +1021,8 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);

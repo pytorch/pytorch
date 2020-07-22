@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -12062,6 +12062,11 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
 
+    @onlyCUDA
+    @expectedAlertNondeterministic('_histc_cuda', fn_has_device_arg=False)
+    def test_histc_alert_nondeterministic(self, device):
+        torch.histc(torch.tensor([], device=device), min=0, max=3)
+
     def test_histc(self, device):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
@@ -15540,6 +15545,11 @@ class TestTorchDeviceType(TestCase):
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
+    def test_bincount_alert_nondeterministic(self, device):
+        torch.bincount(torch.tensor([], device=device, dtype=torch.long))
 
     @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
