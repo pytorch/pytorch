@@ -567,7 +567,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   else {
     TORCH_CHECK(false,
                 "reduce argument must be either of add, subtract, multiply or divide.");
-  } 
+  }
 }
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
@@ -706,6 +706,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   // Create strided view of result before feeding into TensorIterator
   auto strides = DimVector(shape.size(), 0);
+  auto orig_stride = result.strides()[0];
   auto result_strided = result.as_strided(shape, strides);
 
   // serial kernel
@@ -715,11 +716,11 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
-      .add_input(_self)
-      .add_input(_mask)
+      .add_input(_self.contiguous())
+      .add_input(_mask.contiguous())
       .build();
 
-    masked_select_serial_stub(iter.device_type(), iter);
+    masked_select_serial_stub(iter.device_type(), iter, orig_stride);
     return result;
   }
 
@@ -743,7 +744,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .add_input(mask_prefix_sum)
     .build();
 
-  masked_select_stub(iter.device_type(), iter);
+  masked_select_stub(iter.device_type(), iter, orig_stride);
   return result;
 }
 

@@ -186,17 +186,17 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
   iter.serial_for_each(loop, {0, iter.numel()});
 }
 
-void masked_select_serial_kernel(TensorIterator& iter) {
+void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "masked_select", [&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == at::ScalarType::Bool) {
-        cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       } else {
-        cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
     });
@@ -225,17 +225,17 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
   iter.for_each(loop);
 }
 
-void masked_select_kernel(TensorIterator& iter) {
+void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "masked_select", [&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == at::ScalarType::Bool) {
-        cpu_masked_select_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       } else {
-        cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
     });
