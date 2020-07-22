@@ -30,7 +30,7 @@ def channel_range(input, axis=0):
     mins = min_over_ndim(input, axis_list)
     maxs = max_over_ndim(input, axis_list)
 
-    assert mins.size()[0] == input.size()[axis], "Dimensions of resultant channel range does not match size of requested axis"
+    assert mins.size(0) == input.size(axis), "Dimensions of resultant channel range does not match size of requested axis"
     return maxs - mins
 
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
@@ -113,8 +113,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
 
             cross_layer_equalization(name_to_module[pair[0]], name_to_module[pair[1]])
 
-    if not inplace:
-        return model
+    return model
 
 def converged(curr_modules, prev_modules, threshold=1e-4):
     ''' Tests for the summed norm of the differences between each set of modules
