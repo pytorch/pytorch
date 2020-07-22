@@ -263,6 +263,9 @@ class MinMaxObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -314,7 +317,7 @@ class MinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+                 reduce_range=False, initial_dynamic_qrange=None):
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -324,7 +327,8 @@ class MinMaxObserver(_ObserverBase):
 
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
-                                             reduce_range=reduce_range)
+                                             reduce_range=reduce_range,
+                                             initial_dynamic_qrange=initial_dynamic_qrange)
         self.register_buffer('min_val', torch.tensor([]))
         self.register_buffer('max_val', torch.tensor([]))
         if self.qscheme == torch.per_tensor_symmetric and \
@@ -394,6 +398,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The moving average min/max is computed as follows
 
@@ -422,11 +429,13 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
               and zero_point are set to 1.0 and 0.
     """
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_tensor_affine, reduce_range=False,
+                 initial_dynamic_qrange=None):
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
                                                           qscheme=qscheme,
-                                                          reduce_range=reduce_range)
+                                                          reduce_range=reduce_range,
+                                                          initial_dynamic_qrange=initial_dynamic_qrange)
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -535,6 +544,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
@@ -546,10 +558,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False,
+                 initial_dyanmic_qrange=None):
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
-                                                       reduce_range=reduce_range)
+                                                       reduce_range=reduce_range,
+                                                       initial_dynamic_qrange=initial_dyanmic_qrange)
         self.ch_axis = ch_axis
         self.register_buffer('min_vals', torch.tensor([]))
         self.register_buffer('max_vals', torch.tensor([]))
@@ -632,6 +646,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.quantization.observer.MovingAverageMinMaxObserver`, with the
@@ -643,10 +660,11 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     """
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False,
+                 initial_dynamic_qrange=None):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
-            reduce_range=reduce_range)
+            reduce_range=reduce_range, initial_dyanmic_qrange=initial_dynamic_qrange)
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):

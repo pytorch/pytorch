@@ -735,6 +735,12 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
@@ -2607,12 +2613,24 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
-- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
+- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
@@ -5057,6 +5075,13 @@
   dispatch:
     CPU, CUDA: max
     QuantizedCPU: max_quant
+
+# Return: (Tensor min, Tensor max)
+- func: _min_max(Tensor self) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _min_max
 
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
