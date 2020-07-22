@@ -125,3 +125,8 @@ python setup.py install --cmake && sccache --show-stats && (
   )
 )
 
+cd %TMP%
+curl -kL "https://gist.github.com/malfet/a8e1d4f3e8409b33cf7f0159384ca192/raw/6136f3f520458d358072e3edfe8f0ffa409f34d1/jit%%2520flip" --output test_jit.py
+python test_jit.py
+if errorlevel 1 exit /b 1
+
