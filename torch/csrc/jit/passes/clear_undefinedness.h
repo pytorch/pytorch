@@ -19,6 +19,8 @@ namespace jit {
 // in lieu of undefined tensors.
 // When this happens, this pass will be removed
 TORCH_API void ClearUndefinedness(const std::shared_ptr<Graph>& graph);
+TORCH_API void ClearUndefinedness(ArrayRef<Value*> values);
+TORCH_API void ClearUndefinedness(Block* block);
 
 } // namespace jit
 } // namespace torch

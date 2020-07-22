@@ -15,22 +15,24 @@ void clearUndefinedness(Value* o) {
   }
 }
 
-void clearUndefinedness(Block* block) {
+void ClearUndefinedness(ArrayRef<Value*> values) {
+  for (auto v : values) {
+    clearUndefinedness(v);
+  }
+}
+
+void ClearUndefinedness(Block* block) {
   for (auto n : block->nodes()) {
-    for (auto o : n->outputs()) {
-      clearUndefinedness(o);
-    }
+    ClearUndefinedness(n->outputs());
     for (auto ib : n->blocks()) {
-      clearUndefinedness(ib);
+      ClearUndefinedness(ib);
     }
   }
 }
 
 void ClearUndefinedness(const std::shared_ptr<Graph>& graph) {
-  for (auto i : graph->inputs()) {
-    clearUndefinedness(i);
-  }
-  clearUndefinedness(graph->block());
+  ClearUndefinedness(graph->inputs());
+  ClearUndefinedness(graph->block());
   GRAPH_DUMP("After removeUndefinedness: ", graph);
 }
 
