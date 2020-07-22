@@ -102,8 +102,8 @@ class Reducer {
   // Indicate that reduction is done and D2H copy is done as well.
   bool local_used_maps_reduced_;
 
-  // Work handle for allreduce on local_used_maps_
-  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
+  // Future work handle for allreduce on local_used_maps_
+  c10::intrusive_ptr<torch::jit::Future> local_used_work_;
 
   void verify_replicas_within_process();
 
@@ -209,10 +209,7 @@ class Reducer {
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 
-    // Keep work handle around when this set of buckets is being reduced.
-    std::shared_ptr<c10d::ProcessGroup::Work> work;
-
-    // Keep future work handle around if DDP comm hook is registered.
+    // Keep future work handle around when this set of buckets is being reduced.
     c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.

@@ -529,7 +529,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         // allreduce respect the current stream, so will be sequenced correctly.
         local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
       }
-      local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+      local_used_work_ =
+          process_group_->allreduce(local_used_maps_dev_)->getFuture();
     }
 
     // The autograd engine uses the default stream when running callbacks, so we
@@ -592,7 +593,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     // TODO(@sinannasir): merge `work` and `future_work`. Related to GH Issue
     // #41266.
     if (comm_hook_ == nullptr) {
-      bucket.work = process_group_->allreduce(tensors);
+      bucket.future_work = process_group_->allreduce(tensors)->getFuture();
     } else {
       bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
     }
@@ -951,20 +952,14 @@ void Reducer::finalize_backward() {
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
-    // See Note [DDP Communication Hook]
-    if (comm_hook_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(
-          bucket.work,
-          "Expected bucket.work not to be null. "
-          "This may indicate that allreduce hooks were not properly installed.");
-      bucket.work->wait();
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          bucket.future_work,
-          "Expected bucket.future_work not to be null. "
-          "This may indicate that communication hook was not properly installed.");
-      bucket.future_work->wait();
+    TORCH_INTERNAL_ASSERT(
+        bucket.future_work,
+        "Expected bucket.future_work not to be null. "
+        "This may indicate that communication hook was not properly installed.");
+    bucket.future_work->wait();
 
+    // See Note [DDP Communication Hook]
+    if (comm_hook_ != nullptr) {
       auto future_result =
           comm_hook_->processFuture(bucket.future_work->value());
 
