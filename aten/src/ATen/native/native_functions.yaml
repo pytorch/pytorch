@@ -5076,6 +5076,13 @@
     CPU, CUDA: max
     QuantizedCPU: max_quant
 
+# Return: (Tensor min, Tensor max)
+- func: _min_max(Tensor self) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _min_max
+
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
