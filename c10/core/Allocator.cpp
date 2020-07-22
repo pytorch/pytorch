@@ -1,3 +1,4 @@
+#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <c10/core/Allocator.h>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
