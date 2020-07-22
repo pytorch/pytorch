@@ -254,7 +254,8 @@ class TestONNXRuntime(unittest.TestCase):
     def test_resnet(self):
         model = torchvision.models.resnet50(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,))
+        y = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), test_with_inputs=[y])
 
     def test_shufflenet(self):
         model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
@@ -2451,6 +2452,14 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                out1, out2, out3 = input.split([2, 1, 2])
+                return out3, out1
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(torch.jit.script(SplitModel3()), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_as_list(self):

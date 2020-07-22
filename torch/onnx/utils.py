@@ -152,6 +152,14 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
 
+        # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
+        # However, there are nodes that cannot be converted without additional context.
+        # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
+        # until the point where it is unpacked by listUnpack node.
+        # This pass does a preprocess, and prepares the nodes such that enough context can be received
+        # by the symbolic function.
+        torch._C._jit_pass_onnx_preprocess(graph)
+
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
