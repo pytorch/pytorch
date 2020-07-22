@@ -7206,8 +7206,10 @@ The operation is defined as:
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor or Scalar): values selected at indices where :attr:`condition` is ``True``
-    y (Tensor or Scalar): values selected at indices where :attr:`condition` is ``False``
+    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``True``
+    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -7224,7 +7226,7 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
-    >>> x = torch.randn(2, 2).to(torch.double)
+    >>> x = torch.randn(2, 2, dtype=torch.double)
     >>> x
     tensor([[ 1.0779,  0.0383],
             [-0.8785, -1.1089]], dtype=torch.float64)
