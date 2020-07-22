@@ -23,15 +23,6 @@ from torch.quantization import (
 )
 import copy
 
-from  mobilenet_classes import (
-    ConvBNReLU,
-    InvertedResidual,
-    MobileNetV2,
-    ChainModule,
-    ChainModule2
-)
-
-
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
     '''
@@ -62,17 +53,6 @@ def get_param(module, attr):
         return getattr(module, attr, None)
     else:
         return getattr(module, attr, None)()
-
-module_swap_list = [torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
-                    torch.nn.Conv2d,
-                    ConvBNReLU,
-                    torchvision.models.mobilenet.ConvBNReLU,
-                    torch.quantization.observer.MinMaxObserver,  # might be a problem
-                    torchvision.models.quantization.mobilenet.QuantizableInvertedResidual,
-                    torch.nn.modules.batchnorm.BatchNorm2d,
-                    torch.nn.modules.linear.Linear,
-                    torch.nn.modules.conv.Conv2d,
-                    ]
 
 class MeanLogger(ns.Logger):
     def __init__(self):
@@ -219,12 +199,11 @@ def parallel_bias_correction(float_model, quantized_model, img_data, white_list 
 
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
     torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
-    # final batch in a dataset might be smaller than the previous batches so
-    # the last batch is possibly ignored to avoid an adding error with the
-    # mean logger
     batch_size = None
     for data in img_data:
         with torch.no_grad():
+            print("executed")
+            print(data[0].size())
             if batch_size is None:
                 batch_size = data[0].size(0) # getting batch size
             if data[0].size(0) == batch_size:

@@ -66,8 +66,6 @@ from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
 
-# Equalization
-from quantization.test_equalize import TestEqualizeEager  # noqa: F401
 # Bias Correction
 from quantization.test_bias_correction import TestBiasCorrection
 

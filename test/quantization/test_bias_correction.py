@@ -1,9 +1,14 @@
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 import torch.quantization._correct_bias as _correct_bias
-import torchvision.models.quantization.mobilenet_v2 as mobilenet_v2
+from torchvision.models.quantization import mobilenet_v2
 # import copy
-# import torch.quantization.quantize as quantize
+from torch.quantization import (
+    default_eval_fn,
+    default_qconfig,
+    quantize,
+)
 
 class TestBiasCorrection(QuantizationTestCase):
     def computeSqnr(self, x, y):
