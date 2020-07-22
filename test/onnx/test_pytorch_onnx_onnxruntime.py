@@ -3369,6 +3369,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
         x = torch.randn(5)
@@ -3397,7 +3398,7 @@ class TestONNXRuntime(unittest.TestCase):
         class KLDivLossMean(torch.nn.Module):
             def __init__(self):
                 super(KLDivLossMean, self).__init__()
-                self.loss = torch.nn.KLDivLoss(reduction='mean', log_target=True)
+                self.loss = torch.nn.KLDivLoss(reduction='mean', log_target=False)
 
             def forward(self, input, target):
                 return self.loss(input, target)
@@ -3417,7 +3418,7 @@ class TestONNXRuntime(unittest.TestCase):
         class KLDivLossBatchMean(torch.nn.Module):
             def __init__(self):
                 super(KLDivLossBatchMean, self).__init__()
-                self.loss = torch.nn.KLDivLoss(reduction='batchmean', log_target=True)
+                self.loss = torch.nn.KLDivLoss(reduction='batchmean', log_target=False)
 
             def forward(self, input, target):
                 return self.loss(input, target)
