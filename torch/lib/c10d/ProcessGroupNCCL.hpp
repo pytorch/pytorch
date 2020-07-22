@@ -8,10 +8,68 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 
+#include <ATen/Parallel.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 
 namespace c10d {
+
+// CheckFutureWork is used by a cudaStremCallback function called
+// ncclKernelCompletionCallback. The purpose of CheckFutureWork is to mark
+// workNCCL's Future work when, all NCCL streams created in collective operation
+// are finished.
+// We use enable_shared_from_this to safely call shared_ptr<CheckFutureWork>
+// (this) to remove its pointer from ProcessGroupNCCL's checkFutObjs after
+// at::launch operation of markFutureCompleted is done.
+// markFutureCompleted increments streamCounter by one and once it is called by
+// number of replicas times, it marks Future work completed by setting outputs
+// vector as its value.
+struct CheckFutureWork : std::enable_shared_from_this<CheckFutureWork> {
+ public:
+  CheckFutureWork(
+      std::shared_ptr<ProcessGroup::Work> work,
+      std::vector<at::Tensor>& outputs,
+      std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
+          checkFutObjs,
+      std::mutex& checkFutObjMutex_)
+      : work_(work),
+        outputs_(std::make_shared<std::vector<at::Tensor>>(outputs)),
+        streamCounter_(0),
+        checkFutObjs_(checkFutObjs),
+        checkFutObjMutex_(checkFutObjMutex_){};
+
+  std::shared_ptr<CheckFutureWork> getPtr() {
+    return shared_from_this();
+  }
+
+  void markFutureCompleted() {
+    at::launch(([this]() {
+      std::unique_lock<std::mutex> lock(checkFutObjMutex_);
+      (streamCounter_)++;
+      if (streamCounter_ == (*outputs_).size()) {
+        // Need to wait until work is completed, because some post processing
+        // could be needed for outputs.
+        work_->wait();
+
+        TORCH_CHECK(
+            !work_->getFuture()->completed(),
+            "Future work of workNCCL can only be marked as "
+            "completed by ncclKernelCompletionCallback.")
+        work_->getFuture()->markCompleted(at::IValue(*outputs_));
+
+        checkFutObjs_->erase(getPtr());
+      }
+    }));
+  };
+
+ private:
+  std::shared_ptr<ProcessGroup::Work> work_;
+  std::shared_ptr<std::vector<at::Tensor>> outputs_;
+  int streamCounter_;
+  std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
+      checkFutObjs_;
+  std::mutex& checkFutObjMutex_;
+};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
@@ -127,7 +185,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
-    // Store a Future object associated with WorkNCCL.
+    // Store a Future work associated with WorkNCCL.
     c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
 
     friend class ProcessGroupNCCL;
@@ -388,6 +446,17 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
+
+  // The set of CheckFutureWork pointers ensures that the CheckFutureWork object
+  // is not deleted before the at::launch operation inside CheckFutureWork's
+  // markFutureCompleted called by cudaStremCallback function.
+  std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
+      checkFutObjs_;
+
+  // Multiple threads can access and write to checkFutObjs_, so we need the
+  // following lock. This lock is also used to safely increment
+  // CheckFutureWork's streamCounter.
+  mutable std::mutex checkFutObjMutex_;
 };
 
 } // namespace c10d

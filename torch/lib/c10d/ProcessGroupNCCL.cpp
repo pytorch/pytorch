@@ -304,7 +304,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateWatchdog_(false),
-      opTimeout_(opTimeout) {
+      opTimeout_(opTimeout),
+      checkFutObjs_(std::make_shared<
+                    std::unordered_set<std::shared_ptr<CheckFutureWork>>>(0)) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -670,41 +672,11 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   return futureWork_;
 }
 
-class CheckFutureWorkBase {
- public:
-  virtual ~CheckFutureWorkBase() = default;
-
-  virtual void markFutureCompleted() = 0;
-};
-
-struct CheckFutureWork : public CheckFutureWorkBase {
-  CheckFutureWork(
-      c10::intrusive_ptr<c10::ivalue::Future> futureWork,
-      std::vector<at::Tensor>& outputs)
-      : futureWork_(futureWork), outputs_(outputs), workCounter_(0){};
-
- public:
-  void markFutureCompleted() {
-    at::launch(([this]() {
-      workCounter_++;
-      if (workCounter_ == outputs_.size()) {
-        futureWork_->markCompleted(at::IValue(outputs_));
-      }
-    }));
-  };
-
- private:
-  c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
-  std::vector<at::Tensor>& outputs_;
-  std::atomic<int> workCounter_;
-};
-
 void ncclKernelCompletionCallback(
     cudaStream_t /* unused */,
     cudaError_t /* unused */,
     void* userData) {
-  auto castedUserDataBase = static_cast<CheckFutureWorkBase*>(userData);
-  auto castedUserData = dynamic_cast<CheckFutureWork*>(castedUserDataBase);
+  auto castedUserData = static_cast<CheckFutureWork*>(userData);
 
   TORCH_CHECK(
       castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
@@ -749,8 +721,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
-  auto checkFutObj =
-      std::make_shared<CheckFutureWork>(work->getFuture(), outputs);
+  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
+  // Create and store a CheckFutureWork object to be used in
+  // ncclKernelCompletionCallback function.
+  auto checkFutObj = std::make_shared<CheckFutureWork>(
+      work, outputs, checkFutObjs_, checkFutObjMutex_);
+  checkFutObjs_->insert(checkFutObj);
 
   {
     AutoNcclGroup nccl_group_guard;
@@ -759,6 +735,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+
+      // Add a cudaStreamCallback on the same stream. CUDA will automatically
+      // call ncclKernelCompletionCallback once the appropriate NCCL kernel
+      // is done and workNCCL's Future work will be marked as completed
+      // using this callback.
       cudaStreamAddCallback(
           ncclStream, ncclKernelCompletionCallback, checkFutObj.get(), 0);
     }
