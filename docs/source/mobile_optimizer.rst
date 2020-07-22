@@ -13,7 +13,7 @@ By default, if optimization blacklist is None or empty, ``optimize_for_mobile`` 
     - **ReLU/Hardtanh fusion**: XNNPACK ops support fusion of clamping. That is clamping of output activation is done as part of the kernel, including for 2D convolution and linear op kernels. Thus clamping effectively comes for free. Thus any op that can be expressed as clamping op, such as ``ReLU`` or ``hardtanh``, can be fused with previous ``Conv2D`` or ``linear`` op in XNNPACK. This pass rewrites graph by finding ``ReLU/hardtanh`` ops that follow XNNPACK ``Conv2D/linear`` ops, written by the previous pass, and fuses them together.
     - **Dropout removal** (blacklisting option `MobileOptimizerType::REMOVE_DROPOUT`): This optimization pass removes ``dropout`` and ``dropout_`` nodes from this module when training is false.
 
-``optimize_for_mobile`` will also invoke freeze_module pass which only preserves ``forward`` method. If you have other method to that needed to be preserved,  add them into the preserved method list and pass into the method.
+``optimize_for_mobile`` will also invoke freeze_module pass which only preserves ``forward`` method. 
 
 
 .. currentmodule:: torch.utils.mobile_optimizer
