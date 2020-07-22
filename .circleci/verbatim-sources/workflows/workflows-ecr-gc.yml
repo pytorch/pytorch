@@ -32,4 +32,3 @@
             tags_to_keep: "34"
             requires:
               - docker_for_ecr_gc_build_job
-      - docker_hub_index_job
