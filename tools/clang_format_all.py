@@ -97,9 +97,7 @@ async def run_clang_format(max_processes, diff=False, verbose=False):
 
     # Format files in parallel.
     if diff:
-        for f in asyncio.as_completed(
-                    [file_clang_formatted_correctly(f, semaphore, verbose) for f in get_allowlisted_files()]
-                ):
+        for f in asyncio.as_completed([file_clang_formatted_correctly(f, semaphore, verbose) for f in get_allowlisted_files()]):
             ok &= await f
 
         if ok:
