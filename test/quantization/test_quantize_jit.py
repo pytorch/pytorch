@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
-import numpy as np
 
 # torch.quantization
 from torch.quantization import (
@@ -2835,7 +2834,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 e2 = self.embedding2(indices2, offsets2)
                 return e1, e2
 
-        weights = torch.from_numpy((np.random.random_sample((10, 12)) + 1).astype(np.float32))
+        weights = torch.randn(10, 12, dtype=torch.float32)
         module = M(weights)
         m = torch.jit.script(module)
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])

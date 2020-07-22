@@ -249,7 +249,9 @@ bool isFP16NoopObserver(script::Module& module, Node* n) {
       isNoopObserver(observer);
 }
 
-std::string getEmbeddingBagObsName(script::Module& module, Node* n) {
+c10::optional<std::string> getEmbeddingBagObsName(
+    script::Module& module,
+    Node* n) {
   Value* v = n->output();
   auto observer = n->input(0);
   auto observer_module = module.attr(findObserverName(v).value()).toModule();
@@ -257,16 +259,16 @@ std::string getEmbeddingBagObsName(script::Module& module, Node* n) {
     auto op_name = observer_module.attr("custom_op").toStringRef();
     return isNoopObserver(observer) ? op_name : "";
   }
-  return "";
+  return c10::nullopt;
 }
 
+// Insert quant and dequant nodes into the graph for both static and dynamic
+// quant.
 std::tuple<Node*, Node*> insertDefaultObserverNodes(
     Value* self,
     Node* observer,
     const std::vector<std::string>& qparam_names,
     const std::string& quantize_func) {
-  // Else branch is executed for dynamic weight observers and all observers
-  // for static quant.
   Graph* g = observer->owningGraph();
   Value* observer_out = observer->output();
   Value* original_val = observer->input(1);
@@ -282,6 +284,77 @@ std::tuple<Node*, Node*> insertDefaultObserverNodes(
       original_val->debugName() + ".quant");
   Node* dequant = insertDeQuant(g, quant->output(), original_val);
   return std::make_tuple(quant, dequant);
+}
+
+Node* insertEmbeddingBagOps(
+    Module& module,
+    Node* observer,
+    const std::string& op_name) {
+  Graph* g = observer->owningGraph();
+  auto observer_out = observer->output();
+
+  std::string prepack_fn, quant_fn;
+  if (op_name == "embedding_bag_4bit") {
+    prepack_fn = "quantized::embedding_bag_4bit_prepack";
+    quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
+  } else if (op_name == "embedding_bag_byte") {
+    prepack_fn = "quantized::embedding_bag_byte_prepack";
+    quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
+  }
+
+  std::vector<Value*> prepack_inputs = {observer_out};
+  std::vector<Use> uses = observer_out->uses();
+  Node* embedding_bag_float_op;
+  // We expect that the output of the weight observer will be consumed by the
+  // embedding_bag operator.
+  for (const Use& use : uses) {
+    if (matchCallFuncToUse(use, "embedding_bag", 2)) {
+      embedding_bag_float_op = use.user;
+    }
+  }
+  TORCH_CHECK(
+      embedding_bag_float_op->inputs().size() == 11,
+      "Expecting FP EmbeddingBag operator to have 11 inputs");
+  // Insert prepack op
+  Node* prepack = g->create(Symbol::fromQualString(prepack_fn), prepack_inputs);
+  g->insertNode(prepack);
+
+  std::vector<Value*> embedding_bag_inputs =
+      embedding_bag_float_op->inputs().vec();
+
+  // Create and insert quantized embedding op.
+  Value* none = g->insertConstant(IValue());
+  Value* zero = g->insertConstant(IValue(0));
+  embedding_bag_inputs[3]->setType(TensorType::get());
+
+  std::vector<Value*> qembedding_bag_inputs = {
+      /* weight */ prepack->output(),
+      /* indices */ embedding_bag_inputs[1],
+      /* offsets */ embedding_bag_inputs[3],
+      /* scale_grad_by_freq */ embedding_bag_inputs[6],
+      /* mode */ zero,
+      /* sparse */ embedding_bag_inputs[8],
+      /* per_sample_weights_ */ embedding_bag_inputs[9]};
+
+  if (op_name == "embedding_bag_4bit") {
+    // 4-bit op has an extra input compressed_indices_mapping
+    qembedding_bag_inputs.push_back(none);
+  }
+  qembedding_bag_inputs.push_back(embedding_bag_inputs[10]);
+
+  Node* qembedding_bag =
+      g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
+  g->insertNode(qembedding_bag);
+
+  embedding_bag_float_op->output()->replaceAllUsesWith(
+      qembedding_bag->output());
+  embedding_bag_float_op->removeAllInputs();
+  embedding_bag_float_op->destroy();
+  g->lint();
+  return qembedding_bag;
 }
 
 void insertQuantizationOps(
@@ -305,12 +378,19 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-
-  // Special case for embedding bag operators
-  if (quant_type == QuantType::DYNAMIC &&
-      getEmbeddingBagObsName(module, observer).find("embedding_bag_") !=
-          std::string::npos) {
-    if (!isWeight(module, observer_out)) {
+  // Temporary solution to quantize embedding_bag operators.
+  auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
+  if (quant_type == QuantType::DYNAMIC && embedding_bag_name &&
+      embedding_bag_name.value().find("embedding_bag_") != std::string::npos) {
+    if (isWeight(module, observer_out)) {
+      auto op_name = embedding_bag_name.value();
+      Node* dequant = insertEmbeddingBagOps(module, observer, op_name);
+      observer_out->replaceAllUsesWith(original_val);
+      original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+    } else {
+      // Special case for embedding bag operators indices input - we don't
+      // quantize the input but we still need to insert observers for it because
+      // the order of input and weight can be changed in the module code.
       observer_out->replaceAllUsesWith(original_val);
     }
     return;
@@ -831,92 +911,6 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
   weight_to_graph_fn_[weight_value]->run(module_inp);
 }
 
-Node* insertEmbeddingBagOps(
-    Module& module,
-    Node* observer,
-    const std::string& op_name) {
-  Graph* g = observer->owningGraph();
-  auto observer_out = observer->output();
-
-  std::string prepack_fn, quant_fn;
-  if (op_name == "embedding_bag_4bit") {
-    prepack_fn = "quantized::embedding_bag_4bit_prepack";
-    quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
-  } else if (op_name == "embedding_bag_byte") {
-    prepack_fn = "quantized::embedding_bag_byte_prepack";
-    quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
-  }
-
-  std::vector<Value*> prepack_inputs = {observer_out};
-  std::vector<Use> uses = observer_out->uses();
-  Node* embedding_bag_float_op;
-  for (const Use& use : uses) {
-    if (matchCallFuncToUse(use, "embedding_bag", 2)) {
-      embedding_bag_float_op = use.user;
-    }
-  }
-  // Insert prepack op
-  Node* prepack = g->create(Symbol::fromQualString(prepack_fn), prepack_inputs);
-  g->insertNode(prepack);
-
-  std::vector<Value*> embedding_bag_inputs =
-      embedding_bag_float_op->inputs().vec();
-
-  // Create and insert quantized embedding op.
-  Value* none = g->insertConstant(IValue());
-  Value* zero = g->insertConstant(IValue(0));
-  embedding_bag_inputs[3]->setType(TensorType::get());
-
-  TORCH_CHECK(
-      embedding_bag_inputs.size() == 11,
-      "Expecting FP EmbeddingBag operator to have 11 inputs");
-
-  std::vector<Value*> qembedding_bag_inputs = {
-      /* weight */ prepack->output(),
-      /* indices */ embedding_bag_inputs[1],
-      /* offsets */ embedding_bag_inputs[3],
-      /* scale_grad_by_freq */ embedding_bag_inputs[6],
-      /* mode */ zero,
-      /* sparse */ embedding_bag_inputs[8],
-      /* per_sample_weights_ */ embedding_bag_inputs[9]};
-
-  if (op_name == "embedding_bag_4bit") {
-    // 4-bit op has an extra input compressed_indices_mapping
-    qembedding_bag_inputs.push_back(none);
-  }
-  qembedding_bag_inputs.push_back(embedding_bag_inputs[10]);
-
-  Node* qembedding_bag =
-      g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
-  g->insertNode(qembedding_bag);
-
-  embedding_bag_float_op->output()->replaceAllUsesWith(
-      qembedding_bag->output());
-  embedding_bag_float_op->removeAllInputs();
-  embedding_bag_float_op->destroy();
-  g->lint();
-  return qembedding_bag;
-}
-
-void insertEmbeddingBagQuantOps(
-    Module& module,
-    Value* self,
-    Value* observer_out) {
-  Node* observer = observer_out->node();
-  Value* original_val = observer->input(1);
-  Graph* g = observer->owningGraph();
-  if (getEmbeddingBagObsName(module, observer).find("embedding_bag_") !=
-      std::string::npos) {
-    auto op_name = getEmbeddingBagObsName(module, observer);
-    Node* dequant = insertEmbeddingBagOps(module, observer, op_name);
-    observer_out->replaceAllUsesWith(original_val);
-    original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
-  }
-}
-
 void InsertQuantDeQuantHelper::quantizeTensors(
     Module& module,
     Graph* g,
@@ -1293,7 +1287,6 @@ void InsertQuantDeQuantHelper::runWeightObserver(
   // weight.
   for (const auto& v : weight_values) {
     extractAndRunWeightObserver(module, self, v);
-    insertEmbeddingBagQuantOps(module, self, v);
   }
 }
 
@@ -1316,6 +1309,8 @@ void InsertQuantDeQuantHelper::run(
       auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
+      // We check the size here because for some observers (like NoopObserver)
+      // the qparams might be empty.
       if (qparam_map.size() > 0) {
         TORCH_INTERNAL_ASSERT(
             qparam_name_map_for_node_.count(n),
