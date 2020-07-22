@@ -1493,6 +1493,16 @@ def scalar_tensor(g, scalar, dtype, *options):
     scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
     return scalar
 
+def tensor(g, data, dtype=None, device=None, requires_grad=False):
+    value = sym_help._maybe_get_const(data, 't')
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        if sym_help._is_packed_list(data):
+            unsqueezed = [g.op("Unsqueeze", t, axes_i=[0]) for t in sym_help._unpack_list(data)]
+            return g.op("Concat", *unsqueezed, axis_i=0)
+    dtype = value.type().scalarType()
+    return g.op("Cast", data, to_i=sym_help.cast_pytorch_to_onnx[dtype])
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
