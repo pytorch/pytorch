@@ -3,6 +3,7 @@
 #include "ATen/core/interned_strings.h"
 #include "jit/ir/ir.h"
 #include "jit/jit_log.h"
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include "jit/passes/dead_code_elimination.h"
 
 namespace torch {
@@ -92,14 +93,12 @@ private:
     WithInsertPoint wip{vif};
     Value* cond = g.insertConstant(true);
     Value* check_result = nullptr;
-    //for (auto inp : g.inputs()) {
     for (size_t i = 0; i < g.inputs().size(); i++) {
       auto inp = g.inputs()[i];
       if (auto tt = inp->type()->cast<TensorType>()) {
         // TODO: consider using a specialized op
         auto guard = g.create(prim::TypeCheck, {inp, cond}, 2);
         g.insertNode(guard);
-        // we ignore go0 as we autodiff only non side-effectful ops
         auto go0 = guard->output(0);
         inp->replaceAllUsesAfterNodeWith(guard, go0);
         cond = guard->output(1);
@@ -120,6 +119,9 @@ private:
     TORCH_INTERNAL_ASSERT(check_result);
     vif->addInput(check_result);
     GRAPH_DUMP("specialize_autogradzero ", &g);
+
+    ClearUndefinedness(g.inputs());
+    ClearUndefinedness(vif->blocks()[1]);
     return vif;
   }
 
