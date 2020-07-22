@@ -915,7 +915,7 @@ public:
       volatile register float32x4_t low asm("q3");
       volatile register float32x4_t high asm("q4");
       __asm__  __volatile__ (
-          "vld1.32 {d6, d7, d8, d9}, [%[in_ptr]]\n\t"
+          "vld1.32 {d6, d7, d8, d9}, [%[in_ptr]:256]\n\t"
           : "=w" (low), "=w" (high)
           : [in_ptr] "r" (tmp_values)
           : "memory");
@@ -947,7 +947,7 @@ public:
       __asm__  __volatile__ (
           "vmov.f32 q3, %[in_low]\n\t"
           "vmov.f32 q4, %[in_high]\n\t"
-          "vst1.32 {d6, d7, d8, d9}, [%[in_ptr]]\n\t"
+          "vst1.32 {d6, d7, d8, d9}, [%[in_ptr]:256]\n\t"
           :
           : [in_ptr] "r" (tmp_values),
             [in_low] "w" (values.val[0]), [in_high] "w" (values.val[1])
