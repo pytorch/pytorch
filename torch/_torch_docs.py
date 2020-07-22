@@ -104,17 +104,18 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
-add_docstr(torch.abs,
-           r"""
-abs(input, out=None) -> Tensor
+add_docstr(torch.abs, r"""
+abs(input, *, out=None) -> Tensor
 
-Computes the element-wise absolute value of the given :attr:`input` tensor.
+Computes the absolute value of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = |\text{input}_{i}|
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -130,17 +131,18 @@ absolute(input, out=None) -> Tensor
 Alias for :func:`torch.abs`
 """.format(**common_args))
 
-add_docstr(torch.acos,
-           r"""
-acos(input, out=None) -> Tensor
+add_docstr(torch.acos, r"""
+acos(input, *, out=None) -> Tensor
 
-Returns a new tensor with the arccosine  of the elements of :attr:`input`.
+Computes the inverse cosine of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos^{-1}(\text{input}_{i})
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1028,6 +1030,36 @@ Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
+""")
+
+add_docstr(torch.unsafe_chunk,
+           r"""
+unsafe_chunk(input, chunks, dim=0) -> List of Tensors
+
+Works like :func:`torch.chunk` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
+""")
+
+add_docstr(torch.unsafe_split,
+           r"""
+unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
+
+Works like :func:`torch.split` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
 """)
 
 add_docstr(torch.can_cast,
@@ -2821,18 +2853,21 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
-add_docstr(torch.isinf,
-           r"""
+add_docstr(torch.isinf, r"""
 isinf(input) -> Tensor
 
-Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
-Complex values are infinite when their real and/or imaginary part is infinite.
+Tests if each element of :attr:`input` is infinite
+(positive or negative infinity) or not.
+
+.. note::
+    Complex values are infinite when their real or imaginary part is
+    infinite.
 
     Arguments:
-        {input}}
+        {input}
 
     Returns:
-        Tensor: a boolean tensor with True where :attr:`input` is `+/-INF` and False elsewhere
+        A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
 
     Example::
 

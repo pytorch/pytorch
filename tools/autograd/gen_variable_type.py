@@ -24,7 +24,8 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE
+from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
+    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -818,9 +819,8 @@ def emit_body(declaration):
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
-    # TODO: Add back when https://github.com/pytorch/pytorch/pull/32044 lands again
-    # if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
-    #     view_info = "self"
+    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
+        view_info = "self"
 
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
@@ -1090,7 +1090,10 @@ def emit_body(declaration):
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
                 if return_info['dynamic_type'] == 'TensorList':
-                    creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
+                    if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
+                        creation_meta = "CreationMeta::MULTI_OUTPUT_SAFE"
+                    else:
+                        creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
                     rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
                                  "/* creation_meta */ {})").format(view_info, var, creation_meta)
                 else:

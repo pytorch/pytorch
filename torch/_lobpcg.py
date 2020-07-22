@@ -76,7 +76,7 @@ def lobpcg(A,                   # type: Tensor
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specifed, the value of `n`
+                  is `k`. If :math:`X` is specified, the value of `n`
                   (when specified) must be the number of :math:`X`
                   columns.
 
