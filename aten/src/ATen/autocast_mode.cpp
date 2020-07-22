@@ -360,7 +360,7 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
   m.impl(REGISTER_NAME, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
 
-#define KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(FUNC, REGISTER_NAME, SIGNATURE, LEGACY_SIGNATURE, POLICY) \
+#define KERNEL_LEGACY_SIGNATURE(FUNC, REGISTER_NAME, SIGNATURE, LEGACY_SIGNATURE, POLICY) \
   m.impl(REGISTER_NAME, \
     c10::impl::hacky_wrapper_for_legacy_signatures<SIGNATURE>(TORCH_FN((&WrapFunction<CastPolicy::POLICY, LEGACY_SIGNATURE, LEGACY_SIGNATURE, &FUNC>::type::call))));
 
@@ -381,18 +381,18 @@ TORCH_LIBRARY_IMPL(_, Autocast, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(_convolution), "_convolution", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(_convolution_nogroup), "_convolution_nogroup", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv1d), "conv1d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv2d), "conv2d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv3d), "conv3d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
   KERNEL(ADD_NS(conv_tbc), "conv_tbc", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv_transpose1d), "conv_transpose1d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv_transpose2d), "conv_transpose2d.input", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(conv_transpose3d), "conv_transpose3d.input", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(convolution), "convolution", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(cudnn_convolution), "cudnn_convolution.deprecated", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
@@ -402,7 +402,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), fp16)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>), Tensor (const Tensor &, const Tensor &, const Tensor &), fp16)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>), Tensor (const Tensor &, const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), fp16)
@@ -427,11 +427,11 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(pow), "pow.Scalar", Tensor (Scalar, const Tensor &), fp32)
   KERNEL(ADD_NS(softplus), "softplus", Tensor (const Tensor &, Scalar, Scalar), fp32)
   KERNEL(ADD_NS(gelu), "gelu", Tensor (const Tensor &), fp32)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, c10::optional<Tensor>, c10::optional<Tensor>, double, bool), Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, c10::optional<Tensor>, c10::optional<Tensor>, double, bool), Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
   m.impl("native_layer_norm",
         c10::impl::hacky_wrapper_for_legacy_signatures<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, c10::optional<Tensor>, c10::optional<Tensor>, int64_t, int64_t, double)>(TORCH_FN((&WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call))));
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, c10::optional<Tensor>, c10::optional<Tensor>, double, bool), Tensor (const Tensor &, int64_t, const Tensor&, const Tensor&, double, bool), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, c10::optional<Tensor>, c10::optional<Tensor>, double, bool), Tensor (const Tensor &, int64_t, const Tensor&, const Tensor&, double, bool), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
   KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
@@ -439,8 +439,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cosine_similarity), "cosine_similarity", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
   KERNEL(ADD_NS(poisson_nll_loss), "poisson_nll_loss", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
   KERNEL(ADD_NS(cosine_embedding_loss), "cosine_embedding_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, int64_t, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, int64_t, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(nll_loss), "nll_loss", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, int64_t, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(nll_loss2d), "nll_loss2d", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, int64_t, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
   KERNEL(ADD_NS(hinge_embedding_loss), "hinge_embedding_loss", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
   KERNEL(ADD_NS(kl_div), "kl_div", Tensor (const Tensor &, const Tensor &, int64_t, bool), fp32)
   KERNEL(ADD_NS(l1_loss), "l1_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
@@ -450,8 +450,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(soft_margin_loss), "soft_margin_loss", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(triplet_margin_loss), "triplet_margin_loss", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, c10::optional<Tensor>, int64_t), Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, c10::optional<Tensor>, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(multi_margin_loss), "multi_margin_loss", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, c10::optional<Tensor>, int64_t), Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, c10::optional<Tensor>, c10::optional<Tensor>, int64_t), Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(ADD_NS(dist), "dist", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
   KERNEL(ADD_NS(pdist), "pdist", Tensor (const Tensor &, double), fp32)
   KERNEL_UNBOXED_ONLY(ADD_NS(cdist), "cdist", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
@@ -486,7 +486,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addcdiv), "addcdiv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
   KERNEL(ADD_NS(addcmul), "addcmul", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote)
   KERNEL(ADD_NS(atan2), "atan2", Tensor (const Tensor &, const Tensor &), promote)
-  KERNEL_HACKY_WRAPPER_FOR_LEGACY_SIGNATURES(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, c10::optional<Tensor>), Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote)
+  KERNEL_LEGACY_SIGNATURE(ADD_NS(bilinear), "bilinear", Tensor (const Tensor &, const Tensor &, const Tensor &, c10::optional<Tensor>), Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote)
   KERNEL(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
   KERNEL_UNBOXED_ONLY(ADD_NS(cat), "cat.names", Tensor (TensorList, Dimname), promote)
   KERNEL(ADD_NS(_cat), "_cat", Tensor (TensorList, int64_t), promote)
