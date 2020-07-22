@@ -6257,6 +6257,80 @@ class TestTorchDeviceType(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*list(product(torch.testing.get_all_dtypes(include_complex=False),
+                          torch.testing.get_all_dtypes(include_complex=False))))
+    def test_heaviside(self, device, dtypes):
+        input_dtype = dtypes[0]
+        val_dtype = dtypes[1]
+
+        val = torch.empty(5, 5, device=device)
+        input = (val.bernoulli(0.5) - val.bernoulli(0.5)).to(input_dtype)
+        val = val.to(val_dtype)
+
+        if input_dtype == torch.bfloat16:
+            np_input = input.to(torch.float32).detach().cpu().numpy()
+        else:
+            np_input = input.detach().cpu().numpy()
+
+        if val_dtype == torch.bfloat16:
+            np_val = val.to(torch.float32).detach().cpu().numpy()
+        else:
+            np_val = val.detach().cpu().numpy()
+
+        np_result = np.heaviside(np_input, np_val)
+        np_result = torch.from_numpy(np_result).to(torch.float32)
+
+        torch_result = torch.heaviside(input, val)
+        self.assertEqual(np_result, torch_result)
+
+        torch_result = input.heaviside(val)
+        self.assertEqual(np_result, torch_result)
+
+        out = torch.empty_like(input, device=device, dtype=torch.float32)
+        torch.heaviside(input, val, out=out)
+        self.assertEqual(np_result, out)
+
+        if input.is_floating_point():
+            input.heaviside_(val)
+            self.assertEqual(np_result, input)
+        else:
+            with self.assertRaisesRegex(RuntimeError, 'heaviside is only implemented for floating point types output.'):
+                input.heaviside_(val)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*list(product(torch.testing.get_all_complex_dtypes(),
+                          torch.testing.get_all_complex_dtypes())))
+    def test_heaviside_complex(self, device, dtypes):
+        input_dtype = dtypes[0]
+        val_dtype = dtypes[1]
+
+        data = (complex(0, -6), complex(-1, 3), complex(1, 1))
+        input = torch.tensor(data, device=device, dtype=input_dtype)
+        val = torch.tensor(data, device=device, dtype=val_dtype)
+        out = torch.empty_like(input)
+        real = input.real
+
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+            torch.heaviside(input, real)
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+            real.heaviside(val)
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+            input.heaviside_(val)
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+            torch.heaviside(real, real, out=out)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_heaviside_non_float_output(self, device, dtype):
+        data = [[6, -2, 2], [8, 0, -4], [-8, -8, 6]]
+        input = torch.tensor(data, device=device, dtype=torch.float32)
+        val = torch.tensor(data, device=device, dtype=torch.float32)
+        out = torch.empty_like(input, dtype=dtype)
+
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is only implemented for floating point types output.'):
+            torch.heaviside(input, val, out=out)
+
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @dtypes(*torch.testing.get_all_dtypes())
     def test_logical_not(self, device, dtype):

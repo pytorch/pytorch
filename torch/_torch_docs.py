@@ -5591,6 +5591,41 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.heaviside,
+           r"""
+heaviside(input, val, out=None) -> Tensor
+
+Returns a new tensor with each of the elements of :attr:`input`
+computed with Heaviside step function.
+
+The Heaviside step function is defined as:
+
+.. math::
+    \text{{heaviside}}(input, val) = \begin{cases}
+        \0, & \text{if input < 0}\\
+        \val, & \text{if input == 0}\\
+        \1, & \text{if input > 0}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+    val (Float point Tensor or value): The value of the element where is 0 in input. 
+                                       If input.shape != val.shape, they must be broadcastable to a common shape 
+                                       (which becomes the shape of the output).
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([-1.5, 0, 2.0])
+    >>> torch.heaviside(a, 0.5)
+    tensor([0, 0.5, 1.0])
+    >>> torch.heaviside(a, 1)
+    tensor([0, 1.0, 1.0])
+
+""".format(**common_args))
+
 add_docstr(torch.rand,
            r"""
 rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

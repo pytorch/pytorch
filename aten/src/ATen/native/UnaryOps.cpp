@@ -337,6 +337,59 @@ Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
+Tensor& heaviside_tensor_out(Tensor& result, const Tensor& self, const Tensor& val) {
+  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !val.is_complex(),
+    "heaviside is not implemented for complex tensors.");
+  TORCH_CHECK(result.is_floating_point(),
+    "heaviside is only implemented for floating point types output.");
+
+  result = result.to(kFloat);
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self.to(kFloat))
+    .add_input(val.to(kFloat))
+    .build();
+  heaviside_tensor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& heaviside_scalar_out(Tensor& result, const Tensor& self, Scalar val) {
+  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !at::isComplexType(val.type()),
+    "heaviside is not implemented for complex tensors.");
+  TORCH_CHECK(result.is_floating_point(),
+    "heaviside is only implemented for floating point types output.");
+
+  result = result.to(kFloat);
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self.to(kFloat))
+    .build();
+  heaviside_scalar_stub(iter.device_type(), iter, val);
+  return result;
+}
+
+Tensor heaviside(const Tensor& self, const Tensor& val) {
+  Tensor result = at::empty({0}, self.options().dtype(kFloat));
+  return at::heaviside_out(result, self, val);
+}
+
+Tensor heaviside(const Tensor& self, Scalar val) {
+  Tensor result = at::empty({0}, self.options().dtype(kFloat));
+  return at::heaviside_out(result, self, val);
+}
+
+Tensor& heaviside_(Tensor& self, const Tensor& val) {
+  return at::heaviside_out(self, self, val);
+}
+
+Tensor& heaviside_(Tensor& self, Scalar val) {
+  return at::heaviside_out(self, self, val);
+}
+
 Tensor& logit_out(
     Tensor& result,
     const Tensor& self,
@@ -607,6 +660,8 @@ DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(heaviside_tensor_stub);
+DEFINE_DISPATCH(heaviside_scalar_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
