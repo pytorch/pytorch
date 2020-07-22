@@ -239,7 +239,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
-
+      prim::TypeCheck,
   };
 
   // These namespaces are required to have Python printers unless
@@ -303,6 +303,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::rpc_async,
       prim::Enter,
       prim::Exit,
+      prim::TypeCheck,
   };
 
   // Operators that should not be used by alias analysis

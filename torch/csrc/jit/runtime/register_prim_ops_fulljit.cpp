@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -50,12 +51,15 @@ RegisterOperators reg(
          [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::TypeCheck(Tensor(a) x, bool y) -> (Tensor(a), bool)",
-         [](Stack& /* stack */) {
-           AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
-           return 0;
+         prim::TypeCheck,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+              AT_ERROR("prim::TypeCheck not yet implemented");
+              return 0;
+           };
          },
-         aliasAnalysisFromSchema()),
+         //aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
          [](Stack* /* stack */) {
