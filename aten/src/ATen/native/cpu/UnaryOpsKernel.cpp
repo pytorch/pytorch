@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
@@ -112,7 +111,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 template <typename T>
 void LogitMKLKernel(T eps, TensorIterator* it) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED

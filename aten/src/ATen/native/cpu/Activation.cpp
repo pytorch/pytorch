@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -189,12 +188,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 
 template <typename T>
 void GeluMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
 void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()
