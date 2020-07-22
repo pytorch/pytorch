@@ -2553,7 +2553,11 @@ infinitely_differentiable_native_layer_norm_backward(
       const Tensor& a = rstd_tensor;
       const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
       const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      dX = a * dY_tensor + b * X_tensor + c;
+      if (gamma.defined()) {
+        dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
+      } else {
+        dX = a * dY_tensor + b * X_tensor + c;
+      }
       if (dmean.defined() && drstd.defined()) {
         dX += var_std_mean_backward(
             {dvar, dmean.view({M, 1})},
