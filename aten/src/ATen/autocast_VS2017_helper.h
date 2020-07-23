@@ -22,8 +22,10 @@ namespace autocastVS2017Helper {
 #define UPTOi(RET, OP, SIG) RET OP SIG { return at::OP(A, B, C, D, E, F, G, H, I   ); }
 #define UPTOj(RET, OP, SIG) RET OP SIG { return at::OP(A, B, C, D, E, F, G, H, I, J); }
 #define UPTOl(RET, OP, SIG) RET OP SIG { return at::OP(A, B, C, D, E, F, G, H, I, J, K, L); }
+#define UPTOm(RET, OP, SIG) RET OP SIG { return at::OP(A, B, C, D, E, F, G, H, I, J, K, L, M); }
 
 UPTOl( Tensor, _convolution               , (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, bool        G, IntArrayRef H, int64_t I, bool J, bool K, bool L) )
+UPTOm( Tensor, _convolution               , (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, bool        G, IntArrayRef H, int64_t I, bool J, bool K, bool L, bool M) )
 UPTOh( Tensor, _convolution_nogroup       , (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, bool        G, IntArrayRef H) )
 UPTOg( Tensor, conv1d                     , (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, int64_t     G) )
 UPTOg( Tensor, conv2d                     , (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, int64_t     G) )
@@ -37,6 +39,8 @@ UPTOi( Tensor, cudnn_convolution          , (const Tensor &A, const Tensor &B, c
 UPTOj( Tensor, cudnn_convolution_transpose, (const Tensor &A, const Tensor &B, const Tensor &C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, IntArrayRef G, int64_t     H, bool    I, bool J) )
 UPTOh( Tensor, cudnn_convolution          , (const Tensor &A, const Tensor &B, IntArrayRef   C, IntArrayRef   D, IntArrayRef E, int64_t     F, bool        G, bool        H) )
 UPTOi( Tensor, cudnn_convolution_transpose, (const Tensor &A, const Tensor &B, IntArrayRef   C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, int64_t     G, bool        H, bool    I) )
+UPTOi( Tensor, cudnn_convolution          , (const Tensor &A, const Tensor &B, IntArrayRef   C, IntArrayRef   D, IntArrayRef E, int64_t     F, bool        G, bool        H, bool    I) )
+UPTOj( Tensor, cudnn_convolution_transpose, (const Tensor &A, const Tensor &B, IntArrayRef   C, IntArrayRef   D, IntArrayRef E, IntArrayRef F, int64_t     G, bool        H, bool    I, bool J) )
 UPTOb( Tensor, prelu                      , (const Tensor &A, const Tensor &B) )
 UPTOe( Tensor, addmm                      , (const Tensor &A, const Tensor &B, const Tensor &C, Scalar        D, Scalar      E) )
 UPTOe( Tensor, addmv                      , (const Tensor &A, const Tensor &B, const Tensor &C, Scalar        D, Scalar      E) )

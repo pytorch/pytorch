@@ -17,56 +17,56 @@ namespace at { namespace native {
 at::Tensor cudnn_convolution(
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_input(
     IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_weight(
     IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
   AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_weight(
     IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
   AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
@@ -751,7 +751,7 @@ static inline void split_batch_dim_to_32bit_out(
     const at::Tensor& input,
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic,
+    bool benchmark, bool deterministic, bool allow_tf32, 
     int64_t max_worksize, func_t func_32bit) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
@@ -759,7 +759,7 @@ static inline void split_batch_dim_to_32bit_out(
   // Assume the shape of the tensor is (N, C, D1, D2, ...)
   // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
-    func_32bit(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    func_32bit(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     return;
   }
   // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
@@ -777,7 +777,7 @@ static inline void split_batch_dim_to_32bit_out(
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor output_ = output.narrow(0, start, split_size_);
-      func_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic);
+      func_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     }
     return;
   }
@@ -825,13 +825,13 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
 
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, at::globalContext().allowTF32CuDNN());
+  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(input);
   args.wdesc.set(weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(output);
@@ -868,15 +868,15 @@ void raw_cudnn_convolution_forward_out_32bit(
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
-  split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
+    bool benchmark, bool deterministic, bool allow_tf32) {
+  split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
 
 Tensor cudnn_convolution_forward(
     CheckedFrom c,
     const TensorArg& input, const TensorArg& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
@@ -906,7 +906,7 @@ Tensor cudnn_convolution_forward(
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 
   return *output;
 }
@@ -914,13 +914,13 @@ Tensor cudnn_convolution_forward(
 Tensor cudnn_convolution(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 };
   CheckedFrom c = "cudnn_convolution";
   auto output_t = cudnn_convolution_forward(
-    c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    c, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   return output_t;
 }
 
@@ -929,28 +929,28 @@ Tensor cudnn_convolution(
 Tensor cudnn_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
             weight      { weight_t, "weight", 2 };
   return cudnn_convolution_forward(
     "cudnn_convolution_transpose_backward_input",
-    grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
-    grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   }
   if (output_mask[1]) {
-    grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   }
 
   return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
@@ -967,12 +967,12 @@ void raw_cudnn_convolution_backward_input_out_32bit(
     const at::Tensor& grad_output,
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   auto dataType = getCudnnDataType(grad_output);
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, at::globalContext().allowTF32CuDNN());
+  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(grad_input);
   args.wdesc.set(weight, 0, grad_output.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
@@ -1006,8 +1006,8 @@ void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& grad_output,
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
-  split_batch_dim_to_32bit_out(grad_input, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, 1024 * 1024 * 128, raw_cudnn_convolution_backward_input_out_32bit);
+    bool benchmark, bool deterministic, bool allow_tf32) {
+  split_batch_dim_to_32bit_out(grad_input, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 128, raw_cudnn_convolution_backward_input_out_32bit);
 }
 
 // NOTE [ Backward vs transpose convolutions ]
@@ -1026,7 +1026,7 @@ Tensor cudnn_convolution_backward_input(
     CheckedFrom c,
     IntArrayRef input_size, const TensorArg& grad_output, const TensorArg& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
@@ -1049,7 +1049,7 @@ Tensor cudnn_convolution_backward_input(
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 
   return *grad_input;
 }
@@ -1058,31 +1058,31 @@ Tensor cudnn_convolution_transpose_forward(
     CheckedFrom c,
     const TensorArg& grad_output, const TensorArg& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   auto input_size = conv_input_size(grad_output->sizes(), weight->sizes(),
                                     padding, output_padding, stride, dilation, groups);
   return cudnn_convolution_backward_input(c, input_size, grad_output, weight,
-                                    padding, stride, dilation, groups, benchmark, deterministic);
+                                    padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
 Tensor cudnn_convolution_backward_input(
     IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
   return cudnn_convolution_backward_input(
       "cudnn_convolution_backward_input",
       input_size, grad_output, weight,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
@@ -1096,10 +1096,10 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     }
   } else {
     if (output_mask[0]) {
-      grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+      grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     }
     if (output_mask[1]) {
-      grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+      grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     }
   }
 
@@ -1109,13 +1109,13 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
 Tensor cudnn_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 };
   CheckedFrom c = "cudnn_convolution_transpose";
   auto output_t = cudnn_convolution_transpose_forward(
-    c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
+    c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   return output_t;
 }
 
@@ -1128,13 +1128,13 @@ Tensor cudnn_convolution_transpose(
 void raw_cudnn_convolution_backward_weight_out_32bit(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
 
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, at::globalContext().allowTF32CuDNN());
+  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(input);
   args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
@@ -1166,14 +1166,14 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = grad_output.numel();
   // Assume the shape of the tensor is (N, C, D1, D2, ...)
   // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
-    raw_cudnn_convolution_backward_weight_out_32bit(grad_weight, grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    raw_cudnn_convolution_backward_weight_out_32bit(grad_weight, grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     return;
   }
   // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
@@ -1192,7 +1192,7 @@ void raw_cudnn_convolution_backward_weight_out(
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor grad_output_ = grad_output.narrow(0, start, split_size_);
       Tensor grad_weight_ = at::empty_like(grad_weight);
-      raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic);
+      raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
       grad_weight.add_(grad_weight_);
     }
     return;
@@ -1215,7 +1215,7 @@ Tensor cudnn_convolution_backward_weight(
     CheckedFrom c,
     IntArrayRef weight_size, const Tensor& grad_output_t, const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
@@ -1241,7 +1241,7 @@ Tensor cudnn_convolution_backward_weight(
 
   raw_cudnn_convolution_backward_weight_out(
       *grad_weight, *grad_output_contig, *input,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 
   return grad_weight_t;
 }
@@ -1251,12 +1251,12 @@ Tensor cudnn_convolution_backward_weight(
     const Tensor& grad_output_t,
     const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, grad_output_t, input_t,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
 Tensor cudnn_convolution_transpose_backward_weight(
@@ -1264,12 +1264,12 @@ Tensor cudnn_convolution_transpose_backward_weight(
     const Tensor& grad_output_t,
     const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic)
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, input_t, grad_output_t,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
 }}  // namespace at::native
@@ -1292,6 +1292,15 @@ Tensor cudnn_convolution_deprecated(
 }
 
 // TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
+Tensor cudnn_convolution_deprecated2(
+    const Tensor& input_t, const Tensor& weight_t,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic)
+{
+  return at::cudnn_convolution(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, at::globalContext().allowTF32CuDNN());
+}
+
+// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
 Tensor cudnn_convolution_transpose_deprecated(
     const Tensor& input, const Tensor& weight, const Tensor& bias /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
@@ -1302,6 +1311,15 @@ Tensor cudnn_convolution_transpose_deprecated(
     output = output + reshape_bias(input.dim(), bias);
   }
   return output;
+}
+
+// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
+Tensor cudnn_convolution_transpose_deprecated2(
+    const Tensor& input_t, const Tensor& weight_t,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic)
+{
+    return at::cudnn_convolution_transpose(input_t, weight_t, padding, output_padding, stride, dilation, groups, benchmark, deterministic, at::globalContext().allowTF32CuDNN());
 }
 
 }}  // namespace at::native

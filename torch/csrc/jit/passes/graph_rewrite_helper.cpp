@@ -66,9 +66,9 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   std::string convolution = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
         return (%r) )";
 
   std::string conv2d = R"(

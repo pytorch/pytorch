@@ -34,9 +34,9 @@ void replaceConvBiasWithGetAttr(Module& module) {
   const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
         return (%conv_out) )");
   const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
   const auto& convolution_vmap = pattern_convolution.vmap;
