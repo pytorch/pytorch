@@ -170,11 +170,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       // `shared_ptr` to `this` in ProcessGroupNCCL's `checkFutObjs_` to
       // ensure that the object is alive when the lambda function is called.
       at::launch(([this]() {
-        std::unique_lock<std::mutex> lock(checkFutObjMutex_);
-        (streamCounter_)++;
-        if (streamCounter_ == (*outputs_).size()) {
-          // Need to synchronize because operations using the outputs might be
-          // running on different streams
+        if (++streamCounter_ == (*outputs_).size()) {
+          // Need to synchronize before passing outputs to Future because
+          // operations using the outputs might be running on different streams
           work_->synchronizeStreams();
 
           TORCH_CHECK(
@@ -183,6 +181,7 @@ class ProcessGroupNCCL : public ProcessGroup {
               "completed by ncclKernelCompletionCallback.")
           work_->getFuture()->markCompleted(at::IValue(*outputs_));
 
+          std::unique_lock<std::mutex> lock(checkFutObjMutex_);
           checkFutObjs_->erase(getPtr());
         }
       }));
@@ -191,7 +190,7 @@ class ProcessGroupNCCL : public ProcessGroup {
    private:
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
-    int streamCounter_;
+    std::atomic<int> streamCounter_;
     std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
         checkFutObjs_;
     std::mutex& checkFutObjMutex_;
@@ -459,9 +458,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
       checkFutObjs_;
 
-  // Multiple threads can access and write to checkFutObjs_, so we need the
-  // following lock. This lock is also used to safely increment
-  // CheckFutureWork's streamCounter.
+  // Mutex to guard the unordered set checkFutObjs_.
   mutable std::mutex checkFutObjMutex_;
 };
 
