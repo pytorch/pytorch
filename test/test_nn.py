@@ -10121,10 +10121,10 @@ class TestNNDeviceType(NNTestCase):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
         coords = torch.tensor([[[-1., -1.],
-                                [ 1., -1.]],
+                                [+1., -1.]],
 
-                               [[-1.,  1.],
-                                [ 1.,  1.]]], device=device, dtype=dtype)
+                               [[-1., +1.],
+                                [+1., +1.]]], device=device, dtype=dtype)
         coords = coords.expand(1, 2, 2, 2)
         im = torch.zeros([1, 1, 32769, 65536], device=device, dtype=dtype)
 
