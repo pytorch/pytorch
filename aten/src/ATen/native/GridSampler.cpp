@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <c10/core/Layout.h>
 #include <ATen/cpu/vml.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/Exception.h>
 
@@ -756,8 +757,8 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
   // cudnn does not support inputs larger than 1024
   if (at::native::cudnn_is_acceptable(input) &&
       at::native::cudnn_is_acceptable(grid) &&
-      at::cuda::detail::canUse32BitIndexMath(input) &&
-      at::cuda::detail::canUse32BitIndexMath(grid) &&
+      at::native::canUse32BitIndexMath(input) &&
+      at::native::canUse32BitIndexMath(grid) &&
       static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bilinear &&
       static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Zeros &&
       align_corners &&
