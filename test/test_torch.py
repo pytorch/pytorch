@@ -15413,13 +15413,13 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
-    def test_max0(self, device, dtype):
+    def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
-    def test_min0(self, device, dtype):
+    def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
     @onlyCPU
