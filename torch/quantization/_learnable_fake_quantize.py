@@ -3,14 +3,18 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
+from .observer import _with_args, MovingAverageMinMaxObserver
 
 
-def _quantize(x, scale, zp, q_min, q_max):
+def _quantize(x, scale, zp, q_min, q_max, clamp=True):
     r"""Reference function for quantizing x.
     """
-    return ((x / scale) + zp).round().clamp(q_min, q_max)
+    xq = torch.round(x * (1.0 / scale) + zp)
+    if clamp:
+        return xq.clamp(q_min, q_max)
+    return xq
 
-def _quantize_vectorized(x, ch_axis, scale, zp, q_min, q_max):
+def _quantize_vectorized(x, ch_axis, scale, zp, q_min, q_max, clamp=True):
     r"""Reference function for quantizing a vectorized vesion of x;
     applies to per channel fake quantization.
     """
@@ -18,7 +22,50 @@ def _quantize_vectorized(x, ch_axis, scale, zp, q_min, q_max):
     axis_mask[ch_axis] = x.shape[ch_axis]
     scale_remasked = scale.reshape(axis_mask)
     zp_remasked = zp.reshape(axis_mask)
-    return (x / scale_remasked + zp_remasked).round().clamp(q_min, q_max)
+    xq = torch.round(x * (1.0 / scale_remasked) + zp_remasked)
+    if clamp:
+        return xq.clamp(q_min, q_max)
+    return xq
+
+def _permute_to_axis_zero(X, axis):
+    new_axis_list = list(range(X.dim()))
+    new_axis_list[axis] = 0
+    new_axis_list[0] = axis
+    y = X.permute(tuple(new_axis_list))
+    return y, new_axis_list
+
+def _calculate_X_grad_per_tensor(grad_Y, X, Xq, scale, zero_point, quant_min, quant_max):
+    r"""Reference function to calculate the gradient per tensor for X based on dY.
+    The gradient for X is calculated as below:
+
+    Let Xq be the quantized version of X.
+
+    :math:
+        \frac{dx}{dy} =
+            \begin{cases}
+                dy & \text{ if } q_{\min} \le X_q \le q_{\max} \\
+                0 & \text { else }
+            \end{cases}
+    """
+    mask = (Xq >= quant_min) * (Xq <= quant_max)
+    res = torch.zeros_like(grad_Y)
+    res[mask] = grad_Y[mask]
+    return res
+
+def _calculate_X_grad_per_channel(
+        dY, X, scale, zero_point, axis, quant_min, quant_max):
+    r"""Reference function to calculate the gradient per tensor for X based on dY.
+    Please see _calculate_X_grad_per_tensor for the formula to calculate gradient of X.
+    """
+    X, permute_axis_list = _permute_to_axis_zero(X, axis)
+    Xq = torch.zeros_like(X)
+    for i in range(X.size()[0]):
+        Xq[i] = torch.round(X[i] * (1.0 / scale[i]) + zero_point[i])
+    Xq = Xq.permute(tuple(permute_axis_list))
+    mask = (Xq >= quant_min) * (Xq <= quant_max)
+    res = torch.zeros_like(dY)
+    res[mask] = dY[mask]
+    return res
 
 def _calculate_scale_grad(grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max):
     r"""Reference function for calculating the gradient for scale.
@@ -98,12 +145,15 @@ class _LearnableFakeQuantizePerTensorOp(torch.autograd.Function):
         return X_fq
 
     @staticmethod
-    def backward(ctx, grad_X):
+    def backward(ctx, grad_Y):
         X, scale, zero_point = ctx.saved_tensors
         q_min, q_max, X_fq, grad_factor = ctx.other
 
         zero_point = int((zero_point + 0.5).clamp(q_min, q_max).item())
-        X_q = _quantize(X, scale, zero_point, q_min, q_max)
+        X_q = _quantize(X, scale, zero_point, q_min, q_max, False)
+        grad_X = _calculate_X_grad_per_tensor(
+            grad_Y, X, X_q, scale, zero_point, q_min, q_max)
+        X_q = X_q.clamp(q_min, q_max)
 
         grad_scale = _calculate_scale_grad(
             grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max).sum().unsqueeze(0)
@@ -114,7 +164,6 @@ class _LearnableFakeQuantizePerTensorOp(torch.autograd.Function):
         grad_zp *= grad_factor
 
         return grad_X, grad_scale, grad_zp, None, None, None
-
 
 class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
     r"""A helper class to perform the necessary per channel fake quantization on
@@ -132,7 +181,7 @@ class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
         return X_fq
 
     @staticmethod
-    def backward(ctx, grad_X):
+    def backward(ctx, grad_Y):
         X, scale, zero_point = ctx.saved_tensors
         q_min, q_max, X_fq, ch_axis, grad_factor = ctx.other
 
@@ -141,6 +190,8 @@ class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
 
         scale_vec = scale.detach().type(torch.float32)
         zp_vec = ((zero_point.detach() + 0.5).clamp(q_min, q_max)).type(torch.int64)
+        grad_X = _calculate_X_grad_per_channel(
+            grad_Y, X, scale_vec, zp_vec, ch_axis, q_min, q_max)
 
         grad_scale = torch.zeros([scale_vec.size(0)])
         grad_zp = torch.zeros([zp_vec.size(0)])
@@ -177,9 +228,10 @@ class _LearnableFakeQuantize(nn.Module):
     * :attr: `channel_len` defines the length of the channel when initializing scale and zero point
              for the per channel case.
 
-    * :attr: `grad_factor` defines a factor that will be multiplied to the gradients for scale
-             and zero point during the backward path for the learnable fake quantization operators.
-             By default, it is 1.
+    * :attr: `use_grad_scaling` defines the flag for whether the gradients for scale and zero point are
+              normalized by the constant, which is proportional to the square root of the number of
+              elements in the tensor. The related literature justifying the use of this particular constant
+              can be found here: https://openreview.net/pdf?id=rkgO66VKDS.
 
     * :attr: `fake_quant_enabled` defines the flag for enabling fake quantization on the output.
 
@@ -188,13 +240,13 @@ class _LearnableFakeQuantize(nn.Module):
 
     * attr: `learning_enabled` defines the flag for enabling backpropagation for scale and zero point.
     """
-    def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
-                 grad_factor=1.):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
+                 scale=1., zero_point=0., channel_len=-1, use_grad_scaling=False):
         super(_LearnableFakeQuantize, self).__init__()
         assert quant_min < quant_max, 'quant_min must be strictly less than quant_max.'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.grad_factor = grad_factor
+        self.use_grad_scaling = use_grad_scaling
 
         if channel_len == -1:
             self.scale = Parameter(torch.tensor([scale]))
@@ -287,15 +339,19 @@ class _LearnableFakeQuantize(nn.Module):
         if self.fake_quant_enabled[0] == 1:
             if self.learning_enabled[0] == 1:
                 self.zero_point.clamp(self.quant_min, self.quant_max)
+                if self.use_grad_scaling:
+                    scale_factor = 1.0 / (self.weight.numel() * self.quant_max) ** 0.5
+                else:
+                    scale_factor = 1.0
                 if self.qscheme in (
                         torch.per_channel_symmetric, torch.per_channel_affine):
                     X = _LearnableFakeQuantizePerChannelOp.apply(
                         X, self.scale, self.zero_point, self.ch_axis,
-                        self.quant_min, self.quant_max, self.grad_factor)
+                        self.quant_min, self.quant_max, scale_factor)
                 else:
                     X = _LearnableFakeQuantizePerTensorOp.apply(
                         X, self.scale, self.zero_point,
-                        self.quant_min, self.quant_max, self.grad_factor)
+                        self.quant_min, self.quant_max, scale_factor)
             else:
                 if self.qscheme == torch.per_channel_symmetric or \
                         self.qscheme == torch.per_channel_affine:
@@ -331,3 +387,5 @@ class _LearnableFakeQuantize(nn.Module):
         super(_LearnableFakeQuantize, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys,
             unexpected_keys, error_msgs)
+
+    with_args = classmethod(_with_args)
