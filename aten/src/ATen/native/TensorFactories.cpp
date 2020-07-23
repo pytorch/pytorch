@@ -363,9 +363,9 @@ TensorOptions infer_full_options(
                             ScalarType::ComplexDouble :
                             ScalarType::ComplexFloat;
       return options.dtype(scalar_type);
+    } else {
+      return options.dtype(get_default_dtype());
     }
-
-    TORCH_CHECK(false, "Failed to infer a dtype!");
   }
 
   return options;
