@@ -602,29 +602,6 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
-Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    // Ugly but needed to replicate the std::min(max, std::max(min, a)) for complex
-    if (std::abs(a[i]) < std::abs(min_vec[i])) {
-      if (std::abs(max_vec[i]) > std::abs(min_vec[i])) {
-        c[i] = min_vec[i];
-      } else {
-        c[i] = max_vec[i];
-      }
-    } else {
-      if (std::abs(a[i]) < std::abs(max_vec[i])) {
-        c[i] = a[i];
-      } else {
-        c[i] = max_vec[i];
-      }
-    }
-  }
-  return c;
-}
-
-template <class T,
           typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
