@@ -378,6 +378,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
+      .def(
+          "_jit_pass_reconstruct_scope_from_inlined_callstack",
+          ReconstructScopeFromInlinedCallStack)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def(
           "_jit_pass_lower_graph",

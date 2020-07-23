@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -50,6 +51,27 @@ struct TORCH_API Scope : public c10::intrusive_ptr_target {
 
 struct Function;
 struct InlinedCallStack;
+struct ModuleInstanceInfo {
+ private:
+  c10::ClassTypePtr module_type_{nullptr};
+  std::string instance_name_;
+
+ public:
+  ModuleInstanceInfo(c10::ClassTypePtr module_type, std::string instance_name);
+  c10::ClassTypePtr class_type() {
+    return module_type_;
+  }
+  std::string instance_name() {
+    return instance_name_;
+  }
+  c10::ClassTypePtr class_type() const {
+    return module_type_;
+  }
+  std::string instance_name() const {
+    return instance_name_;
+  }
+};
+
 
 /**
  * InlinedCallStack is an element in a list representing callstack of functions
@@ -81,6 +103,8 @@ struct InlinedCallStack;
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
+using InlinedCallStackWithModuleInfo =
+  std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
@@ -88,10 +112,17 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   Function* fn_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
+  c10::optional<ModuleInstanceInfo> module_instance_info_;
 
  public:
   // Constructor for a leaf callstack node.
   InlinedCallStack(Function* fn, SourceRange source_range);
+
+  // Constructor for a leaf callstack node.
+  InlinedCallStack(
+      Function* fn,
+      SourceRange source_range,
+      c10::optional<ModuleInstanceInfo> module_instance_info);
 
   // Constructor for an inner callstack node.
   InlinedCallStack(
@@ -99,11 +130,18 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       Function* fn,
       SourceRange source_range);
 
+  InlinedCallStack(
+      InlinedCallStackPtr callee,
+      Function* fn,
+      SourceRange source_range,
+      c10::optional<ModuleInstanceInfo> module_instance_info);
+
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
+  std::vector<InlinedCallStackWithModuleInfo> vec_with_module_info();
 };
 
 } // namespace jit

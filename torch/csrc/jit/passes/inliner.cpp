@@ -10,6 +10,51 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
+namespace {
+void pushScopeInfo(Node* node) {
+  auto callstack_ptr = *(node->callstack());
+  const auto& vec = callstack_ptr->vec_with_module_info();
+  ScopePtr sc = c10::make_intrusive<Scope>();
+  for (const auto& tup : vec) {
+    const auto opt_module_instance_info = std::get<2>(tup);
+    if (opt_module_instance_info) {
+      const auto& module_instance_info = opt_module_instance_info.value();
+      if(module_instance_info.class_type()) {
+        const auto& class_type = module_instance_info.class_type();
+        const auto& instance_name = module_instance_info.instance_name();
+        auto type_name = class_type->name()->qualifiedName();
+        type_name = type_name.substr(type_name.find_last_of(".")+1);
+        std::string module_fn_name = type_name + "(" + instance_name + ")::";
+        module_fn_name += std::get<0>(tup)->name();
+        sc = sc->push(Symbol::scope(module_fn_name));
+      } else {
+        sc = sc->push(Symbol::scope("TYPE_INFO_UNKNOWN::"));
+      }
+    }
+    else {
+      std::string free_fn = "FreeFunction::" + std::get<0>(tup)->name();
+      sc = sc->push(Symbol::scope(free_fn));
+    }
+  }
+  node->setScope(sc);
+}
+
+void ReconstructScopeFromInlinedCallStackHelper(Block* block) {
+  for(auto node : block->nodes()) {
+    if (node->callstack()) {
+      pushScopeInfo(node);
+    }
+    for (auto b : node->blocks()) {
+      ReconstructScopeFromInlinedCallStackHelper(b);
+    }
+  }
+}
+} // namespace
+
+void ReconstructScopeFromInlinedCallStack(torch::jit::Graph& g) {
+  ReconstructScopeFromInlinedCallStackHelper(g.block());
+}
+
 void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
