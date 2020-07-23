@@ -87,7 +87,9 @@ class SubgraphSlicer {
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
          ++it) {
-      if (++i >= minSubgraphSize_) {
+      // constants are not interpreted as instructions, ignore them
+      i += it->kind() != prim::Constant;
+      if (i >= minSubgraphSize_) {
         return false;
       }
     }
