@@ -72,7 +72,7 @@ class Conf(object):
                 branches_list=["nightly"],
                 tags_list=[branch_filters.RC_PATTERN],
             )
-        else:
+        elif self.os != "windows" or phase == "upload":
             if phase in ["upload"]:
                 filter_branch = "nightly"
             else:
