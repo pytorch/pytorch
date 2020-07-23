@@ -2043,11 +2043,11 @@ class AbstractTestCases:
             def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
                 x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
                 for normalized in (True, False):
-                    res = x.fft(signal_ndim, normalized=normalized)
+                    res = x.legacy_fft(signal_ndim, normalized=normalized)
                     rec = res.ifft(signal_ndim, normalized=normalized)
                     self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='fft and ifft')
                     res = x.ifft(signal_ndim, normalized=normalized)
-                    rec = res.fft(signal_ndim, normalized=normalized)
+                    rec = res.legacy_fft(signal_ndim, normalized=normalized)
                     self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='ifft and fft')
 
             def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
@@ -2076,7 +2076,7 @@ class AbstractTestCases:
                                 test_one_sample(flatten_batch_res[test_idx])
                         # compare with C2C
                         xc = torch.stack([x, torch.zeros_like(x)], -1)
-                        xc_res = xc.fft(signal_ndim, normalized=normalized)
+                        xc_res = xc.legacy_fft(signal_ndim, normalized=normalized)
                         self.assertEqual(res, xc_res)
                     test_input_signal_sizes = [signal_sizes]
                     rec = res.irfft(signal_ndim, normalized=normalized,
@@ -13915,7 +13915,7 @@ class TestTorchDeviceType(TestCase):
 
         signal = torch.ones((2, 2, 2), device=device)
         signal_copy = signal.clone()
-        spectrum = torch.fft(signal, 2)
+        spectrum = torch.legacy_fft(signal, 2)
         self.assertEqual(signal, signal_copy)
 
         spectrum_copy = spectrum.clone()

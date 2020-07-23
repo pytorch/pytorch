@@ -3699,6 +3699,12 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
+add_docstr_all('fft', r"""
+fft() -> Tensor
+
+See :func:`torch.fft.fft`
+""")
+
 add_docstr_all('legacy_fft',
                r"""
 legacy_fft(signal_ndim, normalized=False) -> Tensor

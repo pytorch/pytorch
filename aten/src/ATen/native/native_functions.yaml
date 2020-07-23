@@ -1439,7 +1439,7 @@
 # FFT
 - func: fft(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   python_module: fft
 
 - func: legacy_fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor

@@ -3,34 +3,24 @@ import sys
 import torch
 from torch._C import _add_docstr
 
+Tensor = torch.Tensor
 
-# # Note [Callable Modules]
-# #   Modules in Python3 cannot be made callable. However, Guido suggests
-# #   https://mail.python.org/pipermail/python-ideas/2012-May/014969.html
-# #   where a callable class acts replaces an imported module.
-# #   Our interest in torch.fft being callable is to let users call
-# #   torch.fft() the function as they have in previous versions of PyTorch.
-# class fft_class:
-#     # Acquires the original fft function
-#     fft_fn = torch.fft
+# Note: This not only adds the doc strings for the spectral ops, but
+# connects the torch.fft Python namespace to the torch._C._fft builtins.
 
-#     # Mimics torch.fft()
-#     __doc__ = fft_fn.__doc__
+fft = _add_docstr(torch._C._fft.fft, r"""
+fft(input) -> Tensor
 
-#     def __call__(self, *args, **kwargs):
-#         return self.fft_fn(*args, **kwargs)
+Computes the one dimensional discrete Fourier transform of :attr:`input`.
 
-#     # Adds functions in the torch.fft namespace
-#     fft = torch._C._fft.fft
+Args:
+  input (Tensor): the input tensor
 
-# # See Note [Callable Modules]
-# sys.modules[__name__] = fft_class()
+Example::
 
-# # docstring registrations for functions in the torch.fft namespace
-
-# fft = _add_docstr(fft_class.fft, r"""
-# fft(input) -> Tensor
-
-# Applies the discrete Fourier transform to the complex input, returning
-# a complex output.
-# """)
+    >>> t = torch.randn(4, dtype=torch.complex128)
+    >>> t
+    tensor([-1.1364-0.5694j, -0.6637+0.9987j, -1.0102-0.4383j,  0.3017+0.9371j], dtype=torch.complex128)
+    >>> torch.fft.fft(t)
+    tensor([-2.5086+0.9281j, -0.0646+0.8343j, -1.7846-2.9435j, -0.1878-1.0965j], dtype=torch.complex128)
+""")

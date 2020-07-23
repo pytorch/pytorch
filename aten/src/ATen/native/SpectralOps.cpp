@@ -22,11 +22,6 @@ Tensor fft(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
   TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
 
-  if (self.scalar_type() != ScalarType::ComplexDouble) {
-    TORCH_WARN("It's recommended to call torch.fft.fft with a complex double "
-               "tensor for numerical precision");
-  }
-
   auto result = native::legacy_fft(at::view_as_real(self), 1, false);
   return at::view_as_complex(result);
 }

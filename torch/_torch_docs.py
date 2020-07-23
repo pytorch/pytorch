@@ -7466,7 +7466,7 @@ Example::
 
     >>> # unbatched 2D FFT
     >>> x = torch.randn(4, 3, 2)
-    >>> torch.fft(x, 2)
+    >>> torch.legacy_fft(x, 2)
     tensor([[[-0.0876,  1.7835],
              [-2.0399, -2.9754],
              [ 4.4773, -5.0119]],
@@ -7483,7 +7483,7 @@ Example::
              [-1.3717, -2.1084],
              [ 2.0289,  2.9357]]])
     >>> # batched 1D FFT
-    >>> torch.fft(x, 1)
+    >>> torch.legacy_fft(x, 1)
     tensor([[[ 1.8385,  1.2827],
              [-0.1831,  1.6593],
              [ 2.4243,  0.5367]],
@@ -7501,7 +7501,7 @@ Example::
              [-0.5384, -2.0299]]])
     >>> # arbitrary number of batch dimensions, 2D FFT
     >>> x = torch.randn(3, 3, 5, 5, 2)
-    >>> y = torch.fft(x, 2)
+    >>> y = torch.legacy_fft(x, 2)
     >>> y.shape
     torch.Size([3, 3, 5, 5, 2])
 

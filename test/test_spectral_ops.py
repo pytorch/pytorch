@@ -21,18 +21,25 @@ class TestFFT(TestCase):
     @precisionOverride({torch.complex64: 1e-4})
     @dtypes(torch.complex64, torch.complex128)
     def test_fft(self, device, dtype):
-        test_inputs = (torch.randn(1029, device=device, dtype=dtype),)
+        test_inputs = (torch.randn(67, device=device, dtype=dtype),
+                       torch.randn(4029, device=device, dtype=dtype))
+
+        def fn(t):
+            return torch.fft.fft(t)
+        scripted_fn = torch.jit.script(fn)
+
+        def method_fn(t):
+            return t.fft()
+        scripted_method_fn = torch.jit.script(method_fn)
+
+        torch_fns = (torch.fft.fft, torch.Tensor.fft, scripted_fn, scripted_method_fn)
 
         for input in test_inputs:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                self.compare_with_numpy(torch.fft.fft,
-                                        np.fft.fft,
-                                        input,
-                                        exact_dtype=(dtype is torch.complex128))
+            expected = np.fft.fft(input.cpu().numpy())
+            for fn in torch_fns:
+                actual = fn(input)
+                self.assertEqual(actual, expected, exact_dtype=(dtype is torch.complex128))
 
-                if dtype is torch.complex64:
-                    self.assertEqual(len(w), 1)
 
     # Note: NumPy will throw a ValueError for an empty input
     @skipCPUIfNoMkl
@@ -50,6 +57,15 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "MKL FFT error"):
             torch.fft.fft(t)
 
+    @dtypes(torch.int64, torch.float32)
+    def test_fft_invalid_dtypes(self, device, dtype):
+        if dtype.is_floating_point:
+            t = torch.randn(64, device=device, dtype=dtype)
+        else:
+            t = torch.randint(-2, 2, (64,), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a complex tensor"):
+            torch.fft.fft(t)
 
 instantiate_device_type_tests(TestFFT, globals())
 

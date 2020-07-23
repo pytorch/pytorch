@@ -4,7 +4,7 @@
 torch.fft
 ===================================
 
-Discrete Fourier transforms and related functions
+Discrete Fourier transforms and related functions.
 
 .. automodule:: torch.fft
 .. currentmodule:: torch.fft
