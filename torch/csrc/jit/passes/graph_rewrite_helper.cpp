@@ -74,21 +74,21 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   std::string conv2d = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   std::string conv1d = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %r = aten::conv1d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   std::string conv3d = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %r = aten::conv3d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
