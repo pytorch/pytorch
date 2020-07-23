@@ -214,7 +214,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     prepare(model, inplace=True)
     run_fn(model, run_args)
     convert(model, mapping, inplace=True)
-    _remove_qconfig(model)
+    # _remove_qconfig(model)
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
@@ -307,7 +307,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
     model = prepare(model, inplace=inplace)
-    convert(model, mapping, inplace=True)
+    _convert(model, mapping, inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
@@ -332,6 +332,50 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     return model
 
 def convert(module, mapping=None, inplace=False):
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module.
+
+    Args:
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
+                 module type, can be overwritten to allow swapping user defined
+                 Modules
+        inplace: carry out model transformations in-place, the original module
+                 is mutated
+
+    """
+    if mapping is None:
+        mapping = DEFAULT_MODULE_MAPPING
+    if not inplace:
+        module = copy.deepcopy(module)
+    reassign = {}
+    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
+    # This is required because intrinsic modules right now are implemented as
+    # nn.Sequential and we don't want to swap their constituents
+    SWAPPABLE_MODULES = (nni.ConvBn2d,
+                         nni.ConvBnReLU2d,
+                         nni.LinearReLU,
+                         nni.BNReLU2d,
+                         nni.BNReLU3d,
+                         nni.ConvBn1d,
+                         nni.ConvReLU1d,
+                         nni.ConvBnReLU1d,
+                         nni.ConvReLU2d,
+                         nni.ConvReLU3d)
+
+    for name, mod in module.named_children():
+        if type(mod) not in SWAPPABLE_MODULES:
+            convert(mod, mapping, inplace=True)
+            if hasattr(module, "qconfig"):
+                del module.qconfig
+        reassign[name] = swap_module(mod, mapping)
+
+    for key, value in reassign.items():
+        module._modules[key] = value
+
+    return module
+
+def _convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
 
