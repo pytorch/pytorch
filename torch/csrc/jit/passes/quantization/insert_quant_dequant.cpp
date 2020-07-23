@@ -49,7 +49,11 @@ bool isWeight(Module& module, Value* v) {
   for (const Use& u : v->uses()) {
     Node* n = u.user;
     if (n->kind() == prim::CallMethod) {
-      auto m = getInvokedModule(module, n, self);
+      auto m_opt = getInvokedModuleOpt(module, n, self);
+      if (!m_opt.has_value()) {
+        return false;
+      }
+      auto m = *m_opt;
       auto g = m.get_method(n->s(attr::name)).graph();
       auto call_method_result = isWeight(m, g->inputs()[u.offset]);
       if (result.has_value()) {
@@ -495,9 +499,10 @@ void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return isTensorInfoNode(user);
   };
@@ -521,9 +526,10 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
@@ -1015,7 +1021,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
             module_instance->node()->kind() == prim::GetAttr &&
             module_instance->node()->s(attr::name).find("_observer_") ==
                 std::string::npos) {
-          m = getInvokedModule(module, n, graph->inputs()[0]);
+          m = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
