@@ -12926,7 +12926,7 @@ class TestTorchDeviceType(TestCase):
         for maskType in [torch.uint8, torch.bool]:
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
-            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+            mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
 
             if dtype == torch.half and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
@@ -12947,18 +12947,18 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
-        # Since complex and half on CPU is not supported, need to skip the remaining test cases
-        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+        # Since half on CPU is not supported, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
         a = torch.rand(100, 100, device=device).mul(100).to(dtype)
-        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        mask_first_el_each_row = torch.zeros(100, device=device, dtype=torch.bool)
         mask_first_el_each_row[0] = True
         a_masked = a.masked_select(mask_first_el_each_row)
         self.assertEqual(a_masked, a[:, 0])
 
-        mask_first_row = torch.zeros(100, 1, device=device, dtype=dtype).bool()
+        mask_first_row = torch.zeros(100, 1, device=device, dtype=torch.bool)
         mask_first_row[0][0] = True
         a_masked = a.masked_select(mask_first_row)
         self.assertEqual(a_masked, a[0, :])
