@@ -4942,6 +4942,63 @@ void testGPU_FusionTraversalOrder7() {
       t5.sub(cg_output_tv5).abs().max());
 }
 
+// Test predication of grid reduction
+void testGPU_FusionThreadPredicate() {
+  const int gdimx = 4;
+  const int bdimx = 128;
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv2 = unaryOp(UnaryOpType::Neg, tv1);
+  TensorView* tv3 = add(tv0, new Float(2));
+
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv2);
+
+  tv1->split(1, bdimx);
+  tv1->split(1, gdimx);
+  tv3->split(1, bdimx);
+  tv3->split(1, gdimx);
+
+  TensorView* tv1_rf = tv1->rFactor({1});
+
+  tv1->computeAt(tv2, -1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(-2)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(-2)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
+  tv3->axis(2)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDy);
+
+  int numel_x = 100;
+  int numel_y = 1000;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output_tv2 = at::empty({numel_x}, options);
+  at::Tensor cg_output_tv3 = at::empty_like(input, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input}, {cg_output_tv3, cg_output_tv2});
+
+  auto aten_output_tv2 = -input.sum({1});
+  TORCH_CHECK(aten_output_tv2.allclose(cg_output_tv2));
+  auto aten_output_tv3 = input + 2.0;
+  TORCH_CHECK(aten_output_tv3.allclose(cg_output_tv3));
+}
+
 } // namespace jit
 } // namespace torch
 

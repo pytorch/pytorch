@@ -161,9 +161,7 @@ void LoopNestGenerator::initReduction(
   // Unsafe clone, as we want an exact replica of tv so we can create a UnaryOp
   // to set the buffer to the init_val.
   auto clone = tv->unsafeClone();
-  if (thread_predicates_.find(tv) != thread_predicates_.end()) {
-    thread_predicates_[clone] = thread_predicates_[tv];
-  }
+  thread_predicates_.duplicate(clone, tv);
   // The initilization stmt that will be located inside the loop nest (if there
   // is one)
   auto init_stmt = new UnaryOp(UnaryOpType::Set, clone, init_val);

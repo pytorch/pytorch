@@ -488,6 +488,8 @@ Function parameters:
 - sync_flags: A vector of integers for synchronizations
 - shared_buf: Shared memory buffer for intra-block reduction
 
+Return true when the thread block has the valid result.
+
 Template parameters:
 - X/Y/Z_BLOCK: When true, reduces across thread blocks along the X/Y/Z
   dimensions
@@ -522,7 +524,7 @@ final results.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK,
           bool X_THREAD, bool Y_THREAD, bool Z_THREAD,
           typename T, typename Func>
-__device__ void gridReduce(T& out, T inp_val, Func reduction_op,
+__device__ bool gridReduce(T& out, T inp_val, Func reduction_op,
                            volatile T* work_buf,
                            Tensor<int64_t, 1> sync_flags,
                            T* shared_buf) {
@@ -561,6 +563,9 @@ __device__ void gridReduce(T& out, T inp_val, Func reduction_op,
     gridReduceLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
         out, (T*)work_buf, seg_size * rblock_size,
         reduction_op, shared_buf);
+    return true;
+  } else {
+    return false;
   }
 }
 } // namespace reduction

@@ -589,7 +589,7 @@ ParallelTypeBitmap getParallelBroadcastDomains(
   if (preds.find(out_tv) == preds.end()) {
     return ParallelTypeBitmap();
   }
-  const ParallelTypeBitmap& out_pred = preds.at(out_tv);
+  const ParallelTypeBitmap& out_pred = preds.at(out_tv).first;
 
   ParallelTypeBitmap parallel_broadcast;
   const auto& iter_domains = out_tv->domain()->domain();

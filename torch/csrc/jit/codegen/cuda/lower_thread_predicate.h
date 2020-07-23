@@ -22,17 +22,22 @@ namespace fuser {
  */
 class TORCH_CUDA_API ThreadPredicateMap {
  public:
-  using MapType =
-      std::unordered_map<const TensorView*, ir_utils::ParallelTypeBitmap>;
+  using SourceMapType =
+      std::unordered_map<ParallelType, std::unordered_set<const TensorView*>>;
+  using MapType = std::unordered_map<
+      const TensorView*,
+      std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>>;
   using const_iterator = MapType::const_iterator;
 
   explicit ThreadPredicateMap(Fusion* _fusion);
 
   const_iterator find(const TensorView* tv) const;
   const_iterator end() const;
-  const ir_utils::ParallelTypeBitmap& at(const TensorView* tv) const;
-  ir_utils::ParallelTypeBitmap& at(const TensorView* tv);
-  ir_utils::ParallelTypeBitmap& operator[](const TensorView* tv);
+  const MapType::mapped_type& at(const TensorView* tv) const;
+  MapType::mapped_type& at(const TensorView* tv);
+  MapType::mapped_type& operator[](const TensorView* tv);
+
+  void duplicate(const TensorView* copy, const TensorView* origin);
 
   // Returns a Bool predicate expression for a given TensorView.
   Bool* getExpr(const TensorView* tv) const;
@@ -43,6 +48,12 @@ class TORCH_CUDA_API ThreadPredicateMap {
 
   // Update the thread_predicates bitset based on provided Expr
   void updateBitSet(Expr*);
+
+  void emplace(
+      const TensorView* tv,
+      const ir_utils::ParallelTypeBitmap& pred,
+      const SourceMapType& src_map);
+  void emplace(const TensorView* tv, const MapType::mapped_type& pred_and_src);
 };
 
 } // namespace fuser

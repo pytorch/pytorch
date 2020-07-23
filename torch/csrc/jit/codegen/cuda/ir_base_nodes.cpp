@@ -142,6 +142,10 @@ Expr* Val::getOrigin() {
   return (fusion_->origin(this));
 }
 
+const Expr* Val::getOrigin() const {
+  return (fusion_->origin(this));
+}
+
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
 Expr::Expr(ExprType _type) : type_{_type} {

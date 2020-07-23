@@ -198,6 +198,12 @@ GridReduction::GridReduction(const GridReduction* src, IrCloner* ir_cloner)
       reduction_buffer_(ir_cloner->clone(src->reduction_buffer_)),
       sync_buffer_(ir_cloner->clone(src->sync_buffer_)) {}
 
+std::string getPredicateFlagName(const TensorView* val) {
+  std::stringstream ss;
+  ss << "T" << val->name() << "_pred";
+  return ss.str();
+}
+
 } // namespace kir
 } // namespace fuser
 } // namespace jit

@@ -233,6 +233,7 @@ class TORCH_CUDA_API Val : public Statement {
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
   Expr* getOrigin();
+  const Expr* getOrigin() const;
 
   virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&
