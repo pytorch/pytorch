@@ -448,13 +448,21 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0, 1, 2]})
 
     def test_tensor(self):
-        class MyModule(torch.jit.ScriptModule):
+        class ScalarInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(ScalarInputModel(), x)
+
+        class TensorInputModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
                 return torch.tensor([input.shape[0], input.shape[1]]) 
 
         x = torch.randn(3, 4)
-        self.run_test(MyModule(), x)
+        self.run_test(TensorInputModel(), x)
 
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
