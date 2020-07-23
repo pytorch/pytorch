@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -211,6 +211,7 @@ class AbstractTestCases:
                            'smm',
                            'softmax',
                            'split_with_sizes',
+                           'unsafe_split_with_sizes',
                            'sspaddmm',
                            'to_dense',
                            'sparse_resize_',
@@ -274,7 +275,7 @@ class AbstractTestCases:
             self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
             self.assertIsNotNone(torch.Tensor().new().storage())
 
-        def _testSelection(self, torchfn, mathfn):
+        def _testSelection(self, torchfn, mathfn, skip_indices=False):
             # contiguous
             m1 = torch.randn(100, 100)
             res1 = torchfn(m1)
@@ -293,20 +294,21 @@ class AbstractTestCases:
             self.assertEqual(res1, res2)
 
             # with indices
-            m1 = torch.randn(100, 100)
-            res1val, res1ind = torchfn(m1, 1, False)
-            res2val = m1[:, 0:1].clone().squeeze()
-            res2ind = res1ind.clone().fill_(0)
-            for i, j in iter_indices(m1):
-                if mathfn(res2val[i], m1[i, j]) != res2val[i]:
-                    res2val[i] = m1[i, j]
-                    res2ind[i] = j
+            if not skip_indices:
+                m1 = torch.randn(100, 100)
+                res1val, res1ind = torchfn(m1, 1, False)
+                res2val = m1[:, 0:1].clone().squeeze()
+                res2ind = res1ind.clone().fill_(0)
+                for i, j in iter_indices(m1):
+                    if mathfn(res2val[i], m1[i, j]) != res2val[i]:
+                        res2val[i] = m1[i, j]
+                        res2ind[i] = j
 
-            maxerr = 0
-            for i in range(res1val.size(0)):
-                maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
-                self.assertEqual(res1ind[i], res2ind[i])
-            self.assertLessEqual(abs(maxerr), 1e-5)
+                maxerr = 0
+                for i in range(res1val.size(0)):
+                    maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
+                    self.assertEqual(res1ind[i], res2ind[i])
+                self.assertLessEqual(abs(maxerr), 1e-5)
 
             # NaNs
             for index in (0, 4, 99):
@@ -326,11 +328,31 @@ class AbstractTestCases:
                 res2 = mathfn(res2, m1[i])
             self.assertEqual(res1, res2)
 
+            # Long
+            m1 = torch.LongTensor(100).random_(-1000, 1000)
+            res1 = torchfn(m1)
+            res2 = m1[0]
+            for i in iter_indices(m1):
+                res2 = mathfn(res2, m1[i])
+            self.assertEqual(res1, res2)
+
+
         def test_max(self):
             self._testSelection(torch.max, max)
 
         def test_min(self):
             self._testSelection(torch.min, min)
+
+        def test_min_max(self):
+            # TODO: implement indices, in a future PR
+            # min correctness
+            self._testSelection(lambda x: torch._min_max(x)[0],
+                                lambda x, y: min(x, y),
+                                skip_indices=True)
+            # max correctness
+            self._testSelection(lambda x: torch._min_max(x)[1],
+                                lambda x, y: max(x, y),
+                                skip_indices=True)
 
         def test_dim_reduction_uint8_overflow(self):
             example = [[-1, 2, 1], [5, 3, 6]]
@@ -2644,6 +2666,13 @@ class AbstractTestCases:
             with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
                 torch.gather(src, dim, idx, out=expected.to(torch.int))
 
+            # checks for the same dimensionality
+            with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
+                torch.gather(src, dim, idx.unsqueeze(-1))
+
+            with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
+                torch.gather(src.unsqueeze(-1), dim, idx)
+
             if test_bounds:
                 idx[0][0][0] = 23
                 self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -2741,6 +2770,17 @@ class AbstractTestCases:
                 # should throw an error when index dtype is not long
                 with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
+
+                # check for the same dimensionality
+                with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as self tensor'):
+                    getattr(base.clone().unsqueeze(-1), method)(dim, idx, src)
+
+                with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as self tensor'):
+                    getattr(base.clone(), method)(dim, idx.unsqueeze(-1), src)
+
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as src tensor'):
+                        getattr(base.clone(), method)(dim, idx, src.unsqueeze(-1))
 
                 if test_bounds:
                     idx[0][0][0] = 34
@@ -6547,7 +6587,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-    @skipCUDAIfRocm
     @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         # ConvTranspose3d works for large input tensors (gh-32866)
@@ -12040,6 +12079,11 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
 
+    @onlyCUDA
+    @expectedAlertNondeterministic('_histc_cuda', fn_has_device_arg=False)
+    def test_histc_alert_nondeterministic(self, device):
+        torch.histc(torch.tensor([], device=device), min=0, max=3)
+
     def test_histc(self, device):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
@@ -12906,7 +12950,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype == torch.half and torch.device(device).type == 'cpu':
+            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -15518,6 +15562,11 @@ class TestTorchDeviceType(TestCase):
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
+    def test_bincount_alert_nondeterministic(self, device):
+        torch.bincount(torch.tensor([], device=device, dtype=torch.long))
 
     @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
@@ -18375,7 +18424,6 @@ class TestDevicePrecision(TestCase):
 
         self.assertEqual(out_cpu, out_gpu, atol=1e-2, rtol=0)
 
-    @skipCUDAIfRocm
     @dtypes(torch.double)
     def test_sum_noncontig(self, device, dtype):
         x = torch.randn(1, 75, 57, 20, dtype=dtype, device=device).permute(0, 3, 1, 2)
@@ -19218,7 +19266,7 @@ tensor_op_tests = [
     ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
-        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfRocm]),
+        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
