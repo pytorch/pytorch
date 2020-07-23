@@ -643,7 +643,8 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     auto sizes = input.sizes();
     auto strides = input.strides();
     // NOTE: Gather offsets are only used for the height and width dimensions
-    auto max_gather_offset = sizes[2] * std::abs(strides[2]) + sizes[3] * std::abs(strides[3]);
+    auto max_gather_offset =
+      (sizes[2] - 1) * std::abs(strides[2]) + (sizes[3] - 1) * std::abs(strides[3]);
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return grid_sampler_2d_cpu_impl<float>(
@@ -685,8 +686,8 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     auto gstrides = grad_output.strides();
     // NOTE: Gather offsets are only used for the height and width dimensions
     auto max_gather_offset = std::max(
-      isizes[2] * std::abs(istrides[2]) + isizes[3] * std::abs(istrides[3]),
-      gsizes[2] * std::abs(gstrides[2]) + gsizes[3] * std::abs(gstrides[3]));
+      (isizes[2] - 1) * std::abs(istrides[2]) + (isizes[3] - 1) * std::abs(istrides[3]),
+      (gsizes[2] - 1) * std::abs(gstrides[2]) + (gsizes[3] - 1) * std::abs(gstrides[3]));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return grid_sampler_2d_backward_cpu_impl<float>(
