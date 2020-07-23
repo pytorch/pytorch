@@ -74,9 +74,9 @@ def _observer_forward_hook(self, input, output):
     return self.activation_post_process(output)
 
 def _observer_forward_pre_hook(self, input):
-    ''' Forward pre hook that calls observer on the input
+    ''' Forward pre hook that calls observer on the input (can be a tuple of values)
     '''
-    self.activation_pre_process(input[0])
+    self.activation_pre_process(*input)
     # Returning nothing is Ok, Module._call_impl will intrepret this
     # as the pre_hook making no changes to the input, as desired
 
