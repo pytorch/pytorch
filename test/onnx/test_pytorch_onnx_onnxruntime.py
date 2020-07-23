@@ -300,6 +300,51 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_fuse_conv_bn1d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.bn = torch.nn.BatchNorm1d(33)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_fuse_conv_bn2d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
+                self.bn = torch.nn.BatchNorm2d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(2, 3, 2, 2, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_fuse_conv_bn3d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv3d(3, 2, (3, 5, 2), stride=(2, 1, 1), padding=(3, 2, 0), bias=False)
+                self.bn = torch.nn.BatchNorm3d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(2, 3, 10, 50, 100, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-6)
+
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
             def __init__(self, ):
@@ -2894,6 +2939,69 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
+    @unittest.skip("Enable once jit trace Tensor.numel as constant is fixed.")
+    def test_embedding_bag_dynamic(self):
+        class EmbeddingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embeddingbag = torch.nn.EmbeddingBag(40, 12, mode='sum')
+
+            def forward(self, input):
+                return self.embeddingbag(input)
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (10, 5))
+        y = torch.randint(10, (20, 5))
+        self.run_test(model, x, test_with_inputs=[y],
+                      input_names=['input'],
+                      output_names=['output'],
+                      dynamic_axes={'input': [0],
+                                    'output': [0]
+                                    })
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag(self):
+        model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
+        input = torch.randint(10, (7,))
+        offset = torch.tensor([0, 2, 5, 6])
+        self.run_test(model, (input, offset))
+
+        model = torch.nn.EmbeddingBag(10, 5, mode='sum', include_last_offset=True)
+        input = torch.randint(10, (7,))
+        offset = torch.tensor([0, 2, 5, 6])
+        self.run_test(model, (input, offset))
+
+        model = torch.nn.EmbeddingBag(10, 5, mode='max')
+        input = torch.randint(10, (7, 5))
+        self.run_test(model, (input))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag_1d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, offset, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input, offsets=offset,
+                                                         mode='sum', per_sample_weights=weights)
+
+        model = EmbeddingModel()
+        x = torch.randint(7, (6,))
+        w = torch.randn(6,)
+        offset = torch.tensor([0, 2, 5])
+        embedding_matrix = torch.rand(10, 15)
+        self.run_test(model, (embedding_matrix, x, offset, w))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_embedding_bag_2d_per_sample_weights(self):
+        class EmbeddingModel(torch.nn.Module):
+            def forward(self, embedding_matrix, input, weights):
+                return torch.nn.functional.embedding_bag(embedding_matrix, input,
+                                                         mode='sum', per_sample_weights=weights)
+
+        embedding_matrix = torch.rand(10, 15)
+        model = EmbeddingModel()
+        x = torch.randint(7, (2, 3))
+        w = torch.randn(2, 3)
+        self.run_test(model, (embedding_matrix, x, w))
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
@@ -3690,6 +3798,19 @@ class TestONNXRuntime(unittest.TestCase):
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fake_quantize_per_tensor(self):
+        class FakeQuantizePerTensorModel(torch.nn.Module):
+            def forward(self, input):
+                scale = 1. / 127
+                zero_point = 0
+                quant_min = -128
+                quant_max = 127
+                return torch.fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max)
+
+        x = torch.randn(6, 4, 3, 3)
+        self.run_test(FakeQuantizePerTensorModel(), (x))
 
 
 def make_test(name, base, layer, bidirectional, initial_state,

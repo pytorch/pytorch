@@ -106,7 +106,7 @@ jit_sources_common = [
 
 libtorch_sources_common = core_sources_common + jit_sources_common
 
-core_sources_full = [
+core_autograd_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -122,6 +122,9 @@ core_sources_full = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+]
+
+core_sources_full = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -254,7 +257,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_autograd_sources)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -479,6 +482,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
@@ -579,6 +583,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_irparser.cpp",
         "test/cpp/jit/test_jit_type.cpp",
         "test/cpp/jit/test_lite_interpreter.cpp",
+        "test/cpp/jit/test_lite_trainer.cpp",
         "test/cpp/jit/test_misc.cpp",
         "test/cpp/jit/test_mobile_type_parser.cpp",
         "test/cpp/jit/test_module_api.cpp",

@@ -723,7 +723,20 @@ inline IValue toIValue(
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
+    case TypeKind::AnyEnumType:
       break;
+    case TypeKind::EnumType:
+      py::object py_obj = py::reinterpret_borrow<py::object>(obj);
+      std::string qualified_class_name_str =
+          py::cast<std::string>(py::module::import("torch._jit_internal")
+                                    .attr("_qualified_name")(py_obj));
+      c10::QualifiedName qualified_class_name(qualified_class_name_str);
+      std::string name = py::cast<std::string>(obj.attr("name"));
+      IValue value = toIValue(
+          obj.attr("value"), type->cast<EnumType>()->getValueType(), {});
+      auto enum_holder = c10::make_intrusive<c10::ivalue::EnumHolder>(
+          qualified_class_name, name, value);
+      return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(
       "toIValue() cannot handle converting to type: ", type->repr_str()));

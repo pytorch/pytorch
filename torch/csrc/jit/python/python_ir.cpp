@@ -798,6 +798,15 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<ClassType>& self, const std::string& name) {
             self->unsafeRemoveAttribute(name);
           });
+
+  py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
+      .def(py::init([](const std::string& qualified_name, TypePtr value) {
+        return EnumType::create(
+            c10::QualifiedName(qualified_name),
+            std::move(value),
+            get_python_cu());
+      }));
+
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
