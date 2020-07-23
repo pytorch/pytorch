@@ -12973,13 +12973,13 @@ class TestTorchDeviceType(TestCase):
         for size in (10, 200):
             vals = torch.rand(size, size, device=device)
             mask = torch.full((size, size), False, dtype=torch.bool, device=device)
-            mask[:,::2] = True
+            mask[:, ::2] = True
             vals_list = (vals, vals.t())
             mask_list = (mask, mask.t())
-            out_dc = torch.empty(size*size, device=device)[::2]
+            out_dc = torch.empty(size * size, device=device)[::2]
             for v, m in product(vals_list, mask_list):
                 if m.is_contiguous():
-                    expected = v[:,::2].clone().view(-1)
+                    expected = v[:, ::2].clone().view(-1)
                 else:
                     expected = v[::2].clone().view(-1)
                 out = torch.masked_select(v, m)
