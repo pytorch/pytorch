@@ -421,16 +421,33 @@ c10::optional<ReductionParams> scheduleReduction(
 
   constexpr int kLoopUnrollSplit = 4;
 
-  // Heuristic Definition
+  // Scheduling the Reduction
   if (rparams.fastest_dim_) {
     // Do multiple reductions per block
     if (rparams.mul_reds_per_blk) {
       // Reduction Splits
+      //      [outputs, |rF-Leftover, rf-Unroll, X-Warp|]
+      // Idx:     0     |   1(-1)       2(-2)    3(-1) |
+      //                --------------------------------
+      //                Reduction Dimensions
       red_tv->split(1, rparams.block_dim_x_);
       red_tv->split(1, kLoopUnrollSplit);
+
+      // Reordering the Unroll dimension eases applying computeAt()
+      // for preceeding operations and the rFactored Tensor.
+      //                               |- Reordered -|
+      //                               V             V
+      //      [outputs, |rF-Leftover, X-Warp, rF-Unroll|]
+      // Idx:     0     |   1(-3)      2(-2)    3(-1)  |
+      //                --------------------------------
+      //                Reduction Dimensions
       red_tv->reorder({{-1, -2}, {-2, -1}});
 
       // Output Splits
+      //      [|Out-Leftover, Out-PerBlock|, <Reduction Dims>]
+      // Idx:  |     0             1      |   2(-2) -- 3(-1)
+      //       ----------------------------
+      //       Output Dimensions
       red_tv->split(0, rparams.block_dim_y_);
 
       auto red_tv_rf = red_tv->rFactor({-3, -1});
@@ -454,15 +471,14 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(1)->parallelize(ParallelType::TIDy);
       red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
-      red_tv_rf->axis(1)->parallelize(ParallelType::TIDy);
-      red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
-      red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
-
-      red_tv->axis(0)->parallelize(ParallelType::BIDx);
-      red_tv->axis(1)->parallelize(ParallelType::TIDy);
-      red_tv->axis(-1)->parallelize(ParallelType::TIDx);
-
       // Bind Inputs to Reduction
+      // The computeAt is not to the inner most dimension of the rFactored
+      // tensor in order to force the creation of separate loop nests to cause
+      // Inputs to be separately read in their own loop.
+      //                       computeAt(-2)------|
+      //                                          V
+      //      [<output dims>, X-Warp, rF-Leftover,| rF-Unroll]
+      // Idx:      0 -- 1      2(-3)      3(-2)        4(-1)
       Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
       if (!fusion->hasInput(input)) {
         input->as<TensorView>()->computeAt(red_tv_rf, -2);
@@ -470,28 +486,58 @@ c10::optional<ReductionParams> scheduleReduction(
       }
       // Do a cross-warp reduction per block
     } else {
-      if (rparams.cross_block_) {
+      if (rparams.cross_grid_) {
         // Reduction Splits
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid, X-Warp|]
+        // Idx:     0     |   1(-5)       2(-4)     3(-3)   4(-2)   5(-1) |
+        //                -------------------------------------------------
+        //                Reduction Dimensions
         red_tv->split(1, rparams.block_dim_x_);
         red_tv->split(1, rparams.grid_dim_y_);
         red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(1, kLoopUnrollSplit);
+
+        // Reordering the Unroll dimension eases applying computeAt()
+        // for preceeding operations and the rFactored Tensor.
+        //                                 |------ Reordered --------|
+        //                                 V                         V
+        //      [outputs, |rF-Leftover, X-Warp, X-Block, X-Grid, rf-Unroll|]
+        // Idx:     0     |   1(-5)     2(-4)    3(-3)    4(-2)    5(-1)  |
+        //                -------------------------------------------------
+        //                Reduction Dimensions
         red_tv->reorder({{-1, -4}, {-4, -1}});
 
         auto red_tv_rf = red_tv->rFactor(
             {-5, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
-        red_tv_rf->axis(-4)->parallelize(ParallelType::BIDy);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
+        // WARNING: computeAt will coalesce the rFactored dimensions
+        // rFactored Reduction Tensor after computeAt():
+        //      [Outputs, |X-Warp, X-Block, X-Grid, rF-Leftover, rF-Unroll|]
+        // Idx:     0     | 1(-5)   2(-4)   3(-3)      4(-2)       5(-1)  |
+        //                -------------------------------------------------
+        //                Reduction Dimensions
+        red_tv_rf->computeAt(red_tv, -1);
+
+        // After the Reduction Tensor has rFactoring applied
+        // Reduction Output Tensor:
+        //      [Outputs, X-Warp, X-Block, X-Grid]
+        // Idx:     0     1(-3)    2(-2)    3(-1)
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv->axis(-3)->parallelize(ParallelType::BIDy);
+        red_tv->axis(-3)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::BIDy);
 
         // Bind Inputs to Reduction
+        // The computeAt is not to the inner most dimension of the rFactored
+        // tensor in order to force the creation of separate loop nests to cause
+        // Inputs to be separately read in their own loop.
+        //                                  computeAt(-2)------|
+        //                                                     V
+        //      [Outputs, X-Warp, X-Block, X-Grid, rF-Leftover,| rF-Unroll]
+        // Idx:     0     1(-5)    2(-4)   3(-3)      4(-2)        5(-1)
         Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
@@ -499,22 +545,53 @@ c10::optional<ReductionParams> scheduleReduction(
         }
       } else {
         // Reduction Splits
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Warp|]
+        // Idx:     0     |   1(-4)       2(-3)     3(-2)   4(-1) |
+        //                -----------------------------------------
+        //                Reduction Dimensions
         red_tv->split(1, rparams.block_dim_x_);
         red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(1, kLoopUnrollSplit);
+
+        // Reordering the Unroll dimension eases applying computeAt()
+        // for preceeding operations and the rFactored Tensor.
+        //                                 |--- Reordered ----|
+        //                                 V                  V
+        //      [outputs, |rF-Leftover, X-Warp, X-Block, rF-Unroll|]
+        // Idx:     0     |   1(-4)      2(-3)   3(-2)     4(-1)  |
+        //                -----------------------------------------
+        //                Reduction Dimensions
         red_tv->reorder({{-1, -3}, {-3, -1}});
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
-        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDx);
+        // WARNING: computeAt will coalesce the rFactored dimensions
+        // rFactored Reduction Tensor after computeAt():
+        //      [Outputs, |X-Warp, X-Block, rF-Leftover, rF-Unroll|]
+        // Idx:     0     | 1(-4)   2(-3)      3(-2)       4(-1)  |
+        //                -----------------------------------------
+        //                Reduction Dimensions
+        red_tv_rf->computeAt(red_tv, -1);
+
+        // After the Reduction Tensor has rFactoring applied
+        // Reduction Output Tensor:
+        //      [Outputs, X-Warp, X-Block]
+        // Idx:     0     1(-2)    2(-1)
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv->axis(-2)->parallelize(ParallelType::TIDy);
-        red_tv->axis(-1)->parallelize(ParallelType::TIDx);
+        red_tv->axis(-2)->parallelize(ParallelType::TIDx);
+        red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
+        // The computeAt is not to the inner most dimension of the rFactored
+        // tensor in order to force the creation of separate loop nests to cause
+        // Inputs to be separately read in their own loop.
+        //                          computeAt(-2)------|
+        //                                             V
+        //      [Outputs, X-Warp, X-Block, rF-Leftover,| rF-Unroll]
+        // Idx:     0     1(-4)    2(-3)      3(-2)        4(-1)
         Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
@@ -523,23 +600,50 @@ c10::optional<ReductionParams> scheduleReduction(
       }
     }
   } else {
-    if (rparams.cross_warp_) {
-      if (rparams.cross_block_) {
+    if (rparams.cross_block_) {
+      if (rparams.cross_grid_) {
         // Reduction Splits
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid|]
+        // Idx:     0     |   1(-4)       2(-3)     3(-2)   4(-1) |
+        //                -----------------------------------------
+        //                Reduction Dimensions
+        red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(1, rparams.grid_dim_y_);
         red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(1, kLoopUnrollSplit);
+
+        // Reordering the Unroll dimension eases applying computeAt()
+        // for preceeding operations and the rFactored Tensor.
+        //                                 |--- Reordered ----|
+        //                                 V                  V
+        //      [outputs, |rF-Leftover, X-Grid, X-Block, rF-Unroll|]
+        // Idx:     0     |   1(-4)      2(-3)   3(-2)     4(-1)  |
+        //                -----------------------------------------
+        //                Reduction Dimensions
         red_tv->reorder({{-1, -3}, {-3, -1}});
 
         // Output Splits
+        //      [|Out-Leftover, Out-PerBlock|, <Reduction Dims>]
+        // Idx:  |     0             1      |   2(-4) -- 5(-1)
+        //       ----------------------------
+        //       Output Dimensions
         red_tv->split(0, rparams.block_dim_x_);
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
-        red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::BIDy);
+        // WARNING: computeAt will coalesce the rFactored dimensions
+        // rFactored Reduction Tensor after computeAt():
+        //      [<output dims>, |X-Grid, X-Block, rF-Leftover, rF-Unroll|]
+        // Idx:      0 -- 1     | 2(-4)   3(-3)      4(-2)       5(-1)  |
+        //                      -----------------------------------------
+        //                      Reduction Dimensions
+        red_tv_rf->computeAt(red_tv, -1);
+
+        // After the Reduction Tensor has rFactoring applied
+        // Reduction Output Tensor:
+        //      [Out-Leftover, Out-PerBlock, X-Grid, X-Block]
+        // Idx:       0              1        2(-2)   3(-1)
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -548,6 +652,13 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
+        // The computeAt is not to the inner most dimension of the rFactored
+        // tensor in order to force the creation of separate loop nests to cause
+        // Inputs to be separately read in their own loop.
+        //                                computeAt(-2)------|
+        //                                                   V
+        //      [<output dims>, X-Grid, X-Block, rF-Leftover,| rF-Unroll]
+        // Idx:      0 -- 1     2(-4)    3(-3)      4(-2)        5(-1)
         Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
@@ -555,18 +666,45 @@ c10::optional<ReductionParams> scheduleReduction(
         }
       } else {
         // Reduction Splits
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Block|]
+        // Idx:     0     |   1(-3)       2(-2)     3(-1) |
+        //                ---------------------------------
+        //                Reduction Dimensions
         red_tv->split(1, rparams.block_dim_y_);
         red_tv->split(1, kLoopUnrollSplit);
+
+        // Reordering the Unroll dimension eases applying computeAt()
+        // for preceeding operations and the rFactored Tensor.
+        //                               |- Reordered -|
+        //                               V             V
+        //      [outputs, |rF-Leftover, X-Block, rF-Unroll|]
+        // Idx:     0     |   1(-3)      2(-2)     3(-1)  |
+        //                ---------------------------------
+        //                Reduction Dimensions
         red_tv->reorder({{-1, -2}, {-2, -1}});
 
         // Output Splits
+        //      [|Out-Leftover, Out-PerBlock|, <Reduction Dims>]
+        // Idx:  |     0             1      |   2(-3) -- 4(-1)
+        //       ----------------------------
+        //       Output Dimensions
         red_tv->split(0, rparams.block_dim_x_);
 
         auto red_tv_rf = red_tv->rFactor({-3, -1});
 
-        red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::TIDy);
+        // WARNING: computeAt will coalesce the rFactored dimensions
+        // rFactored Reduction Tensor after computeAt():
+        //      [<output dims>, |X-Block, rF-Leftover, rF-Unroll|]
+        // Idx:      0 -- 1     | 2(-3)      3(-2)       4(-1)  |
+        //                      ---------------------------------
+        //                      Reduction Dimensions
+        red_tv_rf->computeAt(red_tv, -1);
+
+        // After the Reduction Tensor has rFactoring applied
+        // Reduction Output Tensor:
+        //      [Out-Leftover, Out-PerBlock, X-Block]
+        // Idx:       0              1        2(-1)
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -574,6 +712,13 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
+        // The computeAt is not to the inner most dimension of the rFactored
+        // tensor in order to force the creation of separate loop nests to cause
+        // Inputs to be separately read in their own loop.
+        //                        computeAt(-2)------|
+        //                                           V
+        //      [<output dims>, X-Block, rF-Leftover,| rF-Unroll]
+        // Idx:      0 -- 1      2(-3)      3(-2)        4(-1)
         Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
           input->as<TensorView>()->computeAt(red_tv_rf, -2);
