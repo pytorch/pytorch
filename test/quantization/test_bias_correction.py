@@ -20,7 +20,7 @@ class TestBiasCorrection(QuantizationTestCase):
 
     def spnrOfBiasCorrecting(self, float_model, bias_correction, img_data):
         float_model = copy.deepcopy(float_model)
-        float_model.qconfig = torch.quantization.default_qconfig
+        float_model.qconfig = default_qconfig
         quantized_model = quantize(float_model, default_eval_fn, img_data, inplace=False)
         quantized_model(img_data[0][0])
 
@@ -86,6 +86,6 @@ class TestBiasCorrection(QuantizationTestCase):
     def test_mobilenet(self):
         model = mobilenet_v2(pretrained=True)
         img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                for _ in range(5)]
+                    for _ in range(5)]
         self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
         self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)
