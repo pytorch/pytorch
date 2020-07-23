@@ -543,6 +543,7 @@ jobs:
         no_output_timeout: "90m"
         command: |
           set -e
+          export PYTHONUNBUFFERED=1
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
