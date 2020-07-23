@@ -169,11 +169,17 @@ class Bilinear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:
-        bound = 1 / math.sqrt(self.weight.size(1))
-        init.uniform_(self.weight, -bound, bound)
-        if self.bias is not None:
-            init.uniform_(self.bias, -bound, bound)
+    def reset_parameters(sself, version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> None:
+        with init.init_version(version, use_master) as version:
+            if version >= (1, 7, 0):
+                init.kaiming_normal_(self.weight, mode='fan_out')
+                if self.bias is not None:
+                    init.zeros_(self.bias)
+            else:
+                bound = 1 / math.sqrt(self.weight.size(1))
+                init.uniform_(self.weight, -bound, bound)
+                if self.bias is not None:
+                    init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input1: Tensor, input2: Tensor) -> Tensor:
         return F.bilinear(input1, input2, self.weight, self.bias)

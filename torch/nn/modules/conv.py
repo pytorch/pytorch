@@ -82,12 +82,18 @@ class _ConvNd(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+    def reset_parameters(self, version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> None:
+        with init.init_version(version, use_master) as version:
+            if version >= (1, 7, 0):
+                init.kaiming_normal_(self.weight, mode='fan_out')
+                if self.bias is not None:
+                    init.zeros_(self.bias)
+            else:
+            init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+            if self.bias is not None:
+                fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / math.sqrt(fan_in)
+                init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
