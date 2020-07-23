@@ -40,8 +40,6 @@ class no_grad(_DecoratorContextManager):
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
 
-    This mode has no effect when using :class:`~enable_grad` context manager .
-
     This context manager is thread local; it will not affect computation
     in other threads.
 
@@ -114,9 +112,6 @@ class set_grad_enabled(object):
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
-
-    When using :class:`~enable_grad` context manager, :class:`~set_grad_enabled(False)`
-    has no effect.
 
     This context manager is thread local; it will not affect computation
     in other threads.

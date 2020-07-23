@@ -2404,9 +2404,14 @@ struct to_ir {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
+
+    TypePtr type_hint = nullptr;
+    if (stmt.type().present()) {
+      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+    }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
-    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }

@@ -14,15 +14,7 @@ class SyncBatchNorm(Function):
                             device=input.device).fill_(input.numel() // input.size(1))
 
         # calculate mean/invstd for input.
-        # TODO: remove debug code
-        is_new = True
-        if is_new:
-            mean = torch.mean(input, dim=[0, 2, 3])
-            meansqr = torch.mean(input * input, dim=[0, 2, 3])
-            var = meansqr - mean * mean
-            invstd = torch.rsqrt(var + eps)
-        else:
-            mean, invstd = torch.batch_norm_stats(input, eps)
+        mean, invstd = torch.batch_norm_stats(input, eps)
 
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)

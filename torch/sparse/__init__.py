@@ -158,8 +158,8 @@ def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
 
     :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
-    where :math:`i, j` run over sparse tensor indicies and unspecified
-    entries are ignores. This is equivalent to defining unspecifed
+    where :math:`i, j` run over sparse tensor indices and unspecified
+    entries are ignores. This is equivalent to defining unspecified
     entries as negative infinity so that :max:`exp(x_k) = 0` when the
     entry with index :math:`k` has not specified.
 

@@ -301,8 +301,11 @@ __global__ void batch_norm_collect_statistics_kernel(
       running_mean[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
     }
     if (running_var.data() != NULL) {
-      stat_accscalar_t unbiasedVar = var_n / (N - 1);
-      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      // debug only for now
+      // stat_accscalar_t unbiasedVar = var_n / (N - 1);
+      stat_accscalar_t biasedVar = var_n / N;
+      // running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * biasedVar);
     }
   }
 
@@ -417,9 +420,12 @@ __global__ void batch_norm_reduce_statistics_kernel(
     if (running_mean.data() != NULL) {
       running_mean[i] = static_cast<scalar_t>((1 - momentum) * running_mean[i] + momentum * avg);
     }
-    accscalar_t unbiasedVar = var_n / (n - 1);
+    // debug only for now
+    // accscalar_t unbiasedVar = var_n / (n - 1);
+    accscalar_t biasedVar = var_n / n;
     if (running_var.data() != NULL) {
-      running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
+      // running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
+      running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * biasedVar);
     }
   }
 

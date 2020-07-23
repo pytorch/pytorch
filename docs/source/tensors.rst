@@ -241,6 +241,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cos_
    .. automethod:: cosh
    .. automethod:: cosh_
+   .. automethod:: count_nonzero
    .. automethod:: acosh
    .. automethod:: acosh_
    .. automethod:: cpu
@@ -307,6 +308,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: frac
    .. automethod:: frac_
    .. automethod:: gather
+   .. automethod:: gcd
+   .. automethod:: gcd_
    .. automethod:: ge
    .. automethod:: ge_
    .. automethod:: geometric_
@@ -348,8 +351,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
    .. automethod:: istft
+   .. automethod:: isreal
    .. automethod:: item
    .. automethod:: kthvalue
+   .. automethod:: lcm
+   .. automethod:: lcm_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: lerp
@@ -377,6 +383,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: logical_or_
    .. automethod:: logical_xor
    .. automethod:: logical_xor_
+   .. automethod:: logit
+   .. automethod:: logit_
    .. automethod:: long
    .. automethod:: lstsq
    .. automethod:: lt

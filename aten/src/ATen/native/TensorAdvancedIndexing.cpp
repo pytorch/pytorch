@@ -78,6 +78,8 @@ DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
+DEFINE_DISPATCH(scatter_reduce_stub);
+DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -389,11 +391,14 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      // TODO: Maybe TensorAccessor can beused here?
+      auto* self_ptr = self.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
-        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+        scalar_t *self_ip = self_ptr + self_i * self_stride;
+        *self_ip += *(source_ptr + i * source_stride);
       }
     });
   }
@@ -533,12 +538,57 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_stub(self.device().type(), self, dim, index, source);
   return self;
 }
 
 Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_fill_stub(self.device().type(), self, dim, index, source);
+  return self;
+}
+
+SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
+  if (reduce == "add") {
+    return SCATTER_GATHER_OP::REDUCE_ADD;
+  }
+  else if (reduce == "subtract") {
+    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
+  }
+  else if (reduce == "multiply") {
+    return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+  }
+  else if (reduce == "divide") {
+    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
+  }
+  else {
+    TORCH_CHECK(false,
+                "reduce argument must be either of add, subtract, multiply or divide.");
+  } 
+}
+
+Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+                                   Scalar value, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
+  SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
+  return self;
+}
+
+Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+                      const Tensor & src, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
+  SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
 }
 
@@ -551,6 +601,8 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
