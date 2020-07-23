@@ -12969,6 +12969,7 @@ class TestTorchDeviceType(TestCase):
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
+    @onlyOnCPUAndCUDA
     def test_masked_select_discontiguous(self, device):
         for size in (10, 200):
             vals = torch.rand(size, size, device=device)
