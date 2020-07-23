@@ -3,7 +3,7 @@ from __future__ import division
 import math
 import warnings
 import contextlib
-from typing import Tuple, Union
+from typing import Tuple, Union, ContextManager
 
 import torch
 from torch import Tensor
@@ -536,17 +536,23 @@ _torch_version = (int(v[0]), int(v[1]), int(v[2][0]))
 # did not have 'init_version' context manager.
 _init_version = (1, 6, 1)
 
-def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False):
+def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> Tuple[int, int, int]:
     if use_master:
         return _torch_version
 
     if version is None:
         return _init_version
+
     if isinstance(version, tuple):
         for x in version:
             if not isinstance(x, int):
                 raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
     elif isinstance(version, str):
+        if version.count('.') != 2:
+            raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+        for x in version:
+            if not ((x >= '0' and x <= '9') or x == '.'):
+                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
         v = version.split('.')
         version = (int(v[0]), int(v[1]), int(v[2][0]))
     else:
@@ -555,15 +561,15 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master:
 
 
 @contextlib.contextmanager
-def init_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> None:
+def init_version(version=None, use_master=False) -> ContextManager[int]:
     r"""Context manager to use a specific version of initialization for `nn.modules`.
     By default, the pytorch initialization used till version 1.6.1 is used.
 
     Args:
-        version: which pytorch version to use for initializing nn.modules. The format should be
-            a version string (major,minor,micro) or a tuple of integers. Examples of valid version are (1,7,0),
-            '1.7.1'.
-        use_master: If True, then the latest initialization scheme is used ignoring the value of `version`
+        version : Union[Tuple[int, int, int], str], which pytorch version to use for initializing nn.modules.
+            The format should bea version string (major,minor,micro) or a tuple of integers. Examples of valid
+            version are (1,7,0), '1.7.1'.
+        use_master : bool, If True, then the latest initialization scheme is used ignoring the value of `version`
             (default=False)
 
     Examples:
@@ -608,8 +614,8 @@ def init_version(version: Union[Tuple[int, int, int], str] = None, use_master: b
     version = _parse_version(version, use_master)
 
     # version, should be less than torch.__version__
-    if version > _parse_version(torch.__version__):
-        raise ValueError(f"version {version} should be less than torch version {torch_v}")
+    if version > _torch_version:
+        raise ValueError(f"version {version} should be less than torch version {_torch_version}")
 
     old_init_version = _init_version
     _init_version = version
