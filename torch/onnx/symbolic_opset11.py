@@ -285,7 +285,7 @@ def append(g, self, tensor):
 
 
 def add(g, self, other, alpha=None):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if isinstance(self.type(), torch._C.Type) and self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
         tensor_list_node = other.node()
         if tensor_list_node.kind() != "prim::ListConstruct":
             return _unimplemented("add", "does not support adding dynamic tensor list to another")

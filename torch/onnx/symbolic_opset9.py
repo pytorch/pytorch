@@ -83,7 +83,7 @@ def reshape_as(g, self, other):
 
 
 def add(g, self, other, alpha=None):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if isinstance(self.type(), torch._C.Type) and self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
         return sym_help._onnx_opset_unsupported_detailed('Add', 9, 11, 'Add between list of tensors not supported')
 
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
