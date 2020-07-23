@@ -537,7 +537,7 @@ def generate_tensor_like_override_tests(cls):
         else:
             # Otherwise, TensorLike.
             def instance_gen():
-                return TensorLike([5])
+                return TensorLike()
 
         func_args = []
         if func in annotated_args:
