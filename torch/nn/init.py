@@ -550,13 +550,20 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master:
     elif isinstance(version, str):
         if version.count('.') != 2:
             raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
-        for x in version:
-            if not ((x >= '0' and x <= '9') or x == '.'):
-                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+        v = version.split('.')
+        v = (v[0], v[1], v[2][0])
+        for version_type in v:
+            for char in version_type:
+                if not ((char >= '0' and char <= '9') or char == '.'):
+                    raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
         v = version.split('.')
         version = (int(v[0]), int(v[1]), int(v[2][0]))
     else:
         raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+
+    # version, should be less than torch.__version__
+    if version > _torch_version:
+        raise ValueError(f"version {version} should be less than torch version {_torch_version}")
     return version
 
 
@@ -612,10 +619,6 @@ def init_version(version=None, use_master=False) -> ContextManager[int]:
     global _init_version
 
     version = _parse_version(version, use_master)
-
-    # version, should be less than torch.__version__
-    if version > _torch_version:
-        raise ValueError(f"version {version} should be less than torch version {_torch_version}")
 
     old_init_version = _init_version
     _init_version = version
