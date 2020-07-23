@@ -482,6 +482,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
