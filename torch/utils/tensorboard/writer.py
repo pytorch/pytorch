@@ -608,7 +608,7 @@ class SummaryWriter(object):
             e.g. CHW or HWC
 
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
-            boxes and each 4 elememts in a row represents (xmin, ymin, xmax, ymax).
+            boxes and each 4 elements in a row represents (xmin, ymin, xmax, ymax).
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
         if self._check_caffe2_blob(img_tensor):

@@ -6,6 +6,7 @@ import gc
 import sys
 import json
 import copy
+import time
 
 from .runner import get_nn_runners
 
@@ -41,16 +42,33 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
         items.append(fit_str(to_str(thing)))
     return sep.join(items)
 
+# shim for torch.cuda.Event when running on cpu
+class Event(object):
+    def __init__(self, enable_timing):
+        pass
+
+    def record(self):
+        self.time = time.perf_counter()
+
+    def elapsed_time(self, end_event):
+        assert isinstance(end_event, Event)
+        return end_event.time - self.time
+
 
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
                miniBatch=64, device='cuda', seed=None):
     def train_batch(modeldef):
         # CUDA events for timing
-        fwd_start_event = torch.cuda.Event(enable_timing=True)
-        fwd_end_event = torch.cuda.Event(enable_timing=True)
-        bwd_start_event = torch.cuda.Event(enable_timing=True)
-        bwd_end_event = torch.cuda.Event(enable_timing=True)
+        if device == 'cuda':
+            timer_class = torch.cuda.Event
+        else:
+            timer_class = Event
+
+        fwd_start_event = timer_class(enable_timing=True)
+        fwd_end_event = timer_class(enable_timing=True)
+        bwd_start_event = timer_class(enable_timing=True)
+        bwd_end_event = timer_class(enable_timing=True)
 
         gc.collect()
 
@@ -78,13 +96,13 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
                 assert param.grad is not None
                 param.grad.data.zero_()
 
-        torch.cuda.synchronize()
+        if device == 'cuda':
+            torch.cuda.synchronize()
 
         fwd_time = fwd_start_event.elapsed_time(fwd_end_event)
         bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
         return fwd_time, bwd_time
 
-    assert device == 'cuda'
     creator_args = creator_args = {
         'seqLength': seqLength, 'numLayers': numLayers,
         'inputSize': inputSize, 'hiddenSize': hiddenSize,

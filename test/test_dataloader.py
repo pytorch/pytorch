@@ -1288,22 +1288,24 @@ except RuntimeError as e:
         def sample_stat(sampler, num_samples):
             counts = Counter(sampler)
             count_repeated = sum(val > 1 for val in counts.values())
-            return (count_repeated, min(counts.keys()), max(counts.keys()))
+            return (count_repeated, min(counts.keys()), max(counts.keys()), sum(counts.values()))
 
         # test sample with replacement
         n = len(self.dataset) + 1  # ensure at least one sample is drawn more than once
         sampler_with_replacement = RandomSampler(self.dataset, replacement=True, num_samples=n)
-        count_repeated, minval, maxval = sample_stat(sampler_with_replacement, n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_with_replacement, n)
         self.assertTrue(count_repeated > 0)
         self.assertTrue(minval >= 0)
         self.assertTrue(maxval < len(self.dataset))
+        self.assertTrue(count_total == n)
 
         # test sample without replacement
         sampler_without_replacement = RandomSampler(self.dataset)
-        count_repeated, minval, maxval = sample_stat(sampler_without_replacement, len(self.dataset))
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
         self.assertTrue(count_repeated == 0)
         self.assertTrue(minval == 0)
         self.assertTrue(maxval == len(self.dataset) - 1)
+        self.assertTrue(count_total == len(self.dataset))
 
         # raise error when replacement=False and num_samples is not None
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
