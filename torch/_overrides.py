@@ -149,7 +149,8 @@ def get_ignored_functions():
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.is_deterministic,
-        torch.set_deterministic
+        torch.set_deterministic,
+        torch.unify_type_list
     )
 
 def get_testing_overrides():
@@ -346,6 +347,7 @@ def get_testing_overrides():
         torch.index_fill: lambda input, dim, index, value: -1,
         torch.isfinite: lambda tensor: -1,
         torch.isinf: lambda tensor: -1,
+        torch.isreal: lambda tensor: -1,
         torch.instance_norm: (lambda input, running_mean, running_var, weight, bias, use_input_stats, momentum, eps,
                               cudnn_enabled: -1),
         torch.int_repr: lambda input: -1,
@@ -582,7 +584,6 @@ def get_testing_overrides():
         torch.q_scale: lambda input: -1,
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
-        torch.quantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
@@ -673,6 +674,9 @@ def get_testing_overrides():
         torch.unbind: lambda input, dim=0: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
+        torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
+        torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
+        torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsqueeze: lambda input, dim, out=None: -1,
         torch.var: lambda input, dim=None: -1,
         torch.var_mean: lambda input, dim=None: -1,
