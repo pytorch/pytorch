@@ -24,8 +24,8 @@ struct ReductionParams {
 
   // Reduction Attributes
   bool fastest_dim_ = true;
-  bool cross_warp_ = false;
   bool cross_block_ = false;
+  bool cross_grid_ = false;
   bool mul_reds_per_blk_ = false;
 };
 
