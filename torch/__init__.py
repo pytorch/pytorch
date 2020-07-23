@@ -213,7 +213,7 @@ except ImportError:
                 This error can generally be solved using the `develop` workflow
                     $ python setup.py develop && python -c "import torch"  # This should succeed
                 or by running Python from a different directory.
-            ''').strip())
+            ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
 
