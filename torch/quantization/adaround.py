@@ -1,9 +1,12 @@
 import torch
+import torch.nn as nn
 from torch.quantization.fake_quantize import FakeQuantize
+from torch.quantization.observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
+from torch.quantization.qconfig import *
 
 def clipped_sigmoid(continous_V):
     sigmoid_applied = torch.sigmoid(continous_V)
-    scale_n_add = (continous_V* 1.2) -0.1  # broadcast should work?
+    scale_n_add = (continous_V * 1.2) - 0.1  # broadcast should work?
     # TODO: dtypes
     if continous_V.dtype == torch.int8:
         clip = torch.clamp(scale_n_add, -128, 127)
@@ -52,11 +55,24 @@ class adaround(FakeQuantize):
             self.continous_V = torch.zeros(x.size())  # random?
         return modified_quantized(x, self.continous_V)
 
+class ConvChain(nn.Module):
+    def __init__(self):
+        super(ConvChain, self).__init__()
+        self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
+        self.conv2d2 = nn.Conv2d(4, 5, 5, 5)
+        self.conv2d3 = nn.Conv2d(5, 6, 5, 5)
+
+    def forward(self, x):
+        x = self.conv2d1(x)
+        x = self.conv2d2(x)
+        x = self.conv2d3(x)
+        return x
+
 
 
 
 araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+                                        dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 araround_qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                             quant_min=0,
                                                             quant_max=255,
@@ -64,10 +80,13 @@ araround_qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAver
                           weight=araround_fake_quant)
 
 def main():
-    prepared_model =
+    prepared_model = ConvChain()
     prepared_model.train()
-    img_data =
-    optimizer = torch.optim.Adam([model.weight_fake_quant.continous_V], lr=0.001)
+    img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(5)]
+    prepared_model.qconfig = araround_qconfig
+    torch.quantization.prepare_qat(prepared_model)
+    optimizer = torch.optim.Adam([prepared_model.weight_fake_quant.continous_V], lr=0.001)
 
     for image, target in img_data:
         image, target = image.to(device), target.to(device)
@@ -76,6 +95,8 @@ def main():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+    # convert prepared_model down here
 
 
 if __name__ == "__main__":
