@@ -11,7 +11,7 @@ from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 
 class _ConvNd(Module):
