@@ -225,5 +225,3 @@ inline TYPE min_impl (TYPE a, TYPE b) {
 
 } // end namespace
 }} //end at::native
-
-#include <ATen/native/cpu/zmath_std.h>
