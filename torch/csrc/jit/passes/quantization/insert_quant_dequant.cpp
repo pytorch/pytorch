@@ -290,10 +290,7 @@ std::tuple<Node*, Node*> insertDefaultObserverNodes(
   return std::make_tuple(quant, dequant);
 }
 
-Node* insertEmbeddingBagOps(
-    Module& module,
-    Node* observer,
-    const std::string& op_name) {
+Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   Graph* g = observer->owningGraph();
   auto observer_out = observer->output();
 
@@ -388,7 +385,7 @@ void insertQuantizationOps(
       embedding_bag_name.value().find("embedding_bag_") != std::string::npos) {
     if (isWeight(module, observer_out)) {
       auto op_name = embedding_bag_name.value();
-      Node* dequant = insertEmbeddingBagOps(module, observer, op_name);
+      Node* dequant = insertEmbeddingBagOps(observer, op_name);
       observer_out->replaceAllUsesWith(original_val);
       original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
     } else {
