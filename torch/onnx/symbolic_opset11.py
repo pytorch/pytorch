@@ -361,7 +361,8 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
             return split_out
-        return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long))) for i in range(_outputs)]
+        return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
+                for i in range(_outputs)]
     else:
         return torch.onnx.symbolic_opset9.split(g, self, split_size_or_sizes, dim, _outputs)
 

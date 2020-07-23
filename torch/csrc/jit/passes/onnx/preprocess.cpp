@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/preprocess.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ using namespace ::c10::onnx;
 
 namespace {
 
-at::optional<Node*> FindFusibleListUnpack(Node *n) {
+at::optional<Node*> FindFusibleListUnpack(Node* n) {
   // 1. number of outputs is restricted to 1.
   // 2. output is only used by prim::ListUnpack.
   if (n->outputs().size() != 1) {
@@ -31,8 +31,8 @@ at::optional<Node*> FindFusibleListUnpack(Node *n) {
 // Fuse node + ListUnpack
 // Node such as split/unbind produces tensor[] of static size,
 // that is later unpacked by ListUnpack.
-// This pass fuses the two nodes, and adds an additional input "_outputs" such that the symbolic function is
-// aware of the number of outputs.
+// This pass fuses the two nodes, and adds an additional input "_outputs" such
+// that the symbolic function is aware of the number of outputs.
 //
 // Example IR
 //  split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
@@ -42,15 +42,17 @@ at::optional<Node*> FindFusibleListUnpack(Node *n) {
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
 //   %8 : Tensor[] = aten::split_with_sizes(%input, %13, %7)
-//   %9 : Float(2:12, 4:3, 3:1), %10 : Float(1:12, 4:3, 3:1), %11 : Float(2:12, 4:3, 3:1) = prim::ListUnpack(%8)
-//   return (%9, %10, %11)
+//   %9 : Float(2:12, 4:3, 3:1), %10 : Float(1:12, 4:3, 3:1), %11 : Float(2:12,
+//      4:3, 3:1) = prim::ListUnpack(%8) return (%9, %10, %11)
 //
 // After fusion
 // graph(%input : Float(5:12, 4:3, 3:1)):
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
-//   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3 representing the number of outputs.
-//   %14 : Float(2:12, 4:3, 3:1), %15 : Float(1:12, 4:3, 3:1), %16 : Float(2:12, 4:3, 3:1) = aten::split_with_sizes(%input, %13, %7, %8)
+//   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3
+//      representing the number of outputs.
+//   %14 : Float(2:12, 4:3, 3:1), %15 : Float(1:12, 4:3, 3:1), %16 : Float(2:12,
+//       4:3, 3:1) = aten::split_with_sizes(%input, %13, %7, %8)
 //   return (%14, %15, %16)
 void FuseWithListUnpack(Node* n) {
   auto found_listUnpack = FindFusibleListUnpack(n);
@@ -61,12 +63,14 @@ void FuseWithListUnpack(Node* n) {
   auto listUnpack_node = found_listUnpack.value();
 
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
-  // 1. Add internal input "_outputs" to node, so that later symbolic function conversion
+  // 1. Add internal input "_outputs" to node, so that later symbolic function
+  // conversion
   //    is aware of the number of outputs.
-  // 2. Add the exact number of outputs to n, copy metadata and replace uses of listUnpack outputs.
+  // 2. Add the exact number of outputs to n, copy metadata and replace uses of
+  // listUnpack outputs.
   WithInsertPoint guard(n);
-  auto v_num_outputs = n->owningGraph()->insertConstant(
-      at::full({1}, static_cast<int64_t>(listUnpack_node->outputs().size()), at::kLong));
+  auto v_num_outputs = n->owningGraph()->insertConstant(at::full(
+      {1}, static_cast<int64_t>(listUnpack_node->outputs().size()), at::kLong));
   n->addInput(v_num_outputs);
 
   for (auto i = 0; i < listUnpack_node->outputs().size(); ++i) {
@@ -79,14 +83,14 @@ void FuseWithListUnpack(Node* n) {
   listUnpack_node->replaceAllUsesWith(n);
 }
 
-static void PreprocessForONNX(Block *b) {
+static void PreprocessForONNX(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PreprocessForONNX(child_block);
     }
 
     auto n_kind = it->kind();
-    switch(n_kind) {
+    switch (n_kind) {
       case aten::split:
       case aten::split_with_sizes:
       case aten::unsafe_split:
