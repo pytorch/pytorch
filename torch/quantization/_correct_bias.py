@@ -7,6 +7,7 @@ import torch.quantization
 import torch.quantization._numeric_suite as ns
 from torchvision.models.quantization.mobilenet import mobilenet_v2
 from torch.quantization import quantize
+from torch.quantization import QuantStub, DeQuantStub
 
 import copy
 
@@ -38,10 +39,12 @@ def get_param(module, attr):
     ''' Sometimes the weights/bias attribute gives you the raw tensor, but sometimes
     gives a function that will give you the raw tensor, this function takes care of that logic
     '''
-    if isinstance(getattr(module, attr, None), nn.Parameter):
-        return getattr(module, attr, None)
-    else:
-        return getattr(module, attr, None)()
+    param = getattr(module, attr, None)
+    if isinstance(param, nn.Parameter):
+        return param
+    elif param is not None:
+        return param()
+
 
 class MeanLogger(ns.Logger):
     def __init__(self):
@@ -76,11 +79,7 @@ class ShadowModule(nn.Module):
         ''' Reads in a batch of data, using the computed means of the input and output of the
         float and quantized modules, bias correction will be applied on the quantized module
         '''
-        print('submodule starting')
-        print(x.is_quantized)
-        print(self.float_module.weight.is_quantized)
-        print(self.quantized_module.weight().is_quantized)
-        self.float_module(x)
+        self.float_module(x.dequantize())
         a = self.quantized_module(x)
 
         output_logger, input_logger = get_inputs_n_outputs(self.float_module, self.quantized_module)
@@ -188,7 +187,6 @@ def parallel_bias_correction(float_model, quantized_model, img_data, white_list=
     qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
     float_model.qconfig = qconfig_debug
     quantized_model.qconfig = qconfig_debug
-    # white_list = _supported_modules
 
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
     torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list,
