@@ -112,11 +112,11 @@ LaunchParams FusionExecutor::computeLaunchParams(
       TensorView* tv = val->as<TensorView>();
       for (auto id : tv->domain()->domain()) {
         if (id->isThread() && !id->isBroadcast()) {
-          if (parallel_iter_domains.find(id->parallel_method()) !=
+          if (parallel_iter_domains.find(id->getParallelType()) !=
               parallel_iter_domains.end()) {
-            parallel_iter_domains.at(id->parallel_method()).push_back(id);
+            parallel_iter_domains.at(id->getParallelType()).push_back(id);
           } else {
-            parallel_iter_domains[id->parallel_method()] =
+            parallel_iter_domains[id->getParallelType()] =
                 std::vector<IterDomain*>({id});
           }
         }

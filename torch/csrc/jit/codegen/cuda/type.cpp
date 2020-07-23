@@ -306,11 +306,11 @@ static const char* parallel_type2string(ParallelType t) {
     case ParallelType::TIDx:
       return "threadIdx.x";
     case ParallelType::Vectorize:
-      return "Vectorize";
+      return "V";
     case ParallelType::Unroll:
-      return "Unroll";
+      return "U";
     case ParallelType::Serial:
-      return "Serial";
+      return "S";
     default:
       break;
   }
@@ -333,16 +333,18 @@ static const char* memory_type2string(MemoryType t) {
   return nullptr;
 }
 
-static const char* broadcast_type2string(BroadcastType t) {
+static const char* iter_type2string(IterType t) {
   switch (t) {
-    case BroadcastType::Null:
-      return "";
-    case BroadcastType::WithStride:
+    case IterType::Iteration:
+      return "i";
+    case IterType::Reduction:
+      return "r";
+    case IterType::BroadcastWithStride:
       return "sb";
-    case BroadcastType::WithoutStride:
+    case IterType::BroadcastWithoutStride:
       return "b";
     default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for Broadcast type.");
+      TORCH_INTERNAL_ASSERT(false, "No string found for IterDomain type.");
       return nullptr;
   }
 }
@@ -464,10 +466,8 @@ std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const BroadcastType bt) {
-  return out << broadcast_type2string(bt);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const IterType bt) {
+  return out << iter_type2string(bt);
 }
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(

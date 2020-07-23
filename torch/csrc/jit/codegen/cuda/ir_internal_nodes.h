@@ -243,10 +243,9 @@ class TORCH_CUDA_API IterDomain : public Val {
   IterDomain(
       Val* _start,
       Val* _extent,
-      ParallelType _parallel_method = ParallelType::Serial,
-      bool _reduction_domain = false,
-      bool _rfactor_domain = false,
-      BroadcastType _broadcast_domain = BroadcastType::Null);
+      ParallelType _parallel_type = ParallelType::Serial,
+      IterType _iter_type = IterType::Iteration,
+      bool _is_rfactor_domain = false);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
@@ -258,10 +257,9 @@ class TORCH_CUDA_API IterDomain : public Val {
     return new IterDomain(
         start(),
         extent(),
-        parallel_method(),
-        isReduction(),
-        isRFactorProduct(),
-        getBroadcastType());
+        getParallelType(),
+        getIterType(),
+        isRFactorProduct());
   }
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
@@ -271,7 +269,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   static std::pair<IterDomain*, IterDomain*> split(IterDomain* in, Val* factor);
 
   bool isReduction() const {
-    return is_reduction_domain_;
+    return getIterType() == IterType::Reduction;
   }
 
   bool isRFactorProduct() const {
@@ -279,27 +277,28 @@ class TORCH_CUDA_API IterDomain : public Val {
   }
 
   bool isBroadcast() const {
-    return getBroadcastType() != BroadcastType::Null;
+    return getIterType() == IterType::BroadcastWithStride ||
+        getIterType() == IterType::BroadcastWithoutStride;
   }
 
   bool isParallelized() const {
-    return parallel_method_ != ParallelType::Serial;
+    return getParallelType() != ParallelType::Serial;
   }
 
   // Return if this iter domain is mapped to a grid dimension
   bool isBlockDim() const {
     return (
-        parallel_method_ == ParallelType::BIDz ||
-        parallel_method_ == ParallelType::BIDy ||
-        parallel_method_ == ParallelType::BIDx);
+        getParallelType() == ParallelType::BIDz ||
+        getParallelType() == ParallelType::BIDy ||
+        getParallelType() == ParallelType::BIDx);
   }
 
   // Return if this iter domain is mapped to a block dimension
   bool isThreadDim() const {
     return (
-        parallel_method_ == ParallelType::TIDz ||
-        parallel_method_ == ParallelType::TIDy ||
-        parallel_method_ == ParallelType::TIDx);
+        getParallelType() == ParallelType::TIDz ||
+        getParallelType() == ParallelType::TIDy ||
+        getParallelType() == ParallelType::TIDx);
   }
 
   // Return if this iter domain is either mapped to a block or grid dimension
@@ -308,7 +307,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   }
 
   void parallelize(ParallelType t) {
-    parallel_method_ = t;
+    parallel_type_ = t;
 
     TORCH_CHECK(
         t != ParallelType::Vectorize, "Vectorization not yet supported.");
@@ -324,18 +323,19 @@ class TORCH_CUDA_API IterDomain : public Val {
           " .");
   }
 
-  ParallelType parallel_method() const {
-    return parallel_method_;
+  ParallelType getParallelType() const {
+    return parallel_type_;
   }
 
-  BroadcastType getBroadcastType() const {
-    return broadcast_type_;
+  IterType getIterType() const {
+    return iter_type_;
   }
 
   Val* start() const {
     return start_;
   }
   Val* extent() const;
+
   Val* rawExtent() const {
     return extent_;
   }
@@ -349,10 +349,9 @@ class TORCH_CUDA_API IterDomain : public Val {
  private:
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
-  ParallelType parallel_method_ = ParallelType::Serial;
-  bool is_reduction_domain_ = false;
+  ParallelType parallel_type_ = ParallelType::Serial;
+  IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;
-  BroadcastType broadcast_type_ = BroadcastType::Null;
 };
 
 /*

@@ -73,11 +73,11 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
 
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
-        id_ptypes.set(id->parallel_method(), true);
+        id_ptypes.set(id->getParallelType(), true);
         if (id->isReduction())
-          id_reductions.set(id->parallel_method(), true);
+          id_reductions.set(id->getParallelType(), true);
         if (id->isBroadcast())
-          id_bcasts.set(id->parallel_method(), true);
+          id_bcasts.set(id->getParallelType(), true);
       }
     }
 

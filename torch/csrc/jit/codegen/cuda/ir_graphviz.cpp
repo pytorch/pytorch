@@ -80,25 +80,8 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const IterDomain* id) override {
-    if (id->isReduction()) {
-      label_ << "r";
-    } else {
-      label_ << "i";
-    }
-
-    switch (id->parallel_method()) {
-      case (ParallelType::Vectorize):
-        label_ << "V";
-        break;
-      case (ParallelType::Unroll):
-        label_ << "U";
-        break;
-      case (ParallelType::Serial):
-        label_ << "S";
-        break;
-      default:
-        label_ << id->parallel_method();
-    }
+    label_ << id->getIterType();
+    label_ << id->getParallelType();
 
     label_ << "(";
     if (!id->start()->isZeroInt()) {

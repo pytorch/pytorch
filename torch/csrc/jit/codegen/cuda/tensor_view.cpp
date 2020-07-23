@@ -45,9 +45,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
           new Int(0),
           new Int(1),
           ParallelType::Serial,
-          false,
-          false,
-          BroadcastType::WithStride));
+          IterType::BroadcastWithStride));
     } else {
       sizes.push_back(new IterDomain(new Int(0), new Int()));
     }
@@ -358,17 +356,12 @@ TensorView* TensorView::cache_before() {
   auto root_domain = getRootDomain();
   std::vector<IterDomain*> new_root_domain;
   for (auto root : root_domain) {
-    if (root->isBroadcast()) {
+    if (!root->isReduction()) {
       new_root_domain.push_back(new IterDomain(
           root->start(),
           root->extent(),
-          root->parallel_method(),
-          false,
-          false,
-          root->getBroadcastType()));
-    } else if (!root->isBroadcast() && !root->isReduction()) {
-      new_root_domain.push_back(new IterDomain(
-          root->start(), root->extent(), root->parallel_method()));
+          root->getParallelType(),
+          root->getIterType()));
     }
   }
 
@@ -436,17 +429,12 @@ TensorView* TensorView::cache_after() {
   auto root_domain = getRootDomain();
   std::vector<IterDomain*> new_root_domain;
   for (auto root : root_domain) {
-    if (root->isBroadcast()) {
+    if (!root->isReduction()) {
       new_root_domain.push_back(new IterDomain(
           root->start(),
           root->extent(),
-          root->parallel_method(),
-          false,
-          false,
-          root->getBroadcastType()));
-    } else if (!root->isBroadcast() && !root->isReduction()) {
-      new_root_domain.push_back(new IterDomain(
-          root->start(), root->extent(), root->parallel_method()));
+          root->getParallelType(),
+          root->getIterType()));
     }
   }
 

@@ -131,7 +131,12 @@ enum class MemoryType { Local, Shared, Global };
 // i1*stride[2]]. Broadcasts that translate to a physical memory dim we consider
 // "with stride", Broadcasts only through our broadcast op we consider "without
 // stride"
-enum class BroadcastType { Null, WithStride, WithoutStride };
+enum class IterType {
+  Iteration,
+  Reduction,
+  BroadcastWithStride,
+  BroadcastWithoutStride
+};
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
@@ -148,7 +153,7 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const MemoryType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BroadcastType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const IterType);
 
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);

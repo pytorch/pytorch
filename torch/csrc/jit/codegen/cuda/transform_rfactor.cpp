@@ -53,19 +53,17 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* ido = new IterDomain(
         new Int(0),
         oe->as<Int>(),
-        mapped->parallel_method(),
-        rfactor_outer,
-        true,
-        mapped->getBroadcastType());
+        mapped->getParallelType(),
+        rfactor_outer ? IterType::Reduction : IterType::Iteration,
+        true); // broadcast
 
     // inner IterDomain
     IterDomain* idi = new IterDomain(
         new Int(0),
         s->factor(),
-        mapped->parallel_method(),
-        rfactor_inner,
-        true,
-        mapped->getBroadcastType());
+        mapped->getParallelType(),
+        rfactor_inner ? IterType::Reduction : IterType::Iteration,
+        true);
 
     // Generate the split node
     new Split(ido, idi, mapped, s->factor());
@@ -115,23 +113,12 @@ class ReplayRFactor : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    BroadcastType bcast_type = BroadcastType::Null;
-    if (id_outer_mapped->isBroadcast() && id_inner_mapped->isBroadcast()) {
-      if (id_outer_mapped->getBroadcastType() == BroadcastType::WithStride ||
-          id_inner_mapped->getBroadcastType() == BroadcastType::WithStride) {
-        bcast_type = BroadcastType::WithStride;
-      } else {
-        bcast_type = BroadcastType::WithoutStride;
-      }
-    }
-
     IterDomain* merged_id = new IterDomain(
         new Int(0),
         merged_id_size->as<Int>(),
-        id_outer_mapped->parallel_method(),
-        rfactor_output,
-        true,
-        bcast_type);
+        id_outer_mapped->getParallelType(),
+        rfactor_output ? IterType::Reduction : IterType::Iteration,
+        true);
 
     new Merge(merged_id, id_outer_mapped, id_inner_mapped);
 
@@ -254,20 +241,18 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->parallel_method(),
-            true,
-            true,
-            BroadcastType::Null);
+            id->getParallelType(),
+            IterType::Reduction,
+            true);
         // If this is not an rfactor root, but a reduction root, it should be
         // turned into an iteration domain
       } else if (id->isReduction()) {
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->parallel_method(),
-            false,
-            false,
-            BroadcastType::Null);
+            id->getParallelType(),
+            IterType::Iteration,
+            false);
       } else {
         new_root[i] = id->clone();
       }

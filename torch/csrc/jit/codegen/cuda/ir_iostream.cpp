@@ -156,26 +156,8 @@ void IRPrinter::handle(const TensorView* tv) {
 }
 
 void IRPrinter::handle(const IterDomain* id) {
-  if (id->isReduction())
-    os << "r";
-  else if (id->isBroadcast())
-    os << "b";
-  else
-    os << "i";
-  switch (id->parallel_method()) {
-    case ParallelType::Vectorize:
-      os << "V";
-      break;
-    case ParallelType::Unroll:
-      os << "U";
-      break;
-    case ParallelType::Serial:
-      os << "S";
-      break;
-    default:
-      os << id->parallel_method();
-  }
-
+  os << id->getIterType();
+  os << id->getParallelType();
   os << "{";
   if (!id->start()->isZeroInt()) {
     print_inline(id->start());

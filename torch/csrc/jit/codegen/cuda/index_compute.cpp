@@ -140,7 +140,7 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
         if (!p_root[it_p]->isBroadcast()) {
           p_inds.push_back(c_inds[it_c]);
         } else {
-          if (p_root[it_p]->getBroadcastType() == BroadcastType::WithStride) {
+          if (p_root[it_p]->getIterType() == IterType::BroadcastWithStride) {
             p_inds.push_back(new Int(0));
           } else {
             implicit_bcast_dims++;
@@ -219,7 +219,7 @@ kir::TensorIndex* Index::getProducerIndex_impl(
   std::vector<IterDomain*> used_ranges;
   bool unrolled = false;
   for (size_t i = 0; i < loops_adjusted.size(); i++) {
-    if (ranges[i]->parallel_method() == ParallelType::Unroll)
+    if (ranges[i]->getParallelType() == ParallelType::Unroll)
       unrolled = true;
     if (!unrolled && producer->hasComputeAt() &&
         i < producer->getThisComputeAtAxis())
@@ -284,13 +284,13 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
       if (root_dom[root_i]->isReduction()) {
         root_i++;
       } else {
-        if (root_dom[root_i]->getBroadcastType() ==
-            BroadcastType::WithoutStride) {
+        if (root_dom[root_i]->getIterType() ==
+            IterType::BroadcastWithoutStride) {
           computed_inds.erase(computed_inds.begin() + inds_i);
           root_i++;
         } else {
-          if (root_dom[root_i]->getBroadcastType() ==
-              BroadcastType::WithStride) {
+          if (root_dom[root_i]->getIterType() ==
+              IterType::BroadcastWithStride) {
             computed_inds[inds_i] = new Int(0);
           }
           root_i++;
@@ -369,7 +369,7 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
           l_i++;
         continue;
       }
-      if (ranges[l_i]->parallel_method() == ParallelType::Unroll)
+      if (ranges[l_i]->getParallelType() == ParallelType::Unroll)
         unrolled = true;
 
       if ((!unrolled && consumer->hasComputeAt() &&

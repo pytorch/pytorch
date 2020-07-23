@@ -68,23 +68,18 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   }
   for (size_t dim_i = 0; dim_i < out_domain.size(); dim_i++) {
     if (out_domain[dim_i] == nullptr) {
-      BroadcastType bcast_type = BroadcastType::WithoutStride;
+      IterType itype = IterType::BroadcastWithoutStride;
       for (const auto tv : tvs) {
         auto dim = TensorDomain::noReductions(tv->getRootDomain())[dim_i];
         // If there's an unresolved bcast dim and it came from a strided dim,
         // assume output of it should be strided too
-        if (dim->getBroadcastType() == BroadcastType::WithStride) {
-          bcast_type = BroadcastType::WithStride;
+        if (dim->getIterType() == IterType::BroadcastWithStride) {
+          itype = IterType::BroadcastWithStride;
           break;
         }
       }
-      out_domain[dim_i] = new IterDomain(
-          new Int(0),
-          new Int(1),
-          ParallelType::Serial,
-          false,
-          false,
-          bcast_type);
+      out_domain[dim_i] =
+          new IterDomain(new Int(0), new Int(1), ParallelType::Serial, itype);
     }
   }
 
@@ -407,13 +402,14 @@ static TensorView* newForReduction(
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
       "Asked for ouput of reduction, but no reduction axis provided.");
+
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain.size(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
   for (size_t dim = 0; dim < orig_domain.size(); dim++) {
     bool isReduction = false;
-    if (!axes_set.empty() && *axes_set.begin() == dim) {
+    if (*axes_set.begin() == dim) {
       isReduction = true;
       axes_set.erase(axes_set.begin());
     }
@@ -431,9 +427,7 @@ static TensorView* newForReduction(
         id->start(),
         id->extent(),
         ParallelType::Serial,
-        isReduction,
-        false,
-        id->getBroadcastType()));
+        isReduction ? IterType::Reduction : id->getIterType()));
   }
 
   TensorDomain* td = new TensorDomain(new_domain);
@@ -533,9 +527,7 @@ TensorView* broadcast(
           new Int(0),
           new Int(1),
           ParallelType::Serial,
-          false,
-          false,
-          BroadcastType::WithoutStride));
+          IterType::BroadcastWithoutStride));
     } else {
       // Don't propagate reduction IDs through arith ops.
       out_domain.push_back(inp_domain[iinp]);

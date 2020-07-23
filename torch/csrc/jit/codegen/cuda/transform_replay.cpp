@@ -45,19 +45,17 @@ class ReplaySelf : public ReplayTransformations {
     IterDomain* ido = new IterDomain(
         new Int(0),
         oe->as<Int>(),
-        s->outer()->parallel_method(),
-        s->outer()->isReduction(),
-        s->outer()->isRFactorProduct(),
-        s->outer()->getBroadcastType());
+        s->outer()->getParallelType(),
+        s->outer()->getIterType(),
+        s->outer()->isRFactorProduct());
 
     // inner IterDomain
     IterDomain* idi = new IterDomain(
         new Int(0),
         s->factor(),
-        s->inner()->parallel_method(),
-        s->inner()->isReduction(),
-        s->inner()->isRFactorProduct(),
-        s->inner()->getBroadcastType());
+        s->inner()->getParallelType(),
+        s->outer()->getIterType(),
+        s->inner()->isRFactorProduct());
 
     // Generate the split node
     new Split(ido, idi, mapped, s->factor());
@@ -103,10 +101,9 @@ class ReplaySelf : public ReplayTransformations {
     IterDomain* merged_id = new IterDomain(
         new Int(0),
         merged_id_size->as<Int>(),
-        m->out()->parallel_method(),
-        m->out()->isReduction(),
-        m->out()->isRFactorProduct(),
-        m->out()->getBroadcastType());
+        m->out()->getParallelType(),
+        m->outer()->getIterType(),
+        m->out()->isRFactorProduct());
 
     new Merge(merged_id, id_outer_mapped, id_inner_mapped);
 
@@ -145,7 +142,7 @@ TensorDomain* TransformReplay::fullSelfReplay(
           "Replay does not support IterDomains that do not start at 0.");
 
       TORCH_INTERNAL_ASSERT(
-          new_self_root->axis(i)->parallel_method() == id->parallel_method() &&
+          new_self_root->axis(i)->getParallelType() == id->getParallelType() &&
               new_self_root->axis(i)->isReduction() == id->isReduction() &&
               new_self_root->axis(i)->isRFactorProduct() ==
                   id->isRFactorProduct() &&

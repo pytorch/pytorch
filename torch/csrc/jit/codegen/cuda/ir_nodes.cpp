@@ -310,7 +310,7 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
   std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
   for (auto d : getReductionDomains()) {
     if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->parallel_method(), d));
+      parallel_domains.insert(std::make_pair(d->getParallelType(), d));
     }
   }
   return parallel_domains;
@@ -319,20 +319,15 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
 IterDomain::IterDomain(
     Val* _start,
     Val* _extent,
-    ParallelType _parallel_method,
-    bool _reduction_domain,
-    bool _rfactor_domain,
-    BroadcastType _broadcast_type)
+    ParallelType _parallel_type,
+    IterType _iter_type,
+    bool _is_rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int, false),
       start_(_start),
       extent_(_extent),
-      parallel_method_(_parallel_method),
-      is_reduction_domain_(_reduction_domain),
-      is_rfactor_domain_(_rfactor_domain),
-      broadcast_type_(_broadcast_type) {
-  TORCH_CHECK(
-      !(isReduction() && isBroadcast()),
-      "IterDomain cannot be both a broadcast and reduction domain.");
+      parallel_type_(_parallel_type),
+      iter_type_(_iter_type),
+      is_rfactor_domain_(_is_rfactor_domain) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
@@ -342,11 +337,13 @@ IterDomain::IterDomain(
       "Cannot create an iter domain over an extent that is not an int but recieved ",
       _extent,
       " .");
+
   TORCH_INTERNAL_ASSERT(
       _start->isAnInt(),
       "Cannot create an iter domain with a start that is not an int but recieved ",
       _extent,
       " .");
+
   this->name_ = fusion_->registerVal(this);
 }
 
@@ -354,17 +351,16 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
-      parallel_method_(src->parallel_method_),
-      is_reduction_domain_(src->is_reduction_domain_),
-      is_rfactor_domain_(src->is_rfactor_domain_),
-      broadcast_type_(src->broadcast_type_) {}
+      parallel_type_(src->parallel_type_),
+      iter_type_(src->iter_type_),
+      is_rfactor_domain_(src->is_rfactor_domain_) {}
 
 bool IterDomain::sameAs(const IterDomain* const other) const {
   if (other == this)
     return true;
 
   bool is_same = isReduction() == other->isReduction() &&
-      parallel_method() == other->parallel_method();
+      getParallelType() == other->getParallelType();
   is_same = is_same && ScalarCheck::sameAs(extent(), other->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other->start());
 
@@ -379,26 +375,30 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       outer->isReduction() == inner->isReduction(),
       "Merging IterDomains requires that their iteration types match.");
   TORCH_CHECK(
-      outer->parallel_method() == inner->parallel_method(),
+      outer->getParallelType() == inner->getParallelType(),
       "Merging IterDomains requires that their parallel types match.");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
-  BroadcastType bcast_type = BroadcastType::Null;
+
+  IterType itype = outer->getIterType();
+
   if (outer->isBroadcast() && inner->isBroadcast()) {
-    if (outer->getBroadcastType() == BroadcastType::WithStride ||
-        inner->getBroadcastType() == BroadcastType::WithStride) {
-      bcast_type = BroadcastType::WithStride;
+    if (outer->getIterType() == IterType::BroadcastWithStride ||
+        inner->getIterType() == IterType::BroadcastWithStride) {
+      itype = IterType::BroadcastWithStride;
     } else {
-      bcast_type = BroadcastType::WithoutStride;
+      itype = IterType::BroadcastWithoutStride;
     }
+  } else if (outer->isBroadcast() || inner->isBroadcast()) {
+    itype = IterType::Iteration;
   }
+
   IterDomain* merged_id = new IterDomain(
       new Int(0),
       merged_id_size->as<Int>(),
-      outer->parallel_method(),
-      outer->isReduction(),
-      outer->isRFactorProduct() || inner->isRFactorProduct(),
-      bcast_type);
+      outer->getParallelType(),
+      itype,
+      outer->isRFactorProduct() || inner->isRFactorProduct());
 
   new Merge(merged_id, outer, inner);
 
@@ -412,7 +412,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->start()->isZeroInt(),
       "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
 
-  if (in->parallel_method() != ParallelType::Serial)
+  if (in->getParallelType() != ParallelType::Serial)
     TORCH_CHECK(
         false,
         "Splitting an axis of non-Serial iteration is not supported at this time."
@@ -441,19 +441,18 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   IterDomain* ido = new IterDomain(
       new Int(0),
       vo->as<Int>(),
-      in->parallel_method(),
-      in->isReduction(),
-      in->isRFactorProduct(),
-      in->getBroadcastType());
+      in->getParallelType(),
+      in->getIterType(),
+      in->isRFactorProduct());
 
   // inner loop IterDomain
   IterDomain* idi = new IterDomain(
       new Int(0),
       factor,
-      in->parallel_method(),
-      in->isReduction(),
-      in->isRFactorProduct(),
-      in->getBroadcastType());
+      in->getParallelType(),
+      in->getIterType(),
+      in->isRFactorProduct());
+
   new Split(ido, idi, in, factor);
   return {ido, idi};
 }
@@ -464,7 +463,7 @@ Val* IterDomain::extent() const {
       if (extent_->as<Int>()->isConst())
         return extent_;
 
-    return NamedScalar::getParallelDim(parallel_method());
+    return NamedScalar::getParallelDim(getParallelType());
   }
   return extent_;
 }
