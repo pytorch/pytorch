@@ -142,12 +142,12 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(transforms)
 endif()
 
-# Advanced: if we have white list specified, we will do intersections for all
+# Advanced: if we have enabled, we will do intersections for all
 # main lib srcs.
-if(CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
+if(CAFFE2_Enabled_FILES)
+  caffe2_do_enable(Caffe2_CPU_SRCS CAFFE2_ENABLED_FILES)
+  caffe2_do_enable(Caffe2_GPU_SRCS CAFFE2_ ENABLED_ FILES)
+  caffe2_do_enable(Caffe2_HIP_SRCS CAFFE2_ ENABLED_ FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -1488,3 +1488,4 @@ if(BUILD_PYTHON)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
+
