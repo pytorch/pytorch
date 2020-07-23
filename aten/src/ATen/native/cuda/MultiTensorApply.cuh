@@ -2,21 +2,21 @@
 #include <torch/cuda.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/foreach/Utils.cuh>
+#include <ATen/native/cuda/Utils.cuh>
 
 namespace at { namespace native {
 
 namespace {
 
 template<typename T, typename U, typename... ArgTypes>
-C10_LAUNCH_BOUNDS_1(BLOCK_SIZE)
+C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void 
 multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however it likes.
-  callable(CHUNK_SIZE, tensorListMeta, args...); 
+  callable(kChunkSize, tensorListMeta, args...); 
 }
 
 template<int depth, typename T, typename... ArgTypes>
@@ -36,7 +36,7 @@ void multi_tensor_apply(
             }
             loc_tensor_info++;
 
-            int chunks = (tensor_lists[0][t].numel() + CHUNK_SIZE - 1)/CHUNK_SIZE;
+            int chunks = (tensor_lists[0][t].numel() + kChunkSize - 1)/kChunkSize;
             for (int chunk = 0; chunk < chunks; chunk++) {
                 tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
@@ -48,7 +48,7 @@ void multi_tensor_apply(
                 bool last_chunk = (t == n_tensors - 1 && chunk == chunks - 1);
     
                 if (tensors_full || blocks_full || last_chunk) {
-                    multi_tensor_apply_kernel<<<loc_block_info, BLOCK_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
                         tensorListMeta,
                         callable,
                         args...);

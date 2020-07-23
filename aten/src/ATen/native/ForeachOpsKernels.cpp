@@ -4,10 +4,6 @@
 namespace at { namespace native {
 
 std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
-  if (tensors.size() == 0) {
-    return std::move(tensors.vec());
-  }
-
   TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
     return t.layout() == at::kStrided;
   }), "Only tensors with strided layouts are supported.");

@@ -17,7 +17,7 @@ class TestForeach(TestCase):
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
-            if dtype == torch.bool: 
+            if dtype == torch.bool and device=='cpu':
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
@@ -36,7 +36,7 @@ class TestForeach(TestCase):
         res = torch._foreach_add(tensors, 1)
         size_change = 0
         for t in res: 
-            if dtype == torch.bool: 
+            if dtype == torch.bool and device=='cpu':
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=device, dtype=dtype))
             size_change += 1
@@ -44,8 +44,8 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list(self, device, dtype):
         tensors = []
-        res = torch._foreach_add(tensors, 1)
-        self.assertEqual(tensors, res)
+        with self.assertRaises(RuntimeError):
+            torch._foreach_add(tensors, 1)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_overlapping_tensors(self, device, dtype):

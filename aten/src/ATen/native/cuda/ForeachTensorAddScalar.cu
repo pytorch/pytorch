@@ -1,8 +1,8 @@
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/cuda/foreach/Utils.cuh>
-#include <ATen/native/cuda/foreach/MultiTensorApply.cuh>
+#include <ATen/native/cuda/Utils.cuh>
+#include <ATen/native/cuda/MultiTensorApply.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -29,16 +29,16 @@ struct AddScalarFunctor {
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[ILP];
-            out_t r_out[ILP];
+            x_t r_x[kILP];
+            out_t r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
-            if(n % ILP == 0 && chunk_size % ILP == 0 && is_aligned(x) && is_aligned(out)) {
-                for(int i_start = threadIdx.x; i_start * ILP < n && i_start * ILP < chunk_size; i_start += blockDim.x) {
+            if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
+                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
                     // load
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
-                    for(int ii = 0; ii < ILP; ii++) {
+                    for(int ii = 0; ii < kILP; ii++) {
                         r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
                     // store
@@ -47,9 +47,9 @@ struct AddScalarFunctor {
             }
             else {
                 // Non-divergent exit condition for __syncthreads, not necessary here
-                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * ILP) {
+                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
-                    for(int ii = 0; ii < ILP; ii++) {
+                    for(int ii = 0; ii < kILP; ii++) {
                         r_x[ii] = 0;
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size) {
@@ -57,11 +57,11 @@ struct AddScalarFunctor {
                         }
                     }
 #pragma unroll
-                    for(int ii = 0; ii < ILP; ii++) {
+                    for(int ii = 0; ii < kILP; ii++) {
                         r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
 #pragma unroll
-                    for(int ii = 0; ii < ILP; ii++) {
+                    for(int ii = 0; ii < kILP; ii++) {
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size)
                             out[i] = r_out[ii];
@@ -74,10 +74,6 @@ struct AddScalarFunctor {
 } // namespace
 
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    if (tensors.size() == 0) {
-        return std::move(tensors.vec());
-    }
-
     TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
         return t.layout() == at::kStrided;
     }), "Only tensors with strided layouts are supported.");
