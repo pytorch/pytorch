@@ -46,6 +46,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 self.linear3 = nn.Linear(5, 6)
                 self.quant = QuantStub()
                 self.dequant = DeQuantStub()
+
             def forward(self, x):
                 x = self.quant(x)
                 x = self.linear1(x)
@@ -55,7 +56,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 return x
         model = LinearChain()
         img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                for _ in range(5)]
+                    for _ in range(5)]
         self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
         self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)
 
@@ -68,6 +69,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 self.conv2d3 = nn.Conv2d(5, 6, 5, 5)
                 self.quant = QuantStub()
                 self.dequant = DeQuantStub()
+
             def forward(self, x):
                 x = self.quant(x)
                 x = self.conv2d1(x)
@@ -77,7 +79,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 return x
         model = ConvChain()
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                for _ in range(5)]
+                    for _ in range(5)]
         self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
         self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)
 
