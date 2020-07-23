@@ -21,13 +21,16 @@ namespace fuser {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_API Bool : public Val {
+ public:
   ~Bool() = default;
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
   Bool(bool _value)
       : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
+
+  Bool(const Bool* src, IrCloner* ir_cloner);
 
   Bool(const Bool& other) = delete;
   Bool& operator=(const Bool& other) = delete;
@@ -41,7 +44,7 @@ struct TORCH_CUDA_API Bool : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<bool> value() const noexcept {
+  c10::optional<bool> value() const {
     return maybe_value_;
   }
 
@@ -56,7 +59,8 @@ struct TORCH_CUDA_API Bool : public Val {
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Float : public Val {
+class TORCH_CUDA_API Float : public Val {
+ public:
   using ScalarType = double;
 
   ~Float() = default;
@@ -65,6 +69,8 @@ struct TORCH_CUDA_API Float : public Val {
 
   Float(ScalarType _value)
       : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
+
+  Float(const Float* src, IrCloner* ir_cloner);
 
   Float(const Float& other) = delete;
   Float& operator=(const Float& other) = delete;
@@ -78,7 +84,7 @@ struct TORCH_CUDA_API Float : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<ScalarType> value() const noexcept {
+  c10::optional<ScalarType> value() const {
     return maybe_value_;
   }
 
@@ -93,13 +99,16 @@ struct TORCH_CUDA_API Float : public Val {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Half : public Val {
+class TORCH_CUDA_API Half : public Val {
+ public:
   ~Half() = default;
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
 
   Half(float _value)
       : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
+
+  Half(const Half* src, IrCloner* ir_cloner);
 
   Half(const Half& other) = delete;
   Half& operator=(const Half& other) = delete;
@@ -113,7 +122,7 @@ struct TORCH_CUDA_API Half : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<float> value() const noexcept {
+  c10::optional<float> value() const {
     return maybe_value_;
   }
 
@@ -125,7 +134,8 @@ struct TORCH_CUDA_API Half : public Val {
 
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
-struct TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_API Int : public Val {
+ public:
   using ScalarType = int64_t;
 
   ~Int() = default;
@@ -134,6 +144,8 @@ struct TORCH_CUDA_API Int : public Val {
 
   Int(ScalarType _value)
       : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
+
+  Int(const Int* src, IrCloner* ir_cloner);
 
   Int(const Int& other) = delete;
   Int& operator=(const Int& other) = delete;
@@ -147,7 +159,7 @@ struct TORCH_CUDA_API Int : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<ScalarType> value() const noexcept {
+  c10::optional<ScalarType> value() const {
     return maybe_value_;
   }
 
@@ -157,11 +169,13 @@ struct TORCH_CUDA_API Int : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-struct TransformReplay;
-struct TransformIter;
-struct OptOutMutator;
-struct LoopNestGenerator;
-struct GPULower;
+class ComputeAt;
+class TransformReplay;
+class TransformIter;
+class OptOutMutator;
+class LoopNestGenerator;
+class GPULower;
+
 /*
  * TensorView is our primitive Tensor Type used in code generation. It can be
  * thought of as representing physical memory, however, its dimensionality is
@@ -178,7 +192,8 @@ struct GPULower;
  * we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
  * changing dimension.
  */
-struct TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_API TensorView : public Val {
+ public:
   ~TensorView() = default;
 
   TensorView(const TensorView& other) = delete;
@@ -194,11 +209,15 @@ struct TORCH_CUDA_API TensorView : public Val {
   TensorView(const std::shared_ptr<Value>& jit_value)
       : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
 
-  TensorDomain* domain() const noexcept {
+  TensorView(const TensorView* src, IrCloner* ir_cloner);
+
+  TensorDomain* domain() const {
     return domain_;
   }
 
   bool hasReduction() const;
+  bool hasBlockReduction() const;
+  bool hasGridReduction() const;
   bool hasBroadcast() const;
 
   // Is there an active computeAt TensorView/Axis
@@ -207,7 +226,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   }
 
   // Return the TensorView we're computing at
-  TensorView* getComputeAtView() const noexcept {
+  TensorView* getComputeAtView() const {
     return compute_at_view_;
   }
 
@@ -216,18 +235,20 @@ struct TORCH_CUDA_API TensorView : public Val {
   IterDomain* axis(int pos) const;
 
   // Return compute at axis relative to this domain
-  unsigned int getThisComputeAtAxis() const noexcept {
+  unsigned int getThisComputeAtAxis() const {
     return this_compute_at_axis_;
   }
 
   // Return compute at axis relative to compute at view
-  unsigned int getRelativeComputeAtAxis() const noexcept {
+  unsigned int getRelativeComputeAtAxis() const {
     return relative_compute_at_axis_;
   }
 
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
   std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+    TORCH_INTERNAL_ASSERT(
+        nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
     if (!hasComputeAt() || getThisComputeAtAxis() <= (unsigned int)pos)
       return std::pair<IterDomain*, TensorView*>(axis(pos), this);
     return compute_at_view_->getComputeAtAxis(getComputeAtRelPos(pos));
@@ -259,26 +280,36 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Reorder axes according to old2new[old_pos] = new_pos
   TensorView* reorder(const std::unordered_map<int, int>& old2new);
 
-  /*
-   * WARNING: Does not return this TensorView, returns a new tensorview consumed
-   * to create this!! Take reduction axes out of this domain, and create a new
-   * domain. New domain will be used to create this domain. For example: TV1[I0,
-   * I1] = TV0[I0, R0, R1, I1] TV0->rfactor({1}) TV0 is transformed to ->
-   * TV0[I0, R1, I1] The TensorView returned is: TV2[I0, R0, I3, I1] The
-   * reduction will now beset as: TV1[I0, R1, I1] = TV2[I0, R0, I3, I1] TV0[I0,
-   * I1] = TV1[I0, R1, I1]
-   */
+  // WARNING: rFactor does not return this TensorView, ir returns a new
+  //  tensorview consumed by this!
+  //
+  // Take reduction axes out of this domain, and create a new
+  // domain. New domain will be used to create this domain.
+  //
+  // For example:
+  //  TV1[I0, R1, R2, I3] = TV0[I0, I1, I2, I3]
+  //
+  // After:
+  //  TV1->rfactor({1}), TV1 is transformed to -> TV1[I0, R2, I3]
+  //
+  // The TensorView returned is: TV2[I0, R1, I2, I3]
+  //
+  // The reduction will now beset as:
+  //  TV2[I0, R1, I2, I3] = TV0[I0, I1, I2, I3]
+  //  TV1[I0, R2, I3] = TV2[I0, R1, I2, I3]
+  //
   TensorView* rFactor(const std::vector<int>& axes);
 
-  MemoryType getMemoryType() const noexcept {
+  MemoryType getMemoryType() const {
     return memory_type_;
   }
 
   friend TORCH_CUDA_API TransformReplay;
-  // friend TORCH_CUDA_API TransformIter;
   friend TORCH_CUDA_API OptOutMutator;
-  friend TORCH_CUDA_API GPULower;
   friend TORCH_CUDA_API LoopNestGenerator;
+  friend ComputeAt;
+  friend void IrFixComputeAt(Fusion*);
+  friend void IrAdjustMemoryTypes(Fusion* fusion);
 
  protected:
   // Make an exact copy of this tensor (similar to clone()), however, also grabs
@@ -296,6 +327,10 @@ struct TORCH_CUDA_API TensorView : public Val {
 
   void setComputeAt(TensorView* computeAtView, int axis);
 
+  // Set all computeAt members without checking any correctness. Useful for
+  // computeAt with outputs relative to eachother
+  void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
+
   void setMemoryType(MemoryType mt) {
     memory_type_ = mt;
     bool is_inp_or_out =
@@ -307,12 +342,6 @@ struct TORCH_CUDA_API TensorView : public Val {
   }
 
  private:
-  // Transform this view like consumer, mark compute_at_(viw,axis)
-  void computeAt_impl(TensorView* consumer, int axis);
-
-  // Transform this view like producer, mark producer as compute_at_(this, axis)
-  void forwardComputeAt_impl(TensorView* producer, int axis);
-
   // Make a copy of the domain (used for Tensor based constructor), likely to be
   // removed soon.
   void copyDomain(const TensorDomain* td);
@@ -321,7 +350,8 @@ struct TORCH_CUDA_API TensorView : public Val {
   int getComputeAtRelPos(int pos);
   void setThisComputeAtAxis();
 
-  TensorDomain* domain_;
+ private:
+  TensorDomain* domain_ = nullptr;
   TensorView* compute_at_view_ = nullptr;
   // compute at axis in compute at view
   unsigned int relative_compute_at_axis_ = 0;

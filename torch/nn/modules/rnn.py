@@ -380,6 +380,8 @@ class RNN(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. include:: ../cudnn_rnn_determinism.rst
+
     .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
@@ -506,6 +508,8 @@ class LSTM(RNNBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    .. include:: ../cudnn_rnn_determinism.rst
 
     .. include:: ../cudnn_persistent_rnn.rst
 

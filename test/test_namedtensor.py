@@ -116,8 +116,15 @@ class TestNamedTensor(TestCase):
         x = factory(1, 2, 3, names=('N', None, 'D'), device=device)
         self.assertEqual(x.names, ('N', None, 'D'))
 
+        x = factory(1, 2, 3, names=('_1', 'batch9', 'BATCH_5'), device=device)
+        self.assertEqual(x.names, ('_1', 'batch9', 'BATCH_5'))
+
         with self.assertRaisesRegex(RuntimeError,
-                                    'must contain alphabetical characters and/or underscore'):
+                                    'a valid identifier contains only'):
+            x = factory(2, names=('1',), device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'a valid identifier contains only'):
             x = factory(2, names=('?',), device=device)
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
@@ -459,8 +466,8 @@ class TestNamedTensor(TestCase):
         # Test torch.full
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
+            result = torch.full([1, 2, 3], 2., names=names, device=device)
+            expected = torch.full([1, 2, 3], 2., device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
@@ -1388,7 +1395,7 @@ class TestNamedTensor(TestCase):
 
     def test_no_jit_tracer_support(self):
         def foo(x):
-            return torch.full(x.shape, 2, names=('N',))
+            return torch.full(x.shape, 2., names=('N',))
 
         with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
             x = torch.randn(3)

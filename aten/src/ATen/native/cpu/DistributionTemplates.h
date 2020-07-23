@@ -314,21 +314,23 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
+    auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+    auto iter = TensorIteratorConfig()
+        .add_output(self)
+        .add_input(p)
+        .check_all_same_dtype(false)
+        .build();
     if (p_.scalar_type() == kDouble) {
-      auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
-      CPU_tensor_apply2<self_t, double>(
-        self, p, [generator](self_t& ret_val, double& p_val) {
-          at::bernoulli_distribution<double> bernoulli(p_val);
-          ret_val = static_cast<self_t>(bernoulli(generator));
-        });
+      cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
+        at::bernoulli_distribution<double> bernoulli(p_val);
+        return static_cast<self_t>(bernoulli(generator));
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
-        auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
         using p_t = scalar_t;
-        CPU_tensor_apply2<self_t, p_t>(
-          self, p, [generator](self_t& ret_val, p_t& p_val) {
-            at::bernoulli_distribution<float> bernoulli(p_val);
-            ret_val = static_cast<self_t>(bernoulli(generator));
+        cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
+          at::bernoulli_distribution<float> bernoulli(p_val);
+          return static_cast<self_t>(bernoulli(generator));
         });
       });
     }
@@ -340,11 +342,11 @@ void bernoulli_kernel(Tensor& self, double p, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply1<scalar_t>(
-        self, [generator, p](scalar_t& ret_val) {
-          at::bernoulli_distribution<double> bernoulli(p);
-          ret_val = static_cast<scalar_t>(bernoulli(generator));
-        });
+    auto iter = TensorIterator::nullary_op(self);
+    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
+      at::bernoulli_distribution<double> bernoulli(p);
+      return static_cast<scalar_t>(bernoulli(generator));
+    });
   });
 }
 

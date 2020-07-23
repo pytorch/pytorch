@@ -3,10 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import unittest
-
 import numpy as np
-
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
@@ -27,19 +24,20 @@ GLOW_LOWERED_BATCHNORM = False
 
 # Test the lowered LayerNorm op
 class LayerNorm(serial.SerializedTestCase):
-    @unittest.skip("broken test")
+
     @given(seed=st.integers(0, 65535),
-           size=st.integers(2, 8),
-           input_channels=st.integers(1, 4),
-           batch_size=st.integers(2, 8),
-           epsilon=st.floats(min_value=1e-5, max_value=1e-2))
+           batch_size=st.integers(min_value=1, max_value=50),
+           size=st.integers(min_value=2, max_value=128),
+           epsilon=st.floats(min_value=1e-4, max_value=1e-3),
+           elementwise_affine=st.booleans())
     @settings(max_examples=100)
-    def test_layernorm(self, seed, size, input_channels, batch_size, epsilon):
+    def test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
         np.random.seed(seed)
         # Reset the workspace
         workspace.ResetWorkspace()
+        axis = 1
 
-        dims = np.array(([batch_size, input_channels, size, size]))
+        dims = np.array(([batch_size, size]))
         X = np.random.uniform(size=dims).astype(np.float32) - 0.5
         gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
         beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
@@ -51,10 +49,11 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net.op.add().CopyFrom(
             core.CreateOperator(
                 "LayerNorm",
-                ["X", "gamma", "beta"],
+                ["X", "gamma", "beta"] if elementwise_affine else ["X"],
                 ["Y", "mean", "rstd"],
-                # axis=-1,
-                epsilon=epsilon
+                axis=axis,
+                epsilon=epsilon,
+                elementwise_affine=elementwise_affine
             )
         )
 
@@ -64,11 +63,12 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net_ref.external_output.extend(["Y", "mean", "rstd"])
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
-                "LayerNormFakeFP16",
-                ["X", "gamma", "beta"],
+                "LayerNormFakeFP16NNPI",
+                ["X", "gamma", "beta"] if elementwise_affine else ["X"],
                 ["Y", "mean", "rstd"],
-                # axis=-1,
-                epsilon=epsilon
+                axis=axis,
+                epsilon=epsilon,
+                elementwise_affine=elementwise_affine
             )
         )
 
@@ -93,27 +93,29 @@ class LayerNorm(serial.SerializedTestCase):
 
         workspace.RunNet(pred_net_ref.name)
         Y_c2 = workspace.FetchBlob("Y")
-        mean_c2 = workspace.FetchBlob("mean")
-        std_c2 = workspace.FetchBlob("rstd")
+
+        dims1 = np.array(([1, *dims]))
+        X_glow = X.reshape(dims1)
+        workspace.FeedBlob("X", X_glow)
 
         workspace.RunNet(pred_net_onnxified.name)
         Y_glow = workspace.FetchBlob("Y")
 
-        if not np.allclose(Y_glow.astype(np.float16), Y_c2.astype(np.float16)):
-            diff_Y = np.abs(Y_glow - Y_c2).astype(np.float16)
+        if not np.allclose(Y_glow, Y_c2):
+            diff_Y = np.abs(Y_glow - Y_c2)
             print_test_debug_info(
                 "layernorm",
                 {
                     "seed": seed,
                     "size": size,
-                    "input_channels": input_channels,
                     "batch_size": batch_size,
                     "epsilon": epsilon,
+                    "gamma": gamma,
+                    "beta": beta,
+                    "elementwise_affine": elementwise_affine,
                     "X": X,
                     "Y_glow": Y_glow,
                     "Y_c2": Y_c2,
-                    "mean_c2": mean_c2,
-                    "std_c2": std_c2,
                     "diff_Y": diff_Y,
                 }
             )

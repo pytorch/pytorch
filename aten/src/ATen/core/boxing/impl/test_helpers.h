@@ -40,14 +40,12 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 
 template<class Result, class... Args>
 inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
-  return c10::Dispatcher::singleton()
-      .template call<Result, Args...>(op, std::forward<Args>(args)...);
+  return op.typed<Result(Args...)>().call(std::forward<Args>(args)...);
 }
 
 template<class Result, class... Args>
 inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
-  return c10::Dispatcher::singleton()
-      .template callWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
+  return op.typed<Result(Args...)>().callWithDispatchKey(dispatchKey, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {

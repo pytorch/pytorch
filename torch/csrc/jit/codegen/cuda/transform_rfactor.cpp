@@ -11,7 +11,7 @@ namespace fuser {
 
 namespace {
 
-struct ReplayRFactor : public ReplayTransformations {
+class ReplayRFactor : public ReplayTransformations {
  private:
   // Took a good bit of this from ReplayTransformations::handle(Split...)
   void handle(Split* s) override {
@@ -258,7 +258,7 @@ TensorDomain* TransformRFactor::runReplay(
             id->extent(),
             id->parallel_method(),
             false,
-            true,
+            false,
             false);
       } else {
         new_root[i] = id->clone();

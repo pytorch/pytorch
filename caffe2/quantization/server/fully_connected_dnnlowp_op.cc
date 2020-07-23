@@ -7,6 +7,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/fc_inference.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "caffe2/utils/cpuid.h"
 #include "fbgemm_pack_matrix_cache.h"
 #include "fbgemm_pack_op.h"
@@ -871,17 +872,16 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   if (!dequantize_output_ && !requantization_param_selected_) {
-    CAFFE_ENFORCE(InputSize() == 3 || InputSize() == 5);
-    if (InputSize() == 5) {
-      CAFFE_ENFORCE(Input(3).template IsType<float>());
-      CAFFE_ENFORCE(Input(4).template IsType<int>());
+    CAFFE_ENFORCE(InputSize() <= 4);
+    if (InputSize() == 4) {
+      const auto* input_qparam_blob =
+          this->template Input<caffe2::unique_ptr<caffe2::Int8QuantParamsBlob>>(
+                  3)
+              .get();
+      CAFFE_ENFORCE(input_qparam_blob);
 
-      const auto& in_3 = Input(3);
-      CAFFE_ENFORCE_EQ(in_3.numel(), 1);
-      float in_scale = *(in_3.template data<float>());
-      const auto& in_4 = Input(4);
-      CAFFE_ENFORCE_EQ(in_4.numel(), 1);
-      int in_zero_point = *(in_4.template data<int>());
+      float in_scale = input_qparam_blob->qparam.scale;
+      int in_zero_point = input_qparam_blob->qparam.zero_point;
 
       dnnlowp::TensorQuantizationParams out_qparams_overwrite;
       out_qparams_overwrite.scale = in_scale;
@@ -964,7 +964,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FCRelu)
-    .NumInputs(3, 5)
+    .NumInputs(3, 4)
     .NumOutputs(1)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));
