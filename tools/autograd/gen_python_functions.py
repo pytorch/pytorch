@@ -216,6 +216,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
+    'c10::optional<Tensor>': 'optionalTensor',
     'c10::optional<Generator>': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',

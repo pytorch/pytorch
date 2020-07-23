@@ -984,16 +984,16 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
   return grad_target;
 }
 
-Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const c10::optional<Tensor>& weight, const c10::optional<Tensor>& pos_weight, int64_t reduction) {
   Tensor grad_target;
-  if (pos_weight.defined()) {
-    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight.mul(self.sigmoid().log_())).mul_(grad_output);
+  if (pos_weight.has_value() && pos_weight->defined()) {
+    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight->mul(self.sigmoid().log_())).mul_(grad_output);
   } else {
     grad_target = self.mul(-grad_output);
   }
 
-  if (weight.defined()) {
-    grad_target.mul_(weight);
+  if (weight.has_value() && weight->defined()) {
+    grad_target.mul_(*weight);
   }
 
   if (reduction == at::Reduction::Mean) {
@@ -1030,7 +1030,7 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
-Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
@@ -1038,8 +1038,8 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
   gI *= (grad * grad_output);
 
-  if (weight.defined()) {
-    gI *= weight;
+  if (weight.has_value() && weight->defined()) {
+    gI *= *weight;
   }
   if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
@@ -1049,14 +1049,14 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   return gI;
 }
 
-Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
   ggO *= grad;
 
-  if (weight.defined()) {
-    ggO *= weight;
+  if (weight.has_value() && weight->defined()) {
+    ggO *= *weight;
   }
   if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
@@ -2377,25 +2377,25 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
 
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
-    const Tensor & gamma,
+    const c10::optional<Tensor> & gamma,
     const Tensor & ggI,
     const Tensor & ggG,
     const Tensor & ggB,
     const Tensor & gO,
-    const Tensor & running_mean,
-    const Tensor & running_var,
+    const c10::optional<Tensor> & running_mean,
+    const c10::optional<Tensor> & running_var,
     bool training,
     double eps,
-    const Tensor & save_mean,
-    const Tensor & save_invstd,
+    const c10::optional<Tensor> & save_mean,
+    const c10::optional<Tensor> & save_invstd,
     std::array<bool,3> output_mask) {
 
-  bool affine = gamma.defined();
+  bool affine = gamma.has_value() && gamma->defined();
   // TODO: Do we have a ScalarOrTensor type?  Would such a thing exist?
   Tensor gamma_expanded;
   Tensor ggG_expanded, ggB_expanded;
   if (affine) {
-    gamma_expanded = expand_as_dim1(gamma, input);
+    gamma_expanded = expand_as_dim1(*gamma, input);
     if (ggG.defined()) {
       ggG_expanded = expand_as_dim1(ggG, input);
     }
@@ -2413,11 +2413,11 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? save_mean.to(input.scalar_type()) : running_mean, input);
+  auto mu = unsqueeze_dim1(training ? save_mean.value_or(Tensor()).to(input.scalar_type()) : running_mean.value_or(Tensor()), input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? save_invstd.to(input.scalar_type())
-               : running_var.add(Scalar(eps)).pow(-0.5),
+      training ? save_invstd.value_or(Tensor()).to(input.scalar_type())
+               : running_var.value_or(Tensor()).add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
@@ -2509,7 +2509,7 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
-    const Tensor& gamma,
+    const c10::optional<Tensor>& gamma,
     int64_t M,
     int64_t N,
     double eps,
@@ -2530,8 +2530,8 @@ infinitely_differentiable_native_layer_norm_backward(
 
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
-    if (gamma.defined()) {
-      gamma_tensor = gamma.reshape({1, N});
+    if (gamma.has_value() && gamma->defined()) {
+      gamma_tensor = gamma->reshape({1, N});
     }
     Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
     Tensor var;
@@ -2543,17 +2543,17 @@ infinitely_differentiable_native_layer_norm_backward(
     Tensor ds;
     Tensor db;
     if (dY.defined()) {
-      ds = (gamma.defined() ? dY_tensor * X_tensor * gamma_tensor
+      ds = (gamma.has_value() && gamma->defined() ? dY_tensor * X_tensor * gamma_tensor
                             : dY_tensor * X_tensor)
                .sum(1)
                .unsqueeze_(-1);
-      db = (gamma.defined() ? dY_tensor * gamma_tensor : dY_tensor)
+      db = (gamma.has_value() && gamma->defined() ? dY_tensor * gamma_tensor : dY_tensor)
                .sum(1)
                .unsqueeze_(-1);
       const Tensor& a = rstd_tensor;
       const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
       const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      if (gamma.defined()) {
+      if (gamma.has_value() && gamma->defined()) {
         dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
       } else {
         dX = a * dY_tensor + b * X_tensor + c;
@@ -2587,10 +2587,10 @@ infinitely_differentiable_native_layer_norm_backward(
   if (grad_input_mask[1] && dY.defined()) {
     dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
                  .sum(0)
-                 .reshape_as(gamma);
+                 .reshape_as(gamma.value_or(Tensor()));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(gamma);
+    dbeta = dY_tensor.sum(0).reshape_as(gamma.value_or(Tensor()));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
@@ -2604,7 +2604,7 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
-    const Tensor& gamma,
+    const c10::optional<Tensor>& gamma,
     int64_t N,
     int64_t C,
     int64_t HxW,
@@ -2630,8 +2630,8 @@ infinitely_differentiable_native_group_norm_backward(
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
-    if (gamma.defined()) {
-      gamma_tensor = gamma.reshape({1, G, D, 1});
+    if (gamma.has_value() && gamma->defined()) {
+      gamma_tensor = gamma->reshape({1, G, D, 1});
     }
     const Tensor var =
         ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
@@ -2642,10 +2642,10 @@ infinitely_differentiable_native_group_norm_backward(
     }
     if (dY.defined()) {
       const Tensor a =
-          gamma.defined() ? rstd_tensor * gamma_tensor : rstd_tensor;
-      Tensor b = (gamma.defined() ? (ds * gamma_tensor).sum(2) : ds.sum(2))
+          gamma.has_value() && gamma->defined() ? rstd_tensor * gamma_tensor : rstd_tensor;
+      Tensor b = (gamma.has_value() && gamma->defined() ? (ds * gamma_tensor).sum(2) : ds.sum(2))
                      .unsqueeze_(-2);
-      Tensor c = (gamma.defined() ? (db * gamma_tensor).sum(2) : db.sum(2))
+      Tensor c = (gamma.has_value() && gamma->defined() ? (db * gamma_tensor).sum(2) : db.sum(2))
                      .unsqueeze_(-2);
       b = (c * mean_tensor - b) * rstd_cube * s;
       c = -b * mean_tensor - c * rstd_tensor * s;
@@ -2676,10 +2676,10 @@ infinitely_differentiable_native_group_norm_backward(
     }
   }
   if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(gamma);
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(gamma.value_or(Tensor()));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(gamma);
+    dbeta = db.sum(0).reshape_as(gamma.value_or(Tensor()));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);

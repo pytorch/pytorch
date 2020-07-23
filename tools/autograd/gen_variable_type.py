@@ -982,7 +982,7 @@ def emit_body(declaration):
         for arg in saved_variables:
             name = arg['name']
             expr = arg.get('expr', arg['name'])
-            if arg['type'] == 'Tensor' or (is_output and arg['type'] == 'Scalar'):
+            if arg['type'] == 'Tensor' or arg['type'] == 'c10::optional<Tensor>' or (is_output and arg['type'] == 'Scalar'):
                 name += '_'
                 var = arg['name']
                 if var == 'self' and inplace:
@@ -1153,7 +1153,17 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            call = CALL_DEFAULT.substitute(declaration)
+            if declaration['use_c10_dispatcher'] == 'full':
+                # TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
+                # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+                # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+                # and use the use_optional_tensor=True behavior always.
+                args = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in declaration['args']]
+            else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                args = declaration['args']
+
+            call = CALL_DEFAULT.substitute(declaration, args=args)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values, call)
             call = call + ';'

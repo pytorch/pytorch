@@ -60,24 +60,24 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals});
+${return_type} ${type_wrapper_name}(${native_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_CPU_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
@@ -219,7 +219,7 @@ ${content}
 
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+CAFFE2_API ${return_type} ${native_type_method_dispatch}(${native_formals_with_defaults});
 """)
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
@@ -939,8 +939,14 @@ def create_generic(top_env, declarations):
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
-    def native_get_formals(option, schema_order, include_constants=False):
-        # type: (FunctionOption, bool, bool) -> List[AtFormal]
+    def native_get_formals(option, schema_order, use_optional_tensor, include_constants=False):
+        # type: (FunctionOption, bool, bool, bool) -> List[AtFormal]
+
+        # TODO The use_optional_tensor argument is only needed because our at::native::xxx functions
+        # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+        # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+        # and use the use_optional_tensor=True behavior always.
+
         seen = set()  # type: Set[str]
         pos_args = []
         kwd_args = []
@@ -973,7 +979,8 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
-            # type: (AtFormal, FunctionOption) -> AtFormal
+            argument = copy.deepcopy(argument)
+            # type: (AtFormal, FunctionOption, bool) -> AtFormal
             def translate_map(const):
                 # type: (bool) -> Dict[str, str]
                 return {
@@ -985,7 +992,7 @@ def create_generic(top_env, declarations):
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
-            elif schema_order and argument.get('is_nullable') and argument['type'] == 'Tensor':
+            elif use_optional_tensor and argument.get('is_nullable') and argument['type'] == 'Tensor':
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
 
@@ -1052,11 +1059,15 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-        formals = native_get_formals(option, False)
-        schema_order_formals = native_get_formals(option, True)
+        use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'
+        formals = native_get_formals(option, False, use_optional_tensors_in_cpp_frontend)
+        native_formals = native_get_formals(option, False, False)
+        schema_order_formals = native_get_formals(option, True, use_optional_tensors_in_cpp_frontend)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['native_formals'] = [format_formal(f) for f in native_formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['native_formals_with_defaults'] = [formal_with_default(f) for f in native_formals]
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''

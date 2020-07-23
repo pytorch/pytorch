@@ -24,7 +24,7 @@ Tensor add_Scalar(const Tensor& self, Scalar other, Scalar alpha);
 Tensor conv2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    c10::optional<Tensor> bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
