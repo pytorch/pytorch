@@ -10107,7 +10107,7 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
             expected_grad[0, 0, 1, 1, 1] = 0
-            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=0.005))
+            self.assertEqual(image.grad, expected_grad, atol=0.005, rtol=0)
         issue_24823_1(torch.half)
         issue_24823_1(torch.float)
         issue_24823_1(torch.double)
