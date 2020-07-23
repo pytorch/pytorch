@@ -96,6 +96,9 @@ TypePtr IValue::type() const {
       return toTuple()->type();
     case Tag::Generator:
       return GeneratorType::get();
+    case Tag::Enum:
+      // TODO(gmagogsfm): Implement this.
+      TORCH_INTERNAL_ASSERT(false, "To be implemented");
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -264,6 +267,8 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
       return ptrEqual(lhs, rhs);
+    case Tag::Enum:
+      return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
@@ -501,6 +506,11 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
     }
+    case IValue::Tag::Enum:
+      auto enum_holder = v.toEnumHolder();
+      return out << "Enum<" << enum_holder->qualifiedClassName() << "." <<
+          enum_holder->name() << ">";
+
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
