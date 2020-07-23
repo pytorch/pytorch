@@ -46,12 +46,18 @@ class InitVersionTest(TestCase):
         try:
             with init_version(new_torch_version) as v:
                 l = nn.Linear(2, 3)
-            raise ValueError(f'Cannot pass version number {new_torch_version} greater than torch.__version__ {current_torch_version} in nn.init.init_version')
+            raise ValueError(
+                f'Cannot pass version number {new_torch_version} greater than torch.__version__ ',
+                f'{current_torch_version} in nn.init.init_version'
+            )
         except ValueError as e:
             error_message = e.args[0]
             expected_error_message = f'version {new_torch_version} should be less than torch version {current_torch_version}'
             if error_message != expected_error_message:
-                raise ValueError(f'Cannot pass version number {new_torch_version} greater than torch.__version__ {current_torch_version} in nn.init.init_version')
+                raise ValueError(
+                    f'Cannot pass version number {new_torch_version} greater than torch.__version__ ',
+                    f'{current_torch_version} in nn.init.init_version'
+                )
 
 if __name__ == "__main__":
     run_tests()
