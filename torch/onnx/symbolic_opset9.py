@@ -2452,8 +2452,8 @@ def kl_div(g, input, target, reduction, log_target):
     if reduction == 0:
         return output
     elif reduction == 1:
-        return g.op("ReduceMean", output)
+        return g.op("ReduceMean", output, keepdims_i=0)
     elif reduction == 2:
-        return g.op("ReduceSum", output)
+        return g.op("ReduceSum", output, keepdims_i=0)
     else:
         return _unimplemented("kl_div", "reduction other than none, mean, or sum.")
