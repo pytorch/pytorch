@@ -3,7 +3,7 @@
 
 namespace at {
 
-// Given a linear index for some sizes, return the actual index.
+// Given a linear index, return the actual index.
 // Example: Given linear_idx = 3, sizes = [5, 2], we would return [1, 0]
 static SmallVector<indexing::TensorIndex,kVmapStaticDimVecSize>
 computeIndex(int64_t linear_idx, IntArrayRef sizes) {
