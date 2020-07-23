@@ -379,7 +379,7 @@ def _convert(module, mapping=None, inplace=False):
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
-            convert(mod, mapping, inplace=True)
+            _convert(mod, mapping, inplace=True)
         reassign[name] = swap_module(mod, mapping)
 
     for key, value in reassign.items():
