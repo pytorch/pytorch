@@ -1,56 +1,82 @@
 import torch
+from torch.quantization.fake_quantize import FakeQuantize
 
-class adaroundObeserver(torch.quantization.observer.MinMaxObserver):
-    def __init__(self):
-        super(MinMaxObserver, self).__init__()
-        self.V = torch.zeros(i,j)
-        self.beta = 2
-        self._lambda = .9
+def clipped_sigmoid(continous_V):
+    sigmoid_applied = torch.sigmoid(continous_V)
+    scale_n_add = (continous_V* 1.2) -0.1  # broadcast should work?
+    # TODO: dtypes
+    if continous_V.dtype == torch.int8:
+        clip = torch.clamp(scale_n_add, -128, 127)
+    else:  # add other dtypes
+        clip = torch.clamp(scale_n_add, -128, 127)
+    return clip
 
-    def forward(self, x):
-        pass
+def modified_quantized(weight, continous_V):
+    W_over_s = torch.floor_divide(weight, scale)
+    W_plus_H = W_over_s + clipped_sigmoid(continous_V)
+    # TODO: dtypes
+    if W.dype == torch.int8:
+        soft_quantized_weights = scale * torch.clamp(W_plus_H, -128, 127)
+    else:  # add dtype conditional for clambing range
+        soft_quantized_weights = scale * torch.clamp(W_plus_H, -128, 127)
+    return soft_quantized_weights
 
 def loss_function(model, input):
-    # model should contain its scaling parameters
-    # its activation_post_process should have an observer with V
-    scale = something
-    weights = something
-    beta = something
-    _lambda = something
-    V = something
+    beta = 1  # something we get to play with
+    _lambda = 1  # something we get to play with
 
-    W_over_s = torch.floor_divide(weights, scale)
-    W_plus_H = W_over_s + h_V(V)
-    soft_quantized_weights = scale * torch.clamp(W_plus_H, 0, 255)
+    scale = something  # grab from the observer?
+    weights = model.weights
+    continous_V = model.weight_fake_quant.continous_V
+
     soft_model = copy.deepcopy(model)
-    soft_model.weights = soft_quantized_weights
+    soft_model.weights = modified_quantized(weights, continous_V)
 
     # Frobenius_norm = torch.norm(weights - soft_quantized_weights)
     Frobenius_norm = torch.norm(model.forward(input) - soft_model.forward(input))
 
-    spreading_range = 2*V -1
-    one_minus_beta = 1- (spreading_range ** beta)  # torch.exp
-    f_reg = torch.sum(one_minus_beta)
+    spreading_range = 2 * continous_V - 1
+    one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
+    regulization = torch.sum(one_minus_beta)
 
-    return Frobenius_norm + _lambda*f_reg
+    return Frobenius_norm + (_lambda * regulization)
 
-def h_V(V):
-    sig_applied = torch.sigmoid(V)
-    # scale_n_add = torch.add(torch.mul(V, 1.2), -0.1)
-    scale_n_add = (V* 1.2) -0.1 #broadcast should work?
-    clip = torch.clamp(scale_n_add, 0, 255)
-    return clip
+class adaround(FakeQuantize):
+    def __init__(self):
+        super(FakeQuantize, self).__init__()
+        self.continous_V = None
+
+    def forward(self, x):
+        # the x here is expected to be the parents? weights tensor
+        if self.continous_V is None:
+            self.continous_V = torch.zeros(x.size())  # random?
+        return modified_quantized(x, self.continous_V)
 
 
-def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_batches):
-    model.train()
 
-    for image, target in data_loader:
-        start_time = time.time()
+
+araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
+                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+araround_qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                            quant_min=0,
+                                                            quant_max=255,
+                                                            reduce_range=True),
+                          weight=araround_fake_quant)
+
+def main():
+    prepared_model =
+    prepared_model.train()
+    img_data =
+    optimizer = torch.optim.Adam([model.weight_fake_quant.continous_V], lr=0.001)
+
+    for image, target in img_data:
         image, target = image.to(device), target.to(device)
         output = model(image)
-        loss = criterion(output, target)
+        loss = loss_function(model, image)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    return
+
+
+if __name__ == "__main__":
+    main()
