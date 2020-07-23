@@ -34,7 +34,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', '_set_deterministic', '_is_deterministic'
 ]
 
 ################################################################################
@@ -298,7 +298,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def set_deterministic(d):
+def _set_deterministic(d):
     r"""Sets a global flag to force all operations to use a deterministic
     implementation if available. If an operation that does not have a
     deterministic implementation is called while this setting is True, the
@@ -310,12 +310,24 @@ def set_deterministic(d):
     Args:
         d (:class:`bool`): If True, force operations to be deterministic.
                            If False, allow non-deterministic operations.
+
+    .. warning::
+        This feature is experimental and not complete. The above docstring
+        represents what the future behavior is intended to be. Right now,
+        `_set_deterministic` will only affect `torch.bmm` and convolution
+        operators.
     """
     _C._set_deterministic(d)
 
-def is_deterministic():
+def _is_deterministic():
     r"""Returns True if the global deterministic flag is turned on and
     operations are being forced to use a deterministic implementation.
+
+    .. warning::
+        This feature is experimental and not complete. The above docstring
+        represents what the future behavior is intended to be. Right now,
+        the global deterministic flag will only affect `torch.bmm` and
+        convolution operators.
     """
     return _C._get_deterministic()
 
