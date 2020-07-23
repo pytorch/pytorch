@@ -1,7 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/ForeachOps.h>
 #include <ATen/native/cuda/foreach/Utils.cuh>
 #include <ATen/native/cuda/foreach/MultiTensorApply.cuh>
 
@@ -72,25 +71,34 @@ struct AddScalarFunctor {
         }
 };
 
-static std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-  std::vector<std::vector<at::Tensor>> tensor_lists; 
-  std::vector<at::Tensor> vec_res;
-
-  for (int i = 0; i < tensors.size(); i++) {
-    vec_res.push_back(torch::empty_like(tensors[i]));
-  }
-
-  tensor_lists.push_back(tensors.vec());
-  tensor_lists.push_back(vec_res);
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cuda", [&]() {
-    multi_tensor_apply<2>(tensor_lists, AddScalarFunctor<scalar_t, scalar_t>(), scalar.to<scalar_t>());
-  });
-  return tensor_lists[1];
-}
-
 } // namespace
 
-REGISTER_DISPATCH(foreach_tensor_add_scalar_stub, &foreach_tensor_add_scalar_kernel_cuda);
+std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
+    if (tensors.size() == 0) {
+        return std::move(tensors.vec());
+    }
+
+    TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
+        return t.layout() == at::kStrided;
+    }), "Only tensors with strided layouts are supported.");
+
+    TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
+        return t.is_non_overlapping_and_dense();
+    }), "Only non overlapping and dense tensors are supported.");
+
+    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<at::Tensor> vec_res;
+    for (int i = 0; i < tensors.size(); i++) {
+        vec_res.emplace_back(torch::empty_like(tensors[i]));
+    }
+
+    tensor_lists.emplace_back(std::move(tensors.vec()));
+    tensor_lists.emplace_back(std::move(vec_res));
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cuda", [&]() {
+        multi_tensor_apply<2>(tensor_lists, AddScalarFunctor<scalar_t, scalar_t>(), scalar.to<scalar_t>());
+    });
+    return tensor_lists[1];
+}
 
 }} // namespace at::native

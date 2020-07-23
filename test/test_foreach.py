@@ -17,6 +17,8 @@ class TestForeach(TestCase):
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
+            if dtype == torch.bool: 
+                dtype = torch.int64
             self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
     @dtypes(*torch.testing.get_all_dtypes())
@@ -34,14 +36,16 @@ class TestForeach(TestCase):
         res = torch._foreach_add(tensors, 1)
         size_change = 0
         for t in res: 
+            if dtype == torch.bool: 
+                dtype = torch.int64
             self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=device, dtype=dtype))
             size_change += 1
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list(self, device, dtype):
         tensors = []
-        with self.assertRaisesRegex(RuntimeError, r"Tensor list can't be empty."):
-            torch._foreach_add(tensors, 1)
+        res = torch._foreach_add(tensors, 1)
+        self.assertEqual(tensors, res)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_overlapping_tensors(self, device, dtype):
