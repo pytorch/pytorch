@@ -55,16 +55,12 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
   return { permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims()) };
 }
 
-<<<<<<< HEAD
 std::vector<VmapPhysicalView>
 MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   TORCH_INTERNAL_ASSERT(false, "NYI");
 }
 
-int64_t VmapPhysicalView::numBatchDims() {
-=======
 int64_t VmapPhysicalView::numBatchDims() const {
->>>>>>> 3b90870835... Fix const correctness for VmapPhysicalView struct methods
   return levels_.count();
 }
 
