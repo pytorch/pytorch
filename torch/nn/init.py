@@ -3,7 +3,7 @@ from __future__ import division
 import math
 import warnings
 import contextlib
-from typing import Tuple, Union, ContextManager
+from typing import Tuple, Union
 
 import torch
 from torch import Tensor
@@ -551,10 +551,10 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master:
         if version.count('.') != 2:
             raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
         v = version.split('.')
-        v = (v[0], v[1], v[2][0])
+        v = [v[0], v[1], v[2][0]]
         for version_type in v:
             for char in version_type:
-                if not ((char >= '0' and char <= '9') or char == '.'):
+                if not ((str(char) >= '0' and str(char) <= '9') or str(char) == '.'):
                     raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
         v = version.split('.')
         version = (int(v[0]), int(v[1]), int(v[2][0]))
@@ -568,7 +568,7 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master:
 
 
 @contextlib.contextmanager
-def init_version(version=None, use_master=False) -> ContextManager[int]:
+def init_version(version=None, use_master=False):
     r"""Context manager to use a specific version of initialization for `nn.modules`.
     By default, the pytorch initialization used till version 1.6.1 is used.
 
