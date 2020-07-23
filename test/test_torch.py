@@ -2666,6 +2666,13 @@ class AbstractTestCases:
             with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
                 torch.gather(src, dim, idx, out=expected.to(torch.int))
 
+            # checks for the same dimensionality
+            with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
+                torch.gather(src, dim, idx.unsqueeze(-1))
+
+            with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as input tensor'):
+                torch.gather(src.unsqueeze(-1), dim, idx)
+
             if test_bounds:
                 idx[0][0][0] = 23
                 self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -2763,6 +2770,17 @@ class AbstractTestCases:
                 # should throw an error when index dtype is not long
                 with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
+
+                # check for the same dimensionality
+                with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as self tensor'):
+                    getattr(base.clone().unsqueeze(-1), method)(dim, idx, src)
+
+                with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as self tensor'):
+                    getattr(base.clone(), method)(dim, idx.unsqueeze(-1), src)
+
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Index tensor must have the same number of dimensions as src tensor'):
+                        getattr(base.clone(), method)(dim, idx, src.unsqueeze(-1))
 
                 if test_bounds:
                     idx[0][0][0] = 34
