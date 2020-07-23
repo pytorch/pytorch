@@ -632,8 +632,8 @@ class DistributedDataParallel(Module):
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
 
-                             We also provide an API called "get_future" to convert
-                             c10d.ProcessGroupNCCL.work to torch.futures.Future.
+                             We also provide an API called "get_future" to retrieve a future
+                             associated with the completion of c10d.ProcessGroupNCCL.work.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered
@@ -645,9 +645,6 @@ class DistributedDataParallel(Module):
 
         .. warning ::
             DDP communication hook is experimental and subject to change.
-
-        .. warning ::
-            "get_future" API supports only NCCL backend.
 
         Example::
             Below is an example of a noop hook that returns back the same tensors:

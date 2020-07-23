@@ -166,6 +166,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void markFutureCompleted() {
+      // Passing `this` here as the capture is fine because we store a
+      // `shared_ptr` to `this` in ProcessGroupNCCL's `checkFutObjs_` to
+      // ensure that the object is alive when the lambda function is called.
       at::launch(([this]() {
         std::unique_lock<std::mutex> lock(checkFutObjMutex_);
         (streamCounter_)++;
