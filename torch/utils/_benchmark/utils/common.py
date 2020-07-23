@@ -3,7 +3,7 @@
 import collections
 import contextlib
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -73,8 +73,8 @@ class Measurement:
             "metadata": self.metadata,
         }
 
-    def __setstate__(self, state):
-        self.__init__(**state)
+    def __setstate__(self, state: Dict[str, Any]):
+        self.__init__(**state)  # type: ignore
 
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
