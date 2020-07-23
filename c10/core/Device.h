@@ -33,7 +33,7 @@ struct C10_API Device final {
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
-      : type_(type), index_(index) {
+      : index_(index), type_(type) {
     validate();
   }
 
@@ -90,8 +90,8 @@ struct C10_API Device final {
   std::string str() const;
 
  private:
-  DeviceType type_;
   DeviceIndex index_ = -1;
+  DeviceType type_;
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
