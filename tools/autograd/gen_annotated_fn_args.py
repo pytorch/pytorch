@@ -32,7 +32,7 @@ def gen_annotated(aten_path, out, template_path):
 
     for func in recurse_dict(get_py_nn_functions(declarations)):
         annotated_args.append(process_func("torch._C._nn", func))
-    
+
     for func in recurse_dict(get_py_variable_methods(declarations)):
         annotated_args.append(process_func("torch.Tensor", func))
 

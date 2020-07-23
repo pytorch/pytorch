@@ -705,7 +705,7 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
-bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],
+bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
   auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
@@ -853,7 +853,7 @@ void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
   }
 }
 
-PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(self, args, kwargs, parsed_args, true);
@@ -871,7 +871,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
   print_error(self, args, kwargs, parsed_args);
 }
 
-void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<int> plausible_idxs;
   ssize_t i = 0;

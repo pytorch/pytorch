@@ -532,10 +532,12 @@ def generate_tensor_like_override_tests(cls):
         # If func corresponds to a torch.Tensor method or property.
         if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
             # Generate an instance by using SubTensor,
-            instance_gen = lambda: SubTensor([5])
+            def instance_gen():
+                return SubTensor([5])
         else:
             # Otherwise, TensorLike.
-            instance_gen = lambda: TensorLike()
+            def instance_gen():
+                return TensorLike([5])
 
         func_args = []
         if func in annotated_args:
@@ -590,9 +592,9 @@ def generate_tensor_like_override_tests(cls):
             if ret is None:
                 self.assertTrue(HANDLED_FUNCTIONS_WRAPPERS[func]._triggered)
                 return
-            
+
             self.assertEqual(ret, -1)
-            
+
         return test
 
     for func, override in get_testing_overrides().items():

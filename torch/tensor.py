@@ -405,7 +405,11 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized, onesided=onesided)
+            return handle_torch_function(
+                Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
+                win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
+                onesided=onesided
+            )
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
                           pad_mode, normalized, onesided)
 
@@ -415,7 +419,10 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length, window=window, center=center, normalized=normalized, onesided=onesided, length=None)
+            return handle_torch_function(
+                Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
+                window=window, center=center, normalized=normalized, onesided=onesided, length=None
+            )
         return torch.istft(self, n_fft, hop_length, win_length, window, center,
                            normalized, onesided, length)
 
@@ -463,7 +470,10 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.unique, relevant_args, self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+            return handle_torch_function(
+                Tensor.unique, relevant_args, self, sorted=sorted, return_inverse=return_inverse,
+                return_counts=return_counts, dim=dim
+            )
         return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
@@ -474,7 +484,10 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch._overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.unique_consecutive, relevant_args, self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+            return handle_torch_function(
+                Tensor.unique_consecutive, relevant_args, self, return_inverse=return_inverse,
+                return_counts=return_counts, dim=dim
+            )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def __rsub__(self, other):

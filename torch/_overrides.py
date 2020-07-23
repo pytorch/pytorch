@@ -1028,7 +1028,12 @@ def has_torch_function(relevant_args):
     True if any of the elements of relevant_args have __torch_function__
     implementations, False otherwise.
     """
-    return _is_torch_function_enabled() and any(type(a) is not torch.Tensor and getattr(a, '__torch_function__', _disabled_torch_function_impl) is not _disabled_torch_function_impl for a in relevant_args)
+    return _is_torch_function_enabled() and any(
+        type(a) is not torch.Tensor and
+        getattr(a, '__torch_function__', _disabled_torch_function_impl)
+        is not _disabled_torch_function_impl
+        for a in relevant_args
+    )
 
 def get_overridable_functions():
     """List functions that are overridable via __torch_function__
