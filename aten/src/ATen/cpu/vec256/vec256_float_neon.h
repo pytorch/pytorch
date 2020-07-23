@@ -654,7 +654,11 @@ float32x4_t fill_mask(float32x4_t mask);
 template<>
 inline float32x4_t fill_mask<0, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0xFFFFFFFF, 0x0, 0x0, 0x0};
+#ifdef __clang__
   float32x4_t tmp_mask = (float32x4_t)(int_mask);
+#else
+  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+#endif
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -666,7 +670,11 @@ inline float32x4_t fill_mask<0, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<1, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0xFFFFFFFF, 0x0, 0x0};
+#ifdef __clang__
   float32x4_t tmp_mask = (float32x4_t)(int_mask);
+#else
+  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+#endif
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -678,7 +686,11 @@ inline float32x4_t fill_mask<1, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<2, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0x0, 0xFFFFFFFF, 0x0};
+#ifdef __clang__
   float32x4_t tmp_mask = (float32x4_t)(int_mask);
+#else
+  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+#endif
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -690,7 +702,11 @@ inline float32x4_t fill_mask<2, true>(float32x4_t mask){
 template<>
 inline float32x4_t fill_mask<3, true>(float32x4_t mask){
   static uint32x4_t int_mask = {0x0, 0x0, 0x0, 0xFFFFFFFF};
+#ifdef __clang__
   float32x4_t tmp_mask = (float32x4_t)(int_mask);
+#else
+  float32x4_t tmp_mask = vreinterpretq_f32_u32(int_mask);
+#endif
   __asm__ (
       "vorr %[in_mask], %[in_mask], %[in_tmp]\n\t"
       : [in_mask] "+w" (mask)
@@ -802,7 +818,11 @@ public:
         {
           Vec256<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0x0, 0x0, 0x0};
-          vec.values.val[0] = (float32x4_t)mask_low;
+#ifdef __clang__
+          vec.values.val[0] = (float32x4_t)(mask_low);
+#else
+          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+#endif
           vec.values.val[1] = a.values.val[1];
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
@@ -815,7 +835,11 @@ public:
         {
           Vec256<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
-          vec.values.val[0] = (float32x4_t)mask_low;
+#ifdef __clang__
+          vec.values.val[0] = (float32x4_t)(mask_low);
+#else
+          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+#endif
           vec.values.val[1] = a.values.val[1];
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
@@ -828,7 +852,11 @@ public:
         {
           Vec256<float> vec;
           static uint32x4_t mask_low = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
-          vec.values.val[0] = (float32x4_t)mask_low;
+#ifdef __clang__
+          vec.values.val[0] = (float32x4_t)(mask_low);
+#else
+          vec.values.val[0] = vreinterpretq_f32_u32(mask_low);
+#endif
           vec.values.val[1] = a.values.val[1];
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
@@ -844,7 +872,11 @@ public:
           Vec256<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0x0, 0x0, 0x0};
           vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = (float32x4_t)mask_high;
+#ifdef __clang__
+          vec.values.val[1] = (float32x4_t)(mask_high);
+#else
+          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+#endif
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
               : [res_mask] "+w" (vec.values.val[1])
@@ -857,7 +889,11 @@ public:
           Vec256<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0x0, 0x0};
           vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = (float32x4_t)mask_high;
+#ifdef __clang__
+          vec.values.val[1] = (float32x4_t)(mask_high);
+#else
+          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+#endif
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
               : [res_mask] "+w" (vec.values.val[1])
@@ -870,7 +906,11 @@ public:
           Vec256<float> vec;
           static uint32x4_t mask_high = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x0};
           vec.values.val[0] = b.values.val[0];
-          vec.values.val[1] = (float32x4_t)mask_high;
+#ifdef __clang__
+          vec.values.val[1] = (float32x4_t)(mask_high);
+#else
+          vec.values.val[1] = vreinterpretq_f32_u32(mask_high);
+#endif
           __asm__ (
               "vbsl.f32 %[res_mask], %[in_b], %[in_a]\n\t"
               : [res_mask] "+w" (vec.values.val[1])
