@@ -155,6 +155,12 @@ struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), Return(K
     }
 };
 
+template<class T>
+constexpr bool _is_optional_tensor_arg() {
+    return std::is_same<c10::optional<at::Tensor>, std::decay_t<T>>::value;
+}
+template<class T> using is_optional_tensor_arg = guts::bool_constant<_is_optional_tensor_arg<T>()>;
+
 /**
  * Take a kernel function that has a number of `Tensor` arguments
  * and take in a `TargetSignature` that must match, but is allowed
@@ -163,11 +169,18 @@ struct with_explicit_optional_tensors_<Return (TargetSignatureArgs...), Return(K
  * in those locations, unwraps them to `Tensor` (potentially undefined tensor)
  * and calls the original kernel function.
  */
-template<class TargetSignature, class KernelFunc>
-constexpr auto with_explicit_optional_tensors(KernelFunc) {
-    // TODO Only wrap if signatures have an entry where Tensor is vs optional<Tensor>
-    using WrappedFunc = TORCH_FN_TYPE((&with_explicit_optional_tensors_<TargetSignature, typename KernelFunc::FuncType, KernelFunc>::wrapper));
-    return WrappedFunc();
+template<class TargetSignature, class KernelFunc, std::enable_if_t<guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
+constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
+    // SFINAE case for kernels that have optional tensor arguments.
+    // Wrap them to unpack the optionals before calling the kernel
+    return TORCH_FN((&with_explicit_optional_tensors_<TargetSignature, typename KernelFunc::FuncType, KernelFunc>::wrapper));
+}
+
+template<class TargetSignature, class KernelFunc, std::enable_if_t<!guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
+constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
+    // SFINAE case for kernels that don't have optional tensor arguments.
+    // Don't wrap them but just use the kernel directly.
+    return kernel_func;
 }
 
 }
