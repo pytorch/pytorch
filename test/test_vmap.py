@@ -453,7 +453,7 @@ class TestVmapAPI(TestCase):
             result = vmap(torch.sub)(x, y)
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message),
-                             'falling back to slow \(for loop and stack\) implementation')
+                             r'falling back to slow \(for loop and stack\) implementation')
             self.assertEqual(result, x - y)
 
         # fallback on torch.sub
@@ -489,7 +489,7 @@ class TestVmapAPI(TestCase):
                 result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
                 self.assertEqual(len(wa), 2)
                 self.assertRegex(str(wa[-1].message),
-                                 'falling back to slow \(for loop and stack\) implementation')
+                                 r'falling back to slow \(for loop and stack\) implementation')
                 expected = torch.index_add(
                     x, dim + 1, index, values.view(B0, 3, 1, 13))
                 self.assertEqual(result, expected)
