@@ -15394,11 +15394,17 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torchfn, reffn, x)
         # indices
         if not skip_indices:
-            size = 100
+            size = 5
             x = create_input((size, size), device, dtype)
-            self.compare_with_numpy(lambda x: torchfn(x, 1, False)[0], lambda x: reffn(x, 1, keepdims=False), x)
-            v, i = torchfn(x, 1, False)
-            self.assertEqual(x[torch.arange(size), i], v, atol=0, rtol=0)
+            inputs = (x, x.t())
+            dims = (0, 1)
+            for xinp, d in product(inputs, dims):
+                self.compare_with_numpy(lambda x: torchfn(x, d, False)[0], lambda x: reffn(x, d, keepdims=False), xinp)
+                v, i = torchfn(xinp, d, False)
+                if d == 1:
+                    self.assertEqual(xinp[torch.arange(size), i], v, atol=0, rtol=0)
+                else:
+                    self.assertEqual(xinp[i, torch.arange(size)], v, atol=0, rtol=0)
         # nan
         if dtype.is_floating_point:
             for index in (0, 4, 99):
@@ -15413,17 +15419,20 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
     @onlyCPU
     @dtypesIfCPU(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_minmax(self, device, dtype):
         self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
         self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
