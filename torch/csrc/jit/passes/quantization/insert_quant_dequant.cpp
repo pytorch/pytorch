@@ -370,9 +370,10 @@ void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return isTensorInfoNode(user);
   };
@@ -396,9 +397,10 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
