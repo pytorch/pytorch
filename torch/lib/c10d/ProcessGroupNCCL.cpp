@@ -725,11 +725,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
-  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
   // Create and store a CheckFutureWork object to be used in
   // ncclKernelCompletionCallback function.
   auto checkFutObj = std::make_shared<ProcessGroupNCCL::CheckFutureWork>(
       work, outputs, checkFutObjs_, checkFutObjMutex_);
+
+  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
   checkFutObjs_->insert(checkFutObj);
 
   {
