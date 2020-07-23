@@ -266,9 +266,16 @@ c10::optional<std::string> getEmbeddingBagObsName(
   return c10::nullopt;
 }
 
+bool isEmbeddingBagOp(
+    Node* observer,
+    c10::optional<std::string> embedding_bag_name) {
+  return embedding_bag_name &&
+      embedding_bag_name.value().find("embedding_bag_") != std::string::npos;
+}
+
 // Insert quant and dequant nodes into the graph for both static and dynamic
 // quant.
-std::tuple<Node*, Node*> insertDefaultObserverNodes(
+Node* insertQuantDequantNodes(
     Value* self,
     Node* observer,
     const std::vector<std::string>& qparam_names,
@@ -287,7 +294,7 @@ std::tuple<Node*, Node*> insertDefaultObserverNodes(
       at::Symbol::aten(quantize_func),
       original_val->debugName() + ".quant");
   Node* dequant = insertDeQuant(g, quant->output(), original_val);
-  return std::make_tuple(quant, dequant);
+  return dequant;
 }
 
 Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
@@ -379,10 +386,11 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-  // Temporary solution to quantize embedding_bag operators.
+  // Temporary solution to quantize embedding_bag operators. Will be re-written
+  // once we support quantization of embedding_bag weights.
   auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
-  if (quant_type == QuantType::DYNAMIC && embedding_bag_name &&
-      embedding_bag_name.value().find("embedding_bag_") != std::string::npos) {
+  if (quant_type == QuantType::DYNAMIC &&
+      isEmbeddingBagOp(observer, embedding_bag_name)) {
     if (isWeight(module, observer_out)) {
       auto op_name = embedding_bag_name.value();
       Node* dequant = insertEmbeddingBagOps(observer, op_name);
@@ -406,12 +414,12 @@ void insertQuantizationOps(
           g, observer_out, dtype, at::Symbol::aten(quantize_func));
     } else {
       // For weight tensors we insert quant-dequant ops.
-      std::tie(quant, dequant) = insertDefaultObserverNodes(
-          self, observer, qparam_names, quantize_func);
+      dequant =
+          insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
     }
   } else { // Static quant
-    std::tie(quant, dequant) =
-        insertDefaultObserverNodes(self, observer, qparam_names, quantize_func);
+    dequant =
+        insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
   }
 
   observer_out->replaceAllUsesWith(original_val);
