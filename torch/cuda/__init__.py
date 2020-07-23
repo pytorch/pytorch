@@ -361,7 +361,7 @@ def device_count() -> int:
         return 0
 
 def get_arch_list() -> List[str]:
-    r"""Returns list CUDA architecutres this library was compiled for."""
+    r"""Returns list CUDA architectures this library was compiled for."""
     if not is_available():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
