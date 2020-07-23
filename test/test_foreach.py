@@ -17,7 +17,7 @@ class TestForeach(TestCase):
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
-            if dtype == torch.bool and device=='cpu':
+            if dtype == torch.bool and device == 'cpu':
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
@@ -36,7 +36,7 @@ class TestForeach(TestCase):
         res = torch._foreach_add(tensors, 1)
         size_change = 0
         for t in res: 
-            if dtype == torch.bool and device=='cpu':
+            if dtype == torch.bool and device == 'cpu':
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=device, dtype=dtype))
             size_change += 1
