@@ -13,13 +13,13 @@ from torch.quantization import (
 class TestBiasCorrection(QuantizationTestCase):
     def computeSqnr(self, x, y):
         Ps = torch.norm(x)
-        Pn = torch.norm(x-y)
-        return 20*torch.log10(Ps/Pn)
+        Pn = torch.norm(x - y)
+        return 20 * torch.log10(Ps / Pn)
 
     def spnrOfBiasCorrecting(self, float_model, bias_correction):
         float_model.qconfig = torch.quantization.default_qconfig
         img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                                for _ in range(5)]
+                    for _ in range(5)]
         quantized_model = quantize(float_model, default_eval_fn, img_data, inplace=False)
 
         bias_correction(float_model, quantized_model, img_data)

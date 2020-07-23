@@ -1,27 +1,16 @@
 from __future__ import print_function, division, absolute_import
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-from  torch.nn.quantized.modules import Quantize, DeQuantize
-from torch._ops import ops
 
-from torch.quantization import QuantStub, DeQuantStub
-
-
-import torchvision
-import torchvision.transforms as transforms
-import os
 import torch.quantization
 import torch.quantization._numeric_suite as ns
 from torchvision.models.quantization.mobilenet import mobilenet_v2
-from torch.quantization import (
-    default_eval_fn,
-    default_qconfig,
-    quantize,
-)
+from torch.quantization import quantize
+
 import copy
+
+_supported_modules = {nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d}
 
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
@@ -95,7 +84,7 @@ class ShadowModule(nn.Module):
         correct_quantized_bias(output_logger, input_logger, self.float_module, self.quantized_module)
         return a
 
-def add_shadow(float_model, quantized_model, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+def add_shadow(float_model, quantized_model, white_list=_supported_modules):
     ''' Goal: while data is being passed from submodule to submodule when executing we want to compare
     the inputs and outputs of the whitelisted submodules of the floating and quantized models.
 
@@ -122,7 +111,7 @@ def add_shadow(float_model, quantized_model, white_list = [nn.Linear, nnq.Linear
     for key, value in reassign.items():
         quantized_model._modules[key] = value
 
-def remove_hooks(model, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+def remove_hooks(model, white_list=_supported_modules):
     ''' Removes all the hooks from the whitelisted submodules
     '''
     for name, module in model.named_modules():
@@ -150,7 +139,7 @@ def remove_shadow(model):
         name_split = name.split('.')
         get_parent_module(model, name)._modules[name_split[-1]] = reassign[name]
 
-def sequential_bias_correction(float_model, quantized_model, img_data, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+def sequential_bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
     ''' Applies bias correction on the whitelisted submodules of the quantized model
     After adding shadow modules and MeanLoggers to the quantized model the img_data will get reshaped
     into one large batch and then this batch will be ran through the quantized model
@@ -166,7 +155,8 @@ def sequential_bias_correction(float_model, quantized_model, img_data, white_lis
     # calling prepare with prehook param, and throwing the whitelist to make sure supported modules
     # get the qconfig and thus post hook
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
-    torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+    torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list,
+                            observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
 
     add_shadow(float_model, quantized_model, white_list=white_list)
 
@@ -185,7 +175,7 @@ def sequential_bias_correction(float_model, quantized_model, img_data, white_lis
     remove_hooks(quantized_model)
     remove_shadow(quantized_model)
 
-def parallel_bias_correction(float_model, quantized_model, img_data, white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]):
+def parallel_bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
     ''' Applies bias correction on the whitelisted submodules of the quantized model
     MeanLoggers are added to float and quantized models to record the running means of
     their inputs and outputs, after running all the data provided by img_data, the results
@@ -195,17 +185,19 @@ def parallel_bias_correction(float_model, quantized_model, img_data, white_list 
     qconfig_debug = torch.quantization.QConfig(activation=MeanLogger, weight=None)
     float_model.qconfig = qconfig_debug
     quantized_model.qconfig = qconfig_debug
-    white_list = [nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d]
+    # white_list = _supported_modules
 
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
-    torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list, observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+    torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list,
+                            observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
     batch_size = None
+    # batch size is used here to avoid an adding error in the MeanLogger due
+    # to the last batch of the dataset possibly being a different size than
+    # the previous batches
     for data in img_data:
         with torch.no_grad():
-            print("executed")
-            print(data[0].size())
             if batch_size is None:
-                batch_size = data[0].size(0) # getting batch size
+                batch_size = data[0].size(0)  # getting batch size
             if data[0].size(0) == batch_size:
                 float_model(data[0])
                 quantized_model(data[0])
@@ -225,7 +217,7 @@ def correct_quantized_bias(expected_output, expected_input, float_model, quantiz
         quantized_submodule = get_module(quantized_model, key[:-1])
 
         # checking for existence of bias attribute
-        if hasattr(quantized_submodule, 'bias') and type(quantized_submodule) in [nn.Linear, nn.Conv2d, nnq.Linear, nnq.Conv2d]:
+        if hasattr(quantized_submodule, 'bias') and type(quantized_submodule) in _supported_modules:
             if (isinstance(quantized_submodule.bias, torch.nn.parameter.Parameter) and (quantized_submodule.bias is not None)) or \
                 (quantized_submodule.bias() is not None):
 
@@ -241,8 +233,8 @@ def correct_quantized_bias(expected_output, expected_input, float_model, quantiz
 
                 # bias correction logic
                 if type(quantized_submodule) in [nn.Conv2d, nnq.Conv2d]:
-                    sum_kernels = torch.sum(error_matrix, (2,3))  # c_o, c_i
-                    expected_c_i = torch.mean(expected_input[key]['float'], (0,2,3))  # c_i
+                    sum_kernels = torch.sum(error_matrix, (2, 3))  # c_o, c_i
+                    expected_c_i = torch.mean(expected_input[key]['float'], (0, 2, 3))  # c_i
                     expected_c_i = expected_c_i.reshape(expected_c_i.size()[0], 1)  # flipping into column vector
                     expected_c_o = torch.matmul(sum_kernels, expected_c_i)  # c_o
                     expected_c_o = expected_c_o.squeeze(1)
@@ -260,7 +252,7 @@ def correct_quantized_bias(expected_output, expected_input, float_model, quantiz
                     quantized_submodule.bias().data = updated_bias
 
 
-def get_logger_entries(mod, target_dict = {}, prefix=""):
+def get_logger_entries(mod, target_dict, prefix):
     """ Reads in the data from a Logger object and formats it into a dictionary,
     where the key to the dict is the name of a submodule and the assoicated value
     are the results of the logger (stored in logger.stats["tensor_val"])
@@ -278,16 +270,19 @@ def get_logger_entries(mod, target_dict = {}, prefix=""):
         module_prefix = get_prefix(prefix) + name if prefix else name
         get_logger_entries(child, target_dict, module_prefix)
 
+def get_logger_entries_root(mod, target_dict):
+    get_logger_entries(mod, target_dict, "")
+
 def get_inputs_n_outputs(float_module, q_module):
     r"""Given two models (a floating point model and is quantized counterpart)
     two dictionaries representing the statistics the forward_pre_hook and forward_hook
     Loggers collected in the two given models
     """
     float_dict = {}
-    get_logger_entries(float_module, float_dict)
+    get_logger_entries_root(float_module, float_dict)
 
     quantized_dict = {}
-    get_logger_entries(q_module, quantized_dict)
+    get_logger_entries_root(q_module, quantized_dict)
 
     output_logger = {}
     input_logger = {}
