@@ -493,8 +493,11 @@ class TestOptim(TestCase):
 
     def test_duplicate_params_in_param_group(self):
         param = Variable(torch.randn(5, 5))
-        with self.assertRaises(ValueError):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             optim.SGD([param, param], lr=0.1)
+            self.assertEqual(len(w), 1)
+            self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
 
 
 class SchedulerTestNet(torch.nn.Module):
