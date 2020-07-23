@@ -63,7 +63,7 @@ class ScriptModuleSerializer {
   TypeNameUniquer type_name_uniquer_;
 };
 
-}
+} // namespace
 
 void Module::save_data(std::ostream& out) const {
   ScriptModuleSerializer serializer(
