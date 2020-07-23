@@ -484,9 +484,9 @@ class PolyLR(_LRScheduler):
         if self.last_epoch == 0:
             return self.base_lrs
 
-        base = max(0, 1 - 1 / (self.max_epoch - self.last_epoch - 1))
-        coeff = base ** coeff
-        return [(lr - min_lr) * coeff + min_lr
+        base = 1 - 1 / max(1, self.max_epoch - self.last_epoch + 1)
+        coeff = base ** self.pow
+        return [(group['lr'] - min_lr) * coeff + min_lr
                 for group, min_lr in zip(self.optimizer.param_groups, self.min_lrs)]
 
     def _get_closed_form_lr(self):
