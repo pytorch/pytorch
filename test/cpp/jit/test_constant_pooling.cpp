@@ -76,8 +76,14 @@ graph():
     ConstantPropagation(graph);
     ConstantPooling(graph);
     testing::FileCheck()
-        .check_count("Float(2:1) = prim::Constant", 1, /*exactly*/ true)
-        ->check_count("Long(2:1) = prim::Constant", 1, /*exactly*/ true)
+        .check_count(
+            "Float(2:1, requires_grad=0, device=cpu) = prim::Constant",
+            1,
+            /*exactly*/ true)
+        ->check_count(
+            "Long(2:1, requires_grad=0, device=cpu) = prim::Constant",
+            1,
+            /*exactly*/ true)
         ->run(*graph);
   }
 }
