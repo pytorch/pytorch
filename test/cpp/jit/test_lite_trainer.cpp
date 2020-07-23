@@ -103,6 +103,7 @@ void testMobileSaveLoadData() {
   )");
   Module child("m2");
   child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 3 * torch::ones({}), false);
   m.register_module("child1", child);
   m.register_module("child2", child);
 

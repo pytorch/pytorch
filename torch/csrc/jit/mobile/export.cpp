@@ -27,7 +27,7 @@ class ScriptModuleSerializer {
       const std::function<size_t(const void*, size_t)>& writer_func)
       : writer_(writer_func) {}
 
-  void serialize(const IValue object) {
+  void serialize(const IValue& object) {
     // Serialize just the data
     writeArchive("data", object);
   }

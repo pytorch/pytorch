@@ -35,11 +35,11 @@ class BytecodeDeserializer final {
  private:
   c10::IValue readArchive(
       const std::string& archive_name,
-      std::shared_ptr<mobile::CompilationUnit> mcu);
+      std::shared_ptr<mobile::CompilationUnit> mcu,
+      c10::optional<at::Device> device);
+
   std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
-  c10::optional<at::Device> device_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -49,16 +49,16 @@ BytecodeDeserializer::BytecodeDeserializer(
 
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
-  device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
-  auto temp = readArchive("data", mcu);
+  auto temp = readArchive("data", mcu, std::move(device));
   return mobile::Module(temp.toObject(), mcu);
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
     const std::string& archive_name,
-    std::shared_ptr<mobile::CompilationUnit> mcu) {
+    std::shared_ptr<mobile::CompilationUnit> mcu,
+    c10::optional<at::Device> device) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -98,7 +98,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     return c10::StrongTypePtr(compilation_unit_, type);
   };
 
-  auto obj_loader = [&](const at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     c10::QualifiedName method_name(qn.value(), "__setstate__");
@@ -148,7 +148,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
-      device_);
+      device);
   return unpickler.parse_ivalue();
 }
 
@@ -158,14 +158,14 @@ std::map<std::string, at::Tensor> _load_mobile_data(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _load_mobile_data(std::move(rai), device);
+  return _load_mobile_data(std::move(rai), std::move(device));
 }
 
 std::map<std::string, at::Tensor> _load_mobile_data(
     const std::string& filename,
     c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_mobile_data(std::move(rai), device);
+  return _load_mobile_data(std::move(rai), std::move(device));
 }
 
 std::map<std::string, at::Tensor> _load_mobile_data(
