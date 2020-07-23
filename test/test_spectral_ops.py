@@ -1,10 +1,9 @@
 
 import torch
 import unittest
-import warnings
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_MKL)
+    (TestCase, run_tests, TEST_NUMPY)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl)
@@ -39,7 +38,6 @@ class TestFFT(TestCase):
             for fn in torch_fns:
                 actual = fn(input)
                 self.assertEqual(actual, expected, exact_dtype=(dtype is torch.complex128))
-
 
     # Note: NumPy will throw a ValueError for an empty input
     @skipCPUIfNoMkl
