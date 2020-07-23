@@ -30,12 +30,13 @@ TESTS = [
     'distributed/test_c10d_spawn',
     'test_cuda',
     'test_jit_cuda_fuser',
+    'test_jit_cuda_fuser_legacy',
+    'test_jit_cuda_fuser_profiling',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
     'distributed/test_distributed',
     'test_distributions',
-    'test_docs_coverage',
     'test_expecttest',
     'test_indexing',
     'test_jit',
@@ -44,11 +45,13 @@ TESTS = [
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
+    'test_native_functions',
     'test_nn',
     'test_numba_integration',
     'test_optim',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
+    'test_vulkan',
     'test_quantization',
     'test_sparse',
     'test_serialization',
@@ -69,9 +72,17 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_openmp',
+    'test_profiler',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -80,40 +91,52 @@ TESTS = [
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'test_futures',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 WINDOWS_BLACKLIST = [
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'distributed/test_distributed',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 ROCM_BLACKLIST = [
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
-    'distributed/test_nccl',
     'test_determination',
     'test_multiprocessing',
-    'test_jit_simple',
     'test_jit_legacy',
-    'test_jit_fuser_legacy',
     'test_tensorexpr',
     'test_type_hints',
+    'test_openmp',
 ]
 
 RUN_PARALLEL_BLACKLIST = [
     'test_cpp_extensions_jit',
-    'test_docs_coverage',
     'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
@@ -138,9 +161,16 @@ SLOW_TESTS = [
     'test_jit',
     'test_jit_profiling',
     'test_torch',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/test_distributed',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',
@@ -410,6 +440,10 @@ def parse_args():
         '--determine-from',
         help='File of affected source filenames to determine which tests to run.')
     parser.add_argument(
+        '--continue-through-error',
+        action='store_true',
+        help='Runs the full test suite despite one of the tests failing')
+    parser.add_argument(
         'additional_unittest_args',
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
@@ -671,6 +705,8 @@ def main():
         ]
         sys.path.remove('test')
 
+    has_failed = False
+    failure_messages = []
     for test in selected_tests:
 
         test_module = parse_test_module(test)
@@ -682,17 +718,27 @@ def main():
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
+            has_failed = True
             message = '{} failed!'.format(test)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
-            raise RuntimeError(message)
+            err = RuntimeError(message)
+            failure_messages.append(err)
+            if options.continue_through_error:
+                print_to_stderr(err)
+            else:
+                raise RuntimeError(err)
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])
 
+    if options.continue_through_error and has_failed:
+        for err in failure_messages:
+            print_to_stderr(message)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

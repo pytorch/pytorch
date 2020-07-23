@@ -20,9 +20,10 @@ C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
 
-class LayerNormFakeFp16Op : public Operator<CPUContext> {
+template <class Context>
+class LayerNormFakeFp16Op final : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CPUContext);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <class... Args>
   explicit LayerNormFakeFp16Op(Args&&... args)
@@ -33,28 +34,26 @@ class LayerNormFakeFp16Op : public Operator<CPUContext> {
   ~LayerNormFakeFp16Op() noexcept override {}
 
   bool RunOnDevice() override {
-    return true;
-    // return DispatchHelper<InputTypes>::call(this, Input(DATA));
+    return DoRunWithType();
   }
 
-  template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(INPUT);
-    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<float>());
     CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >=2.");
     const int canonical_axis = X.canonical_axis_index(axis_);
     std::vector<int64_t> moments_dims(
         X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
     moments_dims.push_back(1);
-    auto* mean = Output(1, moments_dims, at::dtype<T>());
-    auto* sigma = Output(2, moments_dims, at::dtype<T>());
+    auto* mean = Output(MEAN, moments_dims, at::dtype<float>());
+    auto* sigma = Output(STD, moments_dims, at::dtype<float>());
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
-    const T* X_data = X.template data<T>();
-    T* Y_data = Y->template mutable_data<T>();
-    T* mean_data = mean->template mutable_data<T>();
-    T* sigma_data = sigma->template mutable_data<T>();
+    const float* X_data = X.template data<float>();
+    float* Y_data = Y->template mutable_data<float>();
+    float* mean_data = mean->template mutable_data<float>();
+    float* sigma_data = sigma->template mutable_data<float>();
 
     std::vector<float> X_rounded(X.numel());
     fbgemm::RoundToFloat16(
@@ -65,21 +64,68 @@ class LayerNormFakeFp16Op : public Operator<CPUContext> {
         false /*USE_ACC_FP16*/);
     X_data = X_rounded.data();
 
-    const std::array<int, 2> X_dims = {M, N};
-    const std::array<int, 2> Y_dims = {M, 1};
-    math::Moments<T, CPUContext>(
-        2,
-        X_dims.data(),
-        Y_dims.data(),
-        X_data,
-        mean_data,
-        sigma_data,
-        &context_);
+    // Mean and Standard Deviation computation for the input data
+    calcMeanStd(M, N, epsilon_, X_data, mean_data, sigma_data);
+
+    const float* gamma_data = nullptr;
+    const float* beta_data = nullptr;
+    std::vector<float> gamma_rounded(N);
+    std::vector<float> beta_rounded(N);
+
+    if (elementwise_affine_) {
+      CAFFE_ENFORCE_EQ(InputSize(), 3);
+      const auto& gamma = Input(1);
+      const auto& beta = Input(2);
+      CAFFE_ENFORCE_EQ(gamma.numel(), N);
+      CAFFE_ENFORCE_EQ(beta.numel(), N);
+
+      gamma_data = gamma.template data<float>();
+      fbgemm::RoundToFloat16(
+          gamma_data,
+          gamma_rounded.data(),
+          N,
+          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
+          false /*USE_ACC_FP16*/);
+      gamma_data = gamma_rounded.data();
+
+      beta_data = beta.template data<float>();
+      fbgemm::RoundToFloat16(
+          beta_data,
+          beta_rounded.data(),
+          N,
+          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
+          false /*USE_ACC_FP16*/);
+      beta_data = beta_rounded.data();
+    }
+
+    // Layer Normalized Output computation
+    calcY(
+        M, N, X_data, mean_data, sigma_data, gamma_data, beta_data, Y_data);
 
     return true;
   }
 
  private:
+  void calcY(
+      const int M,
+      const int N,
+      const float* X,
+      const float* mean,
+      const float* std,
+      const float* gamma,
+      const float* beta,
+      float* Y);
+
+  void calcMeanStd(
+      const int M,
+      const int N,
+      const float eps,
+      const float* X,
+      float* mean,
+      float* std);
+
+  float ReducedAdd(const std::vector<float>& vec);
+
   const int axis_;
   const float epsilon_;
   const bool elementwise_affine_;

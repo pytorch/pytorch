@@ -116,6 +116,25 @@ graph(%0 : Tensor,
 )IR");
   }
   {
+    checkRoundtrip(R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : int = prim::Constant[value=-1]()
+  %4 : Tensor = aten::add(%0, %1, %3)
+  %5 : Tensor = prim::If(%2)
+    block0():
+      %6 : int = prim::Constant[value=1]()
+      %7 : Tensor = aten::add(%1, %3, %6)
+      %8 : int = prim::Constant[value=1]()
+      %9 : Tensor = aten::add(%7, %3, %8)
+      -> (%9)
+  %10 : int = prim::Constant[value=-987]()
+  %11 : Tensor = aten::add(%5, %3, %10)
+  return (%11)
+)IR");
+  }
+  {
     auto graph = std::make_shared<Graph>();
     parseIR(
         R"IR(
@@ -300,6 +319,22 @@ graph(%a : Float(4:5, 5)):
 graph(%a : Float(4, 5),
       %b : Float(4:5, 5:1),
       %c : Double(*, *)):
+  return (%a)
+)IR");
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%a : Float(*, *, device=cpu),
+      %b : Float(*, *, requires_grad=1),
+      %c : Long(5, 10, requires_grad=1, device=cpu),
+      %d : Float(5, requires_grad=0, device=cuda:2),
+      %e : Long(4:6, 3:2, 2:1, requires_grad=0, device=cuda:1),
+      %f : Float(),
+      %g : Float(device=cpu),
+      %h : Float(requires_grad=1),
+      %i : Float(requires_grad=0, device=cuda:1),
+      %j : Double(*, *, requires_grad=0)):
   return (%a)
 )IR");
   }

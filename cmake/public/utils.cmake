@@ -232,7 +232,7 @@ function(torch_compile_options libname)
 
       target_compile_options(${libname} PUBLIC
         ${MSVC_RUNTIME_LIBRARY_OPTION}
-        ${MSVC_DEBINFO_OPTION}
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /DNOMINMAX
         /wd4267
@@ -249,8 +249,7 @@ function(torch_compile_options libname)
         /bigobj
         )
     else()
-      target_compile_options(${libname} PUBLIC
-        #    -std=c++14
+      target_compile_options(${libname} PRIVATE
         -Wall
         -Wextra
         -Wno-unused-parameter

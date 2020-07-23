@@ -287,7 +287,6 @@ class Vectorizer : public IRMutator {
 
   bool vectorize_inputs(std::vector<const Expr*>& inputs) {
     bool any_vectorized = false;
-    bool all_vectorized = true;
     std::vector<const Expr*> new_inputs;
 
     // Attempt to vectorize each input.
@@ -296,8 +295,6 @@ class Vectorizer : public IRMutator {
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
-      } else {
-        all_vectorized = false;
       }
     }
 
@@ -949,7 +946,8 @@ void LoopNest::splitWithTail(
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1023,7 +1021,8 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1528,18 +1527,21 @@ void LoopNest::rfactor(
                                       reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
-  std::vector<const For*> init_loops;
+  std::vector<const For*> output_loops;
+  bool output_contains_target = false;
 
   while (st) {
     if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
-        init_loops.push_back(f);
+      } else if (target_for && !output_contains_target) {
+        output_loops.push_back(target_for);
+        output_contains_target = true;
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
       } else {
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
 
       if (reduce_args.empty()) {
@@ -1631,13 +1633,16 @@ void LoopNest::rfactor(
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
   SwapReduce sr(reduce_op, first_reduce);
-  auto root_block = dynamic_cast<Block*>(root_stmt());
-  auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
+  Block* root_block = dynamic_cast<Block*>(root_stmt());
+  Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
     return;
   }
-  Stmt* new_root_for = root_for->accept_mutator(&sr);
+  For* new_root_for = dynamic_cast<For*>(root_for->accept_mutator(&sr));
+  if (!new_root_for) {
+    std::cerr << "Couldn't find new root for in rfactor\n";
+  }
   auto res = parent_block->replace_stmt(root_for, new_root_for);
   if (!res) {
     std::cerr << "Couldn't find target loop within parent block of loop nest\n";
@@ -1658,11 +1663,15 @@ void LoopNest::rfactor(
         new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
 
     // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* il : init_loops) {
-      init_stmt = il->cloneWithNewBody(init_stmt);
+    for (auto* ol : output_loops) {
+      init_stmt = ol->cloneWithNewBody(init_stmt);
     }
 
-    parent_block->prepend_stmt(init_stmt);
+    if (output_contains_target) {
+      parent_block->insert_stmt_before(init_stmt, new_root_for);
+    } else {
+      new_root_for->body()->prepend_stmt(init_stmt);
+    }
   } else {
     // We may support this but not possible now.
     throw std::runtime_error("can't rfactor reduction with no initializer\n");
@@ -1676,16 +1685,20 @@ void LoopNest::rfactor(
     insertion_point->append_stmt(
         new Store(second_buf, second_indices, second_reduce, new IntImm(1)));
   } else {
-    For* new_for = new For(
-        target_for->var(),
-        target_for->start(),
-        target_for->stop(),
-        new Store(second_buf, second_indices, second_reduce, new IntImm(1)),
-        target_for->loop_options());
+    Stmt* body_stmt =
+        new Store(second_buf, second_indices, second_reduce, new IntImm(1));
+
+    for (auto* il : output_loops) {
+      body_stmt = il->cloneWithNewBody(body_stmt);
+    }
     if (insertion_point) {
-      insertion_point->append_stmt(new_for);
+      insertion_point->append_stmt(body_stmt);
     } else {
-      parent_block->append_stmt(new_for);
+      if (output_contains_target) {
+        parent_block->insert_stmt_after(body_stmt, new_root_for);
+      } else {
+        new_root_for->body()->append_stmt(body_stmt);
+      }
     }
   }
 

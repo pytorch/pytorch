@@ -5,7 +5,8 @@ from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
 from torch.testing import make_non_contiguous
-from torch.testing._internal.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
+from torch.testing._internal.common_device_type import (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+                                                        expectedAlertNondeterministic)
 from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
                                                   random_symmetric_matrix, random_symmetric_psd_matrix,
                                                   random_symmetric_pd_matrix, make_nonzero_det,
@@ -117,6 +118,8 @@ def ident(x):
 def method_tests():
     set_rng_seed(0)
     return [
+        ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, ''),
+        ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar'),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -126,6 +129,10 @@ def method_tests():
         ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
+        ('asinh', (S, S, S), NO_ARGS, ''),
+        ('asinh', (), NO_ARGS, 'scalar'),
+        ('atanh', torch.rand(S, S, S), NO_ARGS, ''),
+        ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar'),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
@@ -197,6 +204,8 @@ def method_tests():
         ('flip', (S, S, S), ([0, 2],), 'd02'),
         ('flip', (S, S, S), ([2, 0],), 'd20'),
         ('flip', (S, S, S), ([-1],), 'neg_d'),
+        ('fliplr', (S, S, S), ()),
+        ('flipud', (S, S, S), ()),
         ('roll', (S, S, S), (0, 0), 'd0'),
         ('roll', (S, S, S), (1, 2), 'd12'),
         ('roll', (S, S, S), (0, 2,), 'd02'),
@@ -248,6 +257,10 @@ def method_tests():
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
         ('sigmoid', (), NO_ARGS, 'scalar', (True,)),
+        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
+        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
+        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
+        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'scalar_eps'),
         ('sinh', (S, S, S), NO_ARGS, '', (True,)),
         ('sinh', (), NO_ARGS, 'scalar', (True,)),
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
@@ -294,6 +307,8 @@ def method_tests():
         ('floor', (), NO_ARGS, 'scalar', (True,)),
         ('ceil', (S, S, S), NO_ARGS, '', (True,)),
         ('ceil', (), NO_ARGS, 'scalar', (True,)),
+        ('rad2deg', (S, S, S), NO_ARGS),
+        ('deg2rad', (S, S, S), NO_ARGS),
         ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('frac', (S, S, S), NO_ARGS, '', (True,)),
@@ -662,6 +677,8 @@ def method_tests():
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
+        ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('index_add_cuda_', 'cuda')]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
@@ -865,6 +882,8 @@ def method_tests():
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
         ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
+        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
         ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
         ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),

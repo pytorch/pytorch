@@ -634,6 +634,18 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    auto sizes = self.sizes();
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -655,6 +667,18 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    auto sizes = self.sizes();
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -681,7 +705,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
-    Tensor real_in = self.copy_real().to(dtype);
+    Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
     auto iter = make_reduction("std or var", real_out, real_in, dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -689,7 +713,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
     } else {
       std_var_stub(iter.device_type(), iter, unbiased, false);
     }
-    Tensor imag_in = self.copy_imag().to(dtype);
+    Tensor imag_in = at::imag(self);
     Tensor imag_out = at::empty({0}, self.options().dtype(dtype));
     iter = make_reduction("std or var", imag_out, imag_in, dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -727,7 +751,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
            ".");
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
-    Tensor real_in = self.copy_real().to(dtype);
+    Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
     auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, dim, keepdim, dtype);
@@ -737,7 +761,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     } else {
       std_var_stub(iter.device_type(), iter, unbiased, false);
     }
-    Tensor imag_in = self.copy_imag().to(dtype);
+    Tensor imag_in = at::imag(self);
     Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor imag_out_mean = at::empty({0}, self.options().dtype(dtype));
     iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, dim, keepdim, dtype);
@@ -749,7 +773,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     }
     at::add_out(result1, real_out_var, imag_out_var);
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
@@ -928,6 +952,61 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
 
 Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
   return at::norm(self - other, p);
+}
+
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
+  auto mask = (self != 0);
+  return mask.sum(dims);
+}
+
+Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
+  if (dim){
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    return at::count_nonzero(self, IntArrayRef{wrap_dim});
+  }
+  return at::count_nonzero(self, IntArrayRef{});
+}
+
+bool cpu_equal(const Tensor& self, const Tensor& other) {
+  if (!at::namedinference::are_names_equal(
+        self.unsafeGetTensorImpl(), other.unsafeGetTensorImpl())) {
+    return false;
+  }
+  at::NoNamesGuard guard;
+  TORCH_CHECK(self.device() == other.device(), "Cannot compare two tensors on "
+              "different devices. Got: ", self.device(), " and ", other.device());
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  if (!self.is_same_size(other)) {
+    return false;
+  }
+  std::atomic<bool> result{true};
+  auto iter = TensorIteratorConfig()
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .build();
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "equal_cpu", [&] {
+    iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
+      if (!result) {
+          return;
+      }
+      char* self_data = data[0];
+      char* other_data = data[1];
+      for (int64_t i = 0; i < dim_size; ++i) {
+        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+          result = false;
+          return;
+        }
+        self_data += strides[0];
+        other_data += strides[1];
+      }
+    });
+  });
+  return result.load();
 }
 
 }} // namespace at::native

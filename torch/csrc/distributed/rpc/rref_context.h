@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/utils/future.h>
 
 #include <atomic>
@@ -22,8 +23,9 @@ void TORCH_API confirmPendingUser(
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
 // deletedRRef contains python object.
-c10::intrusive_ptr<RRef> TORCH_API
-finishCreatingOwnerRRef(const FutureMessage& futureMessage);
+c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
+    const FutureMessage& futureMessage,
+    const RRefId& rrefId);
 } // namespace callback
 
 using torch::utils::Future;
@@ -102,9 +104,12 @@ class TORCH_API RRefContext {
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not
-  // available, e.g., when processing to_here().
+  // available, e.g., when processing to_here(). The forceCreated flag can be
+  // used to ensure that the rref is created on the owner, otherwise throw in
+  // cases where the user of this API expects this to return a completed future.
   std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
-      const RRefId& rrefId);
+      const RRefId& rrefId,
+      bool forceCreated = false);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -171,6 +176,10 @@ class TORCH_API RRefContext {
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
 
+  // Retrieve a pending user given the fork ID. Throws if the user has already
+  // been confirmed (i.e. is no longer in the pendingUsers_ map).
+  c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
+
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
   // then be consumed and cleared in waitForThreadLocalPendingRRefs().
@@ -196,7 +205,7 @@ class TORCH_API RRefContext {
       const worker_id_t owner,
       const RRefId& rrefId,
       const ForkId& forkId);
-  void delAllUsers(std::chrono::milliseconds timeoutMillis);
+  void delAllUsersAndUnforkedOwners(std::chrono::milliseconds timeoutMillis);
 
   std::unordered_map<std::string, std::string> getDebugInfo();
 

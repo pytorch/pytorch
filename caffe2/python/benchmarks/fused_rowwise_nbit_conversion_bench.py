@@ -1,14 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
-import datetime
 
 import numpy as np
-from caffe2.fb.python.operator_test.fused_nbit_rowwise_test_helper import (
-    _compress_uniform_simplified,
-    param_search_greedy,
-)
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, workspace
 
 
 def main(bit_rate):
@@ -44,16 +39,6 @@ def main(bit_rate):
 
     workspace.CreateNet(net2)
     workspace.BenchmarkNet(net2.Proto().name, 1, iterations, True)
-
-    start = datetime.datetime.now()
-    for n in range(10):
-        for i in range(input_data.shape[0]):
-            xmin, xmax = param_search_greedy(
-                input_data[i, :], 4, n_bins=200, ratio=0.16
-            )
-            X_q_ref = _compress_uniform_simplified(input_data[i, :], 4, xmin, xmax)
-    end = datetime.datetime.now()
-    print((end - start).total_seconds())
 
 
 if __name__ == "__main__":

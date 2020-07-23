@@ -152,6 +152,9 @@ def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
     for blob in pre_load_blobs:
         meta_net_def.preLoadBlobs.append(blob)
 
+def GetBlobsOrder(meta_net_def):
+    return meta_net_def.blobsOrder
+
 def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
     meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
 

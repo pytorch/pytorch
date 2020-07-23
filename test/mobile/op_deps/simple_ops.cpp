@@ -78,10 +78,10 @@ TORCH_LIBRARY(_test, m) {
   m.impl("AA", torch::CppFunction::makeUnboxedOnly(AA_op));
 
   m.def("BB(Tensor self) -> Tensor");
-  m.impl("BB", &BB_op);
+  m.impl("BB", TORCH_FN(BB_op));
 
-  m.def("CC(Tensor self) -> Tensor", &CC_op);
-  m.def("DD", &DD_op);
+  m.def("CC(Tensor self) -> Tensor", TORCH_FN(CC_op));
+  m.def("DD", TORCH_FN(DD_op));
 }
 
 TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {

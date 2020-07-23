@@ -87,6 +87,14 @@ public:
   Return call(const OperatorHandle& opHandle, Args... args) const;
 
   /**
+   * Like call, but with the stack of the already boxed inputs, in addition to the same
+   * inputs in the parameter pack
+   */
+  template<class Return, class... Args>
+  Return callBoxedOrUnboxed(
+      const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const;
+
+  /**
    * Create a KernelFunction from a boxed function.
    *
    * Example:
@@ -143,8 +151,8 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction();
+  template<class FuncPtr, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
@@ -160,8 +168,8 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncType, FuncType* func>
-  static KernelFunction makeFromUnboxedOnlyFunction();
+  template<class FuncPtr>
+  static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -210,6 +218,8 @@ private:
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
+
+  void checkBoxedKernel(const OperatorHandle& opHandle) const;
 
   OperatorKernel* getFunctor_() const;
 

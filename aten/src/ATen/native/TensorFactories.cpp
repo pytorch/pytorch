@@ -11,6 +11,7 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -354,13 +355,12 @@ TensorOptions infer_full_options(
 
   if (!options.has_dtype()) {
     if (fill_value.isIntegral(true)) {
-      TORCH_WARN_ONCE(
-        "Deprecation warning: In a future PyTorch release torch.full ",
-        "will no longer return tensors of floating dtype by default. ",
-        "Instead, a bool fill_value will return a tensor of torch.bool dtype, ",
-        "and an integral fill_value will return a tensor of torch.long dtype. ",
-        "Set the optional `dtype` or `out` arguments to suppress this warning."
-      );
+      TORCH_CHECK(false,
+        "Providing a bool or integral fill value without setting the optional ",
+        "`dtype` or `out` arguments is currently unsupported. In PyTorch 1.7, ",
+        "when `dtype` and `out` are not set a bool fill value will ",
+        "return a tensor of torch.bool dtype, and an integral fill value ",
+        "will return a tensor of torch.long dtype.");
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
                             ScalarType::ComplexDouble :
@@ -461,6 +461,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     // In the future when we remove the overhead of device dispatch, we'll happily
     // revert this to following:
     //   auto result = at::empty({}, options);
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     auto result = empty_cpu({}, options);
     at::native::fill_(result, s);
@@ -965,6 +966,22 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return cpu_tensor.to(options.device());
 }
 
+template <typename T>
+Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+  auto result = at::empty(values.size(), options);
+  AT_ASSERT(result.is_contiguous());
+  AT_DISPATCH_COMPLEX_TYPES(result.scalar_type(), "tensor_cpu", [&] {
+    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
+  });
+  return result;
+}
+
+template <typename T>
+Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
+  auto cpu_tensor = tensor_complex_cpu(values, options.device(DeviceType::CPU));
+  return cpu_tensor.to(options.device());
+}
+
 #define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
     if (options.device().type() != c10::DeviceType::CPU) {          \
@@ -974,6 +991,17 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
     }                                                               \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+#undef TENSOR
+
+#define TENSOR(T, _1)                                               \
+  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
+    if (options.device().type() != c10::DeviceType::CPU) {          \
+      return tensor_complex_backend(values, options);               \
+    } else {                                                        \
+      return tensor_complex_cpu(values, options);                   \
+    }                                                               \
+  }
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {

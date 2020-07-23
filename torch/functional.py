@@ -11,6 +11,9 @@ Tensor = torch.Tensor
 from torch import _VF
 
 __all__ = [
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
@@ -82,6 +85,27 @@ def split(tensor, split_size_or_sections, dim=0):
         split_size_or_sections (int) or (list(int)): size of a single chunk or
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
+
+    Example::
+        >>> a = torch.arange(10).reshape(5,2)
+        >>> a
+        tensor([[0, 1],
+                [2, 3],
+                [4, 5],
+                [6, 7],
+                [8, 9]])
+        >>> torch.split(a, 2)
+        (tensor([[0, 1],
+                 [2, 3]]),
+         tensor([[4, 5],
+                 [6, 7]]),
+         tensor([[8, 9]]))
+        >>> torch.split(a, [1,4])
+        (tensor([[0, 1]]),
+         tensor([[2, 3],
+                 [4, 5],
+                 [6, 7],
+                 [8, 9]]))
     """
     if not torch.jit.is_scripting():
         if type(tensor) is not Tensor and has_torch_function((tensor,)):
@@ -593,6 +617,67 @@ def _unique_impl(input, sorted=True, return_inverse=False, return_counts=False, 
     return output, inverse_indices, counts
 
 
+def _unique_consecutive_impl(input, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor, Tensor]
+    r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+    .. note:: This function is different from :func:`torch.unique` in the sense that this function
+        only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
+        in C++.
+
+    Arguments:
+        input (Tensor): the input tensor
+        return_inverse (bool): Whether to also return the indices for where
+            elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
+
+    Returns:
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
+
+            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **inverse_indices** (*Tensor*): (optional) if
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
+              for where elements in the original input map to in the output;
+              otherwise, this function will only return a single tensor.
+            - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurrences
+              for each unique value or tensor.
+
+    Example::
+
+        >>> x = torch.tensor([1, 1, 2, 2, 3, 1, 1, 2])
+        >>> output = torch.unique_consecutive(x)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+
+        >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> inverse_indices
+        tensor([0, 0, 1, 1, 2, 3, 3, 4])
+
+        >>> output, counts = torch.unique_consecutive(x, return_counts=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> counts
+        tensor([2, 2, 1, 2, 1])
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                unique_consecutive, (input,), input, return_inverse=return_inverse,
+                return_counts=return_counts, dim=dim)
+    output, inverse_indices, counts = _VF.unique_consecutive(
+        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+    return output, inverse_indices, counts
+
+
 def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
@@ -655,70 +740,66 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
-def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
-    r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+def _consecutive_return_counts(input, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
-    .. note:: This function is different from :func:`torch.unique` in the sense that this function
-        only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
-        in C++.
-
-    Arguments:
-        input (Tensor): the input tensor
-        return_inverse (bool): Whether to also return the indices for where
-            elements in the original input ended up in the returned unique list.
-        return_counts (bool): Whether to also return the counts for each unique
-            element.
-        dim (int): the dimension to apply unique. If ``None``, the unique of the
-            flattened input is returned. default: ``None``
-
-    Returns:
-        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
-
-            - **output** (*Tensor*): the output list of unique scalar elements.
-            - **inverse_indices** (*Tensor*): (optional) if
-              :attr:`return_inverse` is True, there will be an additional
-              returned tensor (same shape as input) representing the indices
-              for where elements in the original input map to in the output;
-              otherwise, this function will only return a single tensor.
-            - **counts** (*Tensor*): (optional) if
-              :attr:`return_counts` is True, there will be an additional
-              returned tensor (same shape as output or output.size(dim),
-              if dim was specified) representing the number of occurrences
-              for each unique value or tensor.
-
-    Example::
-
-        >>> x = torch.tensor([1, 1, 2, 2, 3, 1, 1, 2])
-        >>> output = torch.unique_consecutive(x)
-        >>> output
-        tensor([1, 2, 3, 1, 2])
-
-        >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
-        >>> output
-        tensor([1, 2, 3, 1, 2])
-        >>> inverse_indices
-        tensor([0, 0, 1, 1, 2, 3, 3, 4])
-
-        >>> output, counts = torch.unique_consecutive(x, return_counts=True)
-        >>> output
-        tensor([1, 2, 3, 1, 2])
-        >>> counts
-        tensor([2, 2, 1, 2, 1])
-    """
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
-            return handle_torch_function(
-                unique_consecutive, (input,), input, return_inverse=return_inverse,
-                return_counts=return_counts, dim=dim)
-    output, inverse_indices, counts = _VF.unique_consecutive(
-        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
-    if return_inverse and return_counts:
-        return output, inverse_indices, counts
-    if return_inverse:
-        return output, inverse_indices
-    if return_counts:
-        return output, counts
+            return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+
+    output, _, counts = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+    return output, counts
+
+def _consecutive_return_output(input, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, Optional[int]) -> Tensor
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+
+    output, _, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
     return output
+
+def _consecutive_return_inverse(input, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+
+    output, inverse_indices, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+    return output, inverse_indices
+
+_consecutive_return_inverse_false = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=1,
+    default=False,
+    if_true=_consecutive_return_counts,
+    if_false=_consecutive_return_output,
+    module_name=__name__,
+    func_name='unique_consecutive')
+
+_consecutive_return_inverse_true = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=1,
+    default=False,
+    if_true=_unique_consecutive_impl,
+    if_false=_consecutive_return_inverse,
+    module_name=__name__,
+    func_name='unique_consecutive')
+
+# The return type of unique depends on `return_inverse`, and `return_counts` so in order to
+# resolve the output type in TorchScript we need to statically know the value of both parameters
+
+unique_consecutive = boolean_dispatch(
+    arg_name='return_inverse',
+    arg_index=2,
+    default=False,
+    if_true=_consecutive_return_inverse_true,
+    if_false=_consecutive_return_inverse_false,
+    module_name=__name__,
+    func_name='unique_consecutive')
+unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
 def tensordot(a, b, dims=2):
@@ -902,6 +983,118 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
         return _VF.cdist(x1, x2, p, 2)
     else:
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
+
+def atleast_1d(*tensors):
+    r"""
+    Returns a 1-dimensional view of each input tensor with zero dimensions.
+    Input tensors with one or more dimensions are returned as-is.
+
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example::
+        >>> x = torch.randn(2)
+        >>> x
+        tensor([1.4584, 0.7583])
+        >>> torch.atleast_1d(x)
+        tensor([1.4584, 0.7583])
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_1d(x)
+        tensor([1.])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_1d((x,y))
+        (tensor([0.5000]), tensor([1.]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_1d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_1d(tensors)
+
+def atleast_2d(*tensors):
+    r"""
+    Returns a 2-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with two or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example::
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_2d(x)
+        tensor([[1.]])
+        >>> x = torch.randn(2,2)
+        >>> x
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> torch.atleast_2d(x)
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_2d((x,y))
+        (tensor([[0.5000]]), tensor([[1.]]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_2d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_2d(tensors)
+
+def atleast_3d(*tensors):
+    r"""
+    Returns a 3-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with three or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example::
+        >>> x = torch.tensor(0.5)
+        >>> x
+        tensor(0.5000)
+        >>> torch.atleast_3d(x)
+        tensor([[[0.5000]]])
+        >>> y = torch.randn(2,2)
+        >>> y
+        tensor([[-0.8079,  0.7460],
+                [-1.1647,  1.4734]])
+        >>> torch.atleast_3d(y)
+        tensor([[[-0.8079],
+                [ 0.7460]],
+
+                [[-1.1647],
+                [ 1.4734]]])
+        >>> x = torch.randn(1,1,1)
+        >>> x
+        tensor([[[-1.5689]]])
+        >>> torch.atleast_3d(x)
+        tensor([[[-1.5689]]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_3d((x,y))
+        (tensor([[[0.5000]]]), tensor([[[1.]]]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_3d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_3d(tensors)
 
 # TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
 @overload  # noqa: 749
