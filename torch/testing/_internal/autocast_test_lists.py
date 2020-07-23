@@ -85,7 +85,8 @@ class AutocastTestLists(object):
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
             # the current cudnn_convolutions
             ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1),
+                                                                 (1, 1), 1, False, True, True), TEST_WITH_ROCM),
             ("prelu", pointwise0_fp32 + element0_fp32),
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
