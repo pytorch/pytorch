@@ -1032,6 +1032,36 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
+add_docstr(torch.unsafe_chunk,
+           r"""
+unsafe_chunk(input, chunks, dim=0) -> List of Tensors
+
+Works like :func:`torch.chunk` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
+""")
+
+add_docstr(torch.unsafe_split,
+           r"""
+unsafe_split(tensor, split_size_or_sections, dim=0) -> List of Tensors
+
+Works like :func:`torch.split` but without enforcing the autograd restrictions
+on inplace modification of the outputs.
+
+.. warning::
+    This function is safe to use as long as only the input, or only the outputs
+    are modified inplace after calling this function. It is user's
+    responsibility to ensure that is the case. If both the input and one or more
+    of the outputs are modified inplace, gradients computed by autograd will be
+    silently incorrect.
+""")
+
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
@@ -1533,7 +1563,7 @@ Example::
 
 add_docstr(torch.cross,
            r"""
-cross(input, other, dim=-1, out=None) -> Tensor
+cross(input, other, dim=None, out=None) -> Tensor
 
 
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
@@ -1543,7 +1573,7 @@ and :attr:`other`.
 :attr:`dim` dimension should be 3.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
-size 3.
+size 3. Note that this might be unexpected.
 
 Args:
     {input}
