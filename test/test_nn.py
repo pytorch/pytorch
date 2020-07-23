@@ -44,7 +44,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic
+    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -10117,6 +10117,9 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
 
     @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     32769 * (65536 + 3 * 65536 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -10143,6 +10146,9 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     2 * 32769 * (32768 + 3 * 32768 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
