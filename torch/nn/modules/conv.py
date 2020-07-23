@@ -37,14 +37,14 @@ class _ConvNd(Module):
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
-                 kernel_size: _size_1_t,
-                 stride: _size_1_t,
-                 padding: _size_1_t,
-                 dilation: _size_1_t,
+                 kernel_size: Tuple[int, ...],
+                 stride: Tuple[int, ...],
+                 padding: Tuple[int, ...],
+                 dilation: Tuple[int, ...],
                  transposed: bool,
-                 output_padding: _size_1_t,
+                 output_padding: Tuple[int, ...],
                  groups: int,
-                 bias: Optional[Tensor],
+                 bias: bool,
                  padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
@@ -579,8 +579,7 @@ class _ConvTransposeNd(_ConvNd):
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
 
-    def _output_padding(self, input, output_size, stride, padding, kernel_size):
-        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
+    def _output_padding(self, input: Tensor, output_size: Optional[List[int]], stride: Tuple[int, ...], padding: Tuple[int, ...], kernel_size: Tuple[int, ...]) -> List[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
