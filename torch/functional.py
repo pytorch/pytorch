@@ -1415,9 +1415,6 @@ def clamp(input, min=None, max=None, *, out=None):
     .. math::
         y_i = \min(\text{max}_i, \min(\text{min}_i, x_i))
 
-    The output dtype is same as :attr:`input` if :attr:`min`/:attr:`max` arguments are scalars, otherwise if the 
-    arguments are tensors then the output dtype uses standard type promotion rules.
-
     Args:
         input (Tensor): the input tensor
         min (Tensor or Number): lower-bound of the range to be clamped to
@@ -1441,9 +1438,6 @@ def clamp(input, min=None, max=None, *, out=None):
 
     Clamps all elements in :attr:`input` to be larger or equal to :attr:`min`.
 
-    The output dtype is same as attr:`input` if :attr:`min` argument is a scalar, otherwise if :attr:`min` is a tensor
-    then the output dtype uses standard type promotion rules.
-
     Args:
         input (Tensor): the input tensor
     Keyword args:
@@ -1464,9 +1458,6 @@ def clamp(input, min=None, max=None, *, out=None):
     .. function:: clamp(input, *, max, out=None) -> Tensor
 
     Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-    The output dtype is same as attr:`input` if :attr:`max` argument is a scalar, otherwise if :attr:`max` is a tensor
-    then the output dtype uses standard type promotion rules.
 
     Args:
         input (Tensor): the input tensor

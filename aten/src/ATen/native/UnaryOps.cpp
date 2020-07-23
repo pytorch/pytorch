@@ -454,6 +454,10 @@ Tensor& clamp_with_tensors_out(Tensor& result, const Tensor& self, const Tensor&
   TORCH_CHECK(!self.is_complex() && !min.is_complex() && !max.is_complex(),
               "clamp does not support complex inputs.");
   if (min.defined() && max.defined()) {
+    TORCH_CHECK(self.options().dtype() == min.options().dtype() 
+                && self.options().dtype() == max.options().dtype(),
+                "clamp with tensor arguments does not support type promotion yet, got: ", 
+                self.options().dtype(), ", ", min.options().dtype(), ", ", max.options().dtype());
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
     TensorIterator iter = TensorIteratorConfig()
@@ -462,8 +466,6 @@ Tensor& clamp_with_tensors_out(Tensor& result, const Tensor& self, const Tensor&
       .add_input(self)
       .add_input(min)
       .add_input(max)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
       .build();
     clamp_with_tensors_stub(iter.device_type(), iter);
@@ -483,6 +485,9 @@ Tensor& clamp_with_tensors_max_(Tensor& self, const Tensor& max) {
 }
 
 Tensor& clamp_with_tensors_max_out(Tensor& result, const Tensor& self, const Tensor& max) {
+  TORCH_CHECK(self.options().dtype() == max.options().dtype(),
+              "clamp with tensor arguments does not support type promotion yet, got: ", 
+              self.options().dtype(), ", ", max.options().dtype());
   TORCH_CHECK(!self.is_complex() && !max.is_complex(),
               "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -492,8 +497,6 @@ Tensor& clamp_with_tensors_max_out(Tensor& result, const Tensor& self, const Ten
     .add_output(result)
     .add_input(self)
     .add_input(max)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
     .build();
   clamp_max_with_tensor_stub(iter.device_type(), iter);
@@ -506,6 +509,9 @@ Tensor& clamp_with_tensors_min_(Tensor& self, const Tensor& min) {
 }
 
 Tensor& clamp_with_tensors_min_out(Tensor& result, const Tensor& self, const Tensor& min) {
+  TORCH_CHECK(self.options().dtype() == min.options().dtype(),
+              "clamp with tensor arguments does not support type promotion yet, got: ", 
+              self.options().dtype(), ", ", min.options().dtype());
   TORCH_CHECK(!self.is_complex() && !min.is_complex(),
               "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -515,8 +521,6 @@ Tensor& clamp_with_tensors_min_out(Tensor& result, const Tensor& self, const Ten
     .add_output(result)
     .add_input(self)
     .add_input(min)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
     .build();
   clamp_min_with_tensor_stub(iter.device_type(), iter);
