@@ -342,8 +342,9 @@ def convert(module, mapping=None, inplace=False):
                  is mutated
 
     """
-    _convert(module, mapping, inplace)
-    _remove_qconfig(module)
+    converted_module = _convert(module, mapping, inplace)
+    _remove_qconfig(converted_module)
+    return converted_module
 
 def _convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
