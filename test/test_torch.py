@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -211,6 +211,7 @@ class AbstractTestCases:
                            'smm',
                            'softmax',
                            'split_with_sizes',
+                           'unsafe_split_with_sizes',
                            'sspaddmm',
                            'to_dense',
                            'sparse_resize_',
@@ -274,7 +275,7 @@ class AbstractTestCases:
             self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
             self.assertIsNotNone(torch.Tensor().new().storage())
 
-        def _testSelection(self, torchfn, mathfn):
+        def _testSelection(self, torchfn, mathfn, skip_indices=False):
             # contiguous
             m1 = torch.randn(100, 100)
             res1 = torchfn(m1)
@@ -293,20 +294,21 @@ class AbstractTestCases:
             self.assertEqual(res1, res2)
 
             # with indices
-            m1 = torch.randn(100, 100)
-            res1val, res1ind = torchfn(m1, 1, False)
-            res2val = m1[:, 0:1].clone().squeeze()
-            res2ind = res1ind.clone().fill_(0)
-            for i, j in iter_indices(m1):
-                if mathfn(res2val[i], m1[i, j]) != res2val[i]:
-                    res2val[i] = m1[i, j]
-                    res2ind[i] = j
+            if not skip_indices:
+                m1 = torch.randn(100, 100)
+                res1val, res1ind = torchfn(m1, 1, False)
+                res2val = m1[:, 0:1].clone().squeeze()
+                res2ind = res1ind.clone().fill_(0)
+                for i, j in iter_indices(m1):
+                    if mathfn(res2val[i], m1[i, j]) != res2val[i]:
+                        res2val[i] = m1[i, j]
+                        res2ind[i] = j
 
-            maxerr = 0
-            for i in range(res1val.size(0)):
-                maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
-                self.assertEqual(res1ind[i], res2ind[i])
-            self.assertLessEqual(abs(maxerr), 1e-5)
+                maxerr = 0
+                for i in range(res1val.size(0)):
+                    maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
+                    self.assertEqual(res1ind[i], res2ind[i])
+                self.assertLessEqual(abs(maxerr), 1e-5)
 
             # NaNs
             for index in (0, 4, 99):
@@ -326,11 +328,31 @@ class AbstractTestCases:
                 res2 = mathfn(res2, m1[i])
             self.assertEqual(res1, res2)
 
+            # Long
+            m1 = torch.LongTensor(100).random_(-1000, 1000)
+            res1 = torchfn(m1)
+            res2 = m1[0]
+            for i in iter_indices(m1):
+                res2 = mathfn(res2, m1[i])
+            self.assertEqual(res1, res2)
+
+
         def test_max(self):
             self._testSelection(torch.max, max)
 
         def test_min(self):
             self._testSelection(torch.min, min)
+
+        def test_min_max(self):
+            # TODO: implement indices, in a future PR
+            # min correctness
+            self._testSelection(lambda x: torch._min_max(x)[0],
+                                lambda x, y: min(x, y),
+                                skip_indices=True)
+            # max correctness
+            self._testSelection(lambda x: torch._min_max(x)[1],
+                                lambda x, y: max(x, y),
+                                skip_indices=True)
 
         def test_dim_reduction_uint8_overflow(self):
             example = [[-1, 2, 1], [5, 3, 6]]
@@ -12040,6 +12062,11 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
 
+    @onlyCUDA
+    @expectedAlertNondeterministic('_histc_cuda', fn_has_device_arg=False)
+    def test_histc_alert_nondeterministic(self, device):
+        torch.histc(torch.tensor([], device=device), min=0, max=3)
+
     def test_histc(self, device):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
@@ -12906,7 +12933,7 @@ class TestTorchDeviceType(TestCase):
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-            if dtype == torch.half and torch.device(device).type == 'cpu':
+            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -15518,6 +15545,11 @@ class TestTorchDeviceType(TestCase):
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
+    def test_bincount_alert_nondeterministic(self, device):
+        torch.bincount(torch.tensor([], device=device, dtype=torch.long))
 
     @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):

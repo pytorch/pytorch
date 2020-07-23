@@ -2259,14 +2259,13 @@ class _DistTestBase(object):
             reduction_fn(tensor, dst, op)
         else:
             reduction_fn(tensor, op)
-        print(f"Got tensor {tensor}, expected {expected_tensor}")
         self.assertEqual(tensor, expected_tensor)
 
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
-    def test_nccl_backend_bool_reduction(self):
+    def test_nccl_backend_bool_allreduce(self):
         torch.cuda.set_device(self.rank)
         # Run all_reduce with PRODUCT
         element = self.rank % 2 == 0
@@ -2274,6 +2273,13 @@ class _DistTestBase(object):
             input_tensor = torch.tensor([element, element]).to(self.rank)
             self._run_reduction_test(
                 input_tensor, torch.tensor([False, False]).to(self.rank), op
+            )
+            # Ensure that all ranks contributing True (cast to 1) results in the
+            # correct reduction.
+            input_tensor = torch.tensor([True, True]).to(self.rank)
+            expected_tensor = input_tensor.clone()
+            self._run_reduction_test(
+                input_tensor, expected_tensor, op
             )
 
         # Run all_reduce with SUM
@@ -2321,7 +2327,17 @@ class _DistTestBase(object):
         for op in [dist.ReduceOp.PRODUCT, dist.ReduceOp.MIN]:
             input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
             expected = torch.tensor([False, False]).to(self.rank)
-            self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
+            self._run_reduction_test(
+                input_tensor, expected, op, dist.reduce, dst=0
+            )
+            # Ensure that all ranks contributing True (cast to 1) results in the
+            # correct reduction.
+            input_tensor = torch.tensor([True, True]).to(self.rank)
+            expected_tensor = input_tensor.clone()
+            self._run_reduction_test(
+                input_tensor, expected_tensor, op, dist.reduce, dst=0
+            )
+
         for op in [dist.ReduceOp.SUM, dist.ReduceOp.MAX]:
             input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
             expected = (
@@ -2329,7 +2345,9 @@ class _DistTestBase(object):
                 if self.rank == 0
                 else input_tensor.clone()
             )
-            self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
+            self._run_reduction_test(
+                input_tensor, expected, op, dist.reduce, dst=0
+            )
 
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
@@ -2345,7 +2363,10 @@ class _DistTestBase(object):
         ).to(self.rank)
         dist.broadcast(bcast_tensor, src=0)
         # Now allgather and ensure the tensors are equal.
-        tensor_list = [torch.tensor([False for _ in range(tensor_size)]).to(self.rank) for _ in range(dist.get_world_size())]
+        tensor_list = [
+            torch.tensor([False for _ in range(tensor_size)]).to(self.rank)
+            for _ in range(dist.get_world_size())
+        ]
         dist.all_gather(tensor_list, bcast_tensor)
         expected = tensor_list[0]
         for tensor in tensor_list[1:]:
