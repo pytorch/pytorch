@@ -1,4 +1,5 @@
 import math
+from typing import Union, Tuple
 
 import torch
 from torch import Tensor
@@ -80,8 +81,8 @@ class Linear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self, version=None) -> None:
-        with init.init_version(version) as version:
+    def reset_parameters(self, version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> None:
+        with init.init_version(version, use_master) as version:
             if version >= (1, 7, 0):
                 init.kaiming_normal_(self.weight, mode='fan_out')
                 if self.bias is not None:

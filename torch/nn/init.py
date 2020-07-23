@@ -528,8 +528,18 @@ kaiming_normal = _make_deprecate(kaiming_normal_)
 orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
 
-def _parse_version(version):
-    """Internal function to be used by init_version"""
+
+v = torch.__version__.split('.')
+# These can also be used as global flags
+_torch_version = (int(v[0]), int(v[1]), int(v[2][0]))
+# Use "init_version" to handle "_init_version". This value corresponds to the last pytorch version that
+# did not have 'init_version' context manager.
+_init_version = (1, 6, 1)
+
+def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False):
+    if use_master:
+        return _torch_version
+
     if version is None:
         return _init_version
     if isinstance(version, tuple):
@@ -543,28 +553,30 @@ def _parse_version(version):
         raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
     return version
 
-# Use "init_version" to handle "_init_version". This value is always same as torch.__version__. 
-# "init_version" ensures this value remains same.
-_init_version = _parse_version(torch.__version__)
 
 @contextlib.contextmanager
-def init_version(version : Union[Tuple[int, int, int], str] = None) -> None:
+def init_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> None:
     r"""Context manager to use a specific version of initialization for `nn.modules`.
-    By default, the latest initialization (torch.__version__) is used.
+    By default, the pytorch initialization used till version 1.6.1 is used.
 
     Args:
         version: which pytorch version to use for initializing nn.modules. The format should be
-            a version string (major,minor,micro) or a tuple of integers. (default=None, meaning
-            use the currently set initialization version, which defaults to torch.__version__)
-
-            Examples of valid version are (1,7,0), '1.7.1'.
+            a version string (major,minor,micro) or a tuple of integers. Examples of valid version are (1,7,0),
+            '1.7.1'.
+        use_master: If True, then the latest initialization scheme is used ignoring the value of `version`
+            (default=False)
 
     Examples:
-        >>> with nn.init.init_version('1.5.1') as version:
+        >>> with nn.init.init_version() as version:
+        >>>     # use the default pytorch initialization used till pytorch version 1.6.1
+        >>>     # This is the default behaviour.
         >>>     model = nn.Sequential(...)
         >>>
-        >>> with nn.init.init_version() as version:
+        >>> with nn.init.init_version(use_master=True) as version:
         >>>     # use latest initialization
+        >>>     model = nn.Sequential(...)
+        >>>
+        >>> with nn.init.init_version(version='1.7.1') as version:
         >>>     model = nn.Sequential(...)
 
     Note:
@@ -593,7 +605,7 @@ def init_version(version : Union[Tuple[int, int, int], str] = None) -> None:
     """
     global _init_version
 
-    version = _parse_version(version)
+    version = _parse_version(version, use_master)
 
     # version, should be less than torch.__version__
     if version > _parse_version(torch.__version__):
