@@ -44,7 +44,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast
+    deviceCountAtLeast, expectedAlertNondeterministic
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -8371,6 +8371,29 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be a tuple of tuples, but found type list"):
             nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
 
+    def test_layer_norm_grads_with_create_graph_flag(self):
+        atol = 1e-5
+        rtol = 1e-3
+
+        x = torch.randn((4, 4, 16), requires_grad=True)
+        layer_norm = nn.LayerNorm((16,), 1e-5, True)
+        with torch.no_grad():
+            layer_norm.weight = torch.nn.Parameter(0.1 * torch.ones_like(layer_norm.weight))
+
+        grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+        grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+        self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
+        if TEST_CUDA:
+            x = x.to('cuda')
+            layer_norm = layer_norm.to('cuda')
+
+            grads1 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=False)[0]
+            grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
+
+            self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -8835,7 +8858,8 @@ def add_test(test, decorator=None):
         setattr(TestNN, test_name, fn)
 
     test_name = test.get_name()
-    add(test_name, lambda self, test=test: test(self))
+    if not hasattr(test, 'test_cpu') or test.test_cpu:
+        add(test_name, lambda self, test=test: test(self))
     cuda_test_name = test_name + '_cuda'
     # With dtype enable, it's good enough to test against three floating types
     kwargs = {}
@@ -10064,6 +10088,24 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             torch.cuda.synchronize()
         issue_24823_2()
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_2d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_3d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, 3, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
