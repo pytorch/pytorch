@@ -857,7 +857,7 @@ build_with_asan()
   LDSHARED="clang --shared" \
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
-  CXX_FLAGS="-pthread" \
+  CXXFLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
