@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <jit/passes/inliner.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
@@ -23,7 +24,6 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 C10_DECLARE_bool();
 
