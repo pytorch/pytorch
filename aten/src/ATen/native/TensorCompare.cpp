@@ -124,11 +124,8 @@ Tensor isposinf(const Tensor &self) {
   return result;
 }
 
-Tensor& isposinf_(Tensor &self) {
-  return at::isposinf_out(self, self);
-}
-
 Tensor& isposinf_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   result.resize_(self.sizes());
   auto iter = build_is_infinity_op_iterator(result, self);
   isposinf_stub(iter.device_type(), iter);
@@ -141,11 +138,8 @@ Tensor isneginf(const Tensor &self) {
   return result;
 }
 
-Tensor& isneginf_(Tensor &self) {
-  return at::isneginf_out(self, self);
-}
-
 Tensor& isneginf_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   result.resize_(self.sizes());
   auto iter = build_is_infinity_op_iterator(result, self);
   isneginf_stub(iter.device_type(), iter);

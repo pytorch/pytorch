@@ -6729,9 +6729,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: isposinf_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: isposinf_out
@@ -6739,9 +6736,6 @@
 - func: isneginf(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-
-- func: isneginf_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

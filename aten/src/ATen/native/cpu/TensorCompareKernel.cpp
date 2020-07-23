@@ -167,7 +167,7 @@ static void isposinf_kernel_for_bool_impl(TensorIterator& iter) {
       cpu_kernel(iter, [](scalar_t a) -> bool { return false; });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isposinf_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
     });
   }
@@ -179,7 +179,7 @@ static void isposinf_kernel_for_scalar_impl(TensorIterator& iter) {
       cpu_kernel(iter, [](scalar_t a) -> scalar_t { return false; });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isposinf_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a == std::numeric_limits<scalar_t>::infinity(); });
     });
   }
@@ -199,7 +199,7 @@ static void isneginf_kernel_for_bool_impl(TensorIterator& iter) {
       cpu_kernel(iter, [](scalar_t a) -> bool { return false; });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isneginf_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
     });
   }
@@ -211,7 +211,7 @@ static void isneginf_kernel_for_scalar_impl(TensorIterator& iter) {
       cpu_kernel(iter, [](scalar_t a) -> scalar_t { return false; });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "isneginf_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a == -std::numeric_limits<scalar_t>::infinity(); });
     });
   }
