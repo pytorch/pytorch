@@ -334,10 +334,9 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph(model, args, example_outputs, retain_param_name, enable_jit_freeze_module):
+def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freeze_module):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
             if not enable_jit_freeze_module:
                 graph = model.forward.graph
@@ -353,7 +352,6 @@ def _model_to_jit_graph(model, args, example_outputs, retain_param_name, enable_
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.ScriptFunction):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript ScriptFunction"
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
@@ -391,7 +389,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(example_outputs, torch.Tensor):
         example_outputs = [example_outputs]
 
-    graph, params, torch_out = _model_to_jit_graph(model, args, example_outputs,
+    graph, params, torch_out = _model_to_jit_graph(model, args,
                                                    _retain_param_name,
                                                    enable_jit_freeze_module)
 
@@ -404,6 +402,8 @@ def _model_to_graph(model, args, verbose=False,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict)
 
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
+                                            "ScriptFunction."
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
         graph = _assign_output_shapes(graph, out_vars)
 
