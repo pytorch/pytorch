@@ -186,10 +186,6 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     if not inplace:
         model = copy.deepcopy(model)
     propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
-    # for name, mod in model.named_modules():
-    #     print(getattr(model, 'qconfig', None))
-    # print("checking to see if qconfigs propagated")
-    # print("prehook: ", prehook)
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):

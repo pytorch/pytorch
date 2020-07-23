@@ -16,11 +16,10 @@ class TestBiasCorrection(QuantizationTestCase):
         Pn = torch.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
-    def spnrOfBiasCorrecting(self, float_model, bias_correction):
+    def spnrOfBiasCorrecting(self, float_model, bias_correction, img_data):
         float_model.qconfig = torch.quantization.default_qconfig
-        img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                    for _ in range(5)]
         quantized_model = quantize(float_model, default_eval_fn, img_data, inplace=False)
+        quantized_model(img_data[0][0])
 
         bias_correction(float_model, quantized_model, img_data)
 
@@ -31,8 +30,8 @@ class TestBiasCorrection(QuantizationTestCase):
             if quantized_weight.is_quantized:
                 quantized_weight = quantized_weight.dequantize()
 
-            self.assertTrue(self.computerSqnr(float_weight, quantized_weight) < 35, \
-            "Correcting quantized bias produced too much noise, sqnr score too low")
+            self.assertTrue(self.computerSqnr(float_weight, quantized_weight) < 35,
+                            "Correcting quantized bias produced too much noise, sqnr score too low")
 
     def test_linear_chain(self):
         class LinearChain(nn.Module):
@@ -48,8 +47,10 @@ class TestBiasCorrection(QuantizationTestCase):
                 x = self.linear3(x)
                 return x
         model = LinearChain()
-        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction)
-        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction)
+        img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(5)]
+        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
+        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
@@ -65,10 +66,14 @@ class TestBiasCorrection(QuantizationTestCase):
                 x = self.conv2d3(x)
                 return x
         model = ConvChain()
-        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction)
-        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction)
+        img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(5)]
+        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
+        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)
 
     def test_mobilenet(self):
         model = mobilenet_v2(pretrained=True)
-        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction)
-        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction)
+        img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(5)]
+        self.spnrOfBiasCorrecting(model, _correct_bias.sequential_bias_correction, img_data)
+        self.spnrOfBiasCorrecting(model, _correct_bias.parallel_bias_correction, img_data)

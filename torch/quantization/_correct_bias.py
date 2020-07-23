@@ -77,7 +77,10 @@ class ShadowModule(nn.Module):
         float and quantized modules, bias correction will be applied on the quantized module
         '''
         print('submodule starting')
-        self.float_module(x.dequantize())
+        print(x.is_quantized)
+        print(self.float_module.weight.is_quantized)
+        print(self.quantized_module.weight().is_quantized)
+        self.float_module(x)
         a = self.quantized_module(x)
 
         output_logger, input_logger = get_inputs_n_outputs(self.float_module, self.quantized_module)
@@ -252,7 +255,7 @@ def correct_quantized_bias(expected_output, expected_input, float_model, quantiz
                     quantized_submodule.bias().data = updated_bias
 
 
-def get_logger_entries(mod, target_dict, prefix):
+def get_logger_entries(mod, target_dict, prefix=""):
     """ Reads in the data from a Logger object and formats it into a dictionary,
     where the key to the dict is the name of a submodule and the assoicated value
     are the results of the logger (stored in logger.stats["tensor_val"])
@@ -270,19 +273,16 @@ def get_logger_entries(mod, target_dict, prefix):
         module_prefix = get_prefix(prefix) + name if prefix else name
         get_logger_entries(child, target_dict, module_prefix)
 
-def get_logger_entries_root(mod, target_dict):
-    get_logger_entries(mod, target_dict, "")
-
 def get_inputs_n_outputs(float_module, q_module):
     r"""Given two models (a floating point model and is quantized counterpart)
     two dictionaries representing the statistics the forward_pre_hook and forward_hook
     Loggers collected in the two given models
     """
     float_dict = {}
-    get_logger_entries_root(float_module, float_dict)
+    get_logger_entries(float_module, float_dict)
 
     quantized_dict = {}
-    get_logger_entries_root(q_module, quantized_dict)
+    get_logger_entries(q_module, quantized_dict)
 
     output_logger = {}
     input_logger = {}
