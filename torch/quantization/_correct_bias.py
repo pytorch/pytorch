@@ -155,7 +155,7 @@ def sequential_bias_correction(float_model, quantized_model, img_data, white_lis
     # get the qconfig and thus post hook
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
     torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list,
-                              observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+                                observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
 
     add_shadow(float_model, quantized_model, white_list=white_list)
 
@@ -187,7 +187,7 @@ def parallel_bias_correction(float_model, quantized_model, img_data, white_list=
 
     torch.quantization.prepare(float_model, inplace=True, white_list=white_list, prehook=MeanLogger)
     torch.quantization.prepare(quantized_model, inplace=True, white_list=white_list,
-                              observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
+                                observer_non_leaf_module_list=[nnq.Linear], prehook=MeanLogger)
     batch_size = None
     # batch size is used here to avoid an adding error in the MeanLogger due
     # to the last batch of the dataset possibly being a different size than
