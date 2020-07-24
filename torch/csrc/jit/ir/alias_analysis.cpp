@@ -498,6 +498,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::tolist:
       return analyzeCreator(node);
     case prim::TupleConstruct:
+      return analyzeTupleConstruct(node);
     case prim::DictConstruct:
     case prim::ListConstruct:
       return analyzeContainerConstruct(node);
@@ -864,6 +865,22 @@ void AliasDb::analyzeConservative(Node* node) {
   }
 }
 
+void AliasDb::analyzeTupleConstruct(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::TupleConstruct);
+  // tuples which contain immutable types are immutable
+  if (!isMutableTypeInternal(node->output())) {
+    return;
+  }
+
+  giveFreshAlias(node->output());
+
+  for (const auto& input : node->inputs()) {
+    if (isMutableTypeInternal(input)) {
+      addToContainedElements(input, node->output());
+    }
+  }
+}
+
 // List or dict or tuple: construct: create an aliasing element for the actual
 // container, then mark all inputs as wildcards, since they've gone inside the
 // container. Then, add the wildcard sets of appropriate type to the contained
@@ -871,13 +888,7 @@ void AliasDb::analyzeConservative(Node* node) {
 void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == prim::ListConstruct ||
-      node->kind() == prim::DictConstruct ||
-      node->kind() == prim::TupleConstruct);
-
-  // tuples which contain immutable types are immutable
-  if (!isMutableTypeInternal(node->output())) {
-    return;
-  }
+      node->kind() == prim::DictConstruct);
 
   TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
   auto container = node->output();
