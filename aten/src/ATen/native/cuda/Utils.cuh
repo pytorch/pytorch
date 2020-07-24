@@ -1,4 +1,7 @@
 #pragma once
+#include <ATen/ATen.h>
+#include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 namespace {
 constexpr int64_t kILP = 4;
 constexpr int64_t kChunkSize = 65536;
@@ -23,7 +26,7 @@ __device__ __forceinline__ bool is_aligned(T* p){
 
 template<typename T>
 __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int src_offset){
-  typedef typename std::aligned_storage<kILP * sizeof(T), kILP * alignof(T)>::type LT;
+  using LT = at::native::memory::aligned_vector<T, kILP>;
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
