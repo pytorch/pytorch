@@ -110,7 +110,7 @@ class SubgraphSlicer {
     return result;
   }
 
-  bool isViewOp(Node * n) {
+  bool isViewOp(Node* n) {
     switch (n->kind()) {
       case aten::view:
       case aten::view_as:
