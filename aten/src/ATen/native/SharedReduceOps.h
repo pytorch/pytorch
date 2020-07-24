@@ -319,15 +319,17 @@ namespace detail {
 
 template <typename scalar_t>
 struct LessOrNan {
-  C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a < b;
+  C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
+    // If (a == b), then choose the one with lower idx, else min(a, b)
+    return at::_isnan(a) || ((a == b) ? idx_a < idx_b : (a < b));
   }
 };
 
 template <typename scalar_t>
 struct GreaterOrNan {
-  C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return at::_isnan(a) || a > b;
+  C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
+    // If (a == b), then choose the one with lower idx, else max(a, b)
+    return at::_isnan(a) || ((a == b) ? idx_a < idx_b : (a > b));
   }
 };
 
@@ -342,11 +344,11 @@ struct MinMaxReductionOps {
   }
 
   static C10_DEVICE arg_t reduce(arg_t arg, scalar_t val, int64_t idx) {
-    return comp_t{}(arg.first, val) ? arg : arg_t(val, idx);
+    return comp_t{}(arg.first, val, arg.second, idx) ? arg : arg_t(val, idx);
   }
 
   static C10_DEVICE arg_t combine(arg_t a, arg_t b) {
-    return comp_t{}(a.first, b.first) ? a : b;
+    return comp_t{}(a.first, b.first, a.second, b.second) ? a : b;
   }
 
   static C10_DEVICE arg_t translate_idx(arg_t a, int64_t base_idx) {
