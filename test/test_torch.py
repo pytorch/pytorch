@@ -5497,6 +5497,7 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
         values = torch.tensor((1, 2, 3), device=device)
