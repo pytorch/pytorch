@@ -372,6 +372,7 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
+    std::cout << "multiply reduce: " << self << std::endl;
     break;
   case SCATTER_GATHER_OP::REDUCE_DIVIDE :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,

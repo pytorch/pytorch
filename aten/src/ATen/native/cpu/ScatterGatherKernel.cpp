@@ -348,17 +348,10 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_subtract_", reduce_subtract);
-    break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_divide_", reduce_divide);
   }
 }
 
@@ -369,18 +362,10 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_subtract_", reduce_subtract);
-    break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_divide_", reduce_divide);
-  }
 }
 
 } // anonymous namespace
