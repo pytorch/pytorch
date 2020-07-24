@@ -129,20 +129,26 @@ enum pytorch_qnnp_status qnnpackDeConv(
   const size_t input_pixel_stride = deconv_p.input_channels;
   const size_t output_pixel_stride = deconv_p.output_channels;
 
-  pytorch_qnnp_status status = pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
-      deconvolution,
-      batch_size,
-      input_height,
-      input_width,
-      input,
-      input_pixel_stride,
-      output,
-      output_pixel_stride,
-      threadpool);
-  if (status != pytorch_qnnp_status_success) {
-    pytorch_qnnp_log_error(
-        "failed to run decovolution op setup to setup indirection buffer.");
-    return status;
+  if (deconvolution->input != input ||
+      deconvolution->batch_size != batch_size ||
+      deconvolution->input_height != input_height ||
+      deconvolution->input_width != input_width ||
+      deconvolution->input_pixel_stride != input_pixel_stride) {
+    pytorch_qnnp_status status = pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
+        deconvolution,
+        batch_size,
+        input_height,
+        input_width,
+        input,
+        input_pixel_stride,
+        output,
+        output_pixel_stride,
+        threadpool);
+    if (status != pytorch_qnnp_status_success) {
+      pytorch_qnnp_log_error(
+          "failed to run decovolution op setup to setup indirection buffer.");
+      return status;
+    }
   }
 
   // Run the kernel

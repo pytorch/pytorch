@@ -325,20 +325,30 @@ enum pytorch_qnnp_status qnnpackConv(
   }
   uint32_t stride_width = conv_p.stride_dims[0];
 
-  pytorch_qnnp_status status = pytorch_qnnp_setup_convolution2d_nhwc_q8(
-      convolution,
-      batch_size,
-      input_height,
-      input_width,
-      input,
-      input_pixel_stride,
-      output,
-      output_pixel_stride,
-      threadpool);
-  if (status != pytorch_qnnp_status_success) {
-    pytorch_qnnp_log_error(
-        "failed to run covolution op setup to setup indirection buffer.");
-    return status;
+  // Convolution op caches a few things.
+  // We need to check if the corresponding values on this
+  // invocation is same as cached values.
+  // If so we can skip setup step.
+  if (convolution->input != input ||
+      convolution->batch_size != batch_size ||
+      convolution->input_height != input_height ||
+      convolution->input_width != input_width ||
+      convolution->input_pixel_stride != input_pixel_stride) {
+    pytorch_qnnp_status status = pytorch_qnnp_setup_convolution2d_nhwc_q8(
+        convolution,
+        batch_size,
+        input_height,
+        input_width,
+        input,
+        input_pixel_stride,
+        output,
+        output_pixel_stride,
+        threadpool);
+    if (status != pytorch_qnnp_status_success) {
+      pytorch_qnnp_log_error(
+          "failed to run covolution op setup to setup indirection buffer.");
+      return status;
+    }
   }
 
   const size_t output_size = convolution->output_height * convolution->output_width;

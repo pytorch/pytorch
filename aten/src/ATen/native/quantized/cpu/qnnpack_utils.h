@@ -122,6 +122,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             is_per_channel) {
 
           pytorch_qnnp_operator_t convolution{nullptr};
+          // Initially all the params are set to zero.
           convolution =
               static_cast<pytorch_qnnp_operator_t>(calloc(1, sizeof(struct pytorch_qnnp_operator)));
           if (convolution == nullptr) {
