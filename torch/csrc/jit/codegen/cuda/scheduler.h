@@ -14,31 +14,27 @@ TORCH_CUDA_API bool scheduleFusion(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue> inputs);
 
-// This struct communicates whether a launch param
-// should be calculated per kernel instance if a new set of elements
-// matches the kernel.
-//
-// is_mutable : indicates whether the param should be matched
-// value : launch param integer
-
+/**
+ * This struct communicates whether a launch param
+ * should be calculated per kernel instance if a new set of elements
+ * matches the kernel.
+ *
+ * @param value_ : -1 = symbolic, > 0 = valid constant launch param
+ * @param symbolic_value_ : a pointer to a symbolic val of param
+ */
 struct LaunchParam {
-  bool is_mutable = false;
-  int value = 1;
-
-  bool operator==(const LaunchParam& other) const {
-    // If the params are mutable, we don't care about the value
-    return (is_mutable && other.is_mutable) || (other.value == value);
-  }
+  bool mutable_ = false;
+  int value_ = 1;
 };
 
 // Parameters the Reduction Heuristic Generates to describe
 // the optimial schedule
 struct ReductionParams {
   // Reduction Blocking
-  LaunchParam gdimx;
-  LaunchParam gdimy;
-  LaunchParam bdimx;
-  LaunchParam bdimy;
+  LaunchParam gdimx_;
+  LaunchParam gdimy_;
+  LaunchParam bdimx_;
+  LaunchParam bdimy_;
 
   // Reduction Attributes
   bool fastest_dim = true;
