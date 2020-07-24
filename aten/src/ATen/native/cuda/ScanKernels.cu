@@ -7,6 +7,7 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
+#include <thrust/transform.h>
 #include <thrust/scan.h>
 #include "cub/device/device_scan.cuh"
 
@@ -479,71 +480,47 @@ void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFuncti
   //     thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
   //     src_data, src_data + size, dst_data,
   //     binary_op);
-  // non synchronizing cub call for tensors < INT_MAX
-  int size_cub = std::min<int64_t>(size, (int64_t)std::numeric_limits<int>::max);
-  size_t temp_storage_bytes = 0;
-  AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
-        nullptr,
-        temp_storage_bytes,
-        self.data_ptr<scalar_t>(),
-        result.data_ptr<scalar_t>(),
-        binary_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream()));
-  auto temp_storage = at::empty(
-  {static_cast<int64_t>(temp_storage_bytes)}, self.options().dtype(kByte));
+  // non synchronizing cub call
+  constexpr int int_max = std::numeric_limits<int>::max();
+  for (int64_t i=0; i<= size; i+= int_max){
+    int size_cub = std::min<int64_t>(size - i, int_max);
+    Tensor first_elem; //need to save it for all iterations other than first
+    if (i>0){
+      //need to temporarily transform first element of the range we are operating on
+      //self might be multi-d, but we need to index a single element
+      auto self_view = at::_unsafe_view(self, -1);
+      first_elem = self_view[i].clone();
+      thrust::device_ptr<scalar_t> src_data(self.data_ptr<scalar_t>());
+      thrust::device_ptr<scalar_t> dst_data(result.data_ptr<scalar_t>());
+      thrust::transform(thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      src_data+i, src_data+i+1, dst_data+i-1, src_data+i, binary_op);
+    }
+    size_t temp_storage_bytes = 0;
     AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
-        temp_storage.data_ptr(),
-        temp_storage_bytes,
-        self.data_ptr<scalar_t>(),
-        result.data_ptr<scalar_t>(),
-        binary_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream()));
-  //all subsequent calls incur synchronization
-  //since we can do only exclusive scan, this effectively means that we are processing 1 fewer element
-   for (int64_t i = size_cub; i< size; i+= std::numeric_limits<int>::max()-1){
-     auto self_ptr = self.data_ptr<scalar_t>()+i;
-     //alas, this is unaligned, but unfortunately can only do exclusive_scan with init value
-     auto result_ptr = self.data_ptr<scalar_t>()+i-1;
-     auto result_view = at::_unsafe_view(result, -1); //need to access element, but result can be multi-d
-     size_cub = std::min<int64_t>(size-i, (int64_t)std::numeric_limits<int>::max);
-     if (size_cub > 1) {
-     scalar_t init = result[i-1].item().to<scalar_t>(); //synchronization happens here
-     AT_CUDA_CHECK(cub::DeviceScan::ExclusiveScan(
-      nullptr,
-      temp_storage_bytes,
-      self.data_ptr<scalar_t>(),
-      result.data_ptr<scalar_t>(),
-      binary_op,
-      init,
-      size_cub,
-      at::cuda::getCurrentCUDAStream()));
-      temp_storage = at::empty(
-     {static_cast<int64_t>(temp_storage_bytes)}, self.options().dtype(kByte));
-  AT_CUDA_CHECK(cub::DeviceScan::ExclusiveScan(
-      temp_storage.data_ptr(),
-      temp_storage_bytes,
-      self.data_ptr<scalar_t>(),
-      result.data_ptr<scalar_t>(),
-      binary_op,
-      init,
-      size_cub,
-      at::cuda::getCurrentCUDAStream()));
-     }
+          nullptr,
+          temp_storage_bytes,
+          self.data_ptr<scalar_t>()+i,
+          result.data_ptr<scalar_t>()+i,
+          binary_op,
+          size_cub,
+          at::cuda::getCurrentCUDAStream()));
+    auto temp_storage = at::empty(
+    {static_cast<int64_t>(temp_storage_bytes)}, self.options().dtype(kByte));
+      AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
+          temp_storage.data_ptr(),
+          temp_storage_bytes,
+          self.data_ptr<scalar_t>()+i,
+          result.data_ptr<scalar_t>()+i,
+          binary_op,
+          size_cub,
+          at::cuda::getCurrentCUDAStream()));
+    if (i>0){
+      //restore modified first element
+      auto self_view = at::_unsafe_view(self, -1);
+      self_view[i].copy_(first_elem);
+    }
 
-   }
-   //need to fill in one last element
-   if (size > std::numeric_limits<int>::max()){
-     auto result_view = at::_unsafe_view(result, -1);
-     auto self_view = at::_unsafe_view(result, -1);
-     result_view[size-1] = result_view[size-2]+self_view[size-1];
-   }
-
-
-
-
-
+  }
 
   #endif
 }
