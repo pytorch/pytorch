@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -437,6 +436,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeWait(node);
     case prim::rpc_async:
       return analyzeRpcAsync(node);
+    case prim::TupleConstruct:
+      return analyzeTupleConstruct(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
@@ -453,7 +454,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeCreator(node);
     case prim::DictConstruct:
     case prim::ListConstruct:
-    case prim::TupleConstruct:
       return analyzeContainerConstruct(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -792,6 +792,19 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   }
 }
 
+void AliasDb::analyzeTupleConstruct(Node* node) {
+  // Because we currently mark all Tuples as needing annotation
+  // (even those containing just primitive types), an element needs to be created
+  // for TupleConstruct. When that changes we can create an element
+  // only if it contains elements which need annotation
+  getOrCreateElement(node->output());
+  for (const auto& input : node->inputs()) {
+    if (isMutableType(input)) {
+      addToContainedElements(input, node->output());
+    }
+  }
+}
+
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -832,8 +845,7 @@ void AliasDb::analyzeConservative(Node* node) {
 void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == prim::ListConstruct ||
-      node->kind() == prim::DictConstruct ||
-      node->kind() == prim::TupleConstruct);
+      node->kind() == prim::DictConstruct);
   for (auto input : node->inputs()) {
     setWildcard(input);
   }
@@ -841,14 +853,6 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
   auto container = node->output();
   giveFreshAlias(container);
-  auto container_elem = elementMap_.at(container);
-  for (auto input : node->inputs()) {
-    auto maybe_wildcard_elem = setWildcard(input);
-    if (maybe_wildcard_elem) {
-      memoryDAGBuilder_->addToContainedElements(
-          *maybe_wildcard_elem, container_elem);
-    }
-  }
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.

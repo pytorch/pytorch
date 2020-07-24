@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode
+from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

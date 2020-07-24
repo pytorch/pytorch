@@ -1,5 +1,6 @@
 import os
 import sys
+import unittest
 
 import torch
 from torch.nn import functional as F
@@ -36,7 +37,7 @@ class TestRemoveMutation(JitTestCase):
             out2 = foo(input)
         self.assertEqual(out1, out2)
 
-    @skip("see: https://github.com/pytorch/pytorch/issues/41980")
+    @unittest.skip("see: https://github.com/pytorch/pytorch/issues/41980")
     def test_aten_inplace(self):
         def test_not_new_alias(x):
             y = x[0]
@@ -149,7 +150,7 @@ class TestRemoveMutation(JitTestCase):
         self.run_pass('remove_mutation', foo.graph)
         FileCheck().check("aten::add_").run(foo.graph)
 
-    @skip("see: https://github.com/pytorch/pytorch/issues/41980")
+    @unittest.skip("see: https://github.com/pytorch/pytorch/issues/41980")
     def test_special_mapped_op(self):
         def test_successful():
             x = torch.tensor([2, 2])

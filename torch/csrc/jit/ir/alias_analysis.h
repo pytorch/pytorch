@@ -189,6 +189,7 @@ class AliasDb {
   void analyzeRpcAsync(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
+  void analyzeTupleConstruct(Node* node);
   void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
