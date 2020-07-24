@@ -460,9 +460,9 @@ struct ROCm_Bug {
 #endif
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
   #ifdef __HIP_PLATFORM_HCC__
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   using rocm_bug_t = ROCm_Bug<scalar_t>;
   thrust::device_ptr<rocm_bug_t> src_data(reinterpret_cast<rocm_bug_t *>(self.data_ptr<scalar_t>()));
   thrust::device_ptr<rocm_bug_t> dst_data(reinterpret_cast<rocm_bug_t *>(result.data_ptr<scalar_t>()));
@@ -537,7 +537,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   result = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    scan_thrust<scalar_t>(self_, result, init, binary_op);
+    scan_thrust_or_cub<scalar_t>(self_, result, init, binary_op);
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result, init, binary_op);
   } else {
