@@ -422,6 +422,15 @@ bool isTVOp(const Expr* expr) {
   return false;
 }
 
+TensorView* getTVOutput(const Expr* expr) {
+  for (auto out : expr->outputs()) {
+    if (out->getValType().value() == ValType::TensorView) {
+      return out->as<TensorView>();
+    }
+  }
+  return nullptr;
+}
+
 bool isScalarOp(const Expr* expr) {
   for (auto out : expr->outputs())
     if (!out->isScalar())

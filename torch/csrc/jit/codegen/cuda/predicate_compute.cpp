@@ -31,22 +31,39 @@ std::vector<Bool*> PredicateCompute::computePredicates(
   if (no_pred_needed)
     return preds;
 
-  TORCH_INTERNAL_ASSERT(root.size() == ti->nDims());
-  for (decltype(ti->nDims()) i{0}; i < ti->nDims(); i++)
+  TORCH_INTERNAL_ASSERT(
+      root.size() == ti->nDims(),
+      "Predicate compute received mismatched TensorView and TensorIndex.");
 
-    // I believe the second part of this check is redundant, but it doesn't
-    // hurt.
-    if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr &&
-        !root[i]->isBroadcast()) {
-      Val* pred = lt(ti->index(i), root[i]->extent());
+  Val* extent = nullptr;
+
+  for (size_t i = 0; i < ti->nDims(); i++) {
+    bool zero_ind = ti->index(i)->isZeroInt();
+    bool simple_ind = ti->index(i)->getOrigin() == nullptr;
+
+    if (root[i]->isBroadcast()) {
+      preds.push_back(new Bool(true));
+    } else if (simple_ind && !zero_ind) {
+      preds.push_back(new Bool(true));
+    } else if (zero_ind) {
+      if (extent == nullptr) {
+        extent = root[i]->extent();
+      } else {
+        extent = mul(extent, root[i]->extent());
+      }
+    } else {
+      auto local_extent = root[i]->extent();
+      if (extent != nullptr) {
+        local_extent = mul(extent, local_extent);
+      }
+      Val* pred = lt(ti->index(i), local_extent);
+      extent = nullptr;
       TORCH_INTERNAL_ASSERT(
           pred->getValType().value() == ValType::Scalar &&
           pred->getDataType().value() == DataType::Bool);
       preds.push_back(pred->as<Bool>());
-    } else {
-      preds.push_back(new Bool(true));
     }
-
+  }
   return preds;
 }
 

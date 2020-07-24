@@ -50,6 +50,10 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
       sizes.push_back(new IterDomain(new Int(0), new Int()));
     }
   }
+
+  // Need to add contiguity information
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+
   domain_ = new TensorDomain(sizes);
 
   this->name_ = fusion_->registerVal(this);
@@ -142,13 +146,6 @@ void TensorView::setComputeAt(
   this_compute_at_axis_ = thisPos;
   TORCH_INTERNAL_ASSERT(
       this_compute_at_axis_ <= nDims(), "Manually set an invalid computeAt.");
-}
-
-void TensorView::copyDomain(const TensorDomain* td) {
-  std::vector<IterDomain*> idv;
-  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++)
-    idv.push_back(td->axis(i));
-  setDomain(new TensorDomain(idv));
 }
 
 // Where in compute_at_view does this->axis(pos) match up?
@@ -366,8 +363,10 @@ TensorView* TensorView::cache_before() {
   }
 
   // This domain will be the consumer, so create the producer
-  TensorView* producer =
-      new TensorView(new TensorDomain(new_root_domain), getDataType().value());
+  TensorView* producer = new TensorView(
+      new TensorDomain(
+          new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+      getDataType().value());
 
   // Set domain of consumer
   TensorView* consumer = this;
@@ -439,8 +438,10 @@ TensorView* TensorView::cache_after() {
   }
 
   // This domain will be the producer, so create the consumer
-  TensorView* consumer =
-      new TensorView(new TensorDomain(new_root_domain), getDataType().value());
+  TensorView* consumer = new TensorView(
+      new TensorDomain(
+          new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+      getDataType().value());
 
   // Set domain of producer - No Change
   TensorView* producer = this;

@@ -34,11 +34,31 @@ using namespace torch::jit::fuser;
 
 namespace {
 
+TensorView* makeContigTensor(int nDims, DataType dtype = DataType::Float) {
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < nDims; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+  std::vector<bool> contig(dom.size(), true);
+  return new TensorView(new TensorDomain(dom, contig), dtype);
+}
+
 TensorView* makeDummyTensor(int nDims, DataType dtype = DataType::Float) {
+  // We can uncomment the below statement to test all tests with contiguous
+  // tensors. return makeContigTensor(nDims, dtype);
   std::vector<IterDomain*> dom;
   for (int i = 0; i < nDims; i++)
     dom.push_back(new IterDomain(new Int(0), new Int()));
   return new TensorView(new TensorDomain(dom), dtype);
+}
+
+TensorView* makeTensorWithContig(
+    int nDims,
+    std::vector<bool> contig_info,
+    DataType dtype = DataType::Float) {
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < nDims; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+  return new TensorView(new TensorDomain(dom, contig_info), dtype);
 }
 
 void checkIntValue(
@@ -1197,8 +1217,10 @@ void testGPU_FusionSimplePWise() {
   int nDims = 3;
 
   // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(nDims);
-  TensorView* tv1 = makeDummyTensor(nDims);
+  // TensorView* tv0 = makeTensorWithContig(nDims, {true, true, true});
+  // TensorView* tv1 = makeTensorWithContig(nDims, {false, true, true});
+  TensorView* tv0 = makeContigTensor(nDims);
+  TensorView* tv1 = makeContigTensor(nDims);
 
   // Register your inputs
   fusion.addInput(tv0);
@@ -2835,6 +2857,71 @@ void testGPU_FusionSimpleBCast() {
 
     TORCH_CHECK(t4.allclose(cg_output));
   }
+
+  // TODO: This test below is not working because index math for smem/local mem
+  // is wrong when dealing with broadcasts. Need to fix.
+  // {
+  //   Fusion fusion;
+  //   FusionGuard fg(&fusion);
+
+  //   auto zero = new Int(0);
+  //   auto M = new IterDomain(zero, new Int(2));
+  //   auto K = new IterDomain(zero, new Int(3));
+  //   auto N = new IterDomain(zero, new Int(4));
+
+  //   // Set up your input tensor views
+  //   TensorView* tv0 =
+  //       new TensorView(new TensorDomain({M, K}, {true, true}),
+  //       DataType::Float);
+  //   TensorView* tv1 =
+  //       new TensorView(new TensorDomain({K, N}, {true, true}),
+  //       DataType::Float);
+
+  //   fusion.addInput(tv0);
+  //   fusion.addInput(tv1);
+
+  //   // TODO add pointwise ops on the begining before the bcast.
+
+  //   TensorView* tv2 = broadcast(tv0, {false, false, true});
+  //   TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+  //   TensorView* tv4 = add(tv2, tv3);
+
+  //   fusion.addOutput(tv4);
+
+  //   tv4->merge(0);
+  //   tv4->merge(0);
+
+  //   // tv4->axis(0)->parallelize(ParallelType::Unroll);
+
+  //   // fusion.printMath();
+  //   // fusion.printKernel();
+
+  //   // tv0->computeAt(tv4, -1);
+  //   // tv1->computeAt(tv4, -1);
+
+  //   // tv4->axis(0)->parallelize(ParallelType::BIDx);
+
+  //   constexpr int x = 63, y = 33, z = 15;
+
+  //   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA,
+  //   0);
+
+  //   at::Tensor t0 = at::randn({x, y}, options);
+  //   at::Tensor t1 = at::randn({y, z}, options);
+
+  //   at::Tensor cg_output = at::empty({x, y, z}, options);
+
+  //   torch::jit::fuser::cuda::FusionExecutor fe;
+  //   fe.compileFusion(&fusion);
+  //   fe.runFusion({t0, t1}, {cg_output});
+
+  //   auto t2 = t0.unsqueeze(-1).expand({x, y, z});
+  //   auto t3 = t1.expand({x, y, z});
+  //   auto t4 = t2.add(t3);
+
+  //   TORCH_CHECK(t4.allclose(cg_output));
+  // }
 }
 
 // Test a simple Gemm but also play around with fusion executor features

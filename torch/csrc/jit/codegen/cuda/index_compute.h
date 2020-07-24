@@ -65,14 +65,31 @@ class IndexCompute : public BackwardVisitor {
   // Otherwise warning on runBackward as it hides an overloaded virtual
   // using TransformIter::runBackward;
 
-  IndexCompute(const TensorDomain* td, const std::vector<Val*>& _indices);
+  IndexCompute(
+      const TensorDomain* _td,
+      const std::vector<Val*>& indices,
+      const std::vector<bool>& _root_contiguity);
+
+  const TensorDomain* td_;
   std::unordered_map<IterDomain*, Val*> index_map_;
   std::vector<Val*> indices_;
+  const std::vector<bool> root_contiguity_;
 
  public:
   static std::vector<Val*> get(
-      const TensorDomain* td,
-      const std::vector<Val*>& _indices);
+      const TensorDomain* _td,
+      const std::vector<Val*>& _indices,
+      const std::vector<bool>& _root_contiguity);
+
+  // Map producer contiguity information to consumer, if entries don't match
+  // mark as false
+  static std::vector<bool> contiguityPasC(
+      TensorDomain* producer,
+      TensorDomain* consumer);
+
+  static std::vector<bool> contiguityAnd(
+      const std::vector<bool>& contig1,
+      const std::vector<bool>& contig2);
 };
 
 // Simple interface for IndexCompute

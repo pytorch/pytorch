@@ -378,16 +378,20 @@ class TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain(TensorDomain&& other) = delete;
   TensorDomain& operator=(TensorDomain&& other) = delete;
 
-  explicit TensorDomain(std::vector<IterDomain*> _domain);
+  explicit TensorDomain(
+      std::vector<IterDomain*> _domain,
+      std::vector<bool> _contiguity = std::vector<bool>());
 
   TensorDomain(
       std::vector<IterDomain*> _root_domain,
-      std::vector<IterDomain*> _domain);
+      std::vector<IterDomain*> _domain,
+      std::vector<bool> _contiguity = std::vector<bool>());
 
   TensorDomain(
       std::vector<IterDomain*> _root_domain,
       std::vector<IterDomain*> _rfactor_domain,
-      std::vector<IterDomain*> _domain);
+      std::vector<IterDomain*> _domain,
+      std::vector<bool> _contiguity = std::vector<bool>());
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
@@ -403,6 +407,18 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   const std::vector<IterDomain*>& domain() const {
     return domain_;
+  }
+
+  const std::vector<bool>& contiguity() const {
+    return contiguity_;
+  }
+
+  std::string getContiguityString() const {
+    std::stringstream ss;
+    for (auto b : contiguity()) {
+      ss << (b ? "t" : "f");
+    }
+    return ss.str();
   }
 
   bool hasReduction() const;
@@ -471,6 +487,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   std::vector<IterDomain*> no_bcast_domain_;
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
+  const std::vector<bool> contiguity_;
 };
 
 /*
