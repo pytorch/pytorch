@@ -42,7 +42,7 @@ except ImportError:
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 #
-# declarations blacklist
+# declarations blocklist
 # We skip codegen for these functions, for various reasons.
 # Future PRs will categorize this list and eliminate or hoist
 # them out of eager-only codegen.
