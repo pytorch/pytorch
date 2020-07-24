@@ -13,6 +13,10 @@ from torch.testing._internal.common_device_type import \
 if TEST_NUMPY:
     import numpy as np
 
+
+if TEST_LIBROSA:
+    import librosa
+
 # saves the torch.fft function that's clobbered by importing the torch.fft module
 fft_fn = torch.fft
 import torch.fft
