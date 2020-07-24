@@ -323,6 +323,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
 
     static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      // TODO Should this unwrap optional(Tensor()) to nullopt or assert against it?
       return (*functor_)(std::forward<ParameterTypes>(args)...);
     }
   };
