@@ -201,10 +201,7 @@ m.impl("${unqual_operator_name_with_overload}",
 );
 """)
 
-UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
-
-UNPACK_OPTIONS = CodeTemplate("""\
+PACK_TENSOR_OPTIONS = CodeTemplate("""\
 auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
 DECLARE_GRAD_FN = CodeTemplate("""\
@@ -226,10 +223,10 @@ CALL_DEFAULT = CodeTemplate("""\
 TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
-at::${api_name}(${unpacked_args})""")
+at::${api_name}(${args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-${var}.${api_name}(${unpacked_method_args})""")
+${var}.${api_name}(${method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
@@ -1008,17 +1005,17 @@ def emit_body(declaration):
                 stmts.append('}')
         return stmts
 
-    def emit_dispatch_call(api_name, input_base, unpacked_args):
+    def emit_dispatch_call(api_name, input_base, args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
                 api_name=api_name,
-                unpacked_args=unpacked_args)
+                args=args)
         else:
             call = CALL_DISPATCH_VIA_METHOD.substitute(
                 api_name=api_name,
                 var=input_base,
-                unpacked_method_args=unpacked_args[1:])
+                method_args=args[1:])
         return call
 
     def emit_view_lambda():
@@ -1026,14 +1023,14 @@ def emit_body(declaration):
         See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
         input_base = 'input_base'
         replay_view_func = ''
-        updated_unpacked_args = []
+        updated_args = []
         combined = nested_dict(env, declaration)
         known_view_arg_simple_types = ['int64_t', 'int64_t?', 'bool', 'IntArrayRef']
-        for arg in combined['unpacked_args']:
-            if arg == 'self_':
-                updated_unpacked_args.append(input_base)
+        for arg in combined['args']:
+            if arg == 'self':
+                updated_args.append(input_base)
                 continue
-            arg_type = combined['unpacked_args_simple_type'][arg]
+            arg_type = combined['args_simple_type'][arg]
             if arg_type not in known_view_arg_simple_types:
                 raise TypeError('You are adding an {} {} argument to op {} in addition to known types: {}. '
                                 'Please update the list or materialize it so that it can be closed over by value, '
@@ -1045,16 +1042,16 @@ def emit_body(declaration):
                 # reference type, so materialize a vector to close over by value
                 arg_vec = arg + '_vec'
                 replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
-                updated_unpacked_args.append(arg_vec)
+                updated_args.append(arg_vec)
             elif arg_type == 'int64_t?':
                 # Materialize int64_t? to int64_t
                 arg_value = arg + '_val'
                 replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
-                updated_unpacked_args.append(arg_value)
+                updated_args.append(arg_value)
             else:
-                updated_unpacked_args.append(arg)
+                updated_args.append(arg)
 
-        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
+        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_args)
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
@@ -1116,8 +1113,8 @@ def emit_body(declaration):
         save_ptrs_stmts = []
         enforce_same_ptrs_stmts = []
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
-            for arg in env.get('unpacked_args', []):
-                simple_type = env['unpacked_args_simple_type'][arg]
+            for arg in env.get('args', []):
+                simple_type = env['args_simple_type'][arg]
                 if simple_type == 'TensorList':
                     save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                         SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
@@ -1143,7 +1140,7 @@ def emit_body(declaration):
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
+            base_type_call = emit_dispatch_call(combined['api_name'], 'self', combined['args'])
             if not modifies_arguments and not returns_void:
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
@@ -1207,7 +1204,11 @@ def emit_body(declaration):
     declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
 
     if strategy != 'use_type':
-        body.extend(unpack_args(env, declaration))
+        body.extend(pack_tensor_options(env, declaration))
+        args_simple_type = {}
+        for i, arg in enumerate(declaration['arguments']):
+            args_simple_type[arg['name']] = arg['simple_type']
+        env['args_simple_type'] = args_simple_type
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
@@ -1233,42 +1234,15 @@ def emit_body(declaration):
     return body
 
 
-def unpack_args(env, declaration):
-    def requires_unpack(arg):
-        return 'Tensor' in arg['dynamic_type']
-
+def pack_tensor_options(env, declaration):
     body = []
-    unpacked_args = []
-    unpacked_args_simple_type = {}
     for i, arg in enumerate(declaration['arguments']):
-        if not requires_unpack(arg):
-            unpacked_args.append(arg['name'])
-            unpacked_args_simple_type[arg['name']] = arg['simple_type']
-            continue
-
-        dynamic_type = arg['dynamic_type']
-        if 'TensorOptions' not in dynamic_type:
-            is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList']
-            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
-
-            body.append(UNPACK_TENSOR.substitute(
-                arg_name=arg['name'],
-                arg_pos=i,
-                suffix=suffix,
-                ref='&' if ref else '',
-            ))
-        else:
+        if 'TensorOptions' in arg['dynamic_type']:
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
-            body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+            body.append(PACK_TENSOR_OPTIONS.substitute(arg_name=arg['name']))
 
-        unpacked_args.append(arg['name'] + '_')
-        unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
-
-    env['unpacked_args'] = unpacked_args
-    env['unpacked_args_simple_type'] = unpacked_args_simple_type
     return body
 
 

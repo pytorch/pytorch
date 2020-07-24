@@ -49,37 +49,6 @@ Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
 }
 }
 
-const Tensor & unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
-}
-
-Tensor & unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
-}
-
-Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
-  if (!t.defined()) {
-    return Tensor();
-  }
-  return unpack(t, name, pos);
-}
-
-c10::optional<Tensor> unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
-  return t;
-}
-
-std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
-  std::vector<at::Tensor> ret(tl.size());
-  for (size_t i = 0; i < tl.size(); ++i) {
-    const auto &t = tl[i];
-    if (!t.defined()) {
-      continue;
-    }
-    ret[i] = static_cast<const Variable&>(t);
-  }
-  return ret;
-}
-
 namespace {
 
 void backward(
@@ -194,8 +163,6 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
@@ -208,7 +175,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.copy_(src_, non_blocking);
+    self.copy_(src, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -219,13 +186,12 @@ Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, std::move(optional_memory_format));
+    self.resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
@@ -234,14 +200,12 @@ Tensor& resize_as_(
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
-  auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
+    at::resize_as_(self, the_template, std::move(optional_memory_format));
   }
   return self;
 }
