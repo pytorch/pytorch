@@ -794,9 +794,9 @@ void AliasDb::analyzeRpcAsync(Node* node) {
 
 void AliasDb::analyzeTupleConstruct(Node* node) {
   // Because we currently mark all Tuples as needing annotation
-  // (even those containing just primitive types), an element needs to be created
-  // for TupleConstruct. When that changes we can create an element
-  // only if it contains elements which need annotation
+  // (even those containing just primitive types), an element needs to be
+  // created for TupleConstruct. When that changes we can create an element only
+  // if it contains elements which need annotation
   getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
     if (isMutableType(input)) {
