@@ -98,7 +98,7 @@ if(MSVC)
     if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
 elseif(APPLE)
@@ -248,6 +248,12 @@ set_source_files_properties(
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+endif()
+
+# Preserve CUDA_GENCODE flags
+if(USE_CUDA)
+  torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")

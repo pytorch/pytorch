@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -22,6 +21,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
@@ -50,6 +51,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -142,6 +144,14 @@ void initJITBindings(PyObject* module) {
              bool fixed_batch_size) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
+      .def(
+          "_jit_pass_onnx_eval_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            EvalPeepholeONNX(graph->block(), paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)
@@ -240,6 +250,9 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("preservedAttrs") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def(
+          "_jit_pass_fuse_add_relu",
+          [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def(
@@ -540,10 +553,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
-             std::set<MobileOptimizerType>& optimization_blacklist,
+             std::set<MobileOptimizerType>& optimization_blocklist,
              std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
-                module, optimization_blacklist, preserved_methods);
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -706,6 +719,7 @@ void initJITBindings(PyObject* module) {
           "INSERT_FOLD_PREPACK_OPS",
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
       .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .value("FUSE_ADD_RELU", MobileOptimizerType::FUSE_ADD_RELU)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
@@ -846,6 +860,14 @@ void initJITBindings(PyObject* module) {
     return graph;
   });
   m.def("parse_schema", parseSchema);
+  m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
+    std::ostringstream s;
+    auto type = unifyTypeList(types, s);
+    if (!type) {
+      throw std::runtime_error(s.str());
+    }
+    return type.value();
+  });
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(

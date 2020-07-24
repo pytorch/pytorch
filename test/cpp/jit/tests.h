@@ -85,6 +85,7 @@ namespace jit {
   _(AutogradSymbols)                   \
   _(DefaultArgTypeHinting)             \
   _(Futures)                           \
+  _(TLSFutureCallbacks)                \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
@@ -94,6 +95,8 @@ namespace jit {
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)                \
   _(LiteInterpreterDict)               \
+  _(MobileNamedParameters)             \
+  _(MobileSaveLoadData)                \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)

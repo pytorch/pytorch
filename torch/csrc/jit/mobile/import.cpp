@@ -84,9 +84,7 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
-  TORCH_CHECK(
-      vals.size() > 0,
-      "Bytecode has no elements. ");
+  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
   // version number don't have to be re-generated.
@@ -274,6 +272,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
       for (size_t i = 0; i < ndict; ++i) {
+        std::stringstream name;
+        name << it->key();
+        cls->addOrCheckAttribute(name.str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
       }

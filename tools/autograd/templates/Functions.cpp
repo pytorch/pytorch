@@ -937,6 +937,26 @@ Tensor infinitely_differentiable_gelu_backward(
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
+Tensor infinitely_differentiable_logit_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    c10::optional<double> eps) {
+  if (eps) {
+    const double lo = eps.value();
+    const double hi = 1.0 - lo;
+    return at::where(
+        at::logical_and(self >= lo, self <= hi),
+        grad / (self * (1.0 - self)),
+        at::zeros({}, self.options()));
+  } else {
+    return at::where(
+        at::logical_and(self >= 0.0, self <= 1.0),
+        grad / (self * (1.0 - self)),
+        at::empty({}, self.options())
+            .fill_(std::numeric_limits<double>::quiet_NaN()));
+  }
+}
+
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
   auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
   if (reduction == at::Reduction::Mean) {
@@ -2533,7 +2553,11 @@ infinitely_differentiable_native_layer_norm_backward(
       const Tensor& a = rstd_tensor;
       const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
       const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      dX = a * dY_tensor + b * X_tensor + c;
+      if (gamma.defined()) {
+        dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
+      } else {
+        dX = a * dY_tensor + b * X_tensor + c;
+      }
       if (dmean.defined() && drstd.defined()) {
         dX += var_std_mean_backward(
             {dvar, dmean.view({M, 1})},
