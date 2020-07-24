@@ -518,9 +518,11 @@ void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFuncti
         size_cub,
         at::cuda::getCurrentCUDAStream()));
     if (i > 0) {
-      // restore modified first element
-      auto self_view = at::_unsafe_view(self, -1);
-      self_view[i].copy_(first_elem, /*non_blocking=*/true);
+      if (self.data_ptr<scalar_t>() != result.data_ptr<scalar_t>()) {
+        // restore modified first element only if it's not an inplace operation
+        auto self_view = at::_unsafe_view(self, -1);
+        self_view[i].copy_(first_elem, /*non_blocking=*/true);
+      }
     }
   }
 
