@@ -3700,16 +3700,9 @@ See :func:`torch.istft`
 """)
 
 add_docstr_all('fft', r"""
-fft() -> Tensor
+fft(signal_ndim, normalized=False) -> Tensor
 
-See :func:`torch.fft.fft`
-""")
-
-add_docstr_all('legacy_fft',
-               r"""
-legacy_fft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.legacy_fft`
+See :func:`torch.fft`
 """)
 
 add_docstr_all('ifft',

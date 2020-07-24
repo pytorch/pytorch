@@ -2481,7 +2481,7 @@ class TestAutograd(TestCase):
 
             for normalized in (True, False):
                 def fft(x):
-                    return x.legacy_fft(signal_ndim, normalized=normalized)
+                    return x.fft(signal_ndim, normalized=normalized)
 
                 gradcheck(fft, [x])
                 gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
