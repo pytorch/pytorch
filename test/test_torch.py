@@ -15430,10 +15430,17 @@ class TestTorchDeviceType(TestCase):
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
-    @onlyCPU
+    @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_minmax(self, device, dtype):
+        if self.device_type == "cuda":
+            # FIXME when minmax is implemented on cuda
+            with self.assertRaises(RuntimeError):
+                self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
+            return
+
         self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
         self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
 
