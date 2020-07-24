@@ -2,6 +2,7 @@ import unittest
 import torch
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
+import torch.nn as nn
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
@@ -206,6 +207,89 @@ class TestOptimizer(unittest.TestCase):
             bi_module, [(torch.tensor([1]),)], [])
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
+
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
+    def test_hoist_conv_packed_params(self):
+
+        class Standalone(nn.Module):
+            def __init__(self):
+                super(Standalone, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.dequant(x)
+                return x
+
+        class Child(nn.Module):
+            def __init__(self):
+                super(Child, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                return x
+
+        class Parent(nn.Module):
+            def __init__(self):
+                super(Parent, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.child = Child()
+                # TODO: test nn.Sequential after #42039 is fixed
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.child(x)
+                x = self.dequant(x)
+                return x
+
+        def _static_quant(model):
+            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            torch.quantization.prepare(model, inplace=True)
+            model(torch.randn(4, 1, 4, 4))
+            torch.quantization.convert(model, inplace=True)
+            return model
+
+        # basic case
+
+        m = Standalone()
+        m = _static_quant(m)
+        m = torch.jit.script(m)
+        m_optim = optimize_for_mobile(m)
+
+        FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+                   .check_count("_jit_pass_hoist_conv_packed_params", 1, exactly=True) \
+                   .run(m_optim.graph)
+
+        data = torch.randn(4, 1, 4, 4)
+        m_res = m(data)
+        m_optim_res = m_optim(data)
+        torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
+        # generic case
+
+        m = Parent()
+        m = _static_quant(m)
+        m = torch.jit.script(m)
+        m_optim = optimize_for_mobile(m)
+
+        FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+                   .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                   .run(m_optim.graph)
+
+        data = torch.randn(4, 1, 4, 4)
+        m_res = m(data)
+        m_optim_res = m_optim(data)
+        torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
 
 if __name__ == '__main__':
     unittest.main()

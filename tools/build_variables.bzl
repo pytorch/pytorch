@@ -179,6 +179,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/graph_rewrite_helper.cpp",
     "torch/csrc/jit/passes/guard_elimination.cpp",
+    "torch/csrc/jit/passes/hoist_conv_packed_params.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/inline_forked_closures.cpp",
     "torch/csrc/jit/passes/inliner.cpp",

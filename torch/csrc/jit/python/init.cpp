@@ -725,6 +725,7 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
       .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
       .value("FUSE_ADD_RELU", MobileOptimizerType::FUSE_ADD_RELU)
+      .value("HOIST_CONV_PACKED_PARAMS", MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires

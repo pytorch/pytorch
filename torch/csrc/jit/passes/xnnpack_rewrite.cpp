@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -292,6 +294,11 @@ script::Module optimizeForMobile(
     cloned_module = freeze_module(cloned_module, preserved_methods);
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
+  }
+
+  if (!optimization_blocklist.count(
+      MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+    HoistConvPackedParams(cloned_module);
   }
 
   // Run canonical optimizations post freezing
