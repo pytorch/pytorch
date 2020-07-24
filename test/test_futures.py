@@ -11,6 +11,27 @@ def add_one(fut):
 
 
 class TestFuture(TestCase):
+
+    def test_done(self) -> None:
+        f = Future[torch.Tensor]()
+        f.set_result(torch.ones(2, 2))
+
+        self.assertTrue(f.done())
+
+    def test_done_exception(self) -> None:
+        err_msg = "Intentional Value Error"
+
+        def raise_exception(unused_future):
+            raise RuntimeError(err_msg)
+
+        f1 = Future[torch.Tensor]()
+        f1.set_result(torch.ones(2, 2))
+        f2 = f1.then(raise_exception)
+
+        self.assertTrue(f2.done())
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            f2.wait()
+
     def test_wait(self) -> None:
         f = Future[torch.Tensor]()
         f.set_result(torch.ones(2, 2))
