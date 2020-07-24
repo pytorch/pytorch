@@ -46,15 +46,15 @@ class Unflatten(Module):
     Unflattens a tensor into another tensor of a desired shape. For use with :class:`~nn.Sequential`.
 
     * :attr:`dim` specifies the dimension of the input tensor to be flattened, and it can 
-    be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
+      be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
 
     * :attr:`unflattened_size` is the size of the unflattened dimension of the tensor and it can be a
-    `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
-    :attr:`dim` is an `int`.
+      `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
+      :attr:`dim` is an `int`.
 
     Shape:
         - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, C_out, H_out, W_out)`
+        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
 
     Args:
         dim (Union[int, str]): Dimension to be flattened
