@@ -11,19 +11,19 @@ def add_one(fut):
 
 
 class TestFuture(TestCase):
-    def test_wait(self):
-        f = Future()
+    def test_wait(self) -> None:
+        f = Future[torch.Tensor]()
         f.set_result(torch.ones(2, 2))
 
         self.assertEqual(f.wait(), torch.ones(2, 2))
 
-    def test_wait_multi_thread(self):
+    def test_wait_multi_thread(self) -> None:
 
         def slow_set_future(fut, value):
             time.sleep(0.5)
             fut.set_result(value)
 
-        f = Future()
+        f = Future[torch.Tensor]()
 
         t = threading.Thread(target=slow_set_future, args=(f, torch.ones(2, 2)))
         t.start()
@@ -31,8 +31,8 @@ class TestFuture(TestCase):
         self.assertEqual(f.wait(), torch.ones(2, 2))
         t.join()
 
-    def test_mark_future_twice(self):
-        fut = Future()
+    def test_mark_future_twice(self) -> None:
+        fut = Future[int]()
         fut.set_result(1)
         with self.assertRaisesRegex(
             RuntimeError,
@@ -41,14 +41,14 @@ class TestFuture(TestCase):
             fut.set_result(1)
 
     def test_pickle_future(self):
-        fut = Future()
+        fut = Future[int]()
         errMsg = "Can not pickle torch.futures.Future"
         with TemporaryFileName() as fname:
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 torch.save(fut, fname)
 
     def test_then(self):
-        fut = Future()
+        fut = Future[torch.Tensor]()
         then_fut = fut.then(lambda x: x.wait() + 1)
 
         fut.set_result(torch.ones(2, 2))
@@ -56,7 +56,7 @@ class TestFuture(TestCase):
         self.assertEqual(then_fut.wait(), torch.ones(2, 2) + 1)
 
     def test_chained_then(self):
-        fut = Future()
+        fut = Future[torch.Tensor]()
         futs = []
         last_fut = fut
         for _ in range(20):
@@ -69,7 +69,7 @@ class TestFuture(TestCase):
             self.assertEqual(futs[i].wait(), torch.ones(2, 2) + i + 1)
 
     def _test_error(self, cb, errMsg):
-        fut = Future()
+        fut = Future[int]()
         then_fut = fut.then(cb)
 
         fut.set_result(5)
@@ -99,8 +99,8 @@ class TestFuture(TestCase):
         self._test_error(raise_value_error, "Expected error")
 
     def test_collect_all(self):
-        fut1 = Future()
-        fut2 = Future()
+        fut1 = Future[int]()
+        fut2 = Future[int]()
         fut_all = torch.futures.collect_all([fut1, fut2])
 
         def slow_in_thread(fut, value):
@@ -118,8 +118,8 @@ class TestFuture(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this testcase for Windows")
     def test_wait_all(self):
-        fut1 = Future()
-        fut2 = Future()
+        fut1 = Future[int]()
+        fut2 = Future[int]()
 
         # No error version
         fut1.set_result(1)
