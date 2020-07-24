@@ -18,18 +18,18 @@ namespace impl {
 // utils
 //
 
-// is_tensor_ref
-template<class T> struct is_tensor_ref : std::false_type {};
-template <> struct is_tensor_ref<at::Tensor&> : std::true_type {};
+// is_mutable_tensor_ref
+template<class T> struct is_mutable_tensor_ref : std::false_type {};
+template <> struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
 
-// is_tuple_of_tensor_refs
+// is_tuple_of_mutable_tensor_refs
 //
 template<class T, class Enable = void>
-struct is_tuple_of_tensor_refs : std::false_type {};
+struct is_tuple_of_mutable_tensor_refs : std::false_type {};
 
 template<class T>
-struct is_tuple_of_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
-: guts::typelist::all<is_tensor_ref, guts::typelist::from_tuple_t<T>>
+struct is_tuple_of_mutable_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
+: guts::typelist::all<is_mutable_tensor_ref, guts::typelist::from_tuple_t<T>>
 {};
 
 // has_ivalue_to<T> tests the presence/absence of instance method IValue::to<T>()
@@ -46,17 +46,18 @@ struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
 // boxing predicates
 //
 
+// A boxable arg type is one that IValue has a constructor for.
 template <typename T>
 using can_box =
   guts::disjunction<
-    std::is_constructible<IValue, T>,
+    std::is_constructible<IValue, std::decay_t<T>>,
     // TensorOptions are not directly constructible into IValue,
     // but torch::jit::push knows how to handle them
-    std::is_same<TensorOptions, T>
+    std::is_same<TensorOptions, std::decay_t<T>>
   >;
 
 template <typename... Ts>
-using can_box_all = guts::conjunction<can_box<std::decay_t<Ts>>...>;
+using can_box_all = guts::conjunction<can_box<Ts>...>;
 
 // an unboxable result is one that can be extracted from an IValue
 template <typename T>
@@ -171,7 +172,7 @@ template<class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
-    can_box_all<Args...>::value && can_unbox<Result>::value && !is_tuple_of_tensor_refs<Result>::value,
+    can_box_all<Args...>::value && can_unbox<Result>::value && !is_tuple_of_mutable_tensor_refs<Result>::value,
     void
   >
 > {
@@ -190,14 +191,14 @@ struct BoxedKernelWrapper<
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
-        TORCH_INTERNAL_ASSERT(
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           stack.size() == 1,
           "Boxed kernel was expected to push exactly one return value to the stack."
         );
         return delay_check(std::move(stack[0]).to<Result>());
       },
       [&] {
-        TORCH_INTERNAL_ASSERT(
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           stack.size() == 0,
           "Boxed kernel for op with void return type pushed one or more return values to the stack."
         );
@@ -213,19 +214,16 @@ struct BoxedKernelWrapper<
 // and the generated BoxedKernelWrapper specializations will simply return
 // the initial argument.
 //
-template<class Result, class... OtherArgs>
+template<class... OtherArgs>
 struct BoxedKernelWrapper<
-  Result(Result, OtherArgs...),
-  std::enable_if_t<
-    can_box_all<Result, OtherArgs...>::value && is_tensor_ref<Result>::value,
-    void
-  >
+  at::Tensor&(at::Tensor&, OtherArgs...),
+  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
-  static Result call(
+  static at::Tensor& call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
-    Result outArg,
+    at::Tensor& outArg,
     OtherArgs... otherArgs
   ) {
     // TODO Reuse stack vector instead of allocating?
@@ -235,6 +233,11 @@ struct BoxedKernelWrapper<
     torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+    );
+
     return outArg;
   }
 };
@@ -250,7 +253,7 @@ template<class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
-    can_box_all<Args...>::value && is_tuple_of_tensor_refs<Result>::value,
+    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value,
     void
   >
 > {
@@ -260,16 +263,21 @@ struct BoxedKernelWrapper<
     const OperatorHandle& opHandle,
     Args... args
   ) {
+    using ArgTuple = std::tuple<Args...>;
+    constexpr int RetCount = std::tuple_size<Result>();
+
     // TODO Reuse stack vector instead of allocating?
     torch::jit::Stack stack;
     stack.reserve(sizeof...(Args));
     torch::jit::push(stack, std::forward<Args>(args)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+    );
 
-    using ArgTuple = std::tuple<Args...>;
-    constexpr int n = std::tuple_size<Result>();
-    auto result = guts::tuple_take<ArgTuple, n>(ArgTuple{args...});
+    auto result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of Tensor references "
