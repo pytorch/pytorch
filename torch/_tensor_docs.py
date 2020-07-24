@@ -3670,6 +3670,20 @@ chunk(chunks, dim=0) -> List of Tensors
 See :func:`torch.chunk`
 """)
 
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
