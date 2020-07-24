@@ -98,12 +98,6 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
 
   memoryDAG_ = std::make_unique<MemoryDAG>(std::move(memoryDAGBuilder_));
   memoryDAGBuilder_ = nullptr; // to make further access a hard error
-  for (const auto& write : writeRegistry_->containedWrites_) {
-    const std::vector<const Value*>& writtenValues = write.second;
-    for (const Value* writtenValue : writtenValues) {
-      tryGetOrCreateWildcard(writtenValue->type());
-    }
-  }
 
   memoryDAG_->setWildcards(
       wildcards_, elementMap_, [&](const Value* v) -> Element* {
@@ -141,6 +135,14 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
           elem, writtenMemoryLocations);
       writeIndex[node] |= writtenMemoryLocations;
       auto el = *tryGetOrCreateWildcard(writtenValue->type());
+
+      // also write to any contained types
+      for (const auto& containedType : writtenValue->type()->containedTypes()) {
+        auto containedEl = tryGetOrCreateWildcard(containedType);
+        if (containedEl) {
+          writeIndex[node].set(containedEl.value()->index);
+        }
+      }
       writeIndex[node].set(el->index);
     }
   }
@@ -823,14 +825,11 @@ void AliasDb::analyzeConservative(Node* node) {
       continue;
     }
     registerWrite(input, node, /*writeToContained=*/true);
-    // We may also write to any contained types
-    // for (const auto& type : input->type()->containedTypes()) {
-    //   if (isMutableType(type)) {
-    //     auto el = *tryGetOrCreateWildcard(type);
-    //     registerWrite(el->values,  node);
-    //   }
-    // }
     setWildcard(input);
+    // Create wildcard elements for every contained type
+    for (const auto& contained : input->type()->containedTypes()) {
+      tryGetOrCreateWildcard(contained);
+    }
   }
 
   for (const auto output : node->outputs()) {
