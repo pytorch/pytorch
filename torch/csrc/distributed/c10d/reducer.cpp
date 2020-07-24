@@ -796,14 +796,13 @@ void Reducer::initialize_bucketviews(
     replica.bucket_views.push_back(bucket_view);
     // If grad has already been defined/calculated in previous iterations,
     // it was pointed to a dummy tensor above, and now let it point to the
-    // new bucket_view and intialize it as zeros.
+    // new bucket_view.
     // If grad is not calculated yet, do not let it point to bucket_view.
     // E.g., for global_unused parameters, their grads
     // should be kept as being undefined.
     runGradCallbackForVariable(v, [&](auto& grad) {
       if (grad.has_storage()) {
         grad = bucket_view;
-        bucket_view.zero_();
         // The grad is modefied and needs to be written back.
         return true;
       }
