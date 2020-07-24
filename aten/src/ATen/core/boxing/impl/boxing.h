@@ -124,7 +124,12 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 // that follow.
 //
 template<class FuncType, class Enable = void>
-struct BoxedKernelWrapper {};
+struct BoxedKernelWrapper {
+  static_assert(sizeof(FuncType) == -1,
+    "No boxing support for this function type. Look for a nearby error like "
+    "\"‘call’ is not a member of ‘c10::impl::BoxedKernelWrapper<(your function type), void>’\" "
+    "- (your function type) is the unsupported signature.");
+};
 
 // 1. Unsupported type traps.
 //
