@@ -555,14 +555,8 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
-  else if (reduce == "subtract") {
-    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
-  }
   else if (reduce == "multiply") {
     return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-  }
-  else if (reduce == "divide") {
-    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
   }
   else {
     TORCH_CHECK(false,

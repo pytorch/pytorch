@@ -2714,12 +2714,8 @@ class AbstractTestCases:
                                 if reduction:
                                     if reduction == "add":
                                         expected[tuple(ii)] += src[i, j, k]
-                                    elif reduction == "subtract":
-                                        expected[tuple(ii)] -= src[i, j, k]
                                     elif reduction == "multiply":
                                         expected[tuple(ii)] *= src[i, j, k]
-                                    elif reduction == "divide":
-                                        expected[tuple(ii)] /= src[i, j, k]
                                 else:
                                     expected[tuple(ii)] = src[i, j, k]
                             elif method == 'scatter_add_':
@@ -2768,7 +2764,7 @@ class AbstractTestCases:
             self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
         def test_scatterReduce(self):
-            for method in ["add", "subtract", "multiply", "divide"]:
+            for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
         def test_masked_scatter(self):
@@ -12748,24 +12744,12 @@ class TestTorchDeviceType(TestCase):
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
                           device=device, dtype=torch.float32), "add"),
-            # (torch.zeros(4, 4, device=device, dtype=torch.float32),
-            #  torch.ones(2, 2, device=device, dtype=torch.float32),
-            #  torch.tensor([[0, 0, 0, 0],
-            #                [-1, 0, 0, 0],
-            #                [-1, 0, 0, 0],
-            #                [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
             (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
              torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
                            [4, 2, 2, 2],
                            [4, 2, 2, 2],
                            [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-            # (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
-            #  torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
-            #  torch.tensor([[2, 2, 2, 2],
-            #                [1, 2, 2, 2],
-            #                [1, 2, 2, 2],
-            #                [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
         ]
 
         for input, src, result, operation in test_data:
@@ -12781,21 +12765,11 @@ class TestTorchDeviceType(TestCase):
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
                           device=device, dtype=torch.float32), "add"),
-            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
-             torch.tensor([[0, 0, 0, 0],
-                           [-1, 0, 0, 0],
-                           [-1, 0, 0, 0],
-                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
             (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
              torch.tensor([[2, 2, 2, 2],
                            [4, 2, 2, 2],
                            [4, 2, 2, 2],
                            [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
-             torch.tensor([[2, 2, 2, 2],
-                           [1, 2, 2, 2],
-                           [1, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
         ]
 
         for input, src, result, operation in test_data:
@@ -12823,21 +12797,10 @@ class TestTorchDeviceType(TestCase):
             (torch.ones(height, width, device=device, dtype=torch.float32),
              torch.ones(height, width, device=device, dtype=torch.float32),
              torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "add"),
-
-            (torch.ones(height, width, device=device, dtype=torch.float32),
-             torch.ones(height, width, device=device, dtype=torch.float32),
-             torch.tensor([[-1], [1]], device=device,
-                          dtype=torch.float32).repeat(1, width), "subtract"),
-
             (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
              torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
              torch.tensor([[8], [2]], device=device,
                           dtype=torch.float32).repeat(1, width), "multiply"),
-
-            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
-             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
-             torch.tensor([[0.5], [2]], device=device,
-                          dtype=torch.float32).repeat(1, width), "divide"),
         ]
 
         for input, src, result, operation in test_data:

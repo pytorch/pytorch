@@ -37,25 +37,6 @@ public:
 };
 static ReduceAdd reduce_add;
 
-class ReduceSubtract {
-public:
-  template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    // GPU atomic subtraction
-    atomic_ops::gpuAtomic<atomic_ops::sub_op>()(self_data, *src_data);
-  }
-};
-static ReduceSubtract reduce_subtract;
-
-class ReduceDivide {
-public:
-  template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    // GPU atomic divsion
-  }
-};
-static ReduceDivide reduce_divide;
-
 class TensorAssign {
 public:
   template <typename scalar_t>
@@ -346,13 +327,6 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
 }
 
 void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
-  //   self, dim, index, src,
-  //   "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-  //     gpuAtomicAdd(lhs, *rhs);
-  //   }
-  // );
-
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", reduce_add);
@@ -365,18 +339,11 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
-    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
-                                       "scatter_reduce_cuda_subtract_", reduce_subtract);
-    break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     std::cout << "multiply reduce: " << self << std::endl;
     break;
-  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
-    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
-                                       "scatter_reduce_cuda_divide_", reduce_divide);
   }
 }
 

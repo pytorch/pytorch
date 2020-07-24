@@ -11,7 +11,7 @@ namespace at {
 
 namespace at { namespace native {
 
-enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_SUBTRACT, REDUCE_MULTIPLY, REDUCE_DIVIDE};
+enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
