@@ -14,8 +14,9 @@ class TestFuture(TestCase):
 
     def test_done(self) -> None:
         f = Future[torch.Tensor]()
-        f.set_result(torch.ones(2, 2))
+        self.assertFalse(f.done())
 
+        f.set_result(torch.ones(2, 2))
         self.assertTrue(f.done())
 
     def test_done_exception(self) -> None:
@@ -25,9 +26,11 @@ class TestFuture(TestCase):
             raise RuntimeError(err_msg)
 
         f1 = Future[torch.Tensor]()
+        self.assertFalse(f1.done())
         f1.set_result(torch.ones(2, 2))
-        f2 = f1.then(raise_exception)
+        self.assertTrue(f1.done())
 
+        f2 = f1.then(raise_exception)
         self.assertTrue(f2.done())
         with self.assertRaisesRegex(RuntimeError, err_msg):
             f2.wait()
