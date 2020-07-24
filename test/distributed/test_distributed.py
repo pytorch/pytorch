@@ -2257,9 +2257,12 @@ class _DistTestBase(object):
             raise ValueError(f"Reduction fn {reduction_fn} must specify dst!")
         if dst is not None:
             reduction_fn(tensor, dst, op)
+            # Only destination rank tensor is expected to have final result.
+            if dist.get_rank() == dst:
+                self.assertEqual(tensor, expected_tensor)
         else:
             reduction_fn(tensor, op)
-        self.assertEqual(tensor, expected_tensor)
+            self.assertEqual(tensor, expected_tensor)
 
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
@@ -2318,7 +2321,7 @@ class _DistTestBase(object):
 
     @require_backend({"nccl"})
     @require_backends_available({"nccl"})
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     @skip_if_rocm
     def test_nccl_backend_bool_reduce(self):
         torch.cuda.set_device(self.rank)
