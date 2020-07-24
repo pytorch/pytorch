@@ -1,6 +1,4 @@
 import torch
-from torch import nn
-from torch.nn import functional as F
 import torchvision_models as models
 
 from utils import make_functional, load_weights
@@ -54,14 +52,15 @@ def get_detr(device):
     num_decoder_layers = 6
 
     model = models.DETR(num_classes=num_classes, hidden_dim=hidden_dim, nheads=nheads,
-                 num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
+                        num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
     losses = ['labels', 'boxes', 'cardinality']
     eos_coef = 0.1
     bbox_loss_coef = 5
     giou_loss_coef = 2
     weight_dict = {'loss_ce': 1, 'loss_bbox': bbox_loss_coef, 'loss_giou': giou_loss_coef}
     matcher = models.HungarianMatcher(1, 5, 2)
-    criterion = models.SetCriterion(num_classes=num_classes, matcher=matcher, weight_dict=weight_dict, eos_coef=eos_coef, losses=losses)
+    criterion = models.SetCriterion(num_classes=num_classes, matcher=matcher, weight_dict=weight_dict,
+                                    eos_coef=eos_coef, losses=losses)
 
     model = model.to(device)
     criterion = criterion.to(device)
