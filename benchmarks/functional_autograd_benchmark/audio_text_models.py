@@ -55,7 +55,7 @@ def get_deepspeech(device):
     targets_sizes = torch.full((N,), target_length, dtype=torch.int, device=device)
 
     model = models.DeepSpeech(rnn_type=supported_rnns["lstm"], labels=labels, rnn_hidden_size=1024, nb_layers=5,
-                       audio_conf=audio_conf, bidirectional=True)
+                              audio_conf=audio_conf, bidirectional=True)
     model = model.to(device)
     criterion = nn.CTCLoss()
     params, names = make_functional(model)
