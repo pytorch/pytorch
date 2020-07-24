@@ -88,11 +88,12 @@ const std::vector<at::Tensor>& GradBucket::getTensors() {
 }
 
 AllreduceHook::AllreduceHook(std::shared_ptr<ProcessGroup> process_group)
-    : process_group_(process_group){};
+    : process_group_(std::move(process_group)){};
 
 c10::intrusive_ptr<torch::jit::Future> AllreduceHook::runHook(
     const GradBucket& bucket) {
-  auto tensors = const_cast<GradBucket&>(bucket).getTensors();
+  auto local_bucket = bucket;
+  auto tensors = local_bucket.getTensors();
   return process_group_->allreduce(tensors)->getFuture();
 };
 

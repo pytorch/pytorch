@@ -1121,6 +1121,7 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 // See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   // Check that any prior reduction has finished before registering new hook.
+  std::lock_guard<std::mutex> lock(mutex_);
   TORCH_CHECK(
       !require_finalize_,
       "DDP communication hook can be overridden multiple times, but"

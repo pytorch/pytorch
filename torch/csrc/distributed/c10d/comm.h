@@ -55,7 +55,7 @@ struct TORCH_API CommHookInterface {
 class TORCH_API AllreduceHook : public CommHookInterface {
  public:
   // The constructor simply takes a a c10d process group.
-  AllreduceHook(std::shared_ptr<ProcessGroup> process_group);
+  explicit AllreduceHook(std::shared_ptr<ProcessGroup> process_group);
 
   // runHook calls `process_group->allreduce` using the grad bucket's tensors.
   c10::intrusive_ptr<torch::jit::Future> runHook(
