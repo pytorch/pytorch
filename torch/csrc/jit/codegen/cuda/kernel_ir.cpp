@@ -153,21 +153,22 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
         new BinaryOp(BinaryOpType::Mul, result, size_, tv->axis(i)->extent());
         size_ = result;
       }
-
-      if ((memory_type_ == MemoryType::Local ||
-           memory_type_ == MemoryType::Shared)) {
-        if (!size_->isConstScalar()) {
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "Allocations must be based on constant integers for the memory type ",
-              memory_type_,
-              " but tried to alloc ",
-              buffer_,
-              " with symbolic size.");
-        }
-      }
     }
   }
+
+  if ((memory_type_ == MemoryType::Local ||
+       memory_type_ == MemoryType::Shared)) {
+    if (!size_->isConstScalar()) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Allocations must be based on constant integers for the memory type ",
+          memory_type_,
+          " but tried to alloc ",
+          buffer_,
+          " with symbolic size.");
+    }
+  }
+
   addInput(size_);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
