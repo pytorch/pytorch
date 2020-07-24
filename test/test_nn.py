@@ -6339,6 +6339,47 @@ class TestNN(NNTestCase):
         self.assertTrue(torch.equal(running_mean, bn.running_mean))
         self.assertTrue(torch.equal(running_var, bn.running_var))
 
+    # Test for the temporary fix to batch_norm not updating version counter
+    # of running stats that are modified inplace. Issue #13402.
+    def test_batchnorm_bump_running_stats_version(self):
+        bn = nn.BatchNorm2d(3).double()
+        x = torch.randn(2, 3, 1, 1).double().requires_grad_()
+
+        def setup():
+            bn.running_mean.data.fill_(0)
+            bn.running_var.data.fill_(1)
+
+        def f(x):
+            setup()
+            bn.eval()
+            y0 = bn(x)
+            return y0
+
+        # Should work since we don't modify running stats during eval
+        self.assertTrue(torch.autograd.gradcheck(f, (x,)))
+
+        def g(x):
+            setup()
+            bn.train()
+            y0 = bn(x)
+            return y0
+
+        # Should work since we bump version before saving modified running stats
+        self.assertTrue(torch.autograd.gradcheck(g, (x,)))
+
+        def h(x):
+            setup()
+            bn.eval()
+            y0 = bn(x)
+            bn.train()
+            unused = bn(x)
+            return y0
+
+        # Should raise an error because we modified the variable in train saved by the
+        # eval operation.
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            torch.autograd.gradcheck(h, (x,))
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)

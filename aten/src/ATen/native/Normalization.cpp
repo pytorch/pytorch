@@ -499,6 +499,14 @@ Tensor batch_norm(
     if (bias.defined()) out = out + bias[0];
     return out;
   }
+
+  // This is a temporary fix to issue #13402. We need to manually bump running stats
+  // version preemptively until codegen adds support for optional+inplace tensors.
+  if (training) {
+    if (running_mean.defined()) running_mean.unsafeGetTensorImpl()->bump_version();
+    if (running_var.defined()) running_var.unsafeGetTensorImpl()->bump_version();
+  }
+
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
