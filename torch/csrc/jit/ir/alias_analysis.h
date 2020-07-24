@@ -194,6 +194,7 @@ class AliasDb {
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
+  void analyzeTupleConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 
   /**
