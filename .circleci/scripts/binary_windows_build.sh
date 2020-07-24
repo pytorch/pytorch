@@ -5,6 +5,7 @@ source "/c/w/env"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
+export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
