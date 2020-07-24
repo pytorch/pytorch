@@ -1206,10 +1206,7 @@ def emit_body(declaration):
     if strategy != 'use_type':
         body.extend(pack_tensor_options(env, declaration))
         env['args'] = [arg['name'] for arg in declaration['arguments']]
-        args_simple_type = {}
-        for i, arg in enumerate(declaration['arguments']):
-            args_simple_type[arg['name']] = arg['simple_type']
-        env['args_simple_type'] = args_simple_type
+        env['args_simple_type'] = {arg['name']: arg['simple_type'] for arg in declaration['arguments']}
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
