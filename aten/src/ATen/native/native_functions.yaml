@@ -2186,6 +2186,14 @@
   use_c10_dispatcher: full
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: movedim.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #
