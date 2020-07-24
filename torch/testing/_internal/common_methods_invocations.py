@@ -192,7 +192,7 @@ def method_tests():
         ('view', (), (1,), 'scalar_to_1d', (False,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
         ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
-        ('reshape', (S,), (S,), '1d', (True,)),
+        ('reshape', (S,), (S,), '1d', (False,)),
         ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
