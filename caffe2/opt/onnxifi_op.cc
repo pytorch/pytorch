@@ -1,6 +1,6 @@
-#include "caffe2/opt/onnxifi_op.h"
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
+#include "caffe2/opt/onnxifi_op.h"
 
 namespace caffe2 {
 
@@ -235,14 +235,14 @@ TensorInfo::TensorInfo(const QTensorProto& t)
 } // namespace details
 
 template <>
-std::vector<onnxTensorDescriptorV1>
-OnnxifiOp<CPUContext>::buildInitializationList(
-    Workspace* ws,
-    const std::vector<std::string>& initializers,
-    std::vector<std::string>* weight_names,
-    std::vector<std::vector<uint64_t>>* weight_shapes,
-    std::vector<std::vector<float>>* all_scales,
-    std::vector<std::vector<int32_t>>* all_offsets) const {
+std::vector<onnxTensorDescriptorV1> OnnxifiOp<CPUContext>::
+    buildInitializationList(
+        Workspace* ws,
+        const std::vector<std::string>& initializers,
+        std::vector<std::string>* weight_names,
+        std::vector<std::vector<uint64_t>>* weight_shapes,
+        std::vector<std::vector<float>>* all_scales,
+        std::vector<std::vector<int32_t>>* all_offsets) const {
   std::unordered_set<std::string> initialization_list(
       initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -306,12 +306,23 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // max_batch_size, mark that we don't need to adjust batch size and return.
   // Otherwise, do a pass of shape inference to get the real shapes of the
   // outputs.
-  const auto& t = Input(nominal_batch_idx_);
-  CAFFE_ENFORCE(
-      !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
-  const auto dims = t.sizes();
-  const int current_batch_size = dims[0];
+  const Tensor* t = nullptr;
+  if (this->template InputIsType<int8::Int8TensorCPU>(nominal_batch_idx_)) {
+    const auto& input_tensor_int8 =
+        this->template Input<int8::Int8TensorCPU>(nominal_batch_idx_);
+    t = &input_tensor_int8.t;
+  } else {
+    t = &Input(nominal_batch_idx_);
+  }
 
+  CAFFE_ENFORCE(
+      t, "Null input shape tensor ptr. Possibly unsupported tensor type");
+  CAFFE_ENFORCE(
+      !t->sizes().empty(),
+      input_names_[nominal_batch_idx_],
+      " cannot be empty");
+  const auto dims = t->sizes();
+  const int current_batch_size = dims[0];
   if (current_batch_size == max_batch_size_) {
     return max_batch_size_;
   }
@@ -329,8 +340,18 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   auto bound_shape_inferencer =
       BoundShapeInferencerRegistry()->Create("C10", spec);
   for (int i = 0; i < InputSize(); ++i) {
-    const auto& t0 = Input(i);
-    const auto dim0 = t0.sizes();
+    at::IntArrayRef dim0;
+    bool quantized = false;
+    if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
+      const auto& input_tensor_int8 =
+          this->template Input<int8::Int8TensorCPU>(i);
+      const auto& t0 = input_tensor_int8.t;
+      dim0 = t0.sizes();
+      quantized = true;
+    } else {
+      const auto& t0 = Input(i);
+      dim0 = t0.sizes();
+    }
     TensorShape shape;
     for (const auto d : dim0) {
       shape.add_dims(d);
@@ -340,7 +361,8 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     if (dim_type.size()) {
       dim_type[0] = TensorBoundShape_DimType_BATCH;
     }
-    input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
+    input_shape_info_[input_names_[i]] =
+        ShapeInfo(dim_type, std::move(shape), quantized);
   }
   bound_shape_inferencer->InferBoundShapeAndType(
       netdef_, input_shape_info_, nullptr, false);
@@ -473,18 +495,28 @@ template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   for (unsigned i = 0U; i < InputSize(); ++i) {
-    const auto& input_tensor = Input(i);
-    const at::IntArrayRef tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
-    tensor_descriptor.dimensions = tensor_dims.size();
+    at::IntArrayRef tensor_dims;
+    if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
+      const auto& input_tensor_int8 =
+          this->template Input<int8::Int8TensorCPU>(i);
+      const auto& cpu_tensor = input_tensor_int8.t;
+      tensor_dims = cpu_tensor.sizes();
+      setInputTensorDescriptorTypeAndBuffer(
+          input_tensor_int8, &tensor_descriptor);
+    } else {
+      const auto& input_tensor = Input(i);
+      tensor_dims = input_tensor.sizes();
+      setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
+    }
     auto& input_shape = input_shapes_[i];
     input_shape.clear();
     input_shape.insert(
         input_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.dimensions = tensor_dims.size();
     tensor_descriptor.shape = input_shape.data();
-    setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
