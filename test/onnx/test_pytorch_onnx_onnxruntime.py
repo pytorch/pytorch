@@ -3532,12 +3532,20 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_condition(self):
-        class Model(torch.nn.Module):
+        class Model1(torch.nn.Module):
             def forward(self, input):
                 return torch.stack(torch.where(input > 0.5), dim=1)
 
         x = torch.randint(0, 2, (2, 3, 4), dtype=bool)
-        self.run_test(Model(), (x))
+        self.run_test(Model1(), (x))
+
+        class Model2(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.stack(torch.where(input > other), dim=1)
+
+        x = torch.randint(0, 1, (2, 3, 4), dtype=bool)
+        y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
+        self.run_test(Model2(), (x, y))
 
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
