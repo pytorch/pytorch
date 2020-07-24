@@ -1205,6 +1205,7 @@ def emit_body(declaration):
 
     if strategy != 'use_type':
         body.extend(pack_tensor_options(env, declaration))
+        env['args'] = [arg['name'] for arg in declaration['arguments']]
         args_simple_type = {}
         for i, arg in enumerate(declaration['arguments']):
             args_simple_type[arg['name']] = arg['simple_type']
