@@ -2038,98 +2038,6 @@ class AbstractTestCases:
             self.assertEqual(res1, res2)
             self.assertEqual(res2, out_holder)
 
-        @staticmethod
-        def _test_fft_ifft_rfft_irfft(self, device='cpu', dtype=torch.double):
-            def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
-                x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
-                for normalized in (True, False):
-                    res = x.legacy_fft(signal_ndim, normalized=normalized)
-                    rec = res.ifft(signal_ndim, normalized=normalized)
-                    self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='fft and ifft')
-                    res = x.ifft(signal_ndim, normalized=normalized)
-                    rec = res.legacy_fft(signal_ndim, normalized=normalized)
-                    self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='ifft and fft')
-
-            def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
-                x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
-                signal_numel = 1
-                signal_sizes = x.size()[-signal_ndim:]
-                for normalized, onesided in product((True, False), repeat=2):
-                    res = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-                    if not onesided:  # check Hermitian symmetry
-                        def test_one_sample(res, test_num=10):
-                            idxs_per_dim = [torch.LongTensor(test_num).random_(s).tolist() for s in signal_sizes]
-                            for idx in zip(*idxs_per_dim):
-                                reflected_idx = tuple((s - i) % s for i, s in zip(idx, res.size()))
-                                idx_val = res.__getitem__(idx)
-                                reflected_val = res.__getitem__(reflected_idx)
-                                self.assertEqual(idx_val[0], reflected_val[0], msg='rfft hermitian symmetry on real part')
-                                self.assertEqual(idx_val[1], -reflected_val[1], msg='rfft hermitian symmetry on imaginary part')
-                        if len(sizes) == signal_ndim:
-                            test_one_sample(res)
-                        else:
-                            output_non_batch_shape = res.size()[-(signal_ndim + 1):]
-                            flatten_batch_res = res.view(-1, *output_non_batch_shape)
-                            nb = flatten_batch_res.size(0)
-                            test_idxs = torch.LongTensor(min(nb, 4)).random_(nb)
-                            for test_idx in test_idxs.tolist():
-                                test_one_sample(flatten_batch_res[test_idx])
-                        # compare with C2C
-                        xc = torch.stack([x, torch.zeros_like(x)], -1)
-                        xc_res = xc.legacy_fft(signal_ndim, normalized=normalized)
-                        self.assertEqual(res, xc_res)
-                    test_input_signal_sizes = [signal_sizes]
-                    rec = res.irfft(signal_ndim, normalized=normalized,
-                                    onesided=onesided, signal_sizes=signal_sizes)
-                    self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='rfft and irfft')
-                    if not onesided:  # check that we can use C2C ifft
-                        rec = res.ifft(signal_ndim, normalized=normalized)
-                        self.assertEqual(x, rec.select(-1, 0), atol=1e-8, rtol=0, msg='twosided rfft and ifft real')
-                        self.assertEqual(rec.select(-1, 1).abs().mean(), 0, atol=1e-8,
-                                         rtol=0, msg='twosided rfft and ifft imaginary')
-
-            # contiguous case
-            _test_real((100,), 1)
-            _test_real((10, 1, 10, 100), 1)
-            _test_real((100, 100), 2)
-            _test_real((2, 2, 5, 80, 60), 2)
-            _test_real((50, 40, 70), 3)
-            _test_real((30, 1, 50, 25, 20), 3)
-
-            _test_complex((100, 2), 1)
-            _test_complex((100, 100, 2), 1)
-            _test_complex((100, 100, 2), 2)
-            _test_complex((1, 20, 80, 60, 2), 2)
-            _test_complex((50, 40, 70, 2), 3)
-            _test_complex((6, 5, 50, 25, 20, 2), 3)
-
-            # non-contiguous case
-            _test_real((165,), 1, lambda x: x.narrow(0, 25, 100))  # input is not aligned to complex type
-            _test_real((100, 100, 3), 1, lambda x: x[:, :, 0])
-            _test_real((100, 100), 2, lambda x: x.t())
-            _test_real((20, 100, 10, 10), 2, lambda x: x.view(20, 100, 100)[:, :60])
-            _test_real((65, 80, 115), 3, lambda x: x[10:60, 13:53, 10:80])
-            _test_real((30, 20, 50, 25), 3, lambda x: x.transpose(1, 2).transpose(2, 3))
-
-            _test_complex((2, 100), 1, lambda x: x.t())
-            _test_complex((100, 2), 1, lambda x: x.expand(100, 100, 2))
-            _test_complex((300, 200, 3), 2, lambda x: x[:100, :100, 1:])  # input is not aligned to complex type
-            _test_complex((20, 90, 110, 2), 2, lambda x: x[:, 5:85].narrow(2, 5, 100))
-            _test_complex((40, 60, 3, 80, 2), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
-            _test_complex((30, 55, 50, 22, 2), 3, lambda x: x[:, 3:53, 15:40, 1:21])
-
-            # non-contiguous with strides not representable as aligned with complex type
-            _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [3, 2, 1]))
-            _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
-            _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
-            _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [3, 3, 1]))
-            _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
-            _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
-
-        @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
-        def test_fft_ifft_rfft_irfft(self):
-            self._test_fft_ifft_rfft_irfft(self)
-
         @unittest.skip("Not implemented yet")
         def test_conv2(self):
             x = torch.rand(math.floor(torch.uniform(50, 100)), math.floor(torch.uniform(50, 100)))
@@ -13921,7 +13829,7 @@ class TestTorchDeviceType(TestCase):
 
         signal = torch.ones((2, 2, 2), device=device)
         signal_copy = signal.clone()
-        spectrum = torch.legacy_fft(signal, 2)
+        spectrum = torch.fft(signal, 2)
         self.assertEqual(signal, signal_copy)
 
         spectrum_copy = spectrum.clone()
