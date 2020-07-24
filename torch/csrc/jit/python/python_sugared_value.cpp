@@ -254,7 +254,7 @@ SugaredValuePtr ModuleValue::getitem(
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "
         << "ModuleDict indexing is only supported with string literals. "
-        << "Enumeration of ModuleDict is supported, e.g. 'for m in self.values(): ...'";
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
