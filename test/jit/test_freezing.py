@@ -806,9 +806,6 @@ class TestFreezing(JitTestCase):
         expected = m_s.forward(inp)
         self.assertEqual(out, expected)
 
-    # Check attribute a is preserved. Alias analysis detects that 'a' has output writers.
-    # In this example, 'a' is not mutated. However, we do not track which sub
-    # values of a composite ivalue is mutated.
     def test_freeze_module_with_aliased_attr2(self):
         class FreezeMe(nn.Module):
             def __init__(self):
@@ -827,7 +824,6 @@ class TestFreezing(JitTestCase):
         m_s = torch.jit.script(m)
         m_s.eval()
         m_f = torch._C._freeze_module(m_s._c)
-        self.assertTrue(m_f.hasattr('a'))
         inp = torch.tensor([5])
         out = m_f.forward(inp)
         expected = m.forward(inp)
