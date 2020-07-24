@@ -128,9 +128,9 @@ class _LearnableFakeQuantizePerTensorOp(torch.autograd.Function):
 
         X_q = X_q.clamp(q_min, q_max)
         dScale = _calculate_scale_grad(
-            dX, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
+            dY, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
         dZeroPoint = _calculate_zero_point_grad(
-            dX, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
+            dY, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
 
         dScale *= grad_factor
         dZeroPoint *= grad_factor
@@ -178,9 +178,9 @@ class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
 
         X_q = X_q.clamp(q_min, q_max)
         dScale = _calculate_scale_grad(
-            dX, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
+            dY, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
         dZeroPoint = _calculate_zero_point_grad(
-            dX, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
+            dY, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
 
         dScale *= grad_factor
         dZeroPoint *= grad_factor
