@@ -113,7 +113,7 @@ void max_pool3d_with_indices_out_frame(
          dilationT, dilationH, dilationW,
          offsetZ);
 
-    AT_CUDA_CHECK(cudaGetLastError()); 
+    AT_CUDA_CHECK(cudaGetLastError());
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -179,7 +179,7 @@ void max_pool3d_with_indices_backward_out_frame(
         dilationT, dilationH, dilationW,
         offsetZ);
 
-    AT_CUDA_CHECK(cudaGetLastError()); 
+    AT_CUDA_CHECK(cudaGetLastError());
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -468,6 +468,8 @@ Tensor& max_pool3d_with_indices_backward_out_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_out_cuda");
   max_pool3d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput,
@@ -491,6 +493,8 @@ Tensor max_pool3d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool3d_with_indices_backward_out_cuda_template(
     gradInput,

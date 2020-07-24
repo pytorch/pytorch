@@ -239,6 +239,8 @@ namespace c10 {
   _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
+  _(onnx, Conv)                      \
+  _(onnx, BatchNormalization)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
