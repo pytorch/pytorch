@@ -8,13 +8,12 @@
 #include <ATen/ATen.h>
 
 namespace at { namespace native { namespace atomic_ops {
-      template <typename operation, size_t n>
+
+template <typename operation, size_t n>
 struct AtomicIntegerop;
 
 using add_op = std::integral_constant<int, 0>;
-using sub_op = std::integral_constant<int, 1>;
-using mul_op = std::integral_constant<int, 2>;
-using div_op = std::integral_constant<int, 3>;
+using mul_op = std::integral_constant<int, 1>;
 
 // Integer addition functions.
 template<typename T>
@@ -99,6 +98,72 @@ inline __device__ void operator()(T *address, T val, const func_t& func) {
 }
 };
 
+template <typename T>
+struct AtomicFPOp;
+
+template <>
+struct AtomicFPOp<at::Half> {
+  template <typename func_t>
+  inline __device__ at::Half operator() (at::Half *address, at::Half val, const func_t& func) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    at::Half hsum;
+    do {
+      assumed = old;
+      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      hsum = func(hsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    return hsum;
+  }
+};
+
+template <>
+struct AtomicFPOp<at::BFloat16> {
+  template <typename func_t>
+  inline __device__ at::BFloat16 operator() (at::BFloat16 *address, at::BFloat16 val, const func_t& func) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    at::BFloat16 bsum;
+    do {
+      assumed = old;
+      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      bsum = func(bsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+    bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    return bsum.x;
+  }
+};
+
+template <>
+struct AtomicFPOp<double> {
+  template <typename func_t>
+  inline __device__ double operator() (double * address, double val, const func_t& func) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull;
+    unsigned long long int assumed;
+
+    do {
+      assumed = old;
+      old = atomicCAS(address_as_ull, assumed,
+                      __double_as_longlong(val *
+                                           __longlong_as_double(assumed)));
+
+      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+  } 
+};
+    
 template <typename operation>
 struct gpuAtomic;
 
@@ -106,23 +171,23 @@ template <>
 struct gpuAtomic<add_op> {
   inline __device__ void operator() (uint8_t * address, uint8_t val) {
     AtomicIntegerop<uint8_t, sizeof(uint8_t)>()(address, val,
-                                                        [](uint8_t val, uint32_t old_byte) {
-                                                          return static_cast<uint8_t>(THCNumerics<uint8_t>::add(val, old_byte));
-                                                        });
+                                                [](uint8_t val, uint32_t old_byte) {
+                                                  return static_cast<uint8_t>(THCNumerics<uint8_t>::add(val, old_byte));
+                                                });
   }
 
   inline __device__ void operator() (int8_t * address, int8_t val) {
     AtomicIntegerop<int8_t, sizeof(int8_t)>()(address, val,
-                                                      [](int8_t val, uint32_t old_byte) {
-                                                        return static_cast<int8_t>(THCNumerics<int8_t>::add(val, old_byte));
-                                                          });
+                                              [](int8_t val, uint32_t old_byte) {
+                                                return static_cast<int8_t>(THCNumerics<int8_t>::add(val, old_byte));
+                                              });
   }
 
   inline  __device__ void operator()(int16_t * address, int16_t val) {
     AtomicIntegerop<int16_t, sizeof(int16_t)>()(address, val,
-                                                        [](int16_t val, uint32_t old_byte) {
-                                                          return static_cast<uint16_t>(THCNumerics<int16_t>::add(val, old_byte));
-                                                        });
+                                                [](int16_t val, uint32_t old_byte) {
+                                                  return static_cast<uint16_t>(THCNumerics<int16_t>::add(val, old_byte));
+                                                });
   }
 
   inline __device__ int32_t operator() (int32_t * address, int32_t val) {
@@ -134,9 +199,9 @@ struct gpuAtomic<add_op> {
     __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
     AtomicIntegerop<int64_t, sizeof(int64_t)>()(address, val,
-                                                        [](int64_t val, unsigned long long old){
-                                                          return val + old;
-                                                        });
+                                                [](int64_t val, unsigned long long old){
+                                                  return val + old;
+                                                });
 #endif
   }
 
@@ -146,42 +211,20 @@ struct gpuAtomic<add_op> {
 
   inline  __device__ at::Half operator() (at::Half *address, at::Half val) {
 #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-    unsigned int * address_as_ui =
-      (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
-
-    at::Half hsum;
-    do {
-      assumed = old;
-      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-      hsum = THCNumerics<at::Half>::add(hsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
-      old = atomicCAS(address_as_ui, assumed, old);
-    } while (assumed != old);
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return hsum;
+    return AtomicFPOp<at::Half>()(address, val,
+                                  [](at::Half hsum, at::Half val) {
+                                    return THCNumerics<at::Half>::add(hsum, val);
+                                  });
 #else
     return atomicAdd(reinterpret_cast<__half*>(address), val);
 #endif
   }
 
   inline __device__ at::BFloat16 operator() (at::BFloat16 *address, at::BFloat16 val) {
-    unsigned int * address_as_ui =
-      (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
-
-    at::BFloat16 bsum;
-    do {
-      assumed = old;
-      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-      bsum = THCNumerics<at::BFloat16>::add(bsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
-      old = atomicCAS(address_as_ui, assumed, old);
-    } while (assumed != old);
-    bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return bsum.x;
+    return AtomicFPOp<at::BFloat16>()(address, val,
+                                      [](at::BFloat16 bsum, at::BFloat16 val) {
+                                        return THCNumerics<at::BFloat16>::add(bsum, val);
+                                      });
   }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
@@ -194,19 +237,10 @@ struct gpuAtomic<add_op> {
 #pragma GCC diagnostic pop
 #endif
   {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull;
-    unsigned long long int assumed;
-
-    do {
-      assumed = old;
-      old = atomicCAS(address_as_ull, assumed,
-                      __double_as_longlong(val +
-                                           __longlong_as_double(assumed)));
-
-      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-    } while (assumed != old);
-    return __longlong_as_double(old);
+    AtomicFPOp<double>()(address, val,
+                         [](double val, unsigned long long int assumed) {
+                           return __double_as_longlong(val + __longlong_as_double(assumed));
+                         });
   }
 #endif
 
@@ -227,45 +261,51 @@ template <>
 struct gpuAtomic<mul_op> {
   inline __device__ void operator() (uint8_t * address, uint8_t val) {
     AtomicIntegerop<uint8_t, sizeof(uint8_t)>()(address, val,
-                                                        [](uint8_t val, uint32_t old_byte) {
-                                                          return static_cast<uint8_t>(THCNumerics<uint8_t>::mul(val, old_byte));
-                                                        });
+                                                [](uint8_t val, uint32_t old_byte) {
+                                                  return static_cast<uint8_t>(THCNumerics<uint8_t>::mul(val, old_byte));
+                                                });
   }
 
   inline __device__ void operator() (int8_t * address, int8_t val) {
     AtomicIntegerop<int8_t, sizeof(int8_t)>()(address, val,
-                                                      [](int8_t val, uint32_t old_byte) {
-                                                        return static_cast<int8_t>(THCNumerics<int8_t>::mul(val, old_byte));
-                                                      });
+                                              [](int8_t val, uint32_t old_byte) {
+                                                return static_cast<int8_t>(THCNumerics<int8_t>::mul(val, old_byte));
+                                              });
   }
 
   inline __device__ void operator() (int16_t * address, int16_t val) {
     AtomicIntegerop<int16_t, sizeof(int16_t)>()(address, val,
-                                                        [](int16_t val, uint32_t old_byte) {
-                                                          return static_cast<uint16_t>(THCNumerics<int16_t>::mul(val, old_byte));
-                                                        });    
+                                                [](int16_t val, uint32_t old_byte) {
+                                                  return static_cast<uint16_t>(THCNumerics<int16_t>::mul(val, old_byte));
+                                                });    
   }
 
   inline __device__ void operator() (int32_t * address, int32_t val) {
     AtomicIntegerop<int32_t, sizeof(int32_t)>()(address, val,
-                                                        [](int32_t val, uint32_t old) {
-                                                          return val * (int32_t)old;
-                                                        });
+                                                [](int32_t val, uint32_t old) {
+                                                  return val * (int32_t)old;
+                                                });
   }
 
   inline __device__ void operator() (int64_t * address, int64_t val) {
     AtomicIntegerop<int64_t, sizeof(int64_t)>()(address, val,
-                                                        [](int64_t val, unsigned long long old) {
-                                                          return val * (int64_t)old;
-                                                        });    
+                                                [](int64_t val, unsigned long long old) {
+                                                  return val * (int64_t)old;
+                                                });    
   }
 
-  inline __device__ void operator() (at::Half * address, at::Half val) {
-    
+  inline __device__ at::Half operator() (at::Half * address, at::Half val) {
+    return AtomicFPOp<at::Half>()(address, val,
+                                  [](at::Half bsum, at::Half val) {
+                                    return THCNumerics<at::Half>::add(bsum, val);
+                                  });
   }
 
-  inline __device__ void operator() (at::BFloat16 * address, at::BFloat16 val) {
-    
+  inline __device__ at::BFloat16 operator() (at::BFloat16 * address, at::BFloat16 val) {
+    return AtomicFPOp<at::BFloat16>()(address, val,
+                                      [](at::BFloat16 bsum, at::BFloat16 val) {
+                                        return THCNumerics<at::BFloat16>::add(bsum, val);
+                                      });    
   }
 
   inline __device__ void operator() (bool * address, bool val) {
@@ -273,18 +313,10 @@ struct gpuAtomic<mul_op> {
   }
     
   inline __device__ void operator() (double * address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull;
-    unsigned long long int assumed;
-
-    do {
-      assumed = old;
-      old = atomicCAS(address_as_ull, assumed,
-                      __double_as_longlong(val *
-                                           __longlong_as_double(assumed)));
-
-      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-    } while (assumed != old);
+    AtomicFPOp<double>()(address, val,
+                         [](double val, unsigned long long int assumed) {
+                           return __double_as_longlong(val * __longlong_as_double(assumed));
+                         });
   }
 
   inline __device__ void operator() (float * address, float val) {

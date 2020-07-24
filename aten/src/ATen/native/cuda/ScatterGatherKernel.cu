@@ -20,7 +20,6 @@ class ReduceMultiply {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    // GPU atomic multiply
     atomic_ops::gpuAtomic<atomic_ops::mul_op>()(self_data, *src_data);
   }
 };
@@ -30,8 +29,6 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    // GPU atomic add
-    // gpuAtomicAdd(self_data, *src_data);
     atomic_ops::gpuAtomic<atomic_ops::add_op>()(self_data, *src_data);
   }
 };
@@ -41,7 +38,6 @@ class TensorAssign {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    // GPU atomic assign
     *self_data = *src_data;
   }
 };
@@ -244,7 +240,7 @@ struct _cuda_scatter_fill_internal_kernel {
 
       f(
         (scalar_t*)self_data + idx_dim * index_stride,
-        &src_val
+        (scalar_t*)&src_val
       );
 
     };
@@ -296,7 +292,8 @@ struct cuda_scatter_fill_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        auto src_scalar_val = src.to<scalar_t>();
+        auto src_scalar_val = src.to
+          <scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
         _cuda_scatter_fill_internal_kernel<dtype>()(
@@ -342,14 +339,22 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
-    std::cout << "multiply reduce: " << self << std::endl;
     break;
   }
 }
 
 void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
                                Scalar& value, const SCATTER_GATHER_OP& reduce) {
-
+  switch (reduce) {
+  case SCATTER_GATHER_OP::REDUCE_ADD :
+    cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
+                                      "scatter_fill_cuda_add_", reduce_add);
+    break;
+  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+    cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
+                                      "scatter_fill_cuda_multiply_", reduce_multiply);
+    break;
+  }
 }
 
 
