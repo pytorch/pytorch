@@ -64,11 +64,8 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   return unpack(t, name, pos);
 }
 
-Tensor unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
-  if (!t.has_value() || !t->defined()) {
-    return Tensor();
-  }
-  return unpack(*t, name, pos);
+c10::optional<Tensor> unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
+  return t;
 }
 
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
