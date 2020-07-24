@@ -126,6 +126,10 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'multiple returns'):
             vmap(torch.var_mean)(tensor)
 
+        # The fallback doesn't support TensorList
+        with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
+            vmap(lambda t: torch.stack([t]))(tensor)
+
         # Don't support non-tensor returns. This is a limitation of vmap;
         # functions that don't return tensors must be special cased
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):

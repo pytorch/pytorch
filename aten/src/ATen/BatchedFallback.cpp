@@ -19,22 +19,37 @@ computeIndex(int64_t linear_idx, IntArrayRef sizes) {
   return result;
 }
 
+static bool areAllReturnsTensors(const FunctionSchema& schema) {
+  return std::all_of(
+      schema.returns().begin(),
+      schema.returns().end(),
+      [] (const Argument& arg) { return arg.type() == TensorType::get(); });
+}
+
+static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
+  for (const auto& arg : schema.arguments()) {
+    std::cout << arg.type() << std::endl;
+  }
+  return std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
+}
+
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   auto num_returns = op.schema().returns().size();
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
               "Batching rule not implemented for ", schema, "; ",
               "the fallback path doesn't work on in-place or view ops.");
-  TORCH_WARN("Batching rule not implemented for ", op.schema(), " falling back "
-             "to slow (for loop and stack) implementation");
-  TORCH_CHECK(std::all_of(op.schema().returns().begin(),
-                          op.schema().returns().end(),
-                          [] (const Argument& arg) { return arg.type() == TensorType::get(); }),
+  TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
               "Batching rule not implemented for ", op.schema(), ". ",
               "We could not generate a fallback.");
   TORCH_CHECK(num_returns == 1,
               "Batching rule not implemented for ", op.schema(), ". ",
               "We do not yet support operations with multiple returns.");
+  TORCH_WARN("Batching rule not implemented for ", op.schema(), " falling back "
+             "to slow (for loop and stack) implementation");
 
   // Figure out which arguments are BatchedTensor. Save them to a vector.
   // For each BatchedTensor, also record what position of `stack` they came from.
