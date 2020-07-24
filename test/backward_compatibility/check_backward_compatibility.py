@@ -8,15 +8,15 @@ import torch
 from torch._C import parse_schema
 
 
-# The date specifies how long the whitelist exclusion should apply to.
+# The date specifies how long the allowlist exclusion should apply to.
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
 #   - Otherwise, pick a date that is far enough in the future that you
 #     believe you can land your diff before then.
 #
-# Whitelist entries can be removed after the date listed on them passes.
-white_list = [
+# Allowlist entries can be removed after the date listed on them passes.
+allow_list = [
     ('c10_experimental', datetime.date(2222, 1, 1)),
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
@@ -173,8 +173,8 @@ dont_parse_list = [
 ]
 
 
-def white_listed(schema, white_list):
-    for item in white_list:
+def allow_listed(schema, allow_list):
+    for item in allow_list:
         if item[1] < datetime.date.today():
             continue
         regexp = re.compile(item[0])
@@ -199,7 +199,7 @@ def check_bc(new_schema_dict):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if white_listed(existing_schema, white_list):
+        if allow_listed(existing_schema, allow_list):
             print("Black list, skipping schema: ", str(existing_schema))
             continue
         print("processing existing schema: ", str(existing_schema))

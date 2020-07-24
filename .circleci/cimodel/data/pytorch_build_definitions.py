@@ -136,6 +136,20 @@ class HiddenConf(object):
     def gen_build_name(self, _):
         return self.name
 
+class DocPushConf(object):
+    def __init__(self, name, parent_build=None):
+        self.name = name
+        self.parent_build = parent_build
+
+    def gen_workflow_job(self, phase):
+        return {
+            "pytorch_doc_push": {
+                "name": self.name,
+                "requires": [self.parent_build],
+                "context": "org-member",
+                "filters": gen_filter_dict(branches_list=["nightly"])
+            }
+        }
 
 # TODO Convert these to graph nodes
 def gen_dependent_configs(xenial_parent_config):
@@ -169,9 +183,12 @@ def gen_dependent_configs(xenial_parent_config):
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
-    for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push", "pytorch_doc_test"]:
-        configs.append(HiddenConf(x, parent_build=xenial_parent_config))
+    for x in ["pytorch_python_doc_build", "pytorch_cpp_doc_build"]:
+        conf = HiddenConf(x, parent_build=xenial_parent_config)
+        configs.append(conf)
+        configs.append(DocPushConf(x.replace("build", "push"), x))
 
+    configs.append(HiddenConf("pytorch_doc_test", parent_build=xenial_parent_config))
     return configs
 
 
