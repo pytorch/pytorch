@@ -70,6 +70,9 @@ void IrBuildSizesMap(Fusion* fusion) {
 
       Val* orig_size = id->extent();
 
+      if (orig_size->isConstScalar())
+        continue;
+
       std::stringstream ss;
       ss << "T" << tv->name() << ".size[" << dim++ << "]";
       Val* new_size =
