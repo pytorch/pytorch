@@ -18361,6 +18361,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         np_fn = partial(np.argmin, axis=1)
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
+        t = torch.tensor([[1, 5],
+                          [2, 10],
+                          [0, 0]], device=device, dtype=dtype)
+        torch_fn = partial(torch.argmax, dim=1)
+        np_fn = partial(np.argmax, axis=1)
+        self.compare_with_numpy(torch_fn, np_fn, t)
+        torch_fn = partial(torch.argmin, dim=1)
+        np_fn = partial(np.argmin, axis=1)
+        self.compare_with_numpy(torch.argmin, np.argmin, t)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
