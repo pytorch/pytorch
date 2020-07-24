@@ -598,7 +598,10 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const c10::optional<at::Tensor>& value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Tensor>& value) {
   if (value.has_value()) {
     addInputs(n, name, *value);
   } else {
@@ -896,7 +899,9 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
     warn(ss.str().c_str());
   }
 }
-void ensureUniqueIfOutOfPlaced(const char* name, const c10::optional<at::Tensor>& tensor) {
+void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const c10::optional<at::Tensor>& tensor) {
   ensureUniqueIfOutOfPlaced(name, tensor.has_value() ? *tensor : at::Tensor());
 }
 

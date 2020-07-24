@@ -979,8 +979,9 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
+            # type: (AtFormal, FunctionOption) -> AtFormal
             argument = copy.deepcopy(argument)
-            # type: (AtFormal, FunctionOption, bool) -> AtFormal
+
             def translate_map(const):
                 # type: (bool) -> Dict[str, str]
                 return {
