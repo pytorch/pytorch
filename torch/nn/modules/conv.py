@@ -11,7 +11,7 @@ from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 
 
 class _ConvNd(Module):
@@ -23,9 +23,9 @@ class _ConvNd(Module):
 
     _in_channels: int
     out_channels: int
-    kernel_size: Tuple[int, ...]
-    stride: Tuple[int, ...]
-    padding: Tuple[int, ...]
+    kernel_size: Any
+    stride: Any
+    padding: Any
     dilation: Tuple[int, ...]
     transposed: bool
     output_padding: Tuple[int, ...]
@@ -579,7 +579,8 @@ class _ConvTransposeNd(_ConvNd):
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
 
-    def _output_padding(self, input: Tensor, output_size: Optional[List[int]], stride: Tuple[int, ...], padding: Tuple[int, ...], kernel_size: Tuple[int, ...]) -> List[int]:
+    def _output_padding(self, input: Tensor, output_size: Optional[List[int]], stride: List[int],
+                        padding: List[int], kernel_size: List[int]) -> List[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
