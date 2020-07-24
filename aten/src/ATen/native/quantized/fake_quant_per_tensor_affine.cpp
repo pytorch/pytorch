@@ -176,8 +176,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
     zero_point.device().type(), dZeroPoint_vec, X, dX, scale_val, zero_point_val, quant_min, quant_max);
 
   // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
-  auto dScale = dScale_vec.sum().unsqueeze(0);
-  auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0);
+  auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());
+  auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0).to(zero_point.device());
 
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
