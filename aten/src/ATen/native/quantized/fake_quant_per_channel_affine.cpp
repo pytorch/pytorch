@@ -193,7 +193,7 @@ Tensor _get_rounded_zero_point(
 }
 
 std::tuple<Tensor, Tensor> _get_scale_zero_point_per_channel_iter_grads(
-    const Tensor& dX,
+    const Tensor& dY,
     const Tensor& X,
     const Tensor& scale,
     const Tensor& zero_point,
@@ -203,23 +203,23 @@ std::tuple<Tensor, Tensor> _get_scale_zero_point_per_channel_iter_grads(
 
   int64_t axis_size = X.size(axis);
   std::vector<Tensor> X_flattened = at::unbind(X, axis);
-  std::vector<Tensor> dX_flattened = at::unbind(dX, axis);
+  std::vector<Tensor> dY_flattened = at::unbind(dY, axis);
 
   Tensor dScale = at::zeros({scale.sizes()[0]});
   Tensor dZeroPoint = at::zeros({zero_point.sizes()[0]});
 
   for (int i = 0; i < X_flattened.size(); ++i) {
     Tensor X_i = X_flattened[i];
-    Tensor dX_i = dX_flattened[i];
+    Tensor dY_i = dY_flattened[i];
     auto dScale_item_vec = at::empty_like(X_i, X_i.options(), MemoryFormat::Preserve);
     auto dZeroPoint_item_vec = at::empty_like(X_i, X_i.options(), MemoryFormat::Preserve);
 
     float scale_i = scale[i].item<float>();
     int64_t zero_point_i = static_cast<int64_t>(std::min(std::max(zero_point[i].item<float>() + 0.5f, quant_min), quant_max));
     fake_quant_grad_learnable_scale_channel_stub(
-      scale.device().type(), dScale_item_vec, X_i, dX_i, scale_i, zero_point_i, quant_min, quant_max);
+      scale.device().type(), dScale_item_vec, X_i, dY_i, scale_i, zero_point_i, quant_min, quant_max);
     fake_quant_grad_learnable_zero_point_channel_stub(
-      zero_point.device().type(), dZeroPoint_item_vec, X_i, dX_i, scale_i, zero_point_i, quant_min, quant_max);
+      zero_point.device().type(), dZeroPoint_item_vec, X_i, dY_i, scale_i, zero_point_i, quant_min, quant_max);
     float scale_item = dScale_item_vec.sum().unsqueeze(0).item<float>();
     float zero_point_item = dZeroPoint_item_vec.sum().unsqueeze(0).item<float>();
 
