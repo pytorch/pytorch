@@ -14,63 +14,6 @@
 
 namespace c10d {
 
-// CheckFutureWork is used by a cudaStremCallback function called
-// ncclKernelCompletionCallback. The purpose of CheckFutureWork is to mark
-// workNCCL's Future work when, all NCCL streams created in collective operation
-// are finished.
-// We use enable_shared_from_this to safely call shared_ptr<CheckFutureWork>
-// (this) to remove its pointer from ProcessGroupNCCL's checkFutObjs after
-// at::launch operation of markFutureCompleted is done.
-// markFutureCompleted increments streamCounter by one and once it is called by
-// number of replicas times, it marks Future work completed by setting outputs
-// vector as its value.
-struct CheckFutureWork : std::enable_shared_from_this<CheckFutureWork> {
- public:
-  CheckFutureWork(
-      std::shared_ptr<ProcessGroup::Work> work,
-      std::vector<at::Tensor>& outputs,
-      std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
-          checkFutObjs,
-      std::mutex& checkFutObjMutex_)
-      : work_(work),
-        outputs_(std::make_shared<std::vector<at::Tensor>>(outputs)),
-        streamCounter_(0),
-        checkFutObjs_(checkFutObjs),
-        checkFutObjMutex_(checkFutObjMutex_){};
-
-  std::shared_ptr<CheckFutureWork> getPtr() {
-    return shared_from_this();
-  }
-
-  void markFutureCompleted() {
-    at::launch(([this]() {
-      std::unique_lock<std::mutex> lock(checkFutObjMutex_);
-      (streamCounter_)++;
-      if (streamCounter_ == (*outputs_).size()) {
-        // Need to wait until work is completed, because some post processing
-        // could be needed for outputs.
-        work_->wait();
-
-        TORCH_CHECK(
-            !work_->getFuture()->completed(),
-            "Future work of workNCCL can only be marked as "
-            "completed by ncclKernelCompletionCallback.")
-        work_->getFuture()->markCompleted(at::IValue(*outputs_));
-
-        checkFutObjs_->erase(getPtr());
-      }
-    }));
-  };
-
- private:
-  std::shared_ptr<ProcessGroup::Work> work_;
-  std::shared_ptr<std::vector<at::Tensor>> outputs_;
-  int streamCounter_;
-  std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
-      checkFutObjs_;
-  std::mutex& checkFutObjMutex_;
-};
-
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
@@ -135,10 +78,14 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Synchronize streams by blocking each on the NCCL stream
+    void synchronizeStreams();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
 
+    // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
@@ -189,6 +136,64 @@ class ProcessGroupNCCL : public ProcessGroup {
     c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
 
     friend class ProcessGroupNCCL;
+  };
+
+  // CheckFutureWork is used by a cudaStremCallback function called
+  // ncclKernelCompletionCallback. The purpose of CheckFutureWork is to mark
+  // workNCCL's Future work when, all NCCL streams created in collective
+  // operation are finished. We use enable_shared_from_this to safely call
+  // shared_ptr<CheckFutureWork> (this) to remove its pointer from
+  // ProcessGroupNCCL's checkFutObjs after at::launch operation of
+  // markFutureCompleted is done. markFutureCompleted increments streamCounter
+  // by one and once it is called by number of replicas times, it marks Future
+  // work completed by setting outputs vector as its value.
+  struct CheckFutureWork : std::enable_shared_from_this<CheckFutureWork> {
+   public:
+    CheckFutureWork(
+        std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
+        std::vector<at::Tensor>& outputs,
+        std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
+            checkFutObjs,
+        std::mutex& checkFutObjMutex_)
+        : work_(work),
+          outputs_(std::make_shared<std::vector<at::Tensor>>(outputs)),
+          streamCounter_(0),
+          checkFutObjs_(checkFutObjs),
+          checkFutObjMutex_(checkFutObjMutex_) {}
+
+    std::shared_ptr<CheckFutureWork> getPtr() {
+      return shared_from_this();
+    }
+
+    void markFutureCompleted() {
+      // Passing `this` here as the capture is fine because we store a
+      // `shared_ptr` to `this` in ProcessGroupNCCL's `checkFutObjs_` to
+      // ensure that the object is alive when the lambda function is called.
+      at::launch(([this]() {
+        if (++streamCounter_ == (*outputs_).size()) {
+          // Need to synchronize before passing outputs to Future because
+          // operations using the outputs might be running on different streams
+          work_->synchronizeStreams();
+
+          TORCH_CHECK(
+              !work_->getFuture()->completed(),
+              "Future work of workNCCL can only be marked as "
+              "completed by ncclKernelCompletionCallback.")
+          work_->getFuture()->markCompleted(at::IValue(*outputs_));
+
+          std::unique_lock<std::mutex> lock(checkFutObjMutex_);
+          checkFutObjs_->erase(getPtr());
+        }
+      }));
+    }
+
+   private:
+    std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
+    std::atomic<int> streamCounter_;
+    std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
+        checkFutObjs_;
+    std::mutex& checkFutObjMutex_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -453,9 +458,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
       checkFutObjs_;
 
-  // Multiple threads can access and write to checkFutObjs_, so we need the
-  // following lock. This lock is also used to safely increment
-  // CheckFutureWork's streamCounter.
+  // Mutex to guard the unordered set checkFutObjs_.
   mutable std::mutex checkFutObjMutex_;
 };
 

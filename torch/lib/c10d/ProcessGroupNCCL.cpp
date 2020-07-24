@@ -6,8 +6,6 @@
 
 #include <THC/THC.h>
 
-#include <ATen/Parallel.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -213,14 +211,18 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeInternal(kNoTimeout);
 }
 
-// Waiting on the work's corresponding CUDA events
-void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
-    std::chrono::milliseconds timeout) {
+void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
   }
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
+  synchronizeStreams();
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
@@ -305,8 +307,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       terminateWatchdog_(false),
       opTimeout_(opTimeout),
-      checkFutObjs_(std::make_shared<
-                    std::unordered_set<std::shared_ptr<CheckFutureWork>>>(0)) {
+      checkFutObjs_(
+          std::make_shared<std::unordered_set<
+              std::shared_ptr<ProcessGroupNCCL::CheckFutureWork>>>(0)) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -676,7 +679,8 @@ void ncclKernelCompletionCallback(
     cudaStream_t /* unused */,
     cudaError_t /* unused */,
     void* userData) {
-  auto castedUserData = static_cast<CheckFutureWork*>(userData);
+  auto castedUserData =
+      static_cast<ProcessGroupNCCL::CheckFutureWork*>(userData);
 
   TORCH_CHECK(
       castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
@@ -721,11 +725,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
-  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
   // Create and store a CheckFutureWork object to be used in
   // ncclKernelCompletionCallback function.
-  auto checkFutObj = std::make_shared<CheckFutureWork>(
+  auto checkFutObj = std::make_shared<ProcessGroupNCCL::CheckFutureWork>(
       work, outputs, checkFutObjs_, checkFutObjMutex_);
+
+  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
   checkFutObjs_->insert(checkFutObj);
 
   {

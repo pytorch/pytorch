@@ -21,6 +21,7 @@ void broadcast_coalesced(
 class GradBucket {
  public:
   explicit GradBucket(std::vector<at::Tensor> tensors);
+
   const std::vector<at::Tensor>& getTensors();
 
  private:
@@ -47,6 +48,24 @@ struct TORCH_API CommHookInterface {
   // reducer will use these tensors and copy grads to the grads of individual
   // parameters.
   virtual std::vector<at::Tensor> processFuture(c10::IValue future_value) = 0;
+};
+
+// AllreduceHook runs allreduce by registering a c10d process group to c10d
+// reducer and is a sub class of CommHookInterface.
+class TORCH_API AllreduceHook : public CommHookInterface {
+ public:
+  // The constructor simply takes a a c10d process group.
+  AllreduceHook(std::shared_ptr<ProcessGroup> process_group);
+
+  // runHook calls `process_group->allreduce` using the grad bucket's tensors.
+  c10::intrusive_ptr<torch::jit::Future> runHook(
+      const GradBucket& bucket) override;
+
+  // processFuture just converts IValue input to vector of tensors.
+  std::vector<at::Tensor> processFuture(c10::IValue future_value) override;
+
+ private:
+  std::shared_ptr<ProcessGroup> process_group_;
 };
 
 // PythonCommHook enables registering a python hook to c10d reducer and is a

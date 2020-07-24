@@ -87,6 +87,19 @@ const std::vector<at::Tensor>& GradBucket::getTensors() {
   return tensors_;
 }
 
+AllreduceHook::AllreduceHook(std::shared_ptr<ProcessGroup> process_group)
+    : process_group_(process_group){};
+
+c10::intrusive_ptr<torch::jit::Future> AllreduceHook::runHook(
+    const GradBucket& bucket) {
+  auto tensors = const_cast<GradBucket&>(bucket).getTensors();
+  return process_group_->allreduce(tensors)->getFuture();
+};
+
+std::vector<at::Tensor> AllreduceHook::processFuture(c10::IValue future_value) {
+  return future_value.toTensorVector();
+}
+
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 

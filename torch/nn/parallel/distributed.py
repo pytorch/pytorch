@@ -632,12 +632,12 @@ class DistributedDataParallel(Module):
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
 
-                             We also provide an API called "get_future" to convert
-                             c10d.ProcessGroupNCCL.work to torch.futures.Future.
+                             We also provide an API called "get_future" to retrieve a future
+                             associated with the completion of c10d.ProcessGroupNCCL.work.
 
         .. warning ::
-            DDP communication hook can only be registered once and should be registered
-            before calling backward.
+            DDP communication hook be registered multiple times, but reducer must be done
+            with any prior gradient computations before registering a new hook.
 
         .. warning ::
             The torch.futures.Future object that hook returns should contain a result that
@@ -645,9 +645,6 @@ class DistributedDataParallel(Module):
 
         .. warning ::
             DDP communication hook is experimental and subject to change.
-
-        .. warning ::
-            "get_future" API supports only NCCL backend.
 
         Example::
             Below is an example of a noop hook that returns back the same tensors:
@@ -669,20 +666,19 @@ class DistributedDataParallel(Module):
             >>>     return work.get_future()
 
         Example::
-            Below is an example of fp16_compress hook that first calls allreduce with float16
-            grad bucket tensors. Then, it decompresses the result of allreduce as float32.
+            Below is an example of a Parallel SGD algorithm where gradients are encoded before
+            allreduce, and then decoded after allreduce.
 
-            >>> ddp._register_comm_hook(state = None, hook = fp16_compress)
+            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
 
-            >>> def fp16_compress(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     compressed_tensors = dist.GradBucket(bucket.get_tensors().to(torch.float16))
-            >>>     work = dist.allreduce(compressed_tensors)
-            >>>     allreduce_future = work.get_future()
-            >>>     # Define the then callback to decompress.
-            >>>     def decompress(fut):
-            >>>         decompressed_tensors = fut.wait().to(torch.float32)
-            >>>         return decompressed_tensors
-            >>>     return allreduce_future.then(decompress)
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>>     encoded_tensors = encode(bucket.get_tensors()) # encode gradients
+            >>>     fut = process_group.allreduce(encoded_tensors).get_future()
+            >>>     # Define the then callback to decode.
+            >>>     def decode(fut):
+            >>>         decoded_tensors = decode(fut.wait()) # decode gradients
+            >>>         return decoded_tensors
+            >>>     return fut.then(decode)
 
         """
         self._check_comm_hook(hook)

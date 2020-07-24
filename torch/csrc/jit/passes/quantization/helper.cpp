@@ -21,6 +21,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "batch_norm",
     "hardswish",
     "elu",
+    "celu",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -35,6 +36,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "hardswish_",
     "elu",
     "elu_",
+    "celu",
+    "celu_",
     "batch_norm",
     "layer_norm",
     "group_norm",
@@ -461,15 +464,17 @@ bool nodeQuantizable(Node* n, QuantType quant_type) {
 }
 
 bool useQuantizable(const Use& use, QuantType quant_type) {
-  for (const auto& func_input : _observe_inputs_aten_func) {
-    if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
-      return use.offset == func_input.arg_index;
+  if (quant_type == QuantType::STATIC) {
+    for (const auto& func_input : _observe_inputs_aten_func) {
+      if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
+        return use.offset == func_input.arg_index;
+      }
     }
-  }
 
-  for (const auto& func_input : _observe_inputs_call_func) {
-    if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
-      return use.offset == func_input.arg_index;
+    for (const auto& func_input : _observe_inputs_call_func) {
+      if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
+        return use.offset == func_input.arg_index;
+      }
     }
   }
 
@@ -561,6 +566,23 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   auto* instance = n->inputs()[0];
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
+}
+
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self) {
+  auto* instance = n->inputs()[0];
+  auto path = getModuleAccessPath(instance, self);
+  Module m = module;
+  for (const auto& p : path) {
+    if (m.attr(p).isModule()) {
+      m = m.attr(p).toModule();
+    } else {
+      return c10::nullopt;
+    }
+  }
+  return m;
 }
 
 // ==================== filter functions for matches ==============

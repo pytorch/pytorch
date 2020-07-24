@@ -3109,7 +3109,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_then_mult_ten_hook_nccl(self):
+    def test_ddp_comm_hook_allreduce_then_mult_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that calls allreduce and then
         multiplies the result by ten gives the expected result.
@@ -3117,7 +3117,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_then_mult_ten_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+        def allreduce_then_mult_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
             fut = process_group.allreduce(bucket.get_tensors()).get_future()
 
             def fut_then(fut):
@@ -3126,8 +3126,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             return fut.then(fut_then)
 
-        # Get GPU model with allreduce_then_mult_ten_hook registered.
-        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_then_mult_ten_hook)
+        # Get GPU model with allreduce_then_mult_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_then_mult_hook)
 
         # check whether the grads are equal to what allreduce returns multuplied by 10.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
@@ -3189,30 +3189,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             # Run backward
             output.mean().backward()
-
-    @requires_gloo()
-    def test_ddp_comm_hook_register_just_once(self):
-        """
-        DDP communication hook can only be registered once. This test validates whether
-        the error is thrown properly when register_comm_hook is called more than once.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-
-        model = DistributedDataParallel(
-            TestDdpCommHook(),
-            process_group=process_group
-        )
-
-        def dummy_hook(state, bucket):
-            fut = torch.futures.Future()
-            fut.set_result(bucket.get_tensors())
-            return fut
-
-        model._register_comm_hook(None, dummy_hook)
-
-        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
-            model._register_comm_hook(None, dummy_hook)
 
 
 class ReducerModule(nn.Module):

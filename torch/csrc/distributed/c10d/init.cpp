@@ -113,6 +113,7 @@ class PythonStore : public ::c10d::Store {
 // c10d PythonCommHook object using these inputs. It later calls
 // register_comm_hook function of the reducer input to register that
 // PythonCommHook object.
+// DDP communication hook can be overridden multiple times.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
@@ -708,7 +709,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+            ``get_future`` retrieves a future associated with the completion of
+            ``c10d.ProcessGroup.work``. As an example, a future object can be set
+            by `future_work = dist.allreduce(tensors).get_future()`. `future_work`
+            will be marked as completed once ``dist.allreduce`` work is finished.
+
+            .. warning ::
+                ``get_future`` API supports only NCCL backend.
+           )");
 
   module.def(
       "_compute_bucket_assignment_by_size",

@@ -24,11 +24,13 @@ from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
+from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1398,7 +1400,7 @@ graph(%Ra, %Rb):
                     X = torch.randn(M, M, requires_grad=requires_grad)
                     if requires_grad:
                         FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
-                    self.assertEqual(training, 'bernoulli_' in profile(scripted, X))
+                    self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
@@ -1417,12 +1419,13 @@ graph(%Ra, %Rb):
         scripted_training = torch.jit.script(dropout_training)
         scripted_eval = torch.jit.script(dropout_eval)
         # See comments in test_dropout_module_requires_grad.
-        for requires_grad in (True, False):
-            X = torch.randn(M, M, requires_grad=requires_grad)
-            if requires_grad:
-                FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
-            self.assertIn('bernoulli_', profile(scripted_training, X))
-            self.assertNotIn('bernoulli_', profile(scripted_eval, X))
+        with disable_autodiff_subgraph_inlining():
+            for requires_grad in (True, False):
+                X = torch.randn(M, M, requires_grad=requires_grad)
+                if requires_grad:
+                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+                self.assertIn('aten::bernoulli_', profile(scripted_training, X))
+                self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
@@ -2473,7 +2476,7 @@ graph(%Ra, %Rb):
         mul_events = defaultdict(int)
         other_fn_events = defaultdict(int)
         for e in prof.function_events:
-            if e.name == "mul":
+            if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
                 mul_events[e.thread] = e.cpu_interval.elapsed_us()
             elif e.name == "other_fn":

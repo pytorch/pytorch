@@ -1,11 +1,11 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
 import itertools as it
-from typing import List, Optional, Tuple
+from typing import cast, List, Optional, Tuple
 
 import numpy as np
 
-import utils.common as common
+from torch.utils._benchmark.utils import common
 
 __all__ = ["Compare"]
 
@@ -21,7 +21,7 @@ TERMINATE = "\033[0m"
 class _Column(object):
     def __init__(
         self,
-        grouped_results: List[List[common.Measurement]],
+        grouped_results: List[Tuple[common.Measurement, ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
@@ -70,14 +70,14 @@ class _Row(object):
         self._columns = None
         self._num_threads = num_threads
 
-    def register_columns(self, columns: Tuple[_Column]):
+    def register_columns(self, columns: Tuple[_Column, ...]):
         self._columns = columns
 
     def as_column_strings(self):
         env = f"({self._results[0].env})" if self._render_env else ""
         env = env.ljust(self._env_str_len + 4)
         output = ["  " + env + self._results[0].as_row_name]
-        for m, col in zip(self._results, self._columns):
+        for m, col in zip(self._results, self._columns or ()):
             output.append(col.num_to_str(
                 m.median / self._time_scale,
                 m.significant_figures,
@@ -107,7 +107,7 @@ class _Row(object):
 
     def finalize_column_strings(self, column_strings, col_widths):
         row_contents = [column_strings[0].ljust(col_widths[0])]
-        for col_str, width, result, column in zip(column_strings[1:], col_widths[1:], self._results, self._columns):
+        for col_str, width, result, column in zip(column_strings[1:], col_widths[1:], self._results, self._columns or ()):
             col_str = col_str.center(width)
             if self._colorize:
                 group_medians = [r.median for r in column.get_results_for(self._row_group)]
@@ -146,7 +146,7 @@ class Table(object):
     def populate_rows_and_columns(self):
         rows, columns = [], []
 
-        ordered_results = [[None for _ in self.column_keys] for _ in self.row_keys]
+        ordered_results: List[List[Optional[common.Measurement]]] = [[None for _ in self.column_keys] for _ in self.row_keys]
         row_position = {key: i for i, key in enumerate(self.row_keys)}
         col_position = {key: i for i, key in enumerate(self.column_keys)}
         for r in self.results:
@@ -163,7 +163,7 @@ class Table(object):
         prior_num_threads = -1
         prior_env = ""
         row_group = -1
-        rows_by_group = []
+        rows_by_group: List[List[List[Optional[common.Measurement]]]] = []
         for (num_threads, env, _), row in zip(self.row_keys, ordered_results):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:
@@ -187,18 +187,22 @@ class Table(object):
             prior_env = env
 
         for i in range(len(self.column_keys)):
-            grouped_results = [tuple(row[i] for row in g) for g in rows_by_group]
+            grouped_results = cast(
+                List[Tuple[common.Measurement, ...]],  # All Nones should be gone.
+                [tuple(row[i] for row in g) for g in rows_by_group],
+            )
             column = _Column(
-                grouped_results=grouped_results, time_scale=self.time_scale,
+                grouped_results=grouped_results,
+                time_scale=self.time_scale,
                 time_unit=self.time_unit,
                 trim_significant_figures=self._trim_significant_figures,
                 highlight_warnings=self._highlight_warnings,)
             columns.append(column)
 
-        rows, columns = tuple(rows), tuple(columns)
-        for r in rows:
-            r.register_columns(columns)
-        return rows, columns
+        rows_tuple, columns_tuple = tuple(rows), tuple(columns)
+        for ri in rows_tuple:
+            ri.register_columns(columns_tuple)
+        return rows_tuple, columns_tuple
 
     def render(self):
         string_rows = [[""] + self.column_keys]
@@ -214,7 +218,7 @@ class Table(object):
         for string_row, row in zip(string_rows[1:], self.rows):
             finalized_columns.extend(row.row_separator(overall_width))
             finalized_columns.append("  |  ".join(row.finalize_column_strings(string_row, col_widths)))
-        print("[" + (" " + self.label + " ").center(overall_width - 2, "-") + "]")
+        print("[" + (" " + (self.label or "") + " ").center(overall_width - 2, "-") + "]")
         print("\n".join(finalized_columns))
         print(f"\nTimes are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).")
         if self._highlight_warnings and any(r.has_warnings for r in self.results):
@@ -224,7 +228,7 @@ class Table(object):
 
 class Compare(object):
     def __init__(self, results: List[common.Measurement]):
-        self._results = []
+        self._results: List[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
         self._colorize = False

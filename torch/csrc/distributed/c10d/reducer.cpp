@@ -43,7 +43,7 @@ Reducer::Reducer(
       backward_stats_base_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
-      comm_hook_(nullptr) {
+      comm_hook_(std::make_unique<AllreduceHook>(process_group_)) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -173,9 +173,9 @@ Reducer::Reducer(
 
 // Note [DDP Communication Hook]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// If DDP communication hook is not registered, the reducer reduces the buckets
-// by just calling allreduce. If registered, it calls the hook and uses future
-// work handle.
+// If default DDP communication hook is not overridden by user, the reducer
+// reduces the buckets by just calling allreduce. If a new hook was registered,
+// reducer calls the hook instead of allreduce.
 // DDP communication hook is an enhancement that provides a hook which can be
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
@@ -590,13 +590,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       tensors.push_back(replica.contents);
     }
     // See Note [DDP Communication Hook]
-    // TODO(@sinannasir): merge `work` and `future_work`. Related to GH Issue
-    // #41266.
-    if (comm_hook_ == nullptr) {
-      bucket.future_work = process_group_->allreduce(tensors)->getFuture();
-    } else {
-      bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
-    }
+    bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
   }
 }
 
@@ -959,7 +953,8 @@ void Reducer::finalize_backward() {
     bucket.future_work->wait();
 
     // See Note [DDP Communication Hook]
-    if (comm_hook_ != nullptr) {
+    // Check whether default communication hook was overridden by user.
+    if (!dynamic_cast<AllreduceHook*>(comm_hook_.get())) {
       auto future_result =
           comm_hook_->processFuture(bucket.future_work->value());
 
@@ -1125,9 +1120,11 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 
 // See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
+  // Check that any prior reduction has finished before registering new hook.
   TORCH_CHECK(
-      comm_hook_ == nullptr, "register_comm_hook can only be called once.");
-
+      !require_finalize_,
+      "DDP communication hook can be overridden multiple times, but"
+      "reducer must be done with any prior gradient computations.");
   comm_hook_ = std::move(iface);
 }
 
