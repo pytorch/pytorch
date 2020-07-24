@@ -333,7 +333,6 @@ _(aten, eye) \
 _(aten, feature_alpha_dropout) \
 _(aten, feature_dropout) \
 _(aten, fft) \
-_(aten, legacy_fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \

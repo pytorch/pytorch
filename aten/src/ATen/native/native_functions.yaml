@@ -1437,12 +1437,15 @@
     CPU, CUDA: native_group_norm_backward
 
 # FFT
-- func: fft(Tensor self) -> Tensor
+- func: fft.fft(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
+  dispatch:
+    CPU: fft_fft
+    CUDA: fft_fft
   python_module: fft
 
-- func: legacy_fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
+- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 

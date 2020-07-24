@@ -18,11 +18,11 @@
 
 namespace at { namespace native {
 
-Tensor fft(const Tensor& self) {
+Tensor fft_fft(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
   TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
 
-  auto result = native::legacy_fft(at::view_as_real(self), 1, false);
+  auto result = at::fft(at::view_as_real(self), 1, false);
   return at::view_as_complex(result);
 }
 
@@ -156,7 +156,7 @@ void _cufft_clear_plan_cache(int64_t device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
-Tensor legacy_fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ false, {}, normalized,
               /* onesided */ false);
