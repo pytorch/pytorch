@@ -24,11 +24,13 @@ from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
+from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -545,6 +547,126 @@ class TestJit(JitTestCase):
         self.run_pass('peephole', trace.graph)
         self.run_pass('dce', trace.graph)
         FileCheck().check_not("type_as").run(str(trace.graph))
+
+    def test_add_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(M, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b, c):
+                tmp = torch.add(a, b)
+                x = self.relu_op(tmp)
+                d = torch.add(a, c)
+                return x + d
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
+        m = torch.jit.script(M(torch.relu))
+        orig_res = m(a, b, c)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+
+        # add, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
+        m = torch.jit.script(M(torch.relu_))
+        orig_res = m(a, b, c)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu_(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+
+        class Madd_(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(Madd_, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b):
+                x = a.add_(b)
+                x = self.relu_op(x)
+                return x
+
+        # add_, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        # Because in place add_ will overwrite a
+        a_copy = a.clone()
+        m = torch.jit.script(Madd_(torch.relu_))
+        orig_res = m(a, b)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a_copy, b)
+        FileCheck().check_not("aten::add_(") \
+            .check_not("aten::relu_(") \
+            .check("aten::add_relu_(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
+
+        class Madd_out(torch.nn.Module):
+            def __init__(self, relu_op):
+                super(Madd_out, self).__init__()
+                self.relu_op = relu_op
+
+            def forward(self, a, b):
+                x = torch.add(a, b, out=a)
+                x = self.relu_op(x)
+                return x
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+
+        # add_out, relu_
+        a = torch.rand((7, 11))
+        a = a * -10
+        a = a + 5
+        b = torch.rand((7, 11))
+        # Because in place add_ will overwrite a
+        a_copy = a.clone()
+        m = torch.jit.script(Madd_out(torch.relu_))
+        orig_res = m(a, b)
+        torch._C._jit_pass_fuse_add_relu(m.graph)
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        new_res = m(a_copy, b)
+        FileCheck().check_not("aten::add(") \
+            .check_not("aten::relu_(") \
+            .check("aten::add_relu(") \
+            .run(m.graph)
+        torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ with out=a does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -1089,7 +1211,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
+        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1, device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -1111,7 +1233,7 @@ graph(%Ra, %Rb):
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):
-          # CHECK: Float(*) = aten::masked_select
+          # CHECK: Float(*, requires_grad=0, device=cpu) = aten::masked_select
           %2 : Tensor = aten::masked_select(%0, %1) # test/test_jit.py:15261:0
           return (%2)"""
         graph = parse_ir(input_str)
@@ -1278,7 +1400,7 @@ graph(%Ra, %Rb):
                     X = torch.randn(M, M, requires_grad=requires_grad)
                     if requires_grad:
                         FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
-                    self.assertEqual(training, 'bernoulli_' in profile(scripted, X))
+                    self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_func_requires_grad(self):
@@ -1297,12 +1419,13 @@ graph(%Ra, %Rb):
         scripted_training = torch.jit.script(dropout_training)
         scripted_eval = torch.jit.script(dropout_eval)
         # See comments in test_dropout_module_requires_grad.
-        for requires_grad in (True, False):
-            X = torch.randn(M, M, requires_grad=requires_grad)
-            if requires_grad:
-                FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
-            self.assertIn('bernoulli_', profile(scripted_training, X))
-            self.assertNotIn('bernoulli_', profile(scripted_eval, X))
+        with disable_autodiff_subgraph_inlining():
+            for requires_grad in (True, False):
+                X = torch.randn(M, M, requires_grad=requires_grad)
+                if requires_grad:
+                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+                self.assertIn('aten::bernoulli_', profile(scripted_training, X))
+                self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
@@ -1739,6 +1862,7 @@ graph(%Ra, %Rb):
         self.run_pass('constant_propagation', graph)
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
+    # TODO(gmagogsfm): Refactor this test to reduce complexity.
     def test_constant_insertion(self):
         funcs_template = dedent('''
         def func():
@@ -1832,11 +1956,10 @@ graph(%Ra, %Rb):
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
             f_script = cu.func
-            self.run_pass('constant_propagation', f_script.graph)
-            num_constants = 3  # input constant twice, None once
-            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
+            self.run_pass('constant_propagation_immutable_types', f_script.graph)
+            num_constants = str(f_script.graph).count("prim::Constant")
             self.run_pass('cse', f_script.graph)
-            FileCheck().check_count("prim::Constant", num_constants - 1, exactly=True).run(f_script.graph)
+            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_cuda_export_restore(self):
@@ -2039,7 +2162,7 @@ graph(%Ra, %Rb):
         self.assertExpected(cu.foo.code)
 
     def test_import_method(self):
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
                     super(Foo, self).__init__()
@@ -2055,6 +2178,25 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             foo_loaded = torch.jit.load(buffer)
             self.assertExpected(foo_loaded.forward.code)
+
+    @unittest.skip("temporarily disable the test for fwd compatibility")
+    def test_non_ascii_string(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = "Over \u0e55\u0e57 57"
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return self.a + "hi\xA1"
+
+        foo = Foo()
+        buffer = io.BytesIO()
+        torch.jit.save(foo, buffer)
+
+        buffer.seek(0)
+        foo_loaded = torch.jit.load(buffer)
+        self.assertExpected(foo_loaded.forward.code)
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2334,7 +2476,7 @@ graph(%Ra, %Rb):
         mul_events = defaultdict(int)
         other_fn_events = defaultdict(int)
         for e in prof.function_events:
-            if e.name == "mul":
+            if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
                 mul_events[e.thread] = e.cpu_interval.elapsed_us()
             elif e.name == "other_fn":
@@ -2597,8 +2739,8 @@ class TestScript(JitTestCase):
                 test_not_const(torch.rand([3, 2]))
 
                 graph_str = torch.jit.last_executed_optimized_graph()
-                FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
-                FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+                FileCheck().check("Double(*:2, 2:1, requires_grad=0, device=cpu) = ").run(graph_str)
+                FileCheck().check_not("Double(1:2, 2:1, requires_grad=0, device=cpu) = ").run(graph_str)
 
 
     def test_nested_bailouts(self):
@@ -2856,6 +2998,22 @@ def foo(x):
                     return self.fn()
 
         # shouldn't throw a type error
+        torch.jit.script(MyMod())
+
+    def test_unused_decorator(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+
+            @torch.jit.unused
+            @torch.no_grad()
+            def fn(self, x):
+                # type: (Tensor) -> int
+                return next(x)  # invalid, but should be ignored
+
+            def forward(self, x):
+                return self.fn(x)
+
         torch.jit.script(MyMod())
 
     @_inline_everything
@@ -3457,7 +3615,7 @@ def foo(x):
         mod.ninf = float("-inf")
         mod.nan = float("nan")
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             class Foo(torch.jit.ScriptModule):
                 def __init__(self):
                     super(Foo, self).__init__()
@@ -4070,7 +4228,6 @@ def foo(xyz):
         scripted_y = scripted_f_data(y)
         self.assertEqual(scripted_y, f_data(y))
         self.assertEqual(scripted_x.requires_grad, False)
-
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -5233,7 +5390,7 @@ a")
 
         x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
         graph = _propagate_shapes(fn.graph, (x, y), False)
-        FileCheck().check('Double(*, *) = aten::add').run(graph)
+        FileCheck().check('Double(*, *, device=cpu) = aten::add').run(graph)
 
     def test_shape_prop_promote_scalar_arg(self):
         @torch.jit.script
@@ -5244,9 +5401,9 @@ a")
         graph = _propagate_shapes(fn.graph, (x,), False)
         default = torch.get_default_dtype()
         if(default == torch.float):
-            FileCheck().check('Float(*, *) = aten::add').run(graph)
+            FileCheck().check('Float(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
         else:
-            FileCheck().check('Double(*, *) = aten::add').run(graph)
+            FileCheck().check('Double(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -6732,7 +6889,9 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
+        expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
+                          "Double(*, device=cpu)", "Double(device=cpu)",
+                          "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
@@ -6751,12 +6910,12 @@ a")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
             # both should have completed shapes
-            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut") \
-                       .check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::tensor").check("Float(device=cpu) = prim::BailOut") \
+                       .check("Tensor = aten::tensor").check("Half(device=cpu) = prim::BailOut").run(g)
         else:
             g = test_dtype.graph_for(5)
             # first should have type set second should not
-            FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
+            FileCheck().check("Float(requires_grad=1, device=cpu) = aten::tensor").check("Tensor = aten::tensor").run(g)
 
         @torch.jit.script
         def test_as_tensor_tensor_input(input):
@@ -6769,7 +6928,7 @@ a")
                        .check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
         else:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
-            FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *, requires_grad=0, device=cpu) = aten::as_tensor").run(g)
 
 
     def test_tensor_requires_grad(self):
@@ -6853,13 +7012,31 @@ a")
         def foo(s: float):
             return torch.tensor(s), torch.tensor([s, s])
 
-        scripted_foo = torch.jit.script(foo)
-        with set_default_dtype(torch.float):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        # need to clear function cache so we re run shape analysis
         with set_default_dtype(torch.double):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+        with set_default_dtype(torch.float):
+            del torch.jit._state._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            del torch.jit._state._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+
+    def test_shape_analysis_grad_property(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.sub(x, torch.tanh(x))
+
+        torch._C._jit_pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
+
+        # requires_grad property shouldn't be accidentally set by shape analysis
+        self.assertTrue(foo.graph.findNode("aten::sub").output().requiresGrad() is None)
 
     def test_empty_like_memory_format_bc(self):
         def f(x):
@@ -7821,7 +7998,7 @@ a")
         raise RuntimeError('dtype not handled')
 
     def _dtype_to_expect(self, dtype, dim=0):
-        param = ', '.join(['*'] * dim)
+        param = ', '.join(['*'] * dim + ['device=cpu'])
         param = '(' + param + ')'
         jit_type = self._dtype_to_jit_name(dtype)
         if dim >= 0:
@@ -8176,7 +8353,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "'Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object for attribute 'invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -8198,6 +8375,17 @@ a")
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
             Foo3()
+
+        class Foo4(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo4, self).__init__()
+                self.invalid = np.int64(5)
+
+        # verify that we capture human understandable class name
+        with self.assertRaisesRegex(TypeError, "numpy.int64"):
+            Foo4()
 
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
@@ -8955,7 +9143,7 @@ a")
                 x[seq_lens[b]:, b, :] = 0
 
         eager_seq, eager_lengths = pack_padded_pad_packed_script(x, seq_lens)
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
         script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
         self.assertEqual(eager_seq, script_seq)
@@ -8978,7 +9166,7 @@ a")
 
         lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_script_pad_sequence_pack_sequence(self):
@@ -8998,7 +9186,7 @@ a")
         tensor1 = torch.tensor([1, 2, 3])
         tensor2 = torch.tensor([4, 5])
         tensor3 = torch.tensor([6])
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             self.checkScript(pad_sequence_func,
                              ([ones3, ones4, ones5],))
             self.checkScript(pad_sequence_func,
@@ -9194,7 +9382,7 @@ a")
 
     def test_tuples(self):
         # TODO: jitter issue.
-        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+        with torch._jit_internal._disable_emit_hooks():  # TODO: Python print broadcasting list
             def foo(i):
                 a = (i + 4, i * 2)
                 c = a
@@ -9306,9 +9494,9 @@ a")
 
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
-        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
-        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *)")
-        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *)")
+        self.assertTrue(if_outputs[0].type().str() == "Float(*, *, requires_grad=0, device=cpu)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *, requires_grad=0, device=cpu)")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *, requires_grad=0, device=cpu)")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -9359,7 +9547,7 @@ a")
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1:3, 3:1)").run(cm.forward.graph)
+        FileCheck().check("Double(1:3, 3:1, requires_grad=0, device=cpu)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
@@ -9903,7 +10091,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2:4, 4:1)").run(str(foo.graph))
+        FileCheck().check("Double(2:4, 4:1, requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
@@ -10164,7 +10352,8 @@ a")
         g = fn.graph_for()
         # Testing shape analysis correctly setting type
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
+            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(g)
 
         @torch.jit.script
         def randint():
@@ -10174,7 +10363,8 @@ a")
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-            FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
+            FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
+                       .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the original version of test_rand")
     def test_rand_profiling(self):
@@ -10186,7 +10376,8 @@ a")
         out = fn()
         self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(3:4, 4:1)").check_not("Float(3:4, 4:1)").run(fn.graph_for())
+        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
+                   .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
 
         @torch.jit.script
         def randint():
@@ -10196,7 +10387,8 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(1:2, 2:1)").check_not("Float(1:2, 2:1)").run(randint.graph_for())
+        FileCheck().check("Double(1:2, 2:1, requires_grad=0, device=cpu)") \
+                   .check_not("Float(1:2, 2:1, requires_grad=0, device=cpu)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
@@ -12446,7 +12638,7 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+        with torch._jit_internal._disable_emit_hooks():  # TODO: Python print broadcasting list
             def kwarg_false(x):
                 # type: (Tensor) -> Tensor
                 return F.max_pool1d(x, 1, 1, return_indices=False)
@@ -13364,8 +13556,8 @@ a")
         self.checkScript(invoke_function, ())
 
         # testing that the functions are cached
-        compiled_fns_1 = torch.jit._get_overloads(test_simple)
-        compiled_fns_2 = torch.jit._get_overloads(test_simple)
+        compiled_fns_1 = torch.jit._script._get_overloads(test_simple)
+        compiled_fns_2 = torch.jit._script._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
             self.assertIs(a.graph, b.graph)
 
@@ -14070,7 +14262,7 @@ a")
                 # type: (str) -> Tensor
                 return self.table[key] + self.x
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
@@ -14999,7 +15191,7 @@ class TestJitGeneratedFunctional(JitTestCase):
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
-UBSAN_BLACKLISTED_TESTS = [
+UBSAN_DISABLED_TESTS = [
     "test___rdiv___constant",
     "test___rdiv___scalar_constant",
     "test_addcdiv",
@@ -15226,7 +15418,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
-                with torch.jit._disable_emit_hooks():
+                with torch._jit_internal._disable_emit_hooks():
                     run_test()
             else:
                 run_test()
@@ -15343,7 +15535,7 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
     for skip in skipTestIf:
         do_test = skip(do_test)
 
-    if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
+    if not (TEST_WITH_UBSAN and test_name in UBSAN_DISABLED_TESTS):
         setattr(test_class, test_name, do_test)
 
 

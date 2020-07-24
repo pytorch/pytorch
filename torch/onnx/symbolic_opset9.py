@@ -463,6 +463,10 @@ def view(g, self, size):
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
 
+def view_as(g, self, other):
+    shape = g.op("Shape", other)
+    return g.op("Reshape", self, shape)
+
 
 def prim_ConstantSplit(g, self, split_size, dim):
     size = self.type().sizes()[dim]
@@ -480,6 +484,17 @@ def prim_ConstantSplit(g, self, split_size, dim):
 def prim_ConstantChunk(g, self, chunks, dim):
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     return prim_ConstantSplit(g, self, split_size, dim)
+
+
+@parse_args('v', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim):
+    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
+    size = self.type().sizes()[dim]
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
 
 
 def split(g, self, split_size_or_sizes, dim):
@@ -500,9 +515,18 @@ def split(g, self, split_size_or_sizes, dim):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
 
 
+def unsafe_split(g, self, split_size_or_sizes, dim):
+    return split(g, self, split_size_or_sizes, dim)
+
+
 @parse_args('v', 'is', 'i')
 def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
+
+
+@parse_args('v', 'is', 'i')
+def unsafe_split_with_sizes(g, self, split_sizes, dim):
+    return split_with_sizes(g, self, split_sizes, dim)
 
 
 @parse_args('v', 'i')
@@ -835,24 +859,38 @@ def _prepare_onnx_paddings(dim, pad):
     paddings = paddings[-2::-2] + paddings[-1::-2]
     return paddings
 
+def _convert_padding_node(padding):
+    padding = sym_help._maybe_get_const(padding, 'is')
+    if sym_help._is_value(padding) and sym_help._is_packed_list(padding):
+        input_list = sym_help._unpack_list(padding)
+        try:
+            padding = [sym_help._get_const(v, 'i', 'padding') for v in input_list]
+        except Exception:
+            return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The sizes of the padding must be constant')
+    return padding
 
-@parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
     mode = "constant"
+    try:
+        value = sym_help._get_const(value, 'f', 'value')
+    except Exception:
+        return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The value for the padding must be constant')
+
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
-@parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     mode = "reflect"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
-@parse_args('v', 'is')
 def replication_pad(g, input, padding):
     mode = "edge"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
@@ -1512,13 +1550,18 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
 def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-    shape = g.op("Shape", input)
-    if dtype is None:
-        dtype = 6  # float
-    return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    fill_value = sym_help._maybe_get_const(fill_value, 'f')
+    if sym_help._is_value(fill_value):
+        dtype = 6 if dtype is None else dtype
+        tmp = zeros_like(g, input, dtype, layout, device)
+        return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
+    else:
+        dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        dtype = 6 if dtype is None else dtype
+        shape = g.op("Shape", input)
+        return g.op("ConstantOfShape", shape,
+                    value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1969,6 +2012,11 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    if dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
+
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
@@ -1977,22 +2025,8 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=start_dim)
     if start_dim == 0 and end_dim == dim - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    p = _reshape_from_tensor(g, input, shape)
-    return p
 
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
 @parse_args('v')
 def nonzero(g, input):

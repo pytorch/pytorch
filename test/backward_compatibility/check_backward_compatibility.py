@@ -8,15 +8,15 @@ import torch
 from torch._C import parse_schema
 
 
-# The date specifies how long the whitelist exclusion should apply to.
+# The date specifies how long the allowlist exclusion should apply to.
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
 #   - Otherwise, pick a date that is far enough in the future that you
 #     believe you can land your diff before then.
 #
-# Whitelist entries can be removed after the date listed on them passes.
-white_list = [
+# Allowlist entries can be removed after the date listed on them passes.
+allow_list = [
     ('c10_experimental', datetime.date(2222, 1, 1)),
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
@@ -76,6 +76,7 @@ white_list = [
     ('aten::dict', datetime.date(2020, 6, 30)),
     ('aten::tensor', datetime.date(2020, 6, 30)),
     ('aten::as_tensor', datetime.date(2020, 6, 30)),
+    ('aten::split_with_sizes', datetime.date(2020, 7, 29)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 6, 1)),
     ('quantized::linear_unpack', datetime.date(2020, 6, 1)),
     ('quantized::linear_prepack_fp16', datetime.date(2020, 6, 1)),
@@ -90,7 +91,7 @@ white_list = [
     ('aten::quantized_instance_norm', datetime.date(2020, 6, 30)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
-    ('aten::eq', datetime.date(2020, 6, 30)),
+    ('aten::eq', datetime.date(2020, 7, 30)),
     ('aten::nq', datetime.date(2020, 6, 30)),
     ('aten::lt', datetime.date(2020, 6, 30)),
     ('aten::gt', datetime.date(2020, 6, 30)),
@@ -110,17 +111,40 @@ white_list = [
     ('aten::to_here', datetime.date(2020, 6, 30)),
     ('aten::to_here(RRef(t) self, double timeout*)', datetime.date(2020, 6, 30)),
     ('aten::local_value', datetime.date(2020, 6, 30)),
-    ('aten::log', datetime.date(2020, 6, 30)),
-    ('aten::__and__', datetime.date(2020, 6, 30)),
-    ('aten::__or__', datetime.date(2020, 6, 30)),
-    ('aten::__xor__', datetime.date(2020, 6, 30)),
+    ('aten::log', datetime.date(2020, 7, 30)),
+    ('aten::__and__', datetime.date(2020, 7, 30)),
+    ('aten::__or__', datetime.date(2020, 7, 30)),
+    ('aten::__xor__', datetime.date(2020, 7, 30)),
     ('aten::split', datetime.date(2020, 6, 30)),
+    ('aten::add', datetime.date(2020, 7, 30)),
+    ('aten::__upsample_bilinear', datetime.date(2020, 7, 30)),
+    ('aten::hash', datetime.date(2020, 7, 30)),
+    ('aten::divmod', datetime.date(2020, 7, 30)),
+    ('aten::sorted', datetime.date(2020, 7, 30)),
+    ('aten::__contains__', datetime.date(2020, 7, 30)),
+    ('aten::ne', datetime.date(2020, 7, 30)),
+    ('aten::index', datetime.date(2020, 7, 30)),
+    ('aten::isnan', datetime.date(2020, 7, 30)),
+    ('aten::pow', datetime.date(2020, 7, 30)),
+    ('aten::atan2', datetime.date(2020, 7, 30)),
+    ('aten::copy_', datetime.date(2020, 7, 30)),
+    ('aten::sort', datetime.date(2020, 7, 30)),
+    ('aten::_cudnn_init_dropout_state', datetime.date(2020, 7, 30)),
+    ('aten::sparse_coo_tensor', datetime.date(2020, 7, 30)),
+    ('aten::_sparse_coo_tensor_with_dims', datetime.date(2020, 7, 30)),
+    ('aten::_sparse_coo_tensor_with_dims_and_tensors', datetime.date(2020, 7, 30)),
+    ('aten::to', datetime.date(2020, 7, 15)),
+    ('aten::__lshift__', datetime.date(2020, 7, 30)),
+    ('aten::__rshift__', datetime.date(2020, 7, 30)),
+    ('aten::__round_to_zero_floordiv', datetime.date(2020, 7, 30)),
+    ('aten::gcd', datetime.date(2020, 7, 30)),
 ]
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
+    ('aten::eq', datetime.date(2020, 7, 30)),
     ('aten::quantized_lstm', datetime.date(2020, 6, 1)),
     ('aten::quantized_gru', datetime.date(2020, 6, 1)),
     ('quantized::make_quantized_cell_params', datetime.date(2020, 6, 1)),
@@ -149,8 +173,8 @@ dont_parse_list = [
 ]
 
 
-def white_listed(schema, white_list):
-    for item in white_list:
+def allow_listed(schema, allow_list):
+    for item in allow_list:
         if item[1] < datetime.date.today():
             continue
         regexp = re.compile(item[0])
@@ -175,7 +199,7 @@ def check_bc(new_schema_dict):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if white_listed(existing_schema, white_list):
+        if allow_listed(existing_schema, allow_list):
             print("Black list, skipping schema: ", str(existing_schema))
             continue
         print("processing existing schema: ", str(existing_schema))
