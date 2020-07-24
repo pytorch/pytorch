@@ -14,11 +14,11 @@ def clipped_sigmoid(continous_V):
         clip = torch.clamp(scale_n_add, -128, 127)
     return clip
 
-def modified_quantized(weight, continous_V):
+def modified_quantized(weight, continous_V, scale):
     W_over_s = torch.floor_divide(weight, scale)
     W_plus_H = W_over_s + clipped_sigmoid(continous_V)
     # TODO: dtypes
-    if W.dype == torch.int8:
+    if weight.dtype == torch.int8:
         soft_quantized_weights = scale * torch.clamp(W_plus_H, -128, 127)
     else:  # add dtype conditional for clambing range
         soft_quantized_weights = scale * torch.clamp(W_plus_H, -128, 127)
@@ -27,13 +27,15 @@ def modified_quantized(weight, continous_V):
 def loss_function(model, input):
     beta = 1  # something we get to play with
     _lambda = 1  # something we get to play with
-
-    scale = something  # grab from the observer?
+    print(model)
+    print(model.__dict__)
+    scale = model  # grab from the observer?
+    raise RuntimeError
     weights = model.weights
     continous_V = model.weight_fake_quant.continous_V
 
     soft_model = copy.deepcopy(model)
-    soft_model.weights = modified_quantized(weights, continous_V)
+    soft_model.weights = modified_quantized(weights, continous_V, scale)
 
     # Frobenius_norm = torch.norm(weights - soft_quantized_weights)
     Frobenius_norm = torch.norm(model.forward(input) - soft_model.forward(input))
@@ -46,14 +48,14 @@ def loss_function(model, input):
 
 class adaround(FakeQuantize):
     def __init__(self):
-        super(FakeQuantize, self).__init__()
+        super(adaround, self).__init__()
         self.continous_V = None
 
     def forward(self, x):
         # the x here is expected to be the parents? weights tensor
         if self.continous_V is None:
             self.continous_V = torch.zeros(x.size())  # random?
-        return modified_quantized(x, self.continous_V)
+        return modified_quantized(x, self.continous_V,0)
 
 class ConvChain(nn.Module):
     def __init__(self):
@@ -71,8 +73,7 @@ class ConvChain(nn.Module):
 
 
 
-araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                        dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+araround_fake_quant = adaround.with_args()
 araround_qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                             quant_min=0,
                                                             quant_max=255,
@@ -85,13 +86,23 @@ def main():
     img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                 for _ in range(5)]
     prepared_model.qconfig = araround_qconfig
-    torch.quantization.prepare_qat(prepared_model)
-    optimizer = torch.optim.Adam([prepared_model.weight_fake_quant.continous_V], lr=0.001)
+    print(araround_fake_quant())
+    # prepared_model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+    prepared_model = torch.quantization.prepare_qat(prepared_model, inplace=False)
+    # print(prepared_model)
+    # print()
+    # print(prepared_model.__dict__)
+    # print()
+    # print(prepared_model.conv2d1.__dict__)
+    print(type(prepared_model))
+    print(type(prepared_model.conv2d1))
+    print(prepared_model.parameters())
+    optimizer = torch.optim.Adam(prepared_model.parameters(), lr=0.001)
 
     for image, target in img_data:
-        image, target = image.to(device), target.to(device)
-        output = model(image)
-        loss = loss_function(model, image)
+        # image, target = image.to(device), target.to(device)
+        output = prepared_model(image)
+        loss = loss_function(prepared_model, image)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
