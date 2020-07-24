@@ -51,11 +51,16 @@ install_centos() {
 }
 
 # Install base packages depending on the base OS
-if [ -f /etc/lsb-release ]; then
-  install_ubuntu
-elif [ -f /etc/os-release ]; then
-  install_centos
-else
-  echo "Unable to determine OS..."
-  exit 1
-fi
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+case "$ID" in
+  ubuntu)
+    install_ubuntu
+    ;;
+  centos)
+    install_centos
+    ;;
+  *)
+    echo "Unable to determine OS..."
+    exit 1
+    ;;
+esac
