@@ -66,7 +66,7 @@ class ScriptModuleSerializer {
 
 } // namespace
 
-void _save_parameters(Module module, std::ostream& out) {
+void _save_parameters(const Module& module, std::ostream& out) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
@@ -75,7 +75,7 @@ void _save_parameters(Module module, std::ostream& out) {
   serializer.serialize(module._ivalue());
 }
 
-void _save_parameters(Module module, const std::string& filename) {
+void _save_parameters(const Module& module, const std::string& filename) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(module._ivalue());
 }
