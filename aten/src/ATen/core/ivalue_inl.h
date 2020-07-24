@@ -114,10 +114,20 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const & {
   return toIntrusivePtr<ivalue::EnumHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
+  if (isNone()) {
+    // Undefined Tensors are represented by IValue as None, so we need to
+    // map back to undefined tensor.
+    return at::Tensor();
+  }
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline at::Tensor IValue::toTensor() const & {
+  if (isNone()) {
+    // Undefined Tensors are represented by IValue as None, so we need to
+    // map back to undefined tensor.
+    return at::Tensor();
+  }
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }

@@ -3,6 +3,10 @@
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
 
+using c10::nullopt;
+using c10::optional;
+using at::Tensor;
+
 namespace c10 {
 
 TEST(IValueTest, Basic) {
@@ -295,4 +299,23 @@ TEST(IValueTest, EnumEquality) {
           "enum_class_1", "enum_name_1", IValue("1")))
   );
 }
+
+TEST(IValueTest, UndefinedTensorAndNoneAreTheSame) {
+  EXPECT_EQ(nullopt, IValue(nullopt).to<optional<Tensor>>());
+  EXPECT_EQ(nullopt, IValue(optional<Tensor>()).to<optional<Tensor>>());
+  EXPECT_EQ(nullopt, IValue(Tensor()).to<optional<Tensor>>());
+
+  EXPECT_EQ(nullopt, IValue(nullopt).toOptional<Tensor>());
+  EXPECT_EQ(nullopt, IValue(optional<Tensor>()).toOptional<Tensor>());
+  EXPECT_EQ(nullopt, IValue(Tensor()).toOptional<Tensor>());
+
+  EXPECT_FALSE(IValue(nullopt).to<Tensor>().defined());
+  EXPECT_FALSE(IValue(optional<Tensor>()).to<Tensor>().defined());
+  EXPECT_FALSE(IValue(Tensor()).to<Tensor>().defined());
+
+  EXPECT_FALSE(IValue(nullopt).toTensor().defined());
+  EXPECT_FALSE(IValue(optional<Tensor>()).toTensor().defined());
+  EXPECT_FALSE(IValue(Tensor()).toTensor().defined());
+}
+
 } // namespace c10

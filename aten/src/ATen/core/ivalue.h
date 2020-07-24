@@ -248,14 +248,22 @@ struct CAFFE2_API IValue final {
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t)
-  : tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
-    // Note: the undefined tensor is not refcounted, so while it
-    // is tagged as a tensor, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined tensor.
-    payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
+  IValue(at::Tensor t) {
+    if (t.defined()) {
+      tag = Tag::Tensor;
+      is_intrusive_ptr = true;
+      // Note: the undefined tensor is not refcounted, so while it
+      // is tagged as a tensor, is_intrusive_ptr is set to false.
+      // This is not an optional optimization: our incref call
+      // *will not* do the right thing when called on an
+      // undefined tensor.
+      payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
+    } else {
+      // If the tensor was undefined, set the IValue to None instead
+      tag = Tag::None;
+      is_intrusive_ptr = false;
+      payload = {0};
+    }
   }
   bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() &&;
