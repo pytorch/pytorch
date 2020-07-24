@@ -1979,13 +1979,27 @@ class TestSparse(TestCase):
                 for sparse_device in ['cuda', 'cpu', None]:
                     for test_empty_tensor in [True, False]:
                         if test_empty_tensor:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        self.value_empty(1, 0).to(values_device),
-                                                        (1, 3, 0), device=sparse_device)
+                            if indices_device != values_device and sparse_device is None:
+                                with self.assertRaises(RuntimeError):
+                                    torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                            self.value_empty(1, 0).to(values_device),
+                                                            (1, 3, 0), device=sparse_device)
+                                continue
+                            else:
+                                t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                            self.value_empty(1, 0).to(values_device),
+                                                            (1, 3, 0), device=sparse_device)
                         else:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        torch.tensor([1.], device=values_device),
-                                                        (1, 3), device=sparse_device)
+                            if indices_device != values_device and sparse_device is None:
+                                with self.assertRaises(RuntimeError):
+                                    torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                            self.value_empty(1, 0).to(values_device),
+                                                            (1, 3, 0), device=sparse_device)
+                                continue
+                            else:
+                                t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
+                                                            torch.tensor([1.], device=values_device),
+                                                            (1, 3), device=sparse_device)
                         should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
                         self.assertEqual(should_be_cuda, t.is_cuda)
 
