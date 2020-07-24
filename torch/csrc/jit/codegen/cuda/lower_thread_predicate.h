@@ -49,11 +49,11 @@ class TORCH_CUDA_API ThreadPredicateMap {
   // Update the thread_predicates bitset based on provided Expr
   void updateBitSet(Expr*);
 
-  void emplace(
+  void insert(
       const TensorView* tv,
       const ir_utils::ParallelTypeBitmap& pred,
       const SourceMapType& src_map);
-  void emplace(const TensorView* tv, const MapType::mapped_type& pred_and_src);
+  void insert(const TensorView* tv, const MapType::mapped_type& pred_and_src);
 };
 
 } // namespace fuser

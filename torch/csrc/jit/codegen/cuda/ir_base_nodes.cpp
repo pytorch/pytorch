@@ -139,11 +139,11 @@ c10::optional<DataType> Val::getDataType() const {
 }
 
 Expr* Val::getOrigin() {
-  return (fusion_->origin(this));
+  return fusion_->origin(this);
 }
 
 const Expr* Val::getOrigin() const {
-  return (fusion_->origin(this));
+  return fusion_->origin(this);
 }
 
 // We don't register with the active fusion in Expr as this needs to be done

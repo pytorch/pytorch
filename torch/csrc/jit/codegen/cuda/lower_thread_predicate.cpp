@@ -10,7 +10,7 @@ namespace fuser {
 
 namespace {
 
-Val* threadPredicate(
+Val* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::SourceMapType::mapped_type& sources) {
   if (pt == ParallelType::BIDx || pt == ParallelType::BIDy ||
@@ -25,7 +25,7 @@ Val* threadPredicate(
   }
 }
 
-Bool* getThreadPredicate(
+Bool* getPredicate(
     const ir_utils::ParallelTypeBitmap& bits,
     const ThreadPredicateMap::SourceMapType& sources) {
   if (bits.none()) {
@@ -36,7 +36,8 @@ Bool* getThreadPredicate(
 
   for (const auto& pt_bool : bits.getMap()) {
     if (pt_bool.second) {
-      auto tp = threadPredicate(pt_bool.first, sources.at(pt_bool.first));
+      auto tp =
+          getPredicatePerParallelType(pt_bool.first, sources.at(pt_bool.first));
       pred = pred == nullptr ? tp : andOp(pred, tp);
     }
   }
@@ -177,7 +178,7 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
     if (!ir_utils::isTV(out))
       continue;
     TORCH_INTERNAL_ASSERT(find(ir_utils::asConstTV(out)) == end());
-    emplace(ir_utils::asConstTV(out), output_preds, src_map);
+    insert(ir_utils::asConstTV(out), output_preds, src_map);
   }
 }
 
@@ -185,7 +186,7 @@ ThreadPredicateMap::ThreadPredicateMap(Fusion* _fusion) : fusion_(_fusion) {
   // Initialize mapping for input tensors
   for (auto inp : fusion_->inputs()) {
     if (ir_utils::isTV(inp)) {
-      emplace(
+      insert(
           ir_utils::asConstTV(inp),
           ir_utils::ParallelTypeBitmap(),
           SourceMapType());
@@ -220,31 +221,31 @@ ThreadPredicateMap::MapType::mapped_type& ThreadPredicateMap::operator[](
   return thread_predicates_[tv];
 }
 
-void ThreadPredicateMap::emplace(
+void ThreadPredicateMap::insert(
     const TensorView* tv,
     const ir_utils::ParallelTypeBitmap& pred,
     const SourceMapType& src_map) {
-  emplace(tv, std::make_pair(pred, src_map));
+  insert(tv, std::make_pair(pred, src_map));
 }
 
-void ThreadPredicateMap::emplace(
+void ThreadPredicateMap::insert(
     const TensorView* tv,
     const std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>&
         pred_and_src) {
-  thread_predicates_.emplace(tv, pred_and_src);
+  thread_predicates_.insert(std::make_pair(tv, pred_and_src));
 }
 
 void ThreadPredicateMap::duplicate(
     const TensorView* copy,
     const TensorView* origin) {
   if (find(origin) != end()) {
-    emplace(copy, at(origin).first, at(origin).second);
+    insert(copy, at(origin).first, at(origin).second);
   }
 }
 
 Bool* ThreadPredicateMap::getExpr(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
-  return getThreadPredicate(at(tv).first, at(tv).second);
+  return getPredicate(at(tv).first, at(tv).second);
 }
 
 } // namespace fuser
