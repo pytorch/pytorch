@@ -114,6 +114,7 @@ class TORCH_API MemoryDAG {
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
+
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 

@@ -26,14 +26,7 @@ namespace jit {
  *
  * There is a special alias set called the "wildcard set", which indicates that
  * we're not sure what this value may alias. To be conservative, we consider
- * the wildcard alias set as potentially aliasing any value within the same
- * type class. Whenever a value becomes contained by another value, such as
- * when a Tensor is appended to a List[Tensor], the contained element becomes
- * part of the wildcard set.
- *
- * Values that contain other mutable types, such as List[Tensor], are
- * initialized as containing the Wildcard set for all contained mutable types.
- *
+ * the wildcard alias set as potentially aliasing any value.
  */
 class AliasDb {
  public:
@@ -80,7 +73,6 @@ class AliasDb {
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
-
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
 
@@ -156,6 +148,7 @@ class AliasDb {
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
   MemoryLocations getWrites(Node* n) const;
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
   void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n, bool writeToContained = false);
@@ -169,6 +162,10 @@ class AliasDb {
    */
   // Register `v` as a wildcard value.
   c10::optional<Element*> setWildcard(const Value* v);
+
+  // Is the element a wildcard or an unhandled container type,
+  // or does the element contain an element for which that's true
+  bool cannotCheckAliasContainment(const Value* elem) const;
 
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
@@ -226,17 +223,12 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
-  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
+  std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
-  void addContainedTypesToFreshElement(
-      Element* container_elem,
-      const TypePtr& mut_type);
 
-  std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
   bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
-  bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   // cached mapping of type ptrs to their mutable types
   mutable std::unordered_map<TypePtr, TypePtr> mapped_mutable_types_;
