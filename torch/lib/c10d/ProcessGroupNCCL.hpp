@@ -159,7 +159,7 @@ class ProcessGroupNCCL : public ProcessGroup {
           outputs_(std::make_shared<std::vector<at::Tensor>>(outputs)),
           streamCounter_(0),
           checkFutObjs_(checkFutObjs),
-          checkFutObjMutex_(checkFutObjMutex_){};
+          checkFutObjMutex_(checkFutObjMutex_) {}
 
     std::shared_ptr<CheckFutureWork> getPtr() {
       return shared_from_this();
@@ -185,7 +185,7 @@ class ProcessGroupNCCL : public ProcessGroup {
           checkFutObjs_->erase(getPtr());
         }
       }));
-    };
+    }
 
    private:
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;

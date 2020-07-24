@@ -15,10 +15,13 @@
 #define SEGREDUCE_MINBLOCKS 16
 #endif
 
-#ifdef REDUCE_BLOCK
-#define REDUCE_SIZE REDUCE_BLOCK
+// Whoever include this header should define REDUCE_BLOCK_SIZE
+// which is the maximum row-wise length
+// Default is 1024 (maxThreads per block in Volta GPU)
+#ifdef REDUCE_BLOCK_SIZE
+#define REDUCE_SIZE REDUCE_BLOCK_SIZE
 #else
-#define REDUCE_SIZE CAFFE_CUDA_NUM_THREADS
+#define REDUCE_SIZE 1024
 #endif
 
 namespace caffe2 {
@@ -183,7 +186,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
     }
   } else {
     // TODO: Tuning NumThreads for sum_squares
-    // TODO: Not compatible with embedding dim larger than maxThread, set Volta as default
+    // TODO: Not compatible with embedding dim larger than maxThread
     typedef cub::BlockReduce<float, REDUCE_SIZE> BlockReduce;
     __shared__ BlockReduce::TempStorage temp_storage;
     int valid = min(block_size, blockDim.x);
