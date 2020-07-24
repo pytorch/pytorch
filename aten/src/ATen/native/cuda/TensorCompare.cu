@@ -35,39 +35,21 @@ void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
 }
 
 void isposinf_kernel_impl(TensorIterator &iter) {
-  if (c10::isIntegralType(iter.input_dtype(), /*include_bool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "isposinf_cuda", [&]() {
-      gpu_kernel(
-        iter,
-        [] GPU_LAMBDA (scalar_t a) -> bool { return false; }
-      );
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
-      gpu_kernel(
-        iter,
-        [] GPU_LAMBDA (scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); }
-      );
-    });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
+    gpu_kernel(
+      iter,
+      [] GPU_LAMBDA (scalar_t a) -> scalar_t { return a == std::numeric_limits<scalar_t>::infinity(); }
+    );
+  });
 }
 
 void isneginf_kernel_impl(TensorIterator &iter) {
-  if (c10::isIntegralType(iter.input_dtype(), /*include_bool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "isneginf_cuda", [&]() {
-      gpu_kernel(
-        iter,
-        [] GPU_LAMBDA (scalar_t a) -> bool { return false; }
-      );
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
-      gpu_kernel(
-        iter,
-        [] GPU_LAMBDA (scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); }
-      );
-    });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
+    gpu_kernel(
+      iter,
+      [] GPU_LAMBDA (scalar_t a) -> scalar_t { return a == -std::numeric_limits<scalar_t>::infinity(); }
+    );
+  });
 }
 
 } // anonymous namespace

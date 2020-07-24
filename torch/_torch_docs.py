@@ -2849,12 +2849,15 @@ add_docstr(torch.isposinf,
            r"""
 isposinf(input, *, out=None) -> Tensor
 Tests if each element of :attr:`input` is positive infinity or not.
+
 Args:
-    {out}
+  {input}
+
+Keyword args:
+  {out}
+
 Example::
     >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
-    >>> a
-    tensor([  -inf,    inf, 1.2000])
     >>> torch.isposinf(a)
     tensor([False,  True, False])
 """.format(**common_args))
@@ -2863,12 +2866,15 @@ add_docstr(torch.isneginf,
            r"""
 isneginf(input, *, out=None) -> Tensor
 Tests if each element of :attr:`input` is negative infinity or not.
+
 Args:
-    {out}
+  {input}
+
+Keyword args:
+  {out}
+
 Example::
     >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
-    >>> a
-    tensor([  -inf,    inf, 1.2000]
     >>> torch.isneginf(a)
     tensor([ True, False, False])
 """.format(**common_args))

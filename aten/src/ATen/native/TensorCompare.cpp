@@ -108,17 +108,10 @@ Tensor isinf(const Tensor &self) {
   });
 }
 
-static inline TensorIterator build_is_infinity_op_iterator(Tensor& result, const Tensor& self) {
-  return at::TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
-    .add_output(result)
-    .add_input(self)
-    .cast_common_dtype_to_outputs(true)
-    .build();
-}
-
 Tensor isposinf(const Tensor &self) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
   Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::isposinf_out(result, self);
   return result;
@@ -127,12 +120,26 @@ Tensor isposinf(const Tensor &self) {
 Tensor& isposinf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   result.resize_(self.sizes());
-  auto iter = build_is_infinity_op_iterator(result, self);
-  isposinf_stub(iter.device_type(), iter);
+
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result.fill_(false);
+  } else {
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(self)
+      .cast_common_dtype_to_outputs(true)
+      .build();
+    isposinf_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
 Tensor isneginf(const Tensor &self) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
   Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::isneginf_out(result, self);
   return result;
@@ -141,8 +148,19 @@ Tensor isneginf(const Tensor &self) {
 Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   result.resize_(self.sizes());
-  auto iter = build_is_infinity_op_iterator(result, self);
-  isneginf_stub(iter.device_type(), iter);
+
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result.fill_(false);
+  } else {
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(self)
+      .cast_common_dtype_to_outputs(true)
+      .build();
+    isneginf_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
