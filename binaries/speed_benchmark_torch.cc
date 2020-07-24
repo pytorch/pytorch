@@ -24,6 +24,8 @@
 #include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
+#include "c10/core/CPUCachingAllocator.h"
+
 #include <chrono>
 using namespace std::chrono;
 
@@ -198,6 +200,7 @@ int main(int argc, char** argv) {
     std::cout << module.forward(inputs) << std::endl;
   }
 
+  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard;
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(
