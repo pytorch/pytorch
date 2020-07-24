@@ -344,7 +344,8 @@ def process_arguments(arguments, func_variants, declaration, func_return):
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
                 assert argument['name'] == func_return[arg_idx]['name'] or \
-                    argument['name'] == func_return[arg_idx]['name'] + "_return"
+                    argument['name'] == func_return[arg_idx]['name'] + "_return" or \
+                    argument['name'] + ".vec()" == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
@@ -379,6 +380,11 @@ def parse_return_arguments(return_decl, inplace, func_decl):
                     "Return Tensor of function \"{}\" flagged as inplace needs to be " \
                     "annotated as mutable".format(func_decl['func'])
                 argument_dict['name'] = 'self'
+            elif t == "TensorList" and inplace:
+                assert annotation and annotation.endswith("!"), \
+                    "Return TensorList of function \"{}\" flagged as inplace needs to be " \
+                    "annotated as mutable".format(func_decl['func'])
+                argument_dict['name'] = 'self.vec()'
             else:
                 argument_dict['name'] = 'result' if not multiple_args else 'result' + str(arg_idx)
         argument_dict['output'] = True

@@ -53,6 +53,23 @@ class TestForeach(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Only non overlapping and dense tensors are supported."):
             torch._foreach_add(tensors, 1)
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_add_scalar__same_size_tensors(self, device, dtype):
+        N = 20
+        H = 20
+        W = 20
+        tensors = []
+        for _ in range(N):
+            tensors.append(torch.zeros(H, W, device=device, dtype=dtype))
+        if dtype == torch.bool:
+            torch._foreach_add_(tensors, True)
+        else:
+            torch._foreach_add_(tensors, 1)
+        for t in tensors:
+            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
+
+
+
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':

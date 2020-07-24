@@ -867,6 +867,11 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   return size_var;
 }
 
+void ensureUniqueIfOutOfPlaced(const char* name, const at::TensorList tensors) {
+  for(int i = 0; i < tensors.size(); i++) {
+    ensureUniqueIfOutOfPlaced(name, tensors[i]);
+  }
+}
 void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
   auto& state = getTracingState();
   if (state && state->force_outplace == false) {

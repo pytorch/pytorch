@@ -325,6 +325,10 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const at::Tensor& tensor);
 
+TORCH_API void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const at::TensorList tensors);
+
 template <
     typename T,
     typename = torch::enable_if_t<(
