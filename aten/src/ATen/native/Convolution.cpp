@@ -824,7 +824,7 @@ at::Tensor _convolution(
   return output;
 }
 
-at::Tensor _convolution_deprecated(
+at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
