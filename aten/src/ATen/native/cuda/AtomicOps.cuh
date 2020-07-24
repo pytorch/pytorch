@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <c10/util/complex.h>
@@ -7,7 +8,7 @@
 #include <ATen/ATen.h>
 
 namespace at { namespace native { namespace atomic_ops {
-template <typename operation, size_t n>
+      template <typename operation, size_t n>
 struct AtomicAddIntegerImplNew;
 
 using add_op = std::integral_constant<int, 0>;
@@ -18,7 +19,8 @@ using div_op = std::integral_constant<int, 3>;
 // Integer addition functions.
 template<typename T>
 struct AtomicAddIntegerImplNew<T, 1> {
-  inline __device__ void operator()(T *address, T val) {
+  template <typename func_t>
+  inline __device__ void operator()(T *address, T val, const func_t& func) {
     size_t offset = (size_t)address & 3;
     uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     uint32_t old = *address_as_ui;
@@ -32,7 +34,7 @@ struct AtomicAddIntegerImplNew<T, 1> {
       old_byte = (old >> shift) & 0xff;
       // preserve size in initial cast. Casting directly to uint32_t pads
       // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint8_t>(THCNumerics<T>::add(val, old_byte));
+      newval = func(val, old_byte);//static_cast<uint8_t>(THCNumerics<T>::add(val, old_byte));
       newval = (old & ~(0x000000ff << shift)) | (newval << shift);
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
@@ -41,7 +43,8 @@ struct AtomicAddIntegerImplNew<T, 1> {
 
 template<typename T>
 struct AtomicAddIntegerImplNew<T, 2> {
-  inline __device__ void operator()(T *address, T val) {
+  template <typename func_t>
+  inline __device__ void operator()(T *address, T val, const func_t& func) {
     size_t offset = (size_t)address & 2;
     uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     bool is_32_align = offset;
@@ -55,16 +58,17 @@ struct AtomicAddIntegerImplNew<T, 2> {
       old_bytes = is_32_align ? old >> 16 : old & 0xffff;
       // preserve size in initial cast. Casting directly to uint32_t pads
       // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint16_t>(THCNumerics<T>::add(val, old_bytes));
+      newval = func(val, old_bytes);//static_cast<uint16_t>(THCNumerics<T>::add(val, old_bytes));
       newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
 };
 
-template<typename T>
-struct AtomicAddIntegerImplNew<T, 4> {
-  inline __device__ void operator()(T *address, T val) {
+      template<typename T>
+      struct AtomicAddIntegerImplNew<T,  4> {
+        template <typename func_t>
+  inline __device__ void operator()(T *address, T val, const func_t &func) {
     uint32_t * address_as_ui = (uint32_t *) (address);
     uint32_t old = *address_as_ui;
     uint32_t newval;
@@ -78,9 +82,10 @@ struct AtomicAddIntegerImplNew<T, 4> {
   }
 };
 
-template<typename T>
-struct AtomicAddIntegerImplNew<T, 8> {
-  inline __device__ void operator()(T *address, T val) {
+      template<typename T>
+      struct AtomicAddIntegerImplNew<T, 8> {
+        template <typename func_t>
+  inline __device__ void operator()(T *address, T val, const func_t& func) {
     unsigned long long * address_as_ui = (unsigned long long *) (address);
     unsigned long long old = *address_as_ui;
     unsigned long long newval;
@@ -100,15 +105,24 @@ struct gpuAtomic;
 template <>
 struct gpuAtomic<add_op> {
   inline __device__ void operator() (uint8_t * address, uint8_t val) {
-    AtomicAddIntegerImplNew<uint8_t, sizeof(uint8_t)>()(address, val);
+    AtomicAddIntegerImplNew<uint8_t, sizeof(uint8_t)>()(address, val,
+                                                        [](uint8_t val, uint32_t old_byte) {
+                                                          return static_cast<uint8_t>(THCNumerics<uint8_t>::add(val, old_byte));
+                                                        });
   }
 
   inline __device__ void operator() (int8_t * address, int8_t val) {
-    AtomicAddIntegerImplNew<int8_t, sizeof(int8_t)>()(address, val);
+    AtomicAddIntegerImplNew<int8_t, sizeof(int8_t)>()(address, val,
+                                                      [](int8_t val, uint32_t old_byte) {
+                                                        return static_cast<int8_t>(THCNumerics<int8_t>::add(val, old_byte));
+                                                          });
   }
 
   inline  __device__ void operator()(int16_t * address, int16_t val) {
-    AtomicAddIntegerImplNew<int16_t, sizeof(int16_t)>()(address, val);
+    AtomicAddIntegerImplNew<int16_t, sizeof(int16_t)>()(address, val,
+                                                        [](int16_t val, uint32_t old_byte) {
+                                                          return static_cast<uint16_t>(THCNumerics<int16_t>::add(val, old_byte));
+                                                        });
   }
 
   inline __device__ int32_t operator() (int32_t * address, int32_t val) {
@@ -119,7 +133,7 @@ struct gpuAtomic<add_op> {
 #ifdef __HIP_PLATFORM_HCC__
     __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
-    AtomicAddIntegerImplNew<int64_t, sizeof(int64_t)>()(address, val);
+    AtomicAddIntegerImplNew<int64_t, sizeof(int64_t)>()(address, val, [](){});
 #endif
   }
 
