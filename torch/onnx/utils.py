@@ -334,7 +334,7 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freeze_module):
+def _model_to_jit_graph(model, args, _retain_param_name, enable_jit_freeze_module):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
         try:
@@ -362,7 +362,7 @@ def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freeze_module
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
-        if retain_param_name:
+        if _retain_param_name:
             graph_inputs = list(graph.inputs())
             user_input_num = len(graph_inputs) - len(state_dict)
             param_names = list(state_dict.keys())
