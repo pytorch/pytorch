@@ -71,7 +71,7 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
       "conv2d",
       std::vector<c10::IValue>({input, weight, bias}),
       at::sequence_number::peek());
-  auto result_ = VariableType::conv2d(
+  auto result_ = at::TypeDefault::conv2d(
       input,
       weight,
       bias,
@@ -96,7 +96,7 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto dim = (std::move(peek(*stack, 1, 3))).toInt();
   auto dtype = (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>();
   auto result_ =
-      torch::autograd::VariableType::log_softmax_int(self, dim, dtype);
+      at::TypeDefault::log_softmax_int(self, dim, dtype);
   drop(*stack, 3);
   pack(*stack, std::move(result_));
 }
@@ -106,8 +106,8 @@ TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
   m.impl("add.Scalar", TORCH_FN(torch::autograd::VariableType::add_Scalar));
   m.impl("mul.Tensor", TORCH_FN(torch::autograd::VariableType::mul_Tensor));
   m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
-  m.impl("dropout", TORCH_FN(VariableType::dropout));
-  m.impl("feature_dropout", TORCH_FN(VariableType::feature_dropout));
+  //m.impl("dropout", TORCH_FN(VariableType::dropout));
+  //m.impl("feature_dropout", TORCH_FN(VariableType::feature_dropout));
   m.impl(
       "log_softmax.int",
       torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
@@ -119,7 +119,7 @@ TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
          c10::List<int64_t> padding,
          c10::List<int64_t> dilation,
          bool ceil_mode = false) {
-        return VariableType::max_pool2d(
+        return at::TypeDefault::max_pool2d(
             self,
             kernel_size.vec(),
             stride.vec(),
