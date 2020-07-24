@@ -354,6 +354,11 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
+          "_jit_pass_constant_propagation_immutable_types",
+          [](std::shared_ptr<Graph>& g) {
+            return ConstantPropagationImmutableTypes(g);
+          })
+      .def(
           "_jit_pass_constant_propagation",
           [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); })
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
