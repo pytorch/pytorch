@@ -1,8 +1,9 @@
 import threading
 import time
 import torch
+import unittest
 from torch.futures import Future
-from torch.testing._internal.common_utils import TestCase, TemporaryFileName
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase, TemporaryFileName, run_tests
 
 
 def add_one(fut):
@@ -115,6 +116,7 @@ class TestFuture(TestCase):
         self.assertEqual(res[1].wait(), 2)
         t.join()
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this testcase for Windows")
     def test_wait_all(self):
         fut1 = Future()
         fut2 = Future()
@@ -132,3 +134,6 @@ class TestFuture(TestCase):
         fut3 = fut1.then(raise_in_fut)
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
             torch.futures.wait_all([fut3, fut2])
+
+if __name__ == '__main__':
+    run_tests()
