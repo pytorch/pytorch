@@ -330,7 +330,7 @@ pages.
 Tutorials
 ---------
 
-PyTorch tutorials are documents used to help understand using PyTorch to
+PyTorch tutorials are documents which are used to help in understanding how to use PyTorch to
 accomplish specific tasks or to understand more holistic concepts.
 Tutorials are built using
 `Sphinx-Gallery <https://sphinx-gallery.readthedocs.io/en/latest/index.html>`__
