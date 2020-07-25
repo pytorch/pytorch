@@ -1862,6 +1862,7 @@ graph(%Ra, %Rb):
         self.run_pass('constant_propagation', graph)
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
+    # TODO(gmagogsfm): Refactor this test to reduce complexity.
     def test_constant_insertion(self):
         funcs_template = dedent('''
         def func():
@@ -1955,11 +1956,10 @@ graph(%Ra, %Rb):
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
             f_script = cu.func
-            self.run_pass('constant_propagation', f_script.graph)
-            num_constants = 3  # input constant twice, None once
-            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
+            self.run_pass('constant_propagation_immutable_types', f_script.graph)
+            num_constants = str(f_script.graph).count("prim::Constant")
             self.run_pass('cse', f_script.graph)
-            FileCheck().check_count("prim::Constant", num_constants - 1, exactly=True).run(f_script.graph)
+            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_cuda_export_restore(self):
