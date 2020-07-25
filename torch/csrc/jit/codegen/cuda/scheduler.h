@@ -25,6 +25,10 @@ TORCH_CUDA_API bool scheduleFusion(
 struct LaunchParam {
   bool mutable_ = false;
   int value_ = 1;
+
+  bool operator==(const LaunchParam& other) const {
+    return other.value_ == value_ && other.mutable_ == mutable_;
+  }
 };
 
 // Parameters the Reduction Heuristic Generates to describe
@@ -37,33 +41,34 @@ struct ReductionParams {
   LaunchParam bdimy_;
 
   // Reduction Attributes
-  bool fastest_dim = true;
-  bool cross_block = false;
-  bool cross_grid = false;
-  bool mul_reds_per_blk = false;
+  bool fastest_dim_ = true;
+  bool cross_block_ = false;
+  bool cross_grid_ = false;
+  bool mul_reds_per_blk_ = false;
 
   bool operator==(const ReductionParams& other) const {
-    bool lp_equal = other.gdimx == gdimx && other.gdimy == gdimy &&
-        other.bdimx == bdimx && other.bdimy == bdimy;
-    bool attr_equal = other.fastest_dim == fastest_dim &&
-        other.cross_block == cross_block && other.cross_grid == cross_grid &&
-        other.mul_reds_per_blk == mul_reds_per_blk;
+    bool lp_equal = other.gdimx_ == gdimx_ && other.gdimy_ == gdimy_ &&
+                    other.bdimx_ == bdimx_ && other.bdimy_ == bdimy_;
+    bool attr_equal = other.fastest_dim_ == fastest_dim_ &&
+                      other.cross_block_ == cross_block_ &&
+                      other.cross_grid_ == cross_grid_ &&
+                      other.mul_reds_per_blk_ == mul_reds_per_blk_;
     return attr_equal && lp_equal;
   }
 };
 
 class ReductionParamsHash {
- public:
+public:
   size_t operator()(const ReductionParams& rp) const {
-    size_t lp_hash = (rp.gdimx.is_mutable ? 0 : rp.gdimx.value) ^
-        (rp.gdimy.is_mutable ? 0 : rp.gdimy.value) ^
-        (rp.bdimx.is_mutable ? 0 : rp.bdimx.value) ^
-        (rp.bdimy.is_mutable ? 0 : rp.bdimy.value);
+    size_t lp_hash =  (rp.gdimx_.mutable_ ? 0 : rp.gdimx_.value_) ^
+                      (rp.gdimy_.mutable_ ? 0 : rp.gdimy_.value_) ^
+                      (rp.bdimx_.mutable_ ? 0 : rp.bdimx_.value_) ^
+                      (rp.bdimy_.mutable_ ? 0 : rp.bdimy_.value_);
     constexpr size_t bits = sizeof(std::size_t) * 8;
-    size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) |
-        static_cast<size_t>(rp.cross_block) << (bits - 2) |
-        static_cast<size_t>(rp.cross_grid) << (bits - 3) |
-        static_cast<size_t>(rp.mul_reds_per_blk) << (bits - 4);
+    size_t attr_hash = static_cast<size_t>(rp.fastest_dim_) << (bits-1) |
+                       static_cast<size_t>(rp.cross_block_) << (bits-2) |
+                       static_cast<size_t>(rp.cross_grid_) << (bits-3) |
+                       static_cast<size_t>(rp.mul_reds_per_blk_) << (bits-4);
     return lp_hash | attr_hash;
   }
 };
