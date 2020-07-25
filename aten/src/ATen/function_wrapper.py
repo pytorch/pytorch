@@ -506,7 +506,9 @@ FunctionOption = TypedDict('FunctionOption', {
     'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
+    'native_formals_with_defaults': List[str],
     'formals': List[str],
+    'native_formals': List[str],
     'formals_types': List[str],
     'cpp_signature': str,
     # 'schema_order_cpp_signature' is like 'cpp_signature' but keeps them in the
