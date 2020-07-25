@@ -140,22 +140,6 @@ struct BoxedKernelWrapper {
 // specializations can be removed.
 //
 
-// at::Dimname
-template <class... Args>
-using has_dimname_arg =
-  guts::disjunction<
-    std::is_same<at::Dimname, std::decay_t<Args>>...,
-    std::is_same<c10::ArrayRef<at::Dimname>, std::decay_t<Args>>...,
-    std::is_same<c10::optional<c10::ArrayRef<at::Dimname>>, std::decay_t<Args>>...
-  >;
-
-template<class Result, class... Args>
-struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_dimname_arg<Args...>::value, void>> {
-  static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
-    TORCH_INTERNAL_ASSERT(false, "Call to a boxed kernel with unboxable parameter type at::Dimname.");
-  }
-};
-
 // at::Quantizer
 template <class... Args>
 using has_quantizer_arg =
