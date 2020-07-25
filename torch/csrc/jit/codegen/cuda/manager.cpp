@@ -14,6 +14,7 @@
 #include <unordered_map>
 
 #include <c10/core/DeviceType.h>
+#include <ATen/DimVector.h>
 
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 
@@ -83,7 +84,7 @@ class CudaFusionManager {
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    auto inputs_vec = dimCollapseInputs(graph, inputs);
+    auto inputs_vec = dimSortInputs(graph, inputs);
     const at::ArrayRef<IValue> inputs_ref = inputs_vec;
 
     FusionExecutor* fe;
@@ -91,8 +92,8 @@ class CudaFusionManager {
       // search kernel cache failed, we need to codegen new kernel for given
       // inputs;
 
-      auto copy = dimCollapseGraph(graph);
-      auto fusion = parseJitIR(copy);
+      //auto copy = dimCollapseGraph(graph);
+      auto fusion = parseJitIR(graph);
 
       // TODO: update the API to let `scheduleFusion` consume & return a fusion
       // magic scheduler updates fusion instance via transformation and setup
@@ -107,7 +108,7 @@ class CudaFusionManager {
     }
 
     fe = kernel_cache_[kernel_id].get();
-    return dimCollapseOutputs(graph, fe->runFusion(inputs_ref));
+    return dimSortOutputs(graph, fe->runFusion(inputs_ref));
   }
  
  private:
@@ -139,6 +140,8 @@ class CudaFusionManager {
         }
         if (acc_type->dim().has_value()) {
           // TODO: I think merge cannot handle broadcast - Go verify it later;
+          // TODO: Since we are only handling permutation here, we should just
+          //       merge the stride_index_;
           acc_type = acc_type->merge(input_type);
         } else {
           acc_type = input_type;
@@ -195,6 +198,56 @@ class CudaFusionManager {
     } else {
       printf("no stride properties available\n");
     }
+  }
+
+  // return a permutation order that would undo `permuted`
+  at::DimVector restorePermutation(at::DimVector permuted) {
+    int rank = static_cast<int>(permuted.size());
+    at::DimVector permutation(rank, -1);
+    for (int i; i < rank; i++) {
+      permutation[permuted[i]] = i;
+    }
+    return permutation;
+  }
+
+  at::DimVector getSortStrideScheme(TensorTypePtr type) {
+    // `permute_seq` is the returned permutation to achieve sorted stride;
+    at::DimVector permute_seq;
+
+    auto stride_properties = type->stride_properties().sizes();
+
+    TORCH_INTERNAL_ASSERT(stride_properties.has_value(),
+        "unknown sizes or stride_properties, collapsing shouldn't happen");
+
+    // TODO: reuse this;
+    const int rank = static_cast<int>(stride_properties->size());
+
+    // stores axes with stride_index;
+    std::set<int> ordered_axes;
+
+    // TODO: this does not support broadcast yet;
+    for (int i = 0; i < rank; i++) {
+      if (auto index = (*stride_properties)[i]->stride_index_) {
+        ordered_axes.insert(*index);
+			}
+    }
+
+    int unallocated_axis = 0;
+    // we push from slowest to fastest
+    for (int i = rank-1; i >= 0; i--) {
+      if (auto index = (*stride_properties)[i]->stride_index_) {
+        // pushing axis index to current entry in permute_seq;
+        permute_seq.emplace_back(*index);
+      } else {
+        // no designated axis for this slot, so we push an axis w/o designated
+        // order;
+        while (ordered_axes.count(unallocated_axis) != 0) {
+          ++unallocated_axis;
+        }
+        permute_seq.emplace_back(unallocated_axis++);
+      }
+    }
+    return permute_seq;
   }
 
   std::vector<std::vector<int>> getCollapsingScheme(TensorTypePtr type) {
@@ -277,7 +330,7 @@ class CudaFusionManager {
     return tensor.as_strided(sizes, strides);
   }
 
-  std::vector<IValue> dimCollapseInputs(
+  std::vector<IValue> dimSortInputs(
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs) {
     if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
@@ -292,24 +345,22 @@ class CudaFusionManager {
       return inputs.vec();
     }
 
-    auto strategy = getCollapsingScheme(acc_type);
-    printf("\n ==== strategy");
-    for (const auto& collapsed_dims : strategy) {
-      printf("\n\tdim: ");
-      for (const auto& dim : collapsed_dims) {
-        printf("%d, ", dim);
-      }
+    auto strategy = getSortStrideScheme(acc_type);
+    // TODO: early return if permutation is no-op;
+
+    printf("\n ==== strategy: permute dims");
+    for (const auto& dim : strategy) {
+      printf("%ld, ", dim);
     }
-    std::vector<IValue> collapsed_inputs;
+    std::vector<IValue> permuted_inputs;
     for (const auto& input : inputs) {
       if (input.isTensor()) {
-        collapsed_inputs.emplace_back(dimCollapseInput(input.toTensor(), strategy));
+        permuted_inputs.emplace_back(input.toTensor().permute(strategy));
       } else {
-        collapsed_inputs.emplace_back(input);
+        permuted_inputs.emplace_back(input);
       }
     }
-    return collapsed_inputs;
-    //return inputs.vec();
+    return permuted_inputs;
   }
 
   // TODO: we are currently using output types in `graph` in order to restore
@@ -355,6 +406,29 @@ class CudaFusionManager {
       uncollapsed_outputs.emplace_back(outputs[i].as_strided(sizes, strides));
     }
     return uncollapsed_outputs;
+  }
+
+  std::vector<at::Tensor> dimSortOutputs(
+      const std::shared_ptr<Graph>& graph,
+      const std::vector<at::Tensor> outputs) {
+    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
+      return outputs;
+    }
+    auto acc_type = extractDimensionCollapse(graph);
+    if (!acc_type->dim().has_value()) {
+      return outputs;
+    }
+
+    auto strategy = getSortStrideScheme(acc_type);
+    // TODO: early return if permutation is no-op;
+    auto restore_strategy = restorePermutation(strategy);
+
+    std::vector<at::Tensor> permuted_outputs;
+    TORCH_INTERNAL_ASSERT(outputs.size() == graph->outputs().size());
+    for (auto output : outputs) {
+      permuted_outputs.emplace_back(output.permute(restore_strategy));
+    }
+    return permuted_outputs;
   }
 
   std::shared_ptr<Graph> dimCollapseGraph(std::shared_ptr<Graph>& graph) {

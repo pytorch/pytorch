@@ -52,7 +52,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   }
 
   // Need to add contiguity information
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+  //TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 
   domain_ = new TensorDomain(sizes);
 
