@@ -97,7 +97,6 @@ struct OptionalArray {
   _(RRef)                    \
   _(Generator)               \
   _(Enum)                    \
-  _(Dimname)                 \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -565,14 +564,6 @@ struct CAFFE2_API IValue final {
 
   at::QScheme toQScheme() const {
     return static_cast<at::QScheme>(toInt());
-  }
-
-  // Dimname
-  IValue(at::Dimname dimname)
-  : IValue(dimname.symbol().toQualString()) {}
-
-  at::Dimname toDimname() const {
-    return at::Dimname::fromSymbol(Symbol::fromQualString(toStringRef()));
   }
 
   // Generator

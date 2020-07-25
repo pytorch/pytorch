@@ -126,7 +126,8 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 template<class FuncType, class Enable = void>
 struct BoxedKernelWrapper {
   static_assert(sizeof(FuncType) == -1,
-    "No boxing support for this function type. Look for a nearby error like "
+    "Function signature contains one or more unsupported parameter and/or return types. "
+    "Look for a nearby error like "
     "\"‘call’ is not a member of ‘c10::impl::BoxedKernelWrapper<(your function type), void>’\" "
     "- (your function type) is the unsupported signature.");
 };
@@ -138,6 +139,22 @@ struct BoxedKernelWrapper {
 // raise runtime errors. As support for these types is added, the
 // specializations can be removed.
 //
+
+// at::Dimname
+template <class... Args>
+using has_dimname_arg =
+  guts::disjunction<
+    std::is_same<at::Dimname, std::decay_t<Args>>...,
+    std::is_same<c10::ArrayRef<at::Dimname>, std::decay_t<Args>>...,
+    std::is_same<c10::optional<c10::ArrayRef<at::Dimname>>, std::decay_t<Args>>...
+  >;
+
+template<class Result, class... Args>
+struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_dimname_arg<Args...>::value, void>> {
+  static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
+    TORCH_INTERNAL_ASSERT(false, "Call to a boxed kernel with unboxable parameter type at::Dimname.");
+  }
+};
 
 // at::Quantizer
 template <class... Args>
