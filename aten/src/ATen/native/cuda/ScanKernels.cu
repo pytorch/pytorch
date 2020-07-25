@@ -506,7 +506,7 @@ void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, Binar
         binary_op,
         size_cub,
         at::cuda::getCurrentCUDAStream()));
-    auto temp_storage = at::empty(
+    auto temp_storage = at::native::empty_cuda(
         {static_cast<int64_t>(temp_storage_bytes)},
         self.options().dtype(kByte));
     AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(
@@ -534,14 +534,18 @@ void scan_dim(const Tensor& self, Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   Tensor self_ = self.contiguous();
-  result = result.contiguous();
+  bool copy_result = !result.is_contiguous();
+  Tensor result_ = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    scan_thrust_or_cub<scalar_t>(self_, result, init, binary_op);
+    scan_thrust_or_cub<scalar_t>(self_, result_, init, binary_op);
   } else if (dim == ndim - 1) {
-    scan_innermost_dim<scalar_t>(self_, result, init, binary_op);
+    scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
   } else {
-    scan_outer_dim<scalar_t>(self_, result, dim, init, binary_op);
+    scan_outer_dim<scalar_t>(self_, result_, dim, init, binary_op);
+  }
+  if (copy_result) {
+    result.copy_(result_);
   }
 }
 
