@@ -159,9 +159,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_amd.py
   python setup.py install --user
 
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
-
   exit 0
 fi
 
@@ -233,6 +230,17 @@ else
     mkdir "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
     popd
     assert_git_not_dirty

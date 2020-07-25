@@ -79,6 +79,16 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isreal(const Tensor& self) {
+  // Note: Integral and Floating tensor values are always real
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true) ||
+      c10::isFloatingType(self.scalar_type())) {
+    return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
+  return at::imag(self) == 0;
+}
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
@@ -121,7 +131,7 @@ bool is_nonzero(const Tensor& self) {
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
   } else if (localScalar.isComplex()) {
-     return localScalar.to<std::complex<double>>() != std::complex<double>(0.0, 0.0);
+     return localScalar.to<c10::complex<double>>() != c10::complex<double>(0.0, 0.0);
   } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
   } else if (localScalar.isBoolean()) {

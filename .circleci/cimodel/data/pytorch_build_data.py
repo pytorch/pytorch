@@ -3,11 +3,8 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
-        (None, [
-            X("nightly"),
-        ]),
         ("rocm", [
-            ("3.3", [
+            ("3.5.1", [
                 X("3.6"),
             ]),
         ]),
@@ -62,6 +59,9 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("9", [XImportant("3.8")]),
+        ]),
+        ("conda", [
+            ("", [XImportant("3.7")]),
         ]),
     ]),
 ]
