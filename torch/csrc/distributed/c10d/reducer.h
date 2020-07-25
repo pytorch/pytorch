@@ -193,7 +193,10 @@ class Reducer {
   // function call in `finalize_backward` happens only if DDP communication hook
   // was registered to recrate views with the result of `future_work`. Before
   // `finalize_backward` call, views must be cleared.
-  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
+  void initialize_bucketviews(
+      BucketReplica& replica,
+      at::Tensor& contents,
+      bool copy_to_bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //

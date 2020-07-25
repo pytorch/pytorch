@@ -689,28 +689,10 @@ void Reducer::initialize_buckets(
           replica.offsets.push_back(offset);
           replica.lengths.push_back(length);
           offset += length;
-
-          // Let grad tensor point to a dummy empty tensor so as to free up
-          // grad tensor's memory if grad tensor has storage, later on grad
-          // tensors will point to replica.contents.bucket_views, this can
-          // help all reduce in place and save memory. Clear grad storage has
-          // to be done before allocating replica.content tensor, otherwise
-          // grad tensors and contents tensor co-exist at some point of time,
-          // it can not save memory in this case.
-          runGradCallbackForVariable(variable, [&](auto& grad) {
-            if (grad.has_storage()) {
-              grad = at::empty({0}, options);
-              // The grad is modified and needs to be written back.
-              return true;
-            }
-            // The grad is not modified and does not need to be written back.
-            return false;
-          });
         }
 
         // Allocate bucket contents tensor.
         replica.contents = at::empty({static_cast<long>(offset)}, options);
-
         // Note:  "Gradient Layout Contract"
         //
         // Here, create views into the contents tensor for each variable's grad.
@@ -748,7 +730,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucketviews(replica, replica.contents);
+        initialize_bucketviews(replica, replica.contents, true);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -776,7 +758,8 @@ void Reducer::initialize_buckets(
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucketviews(
     Reducer::BucketReplica& replica,
-    at::Tensor& contents) {
+    at::Tensor& contents,
+    bool copy_to_bucket_view) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
     auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -795,13 +778,20 @@ void Reducer::initialize_bucketviews(
     }
     replica.bucket_views.push_back(bucket_view);
     // If grad has already been defined/calculated in previous iterations,
-    // it was pointed to a dummy tensor above, and now let it point to the
-    // new bucket_view.
-    // If grad is not calculated yet, do not let it point to bucket_view.
-    // E.g., for global_unused parameters, their grads
-    // should be kept as being undefined.
+    // and the grad does not point to bucket_view, that means bucket_view
+    // is newly allocated, if this function is called inside initialize_bucket,
+    // old grad needs to be copied into new bucket_view for initialization
+    // and let grad point to bucket_view;
+    // otherwise this function is called for communication hook, bucket_view
+    // has the updated results in new tensor, just let grad point to
+    // bucket_view. If grad is not defined, do not let it point to bucket_view.
+    // E.g., for global_unused parameters, their grads should be kept as being
+    // undefined.
     runGradCallbackForVariable(v, [&](auto& grad) {
-      if (grad.has_storage()) {
+      if (grad.defined() && !grad.is_alias_of(bucket_view)) {
+        if (copy_to_bucket_view) {
+          bucket_view.copy_(grad);
+        }
         grad = bucket_view;
         // The grad is modefied and needs to be written back.
         return true;
@@ -1022,7 +1012,7 @@ void Reducer::finalize_backward() {
       // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
         bucket.replicas[i].bucket_views.clear();
-        initialize_bucketviews(bucket.replicas[i], future_result[i]);
+        initialize_bucketviews(bucket.replicas[i], future_result[i], false);
       }
     }
     if (!bucket.expect_sparse_gradient) {
