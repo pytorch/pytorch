@@ -571,6 +571,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_class_type.cpp",
         "test/cpp/jit/test_code_template.cpp",
         "test/cpp/jit/test_constant_pooling.cpp",
+        "test/cpp/jit/test_cleanup_passes.cpp",
         "test/cpp/jit/test_create_autodiff_subgraphs.cpp",
         "test/cpp/jit/test_custom_class.cpp",
         "test/cpp/jit/test_custom_operators.cpp",
