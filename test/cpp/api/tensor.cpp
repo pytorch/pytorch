@@ -99,8 +99,10 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     // Throws if requires_grad is set in TensorOptions
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
-    ASSERT_THROW(
-        tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
+
+    // Doesn't throw if requires_grad is not set
+    tensor.to(at::TensorOptions());
+    tensor.to(at::TensorOptions().requires_grad(false));
   }
   {
     auto tensor = torch::empty({3, 4});
@@ -113,8 +115,10 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     // Throws if requires_grad is set in TensorOptions
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
-    ASSERT_THROW(
-        tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
+
+    // Doesn't throw if requires_grad is not set
+    tensor.to(at::TensorOptions());
+    tensor.to(at::TensorOptions().requires_grad(false));
   }
 }
 
@@ -1045,4 +1049,26 @@ TEST(TensorTest, RequiresGradInplace) {
   const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
   ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
     "Only Tensors of floating point and complex dtype can require gradients");
+}
+
+TEST(TensorTest, StdDimension) {
+  // Test that std(0) doesn't select the std(unbiased=False) overload (gh-40287)
+  auto x = torch::randn({4, 3});
+  auto std = x.std(0);
+
+  ASSERT_EQ(x.var(0).numel(), 3);
+  ASSERT_EQ(x.std(0).numel(), 3);
+
+  ASSERT_EQ(x.var(0, /*unbiased=*/true).numel(), 3);
+  ASSERT_EQ(x.std(0, /*unbiased=*/true).numel(), 3);
+
+  ASSERT_EQ(torch::var(x, 0).numel(), 3);
+  ASSERT_EQ(std::get<0>(torch::var_mean(x, 0)).numel(), 3);
+  ASSERT_EQ(torch::std(x, 0).numel(), 3);
+  ASSERT_EQ(std::get<0>(torch::std_mean(x, 0)).numel(), 3);
+
+  ASSERT_EQ(torch::var(x, 0, /*unbiased=*/true).numel(), 3);
+  ASSERT_EQ(std::get<0>(torch::var_mean(x, 0, /*unbiased=*/true)).numel(), 3);
+  ASSERT_EQ(torch::std(x, 0, /*unbiased=*/true).numel(), 3);
+  ASSERT_EQ(std::get<0>(torch::std_mean(x, 0, /*unbiased=*/true)).numel(), 3);
 }

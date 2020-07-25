@@ -1,10 +1,12 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -375,7 +377,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   to the creation of this RRef on the remote node has been recorded.
               )")
           // not releasing GIL to avoid context switch
-          .def("__str__", &PyRRef::str);
+          .def("__repr__", &PyRRef::str);
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -414,16 +416,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(
-          py::init<
-              std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
-              int,
-              std::chrono::milliseconds>(),
-          py::arg("name"),
-          py::arg("process_group"),
-          py::arg("num_send_recv_threads"),
-          py::arg("rpc_timeout"))
+      .def(py::init([](std::string workerName,
+                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       int numSendRecvThreads,
+                       std::chrono::milliseconds rpcTimeout) {
+        return std::make_unique<ProcessGroupAgent>(
+            std::move(workerName),
+            pg,
+            numSendRecvThreads,
+            rpcTimeout,
+            std::make_unique<RequestCallbackImpl>());
+      }))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -722,6 +725,35 @@ PyObject* rpc_init(PyObject* /* unused */) {
       &profiler::processglobal::disableServer);
 
   module.def("_set_profiler_node_id", &at::RecordFunction::setDefaultNodeId);
+
+  py::class_<
+      RemoteProfilerManager,
+      std::unique_ptr<RemoteProfilerManager, py::nodelete>>(
+      module, "RemoteProfilerManager")
+      .def("set_current_profiling_key", [](const std::string& key) {
+        auto& inst = RemoteProfilerManager::getInstance();
+        inst.setCurrentKey(key);
+      });
+
+  module.def(
+      "_enable_jit_rref_pickle",
+      &enableJitRRefPickle,
+      R"(
+        Allows ``torch.jit.save`` to save a ``torch.jit.ScriptModule`` with
+        pickled RRefs out of RPC contexts.
+
+
+        .. warning::
+            This is dangerous. If the module contains RRefs, the pickled
+            result must be sent over RPC and get unpickled on the receiving side
+            to restore the module. Otherwise, there will be RRef leaks, which
+            can potentially lead to program hang. When using this API, it is
+            applications responsibility to make sure that the above assumption
+            always holds.
+      )");
+  module.def(
+      "_disable_jit_rref_pickle",
+      &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
 }

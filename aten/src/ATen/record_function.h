@@ -84,6 +84,15 @@ struct TORCH_API RecordFunction {
   RecordFunction(
       RecordScope scope = RecordScope::FUNCTION);
 
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<c10::IValue>* args,
+      int64_t current_sequence_nr = -1) {
+    inputs_ = *args;
+    before(fn, current_sequence_nr);
+  }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -112,9 +121,6 @@ struct TORCH_API RecordFunction {
   inline RecordScope scope() const {
     return scope_;
   }
-
-  // Current returns the currently active RecordFunction in this thread.
-  static RecordFunction* current();
 
   // Returns logical thread_id for the current thread
   static uint64_t currentThreadId();
@@ -150,12 +156,6 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  // Internal, only for the use within RECORD_FUNCTION macro
-  // (i.e. stack based RecordFunctions with scope lifetime);
-  // sets this function as the current() thread local function;
-  // original value of current() is restored in destructor/end
-  void _setCurrent();
-
   // Calls end callbacks
   void end();
 
@@ -177,21 +177,15 @@ struct TORCH_API RecordFunction {
   /// Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
 
+  // In cases when RecordFunction might be active but we chose not to
+  // use the observers (e.g. operator is not observed), this boolean
+  // flag is used to check whether the start callbacks were called
+  bool called_start_callbacks_ = false;
+
  private:
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
-
-  // parent_ points to the parent RecordFunction and must out live this;
-  // only to be used together with RECORD_FUNCTION macro
-  // (with stack based RecordFunction instances with scope lifetime)
-  RecordFunction* parent_ = nullptr;
-
-  // is_current_ true means that this record function updates thread local
-  // current record function pointer;
-  // true only in case of scope-based record functions, i.e.
-  // RECORD_FUNCTION macro
-  bool is_current_ = false;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;
@@ -294,23 +288,8 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether this callbacks should run in the given scope
-  inline bool shouldRun(RecordScope scope) const {
-    // first check whether this callback is interested in
-    // the given scope type
-    if (!checkScope(scope)) {
-      return false;
-    }
-    // if we have registered should_run_ function, use it
-    if (should_run_) {
-      return should_run_(*this);
-    }
-    // otherwise potentially do the uniform sampling
-    if (sampling_prob_ != 1.0) {
-      return (sample_zero_one() < sampling_prob_);
-    }
-    return true;
-  }
+  // whether the callbacks should run in the given scope
+  bool shouldRun(RecordScope scope) const;
 
  private:
   std::function<void(const RecordFunction&)> start_;
@@ -320,8 +299,6 @@ class TORCH_API RecordFunctionCallback {
   bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
-
-  static double sample_zero_one();
 };
 
 // Using macro to minimize inputs copies,
@@ -329,7 +306,6 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.active) { \
-    guard._setCurrent(); \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \

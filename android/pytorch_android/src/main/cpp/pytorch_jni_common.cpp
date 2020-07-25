@@ -8,8 +8,10 @@
 
 #include "pytorch_jni_common.h"
 #if defined(__ANDROID__)
-#include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#ifndef USE_PTHREADPOOL
+#define USE_PTHREADPOOL
+#endif /* USE_PTHREADPOOL */
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif
 
 namespace pytorch_jni {
@@ -605,7 +607,7 @@ class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
   }
 
   static void setNumThreads(facebook::jni::alias_ref<jclass>, jint numThreads) {
-    caffe2::mobile_threadpool()->setNumThreads(numThreads);
+    caffe2::pthreadpool()->set_thread_count(numThreads);
   }
 };
 #endif

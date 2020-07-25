@@ -42,6 +42,11 @@
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
     - run:
+        name: Output binary sizes
+        no_output_timeout: "1m"
+        command: |
+            ls -lah /final_pkgs
+    - run:
         name: save binary size
         no_output_timeout: "5m"
         command: |
@@ -54,6 +59,9 @@
     - persist_to_workspace:
         root: /
         paths: final_pkgs
+
+    - store_artifacts:
+        path: /final_pkgs
 
     # This should really just be another step of the binary_linux_build job above.
     # This isn't possible right now b/c the build job uses the docker executor
@@ -276,7 +284,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -305,7 +313,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
@@ -354,7 +362,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout

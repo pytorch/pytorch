@@ -4,7 +4,6 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/ComplexHelper.h>
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
@@ -198,8 +197,7 @@ template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   if (self.is_complex()) {
-    // note: float_tensor lives only as long as the self tensor lives
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
     // is half of the input variance
     normal_kernel<RNG>()(float_tensor, mean, std/(std::sqrt(2)), gen);
@@ -275,7 +273,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto float_tensor = at::view_as_real(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "check_uniform_bounds", [&] {
@@ -368,4 +366,3 @@ Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Gen
 #undef WARN_OUT_OF_BOUNDS
 
 }}}
-

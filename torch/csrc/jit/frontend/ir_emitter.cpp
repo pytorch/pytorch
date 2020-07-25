@@ -2404,9 +2404,14 @@ struct to_ir {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
+
+    TypePtr type_hint = nullptr;
+    if (stmt.type().present()) {
+      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+    }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
-    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
@@ -3626,8 +3631,31 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return std::make_shared<SimpleValue>(emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs));
+      // TODO @wconstab refactor using Symbol instead of string compare
+      if (sv->kind() == "module") {
+        // Slicing isn't currently implemented for Sequential/ModuleList,
+        // but is implemented for Tuples, so a quick workaround is to
+        // convert to a tuple of Modules for slicing support.
+        auto s_tuple_val =
+            sv->asTupleValue(val_range, method)->asValue(val_range, method);
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto begin =
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        if (slice.end().present()) {
+          auto end =
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, end);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        } else {
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        }
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3788,9 +3816,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
-  ConstantPooling(to_clean);
+
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
   // if a mutating node is removed in the graph (e.g. constant prop inlined a
@@ -3799,6 +3828,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
+
+  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // new constants that needs to be pooled.
+  ConstantPooling(to_clean);
+
   // For jitter
   CanonicalizeOutputs(to_clean);
 }
