@@ -73,7 +73,14 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def add_observer_(module, non_leaf_module_list=None, device=None):
+def _observer_forward_pre_hook(self, input):
+    ''' Forward pre hook that calls observer on the input (can be a tuple of values)
+    '''
+    self.activation_pre_process(*input)
+    # Returning nothing is Ok, Module._call_impl will intrepret this
+    # as the pre_hook making no changes to the input, as desired
+
+def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -107,8 +114,13 @@ def add_observer_(module, non_leaf_module_list=None, device=None):
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
                 child.register_forward_hook(_observer_forward_hook)
+
+                # Attaching prehook
+                if prehook is not None:
+                    child.add_module('activation_pre_process', prehook())
+                    child.register_forward_pre_hook(_observer_forward_pre_hook)
         else:
-            add_observer_(child, non_leaf_module_list, device)
+            add_observer_(child, non_leaf_module_list, device, prehook)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -123,6 +135,11 @@ def add_observer_(module, non_leaf_module_list=None, device=None):
         # All post forward hooks are preserved and will be executed after the observer before convert
         handle = module.register_forward_hook(_observer_forward_hook)
         module._forward_hooks.move_to_end(handle.id, last=False)
+
+        # Attaching prehook
+        if prehook is not None:
+            module.add_module('activation_pre_process', prehook())
+            module.register_forward_pre_hook(_observer_forward_pre_hook)
 
 def get_unique_devices_(module):
     return {p.device for p in module.parameters()} | \
@@ -150,7 +167,8 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST, observer_non_leaf_module_list=None):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+            observer_non_leaf_module_list=None, prehook=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -164,16 +182,19 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
         inplace: carry out model transformations in-place, the original module is mutated
         white_list: list of quantizable modules
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
+        prehook: observer we want to add to forward_pre_hook
     """
     if not inplace:
         model = copy.deepcopy(model)
     propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
+
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
-    add_observer_(model, observer_non_leaf_module_list)
+
+    add_observer_(model, observer_non_leaf_module_list, prehook=prehook)
     return model
 
 def _remove_qconfig(module):
