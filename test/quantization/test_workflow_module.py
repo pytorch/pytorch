@@ -96,8 +96,8 @@ def _fake_quantize_learnable_per_tensor_affine_grad_reference(dY, X, scale, zero
     grad_X = _fake_quantize_per_tensor_affine_grad_reference(
         dY, X, scale, zero_point, quant_min, quant_max).to(device)
 
-    grad_scale = (grad_scale * grad_X).sum().unsqueeze(dim=0)
-    grad_zp = (grad_zp * grad_X).sum().unsqueeze(dim=0)
+    grad_scale = (grad_scale * dY).sum().unsqueeze(dim=0)
+    grad_zp = (grad_zp * dY).sum().unsqueeze(dim=0)
     return grad_X, grad_scale, grad_zp
 
 # Helper function used to simulate per-channel fake-quant against any axis
@@ -148,22 +148,22 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     per_channel_scale = per_channel_scale.detach().type(torch.float)
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
 
-    Xq = torch.stack([
-        _quantize_per_tensor(
-            X_i, per_channel_scale[i], per_channel_zero_point[i], quant_min, quant_max) for i, X_i in
-        enumerate(torch.unbind(X, dim=axis), 0)
-    ], dim=axis)
-    Xfq = _fake_quantize_per_channel_affine_reference(
-        X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max)
-
     grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
     grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device)
 
-    Xfq_flattened = torch.unbind(Xfq, dim=axis)
     X_flattened = torch.unbind(X, dim=axis)
-    grad_X_flattened = torch.unbind(grad_X, dim=axis)
+    dY_flattened = torch.unbind(dY, dim=axis)
 
-    for i, Xq_i in enumerate(torch.unbind(Xq, dim=axis), 0):
+    for i, X_i in enumerate(torch.unbind(X, dim=axis), 0):
+        scale_i = per_channel_scale[i]
+        zero_point_i = per_channel_zero_point[i]
+        X_i = X_flattened[i]
+        dY_i = dY_flattened[i]
+
+        Xq_i = _quantize_per_tensor(
+            X_i, scale_i, zero_point_i, quant_min, quant_max).to(device)
+        Xfq_i = (Xq_i - zero_point_i) * scale_i
+
         indicate_small_scale_i = (Xq_i == quant_min).float().to(device)
         indicate_big_scale_i = (Xq_i == quant_max).float().to(device)
         indicate_middle_scale_i = torch.ones(indicate_small_scale_i.shape).to(device) - \
@@ -173,12 +173,6 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
                                   (Xq_i == quant_max).float()).to(device)
         indicate_unsaturate_zp_i = torch.ones(indicate_saturate_zp_i.shape).to(device) - \
             indicate_saturate_zp_i
-
-        scale_i = per_channel_scale[i]
-        zero_point_i = per_channel_zero_point[i]
-        Xfq_i = Xfq_flattened[i]
-        X_i = X_flattened[i]
-        grad_X_i = grad_X_flattened[i]
 
         grad_small_scale_i = quant_min - zero_point_i
         grad_big_scale_i = quant_max - zero_point_i
@@ -193,8 +187,8 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         grad_zp_i = indicate_saturate_zp_i * grad_saturate_zp_i + \
             indicate_unsaturate_zp_i * grad_unsaturate_zp_i
 
-        grad_scale_i = (grad_scale_i * grad_X_i).sum().unsqueeze(dim=0)
-        grad_zp_i = (grad_zp_i * grad_X_i).sum().unsqueeze(dim=0)
+        grad_scale_i = (grad_scale_i * dY_i).sum().unsqueeze(dim=0)
+        grad_zp_i = (grad_zp_i * dY_i).sum().unsqueeze(dim=0)
 
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
