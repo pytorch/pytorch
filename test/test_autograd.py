@@ -4411,7 +4411,7 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
-# white list for complex
+# allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
@@ -6456,6 +6456,27 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
+    def test_inplace_view_multi_output_unsafe(self, device):
+        for f in [lambda t: t.unsafe_split(1),
+                  lambda t: t.unsafe_split_with_sizes((1, 1, 1)),
+                  lambda t: t.unsafe_chunk(3)]:
+            a = torch.randn(3, 3, device=device, requires_grad=True)
+            b = a + a
+            s1, s2, s3 = f(b)
+            s1.mul_(s2)
+            s1.sum().backward()
+
+    def test_inplace_view_multi_output_safe(self, device):
+        for f in [lambda t: t.split(1),
+                  lambda t: t.split_with_sizes((1, 1, 1)),
+                  lambda t: t.chunk(3)]:
+            a = torch.randn(3, 3, device=device, requires_grad=True)
+            b = a + a
+            s1, s2, s3 = f(b)
+            with warnings.catch_warnings(record=True) as w:
+                s1.mul_(s2)
+            self.assertIn('Consider using `unsafe_` version', str(w[0].message))
+
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
@@ -6516,6 +6537,17 @@ class TestAutogradDeviceType(TestCase):
         c.grad = None
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
+
+    def test_movedim(self, device):
+        x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
+
+        # Positive axis
+        gradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+        gradgradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+
+        # Negative axis
+        gradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+        gradgradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
     def _test_atleast(self, device, torch_fn):
         # 0-dim
