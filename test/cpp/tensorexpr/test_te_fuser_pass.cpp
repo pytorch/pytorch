@@ -53,7 +53,6 @@ void testFuserPass_2() {
 
   g->lint();
   FuseTensorExprs(g);
-  std::cerr << *g << "\n";
 
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
