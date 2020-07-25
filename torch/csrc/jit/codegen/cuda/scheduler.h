@@ -48,27 +48,27 @@ struct ReductionParams {
 
   bool operator==(const ReductionParams& other) const {
     bool lp_equal = other.gdimx_ == gdimx_ && other.gdimy_ == gdimy_ &&
-                    other.bdimx_ == bdimx_ && other.bdimy_ == bdimy_;
+        other.bdimx_ == bdimx_ && other.bdimy_ == bdimy_;
     bool attr_equal = other.fastest_dim_ == fastest_dim_ &&
-                      other.cross_block_ == cross_block_ &&
-                      other.cross_grid_ == cross_grid_ &&
-                      other.mul_reds_per_blk_ == mul_reds_per_blk_;
+        other.cross_block_ == cross_block_ &&
+        other.cross_grid_ == cross_grid_ &&
+        other.mul_reds_per_blk_ == mul_reds_per_blk_;
     return attr_equal && lp_equal;
   }
 };
 
 class ReductionParamsHash {
-public:
+ public:
   size_t operator()(const ReductionParams& rp) const {
-    size_t lp_hash =  (rp.gdimx_.mutable_ ? 0 : rp.gdimx_.value_) ^
-                      (rp.gdimy_.mutable_ ? 0 : rp.gdimy_.value_) ^
-                      (rp.bdimx_.mutable_ ? 0 : rp.bdimx_.value_) ^
-                      (rp.bdimy_.mutable_ ? 0 : rp.bdimy_.value_);
+    size_t lp_hash = (rp.gdimx_.mutable_ ? 0 : rp.gdimx_.value_) ^
+        (rp.gdimy_.mutable_ ? 0 : rp.gdimy_.value_) ^
+        (rp.bdimx_.mutable_ ? 0 : rp.bdimx_.value_) ^
+        (rp.bdimy_.mutable_ ? 0 : rp.bdimy_.value_);
     constexpr size_t bits = sizeof(std::size_t) * 8;
-    size_t attr_hash = static_cast<size_t>(rp.fastest_dim_) << (bits-1) |
-                       static_cast<size_t>(rp.cross_block_) << (bits-2) |
-                       static_cast<size_t>(rp.cross_grid_) << (bits-3) |
-                       static_cast<size_t>(rp.mul_reds_per_blk_) << (bits-4);
+    size_t attr_hash = static_cast<size_t>(rp.fastest_dim_) << (bits - 1) |
+        static_cast<size_t>(rp.cross_block_) << (bits - 2) |
+        static_cast<size_t>(rp.cross_grid_) << (bits - 3) |
+        static_cast<size_t>(rp.mul_reds_per_blk_) << (bits - 4);
     return lp_hash | attr_hash;
   }
 };
