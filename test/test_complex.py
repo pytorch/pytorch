@@ -1,4 +1,4 @@
-import numpy as np
+from math import pi as PI
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
@@ -45,11 +45,13 @@ class TestComplexTensor(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_polar(self, device, dtype):
-        abs = torch.tensor([1, 2], device=device, dtype=dtype)
-        angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], device=device, dtype=dtype)
+        abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
+        angle = torch.tensor([PI / 2, 5 * PI / 4, 0, -11 * PI / 6, PI, -PI],
+                             device=device, dtype=dtype)
         z = torch.complex_polar(abs, angle)
         complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-        self.assertEqual(torch.tensor([0 + 1.0j, -1.41421356237 - 1.41421356237j],
+        self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
+                                       -3.89711431703 - 2.25j, -1, -1],
                                       dtype=complex_dtype),
                          z, atol=1e-5, rtol=1e-5)
 
@@ -58,7 +60,7 @@ class TestComplexTensor(TestCase):
     def test_torch_complex_floating_dtype_error(self, device, dtype):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
-        error = "Unknown Complex ScalarType"
+        error = "Both inputs must be either Float or Double"
         with self.assertRaisesRegex(RuntimeError, error):
             torch.complex(real, imag)
 
@@ -68,7 +70,7 @@ class TestComplexTensor(TestCase):
     def test_torch_complex_polar_floating_dtype_error(self, device, dtype):
         abs = torch.tensor([1, 2], device=device, dtype=dtype)
         angle = torch.tensor([3, 4], device=device, dtype=dtype)
-        error = "Unknown Complex ScalarType"
+        error = "Both inputs must be either Float or Double"
         with self.assertRaisesRegex(RuntimeError, error):
             torch.complex_polar(abs, angle)
 
@@ -78,7 +80,7 @@ class TestComplexTensor(TestCase):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=other_dtype)
         error = "Expected object of scalar type {} but got scalar type {} " \
-                "for argument 'imag'".format(dtype_name(dtype),
+                "for second argument".format(dtype_name(dtype),
                                              dtype_name(other_dtype))
         with self.assertRaisesRegex(RuntimeError, error):
             torch.complex(real, imag)
@@ -89,8 +91,8 @@ class TestComplexTensor(TestCase):
         abs = torch.tensor([1, 2], device=device, dtype=dtype)
         angle = torch.tensor([3, 4], device=device, dtype=other_dtype)
         error = "Expected object of scalar type {} but got scalar type {} " \
-                "for argument 'angle'".format(dtype_name(dtype),
-                                              dtype_name(other_dtype))
+                "for second argument".format(dtype_name(dtype),
+                                             dtype_name(other_dtype))
         with self.assertRaisesRegex(RuntimeError, error):
             torch.complex_polar(abs, angle)
 
@@ -132,7 +134,7 @@ class TestComplexTensor(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_polar_backward(self, device, dtype):
         abs = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
-        angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], device=device, dtype=dtype, requires_grad=True)
+        angle = torch.tensor([PI / 2, 5 * PI / 4], device=device, dtype=dtype, requires_grad=True)
         z = torch.complex_polar(abs, angle)
         loss = z.sum()
         loss.backward()

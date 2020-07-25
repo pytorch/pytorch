@@ -1467,13 +1467,24 @@ Example::
 
 add_docstr(torch.complex,
            r"""
-complex(real, imag, out=None) -> Tensor
+complex(real, imag, *, out=None) -> Tensor
 
-Constructs a complex-valued tensor from Cartesian coordinates.
+Constructs a complex tensor with its real part equal to :attr:`real` and its
+imaginary part equal to :attr:`imag`.
 
-:attr:`real` and :attr:`imag` should be floating-point tensors of the same
-dtype. ``torch.float32`` tensors will lead to an output of ``torch.complex64``,
-and ``torch.float64`` tensors will lead to an output of ``torch.complex128``.
+.. math::
+    \text{out} = \text{real} + \text{imag} \cdot i
+""" + r"""
+Args:
+    real (Tensor): The real part of the complex tensor. Must be
+        ``torch.float32`` or ``torch.float64``.
+    imag (Tensor): The imaginary part of the complex tensor. Must be
+        ``torch.float32`` or ``torch.float64`` and furthermore of same dtype as
+        :attr:`real`.
+
+Keyword arguments:
+    {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
+        the inputs are ``torch.float64``, must be ``torch.complex128``.
 
 Example::
     >>> real = torch.tensor([1, 2], dtype=torch.float32)
@@ -1488,13 +1499,24 @@ Example::
 
 add_docstr(torch.complex_polar,
            r"""
-complex_polar(abs, angle, out=None) -> Tensor
+complex_polar(abs, angle, *, out=None) -> Tensor
 
-Constructs a complex-valued tensor from polar coordinates.
+Constructs a complex tensor whose elements are Cartesian coordinates
+corresponding to the polar coordinates with absolute value / magnitude
+:attr:`abs` and angle :attr:`angle`.
 
-:attr:`abs` and :attr:`angle` should be floating-point tensors of the same
-dtype. ``torch.float32`` tensors will lead to an output of ``torch.complex64``,
-and ``torch.float64`` tensors will lead to an output of ``torch.complex128``.
+.. math::
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot i
+""" + r"""
+Args:
+    abs (Tensor): The absolute value / magnitude of the complex tensor. Must be
+        ``torch.float32`` or ``torch.float64``.
+    angle (Tensor): The angle of the complex tensor. Must be ``torch.float32``
+        or ``torch.float64`` and furthermore of same dtype as :attr:`abs`.
+
+Keyword arguments:
+    {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
+        the inputs are ``torch.float64``, must be ``torch.complex128``.
 
 Example::
     >>> import numpy as np
