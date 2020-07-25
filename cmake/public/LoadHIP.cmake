@@ -164,7 +164,7 @@ if(HIP_FOUND)
   set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
   set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
 
-  find_package_and_print_version(rocrand REQUIRED) 
+  find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
@@ -174,7 +174,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
-  
+
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
   else()
