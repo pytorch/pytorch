@@ -23,7 +23,7 @@ class MapToRange(ModelLayer):
         name='map_to_range',
         **kwargs
     ):
-        super(MapToRange, self).__init__(model, name, input_record, **kwargs)
+        super(MapToRange, self).__init__(model, input_record,name, **kwargs)
 
         assert max_index > 0
         assert isinstance(input_record, schema.Scalar)

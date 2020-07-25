@@ -37,7 +37,7 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
         axis=1,
         **kwargs
     ):
-        super(FCWithBootstrap, self).__init__(model, name, input_record, **kwargs)
+        super(FCWithBootstrap, self).__init__(model, input_record, name, **kwargs)
         assert isinstance(
             input_record, schema.Scalar
         ), "Incorrect input type {}".format(input_record)

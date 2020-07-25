@@ -19,7 +19,7 @@ import numpy as np
 class BPRLoss(ModelLayer):
 
     def __init__(self, model, input_record, name='bpr_loss', **kwargs):
-        super(BPRLoss, self).__init__(model, name, input_record, **kwargs)
+        super(BPRLoss, self).__init__(model, input_record,name, **kwargs)
         assert schema.is_schema_subset(
             schema.Struct(
                 ('pos_prediction', schema.Scalar()),

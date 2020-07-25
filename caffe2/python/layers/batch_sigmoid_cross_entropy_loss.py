@@ -20,7 +20,7 @@ class BatchSigmoidCrossEntropyLoss(ModelLayer):
         **kwargs
     ):
         super(BatchSigmoidCrossEntropyLoss, self).__init__(
-            model, name, input_record, **kwargs)
+            model, input_record, name,**kwargs)
 
         assert schema.is_schema_subset(
             schema.Struct(

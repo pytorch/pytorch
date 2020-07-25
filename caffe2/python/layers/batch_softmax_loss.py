@@ -23,7 +23,7 @@ class BatchSoftmaxLoss(ModelLayer):
         **kwargs
     ):
         super(BatchSoftmaxLoss, self).__init__(
-            model, name, input_record, **kwargs)
+            model, input_record,name, **kwargs)
 
         assert schema.is_schema_subset(
             schema.Struct(

@@ -32,7 +32,7 @@ class SelectRecordByContext(ModelLayer):
         default_output_record_field=None,
         **kwargs
     ):
-        super(SelectRecordByContext, self).__init__(model, name, input_record,
+        super(SelectRecordByContext, self).__init__(model, input_record, name,
                                                     **kwargs)
 
         assert isinstance(input_record, schema.Struct)

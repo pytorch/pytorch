@@ -22,7 +22,7 @@ class SamplingTrain(ModelLayer):
         **kwargs
     ):
         super(SamplingTrain, self).__init__(
-            model, name, input_record, **kwargs
+            model, input_record, name, **kwargs
         )
 
         layer_class = get_layer_class(prediction_layer)

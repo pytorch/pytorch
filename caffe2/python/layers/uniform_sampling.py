@@ -28,7 +28,7 @@ class UniformSampling(ModelLayer):
         **kwargs
     ):
         super(UniformSampling, self).__init__(
-            model, name, input_record, **kwargs
+            model, input_record, name, **kwargs
         )
 
         assert num_elements > num_samples > 0

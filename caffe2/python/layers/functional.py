@@ -26,7 +26,7 @@ class Functional(ModelLayer):
         # allow coercion
         input_record = schema.as_record(input_record)
 
-        super(Functional, self).__init__(model, name, input_record, tags=tags, **kwargs)
+        super(Functional, self).__init__(model, input_record, name, tags=tags, **kwargs)
         self._function = function
         self._kwargs = kwargs
         return_struct = (

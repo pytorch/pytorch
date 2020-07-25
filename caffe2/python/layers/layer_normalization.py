@@ -24,7 +24,7 @@ class LayerNormalization(ModelLayer):
         **kwargs
     ):
         super(LayerNormalization, self).__init__(
-            model, name, input_record, **kwargs)
+            model, input_record, name, **kwargs)
 
         assert isinstance(input_record, schema.Scalar), (
             "Incorrect input type: {}".format(input_record))

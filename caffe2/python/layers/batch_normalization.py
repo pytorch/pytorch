@@ -23,7 +23,7 @@ class BatchNormalization(ModelLayer):
         **kwargs
     ):
         super(BatchNormalization, self).__init__(
-            model, name, input_record, **kwargs)
+            model, input_record,name, **kwargs)
 
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
 

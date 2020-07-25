@@ -37,7 +37,7 @@ class HomotopyWeight(ModelLayer):
         **kwargs
     ):
         super(HomotopyWeight,
-              self).__init__(model, name, input_record, **kwargs)
+              self).__init__(model, input_record, name, **kwargs)
         self.output_schema = schema.Scalar(
             np.float32, self.get_next_blob_reference('homotopy_weight')
         )

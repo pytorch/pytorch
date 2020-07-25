@@ -35,7 +35,7 @@ class BatchLRLoss(ModelLayer):
         task_gamma_lb=0.1,
         **kwargs
     ):
-        super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
+        super(BatchLRLoss, self).__init__(model, input_record,name, **kwargs)
 
         self.average_loss = average_loss
 

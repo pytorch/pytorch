@@ -20,7 +20,7 @@ class ReservoirSampling(ModelLayer):
     def __init__(self, model, input_record, num_to_collect,
                  name='reservoir_sampling', **kwargs):
         super(ReservoirSampling, self).__init__(
-            model, name, input_record, **kwargs)
+            model, input_record, name, **kwargs)
         assert num_to_collect > 0
         self.num_to_collect = num_to_collect
 
