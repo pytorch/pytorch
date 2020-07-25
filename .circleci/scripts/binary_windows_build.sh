@@ -6,7 +6,7 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
-# export SCCACHE_BUCKET=ossci-compiler-cache-windows
+export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 
 if [[ "$CUDA_VERSION" == "92" || "$CUDA_VERSION" == "100" ]]; then
