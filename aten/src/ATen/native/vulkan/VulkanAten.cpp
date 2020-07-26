@@ -144,12 +144,12 @@ at::Tensor upsample_nearest2d_vulkan(
 }
 
 at::Tensor vulkan_adaptive_avg_pool2d(
-    at::Tensor const& input,
+    const at::Tensor& input,
     IntArrayRef outputSize) {
   TORCH_INTERNAL_ASSERT(
       input.dim() == 4,
       "vulkan_adaptive_avg_pool2d expects 4-dimensional input");
-  VulkanTensor& x = vtensor_from_vulkan(input);
+  auto& x = vtensor_from_vulkan(input);
   auto inputSize = input.sizes();
   auto in = inputSize[0];
   auto ic = inputSize[1];

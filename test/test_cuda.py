@@ -790,6 +790,7 @@ class TestCuda(TestCase):
                                     "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device('cpu'))
 
+    @skipIfRocm
     @skipCUDANonDefaultStreamIf(True)
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
@@ -1032,7 +1033,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10)
         s1.synchronize()
-        s1.record_event(e_tok)
+        e_tok.record()
+        e_tok.synchronize()
 
         self.assertTrue(s0.query())
         self.assertTrue(s1.query())

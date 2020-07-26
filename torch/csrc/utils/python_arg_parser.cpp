@@ -254,17 +254,30 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
   }
 }
 
-auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool
+static auto check_tensor_or_overload(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool {
+  if (THPVariable_CheckExact(obj)) {
+    // torch.Tensor instances (not subclasses)
+    return true;
+  }
+
+  if (check_has_torch_function(obj)) {
+    // tensor subclasses and unrelated objects with __torch_function__
+    append_overloaded_arg(overloaded_args, obj);
+    return true;
+  } else if (THPVariable_Check(obj)) {
+    // tensor subclasses without __torch_function__
+    return true;
+  }
+
+  return false;
+}
+
+// argnum is needed for raising the TypeError, it's used in the error message.
+auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      if (THPVariable_CheckExact(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        if (check_has_torch_function(obj)) {
-          append_overloaded_arg(overloaded_args, obj);
-        }
+      if (check_tensor_or_overload(obj, overloaded_args)) {
         return true;
       }
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
@@ -303,7 +316,21 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: {
+      auto tuple = six::isTuple(obj);
+      if (!(tuple || PyList_Check(obj))) {
+        return false;
+      }
+      auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+      for (auto idx = 0; idx < size; idx++) {
+        PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+        if (!check_tensor_or_overload(iobj, overloaded_args)) {
+          throw TypeError("expected Tensor as element %d in argument %d, but got %s",
+                          idx, argnum, Py_TYPE(iobj)->tp_name);
+        }
+      }
+      return true;
+    }
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
@@ -683,14 +710,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args)) {
+    } else if (param.check(obj, this->overloaded_args, i)) {
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
-    } else if (check_has_torch_function(obj)) {
-      append_overloaded_arg(overloaded_args, obj);
-      dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
