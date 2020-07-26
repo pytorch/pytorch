@@ -226,16 +226,18 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     std::vector<int64_t> bound_dims,
     TensorProto::DataType type,
     bool is_quantized,
-    bool allow_existing_shape) {
+    bool allow_existing_shape,
+    float scale,
+    int offset) {
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
   if (is_quantized) {
     shape_info.is_quantized = true;
     shape_info.q_info.scale.clear();
-    shape_info.q_info.scale.push_back(1);
+    shape_info.q_info.scale.push_back(scale);
     shape_info.q_info.offset.clear();
-    shape_info.q_info.offset.push_back(0);
+    shape_info.q_info.offset.push_back(offset);
     shape_info.q_info.axis = 1;
   }
   // If the shape information exists in shape_info_ already
@@ -810,6 +812,8 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
     output_shapes = schema->InferTensor(op, input_shapes);
     bool is_quantized =
         !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
+    float scale = 1;
+    int offset = 0;
     TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
     if (is_quantized) {
       const static std::map<std::string, int> type_info_from_input = {
@@ -831,6 +835,11 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
         CAFFE_ENFORCE(target < input_shapes.size());
         infered_data_type = input_shapes[target].data_type();
       }
+
+      // Extract output scale and offset
+      ArgumentHelper helper(op);
+      scale = helper.GetSingleArgument<float>("Y_scale", 1);
+      offset = helper.GetSingleArgument<int>("Y_zero_point", 0);
     } else if (op.type() == "Int8Dequantize") {
       infered_data_type = TensorProto::FLOAT;
     }
@@ -848,7 +857,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
           setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
           ConvertToVec(shape.dims()),
           infered_data_type,
-          is_quantized);
+          is_quantized, false, scale, offset);
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()

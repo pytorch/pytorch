@@ -3816,9 +3816,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
-  ConstantPooling(to_clean);
+
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
   // if a mutating node is removed in the graph (e.g. constant prop inlined a
@@ -3827,6 +3828,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
+
+  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // new constants that needs to be pooled.
+  ConstantPooling(to_clean);
+
   // For jitter
   CanonicalizeOutputs(to_clean);
 }

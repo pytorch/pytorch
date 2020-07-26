@@ -927,7 +927,7 @@ VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
   return constBuffer;
 }
 
-ComputeUnitFactory::ComputeUnitFactory(const VkDevice& device)
+ComputeUnitFactory::ComputeUnitFactory(const VkDevice device)
     : device_(device) {
   VkPipelineCacheCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
