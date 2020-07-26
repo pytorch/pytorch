@@ -197,7 +197,6 @@ void unroll(Node* loop) {
   Block* dest = loop->addBlock();
   repeatBody(body, kUnrollFactor, dest);
   loop->eraseBlock(0);
-  body = dest;
 
   // Change the iteration counts of both loops
   Value* iter_count = loop->inputs().at(0);

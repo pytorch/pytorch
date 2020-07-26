@@ -24,6 +24,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -106,6 +107,20 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
+// This method is called from DDP's Python API. Its inputs are
+// a c10d reducer object, state, and callable comm_hook. State and
+// comm_hook inputs are Python objects and this function creates a
+// c10d PythonCommHook object using these inputs. It later calls
+// register_comm_hook function of the reducer input to register that
+// PythonCommHook object.
+void _register_comm_hook(
+    ::c10d::Reducer& reducer,
+    py::object state,
+    py::object comm_hook) {
+  reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
+      std::move(state), std::move(comm_hook)));
+};
+
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -114,6 +129,20 @@ PyObject* c10d_init(PyObject* _unused) {
   }
 
   auto module = py::handle(c10d_module).cast<py::module>();
+
+  module.def(
+      "_register_comm_hook",
+      &_register_comm_hook,
+      py::arg("ddp_model"),
+      py::arg("state"),
+      py::arg("comm_hook"));
+
+  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          "get_tensors",
+          &::c10d::GradBucket::getTensors,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -671,7 +700,24 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
-          py::call_guard<py::gil_scoped_release>());
+          py::arg("timeout") = kNoTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_future",
+          [](::c10d::ProcessGroup::Work& work)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
+          },
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+            ``get_future`` retrieves a future associated with the completion of
+            ``c10d.ProcessGroup.work``. As an example, a future object can be set
+            by `future_work = dist.allreduce(tensors).get_future()`. `future_work`
+            will be marked as completed once ``dist.allreduce`` work is finished.
+
+            .. warning ::
+                ``get_future`` API supports only NCCL backend.
+           )");
 
   module.def(
       "_compute_bucket_assignment_by_size",

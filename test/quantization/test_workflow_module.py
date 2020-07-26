@@ -247,7 +247,7 @@ class TestObserver(QuantizationTestCase):
                     ref_scale = 0.0313725
                     ref_zero_point = -128 if qdtype is torch.qint8 else 0
             self.assertEqual(qparams[1].item(), ref_zero_point)
-            self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+            self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
             state_dict = myobs.state_dict()
             b = io.BytesIO()
             torch.save(state_dict, b)
@@ -474,7 +474,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
-        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+        self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
         # Test for serializability
         state_dict = myobs.state_dict()
         b = io.BytesIO()
@@ -589,6 +589,17 @@ class TestFakeQuantizePerTensor(TestCase):
         self._test_learnable_forward_per_tensor(
             X, 'cpu', scale_base, zero_point_base)
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_forward_per_tensor_cuda(self, X):
+        X, (_, _, _) = X
+        scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(1,))
+        self._test_learnable_forward_per_tensor(
+            X, 'cuda', scale_base, zero_point_base)
+
     def _test_learnable_backward_per_tensor(self, X, device, scale_base, zero_point_base):
         r"""Tests the backward method with additional backprop support for scale and zero point.
         """
@@ -597,7 +608,7 @@ class TestFakeQuantizePerTensor(TestCase):
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
 
-            X = X_base.clone().float()
+            X = X_base.clone().float().to(device)
             X.requires_grad_()
             scale_base = scale_base.to(device)
             zero_point_base = zero_point_base.to(device)
@@ -643,6 +654,18 @@ class TestFakeQuantizePerTensor(TestCase):
         zero_point_base = torch.normal(mean=0, std=128, size=(1,))
         self._test_learnable_backward_per_tensor(
             X, 'cpu', scale_base, zero_point_base)
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_backward_per_tensor_cuda(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, _) = X
+        scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(1,))
+        self._test_learnable_backward_per_tensor(
+            X, 'cuda', scale_base, zero_point_base)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
@@ -848,6 +871,19 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_forward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_forward_per_channel_cuda(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, axis, _) = X
+        X_base = torch.tensor(X).to('cuda')
+        channel_size = X_base.size(axis)
+        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        self._test_learnable_forward_per_channel(
+            X_base, 'cuda', scale_base, zero_point_base, axis)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -901,6 +937,7 @@ class TestFakeQuantizePerChannel(TestCase):
             dScale_actual = scale_curr.to(device).grad.detach()
             dZeroPoint_expected = dZeroPoint.to(device).detach()
             dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
+            tolerance = 1e-3
 
             self.assertTrue(
                 torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -923,6 +960,19 @@ class TestFakeQuantizePerChannel(TestCase):
         zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
+
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_backward_per_channel_cuda(self, X):
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        X, (_, _, axis, _) = X
+        X_base = torch.tensor(X).to('cuda')
+        channel_size = X_base.size(axis)
+        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        self._test_learnable_backward_per_channel(
+            X_base, 'cuda', scale_base, zero_point_base, axis)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
