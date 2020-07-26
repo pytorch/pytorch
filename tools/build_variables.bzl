@@ -106,7 +106,7 @@ jit_sources_common = [
 
 libtorch_sources_common = core_sources_common + jit_sources_common
 
-core_sources_full = [
+core_autograd_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -122,6 +122,9 @@ core_sources_full = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+]
+
+core_sources_full = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -254,7 +257,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_autograd_sources)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -279,6 +282,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
     "torch/csrc/distributed/rpc/python_resp.cpp",
     "torch/csrc/distributed/rpc/request_callback.cpp",
+    "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
     "torch/csrc/distributed/rpc/rref_context.cpp",
     "torch/csrc/distributed/rpc/rref_proto.cpp",
@@ -312,8 +316,10 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/mobile/export.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
@@ -478,6 +484,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
@@ -564,6 +571,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_class_type.cpp",
         "test/cpp/jit/test_code_template.cpp",
         "test/cpp/jit/test_constant_pooling.cpp",
+        "test/cpp/jit/test_cleanup_passes.cpp",
         "test/cpp/jit/test_create_autodiff_subgraphs.cpp",
         "test/cpp/jit/test_custom_class.cpp",
         "test/cpp/jit/test_custom_operators.cpp",
@@ -578,6 +586,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_irparser.cpp",
         "test/cpp/jit/test_jit_type.cpp",
         "test/cpp/jit/test_lite_interpreter.cpp",
+        "test/cpp/jit/test_lite_trainer.cpp",
         "test/cpp/jit/test_misc.cpp",
         "test/cpp/jit/test_mobile_type_parser.cpp",
         "test/cpp/jit/test_module_api.cpp",

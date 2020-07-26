@@ -86,7 +86,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag', 'narrow',
+    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
 })
 
 def format_return_type(returns):
