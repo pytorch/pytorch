@@ -5,6 +5,27 @@
 
 namespace at { namespace native {
 
+// TODO: make all operations that resize given outputs use this function
+//   for consistency and maintainability
+// Resizes outputs
+// Functions accepting output tensors, like with the "out" kwarg, should
+//   call this function to handle resizing their output tensor.
+// Issues a warning if the output tensor has one or more elements
+// NOTE: In the future only output tensors with no elements will be resizable
+static inline void resize_output(Tensor& output, IntArrayRef shape) {
+  if (!output.sizes().equals(shape) && output.numel() > 0) {
+    TORCH_CHECK(false, "checking for internal output resizing behavior");
+    TORCH_WARN(
+      "An output with one or more elements was resized, since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ".",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements.");
+  }
+
+  output.resize_(shape);
+}
+
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp

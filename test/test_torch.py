@@ -5419,6 +5419,21 @@ class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
     @onlyOnCPUAndCUDA
+    def test_out_resize_warning(self, device):
+        a = torch.tensor((1, 2, 3))
+        b = torch.tensor((4, 5, 6))
+
+        # No warnings
+        torch.add(a, b, out=torch.empty(3))
+        torch.add(a, b, out=torch.empty(0))
+
+        # Warning
+        # with warnings.catch_warnings(record=True) as w:
+        #     warnings.simplefilter("always")
+        #     torch.add(a, b, out=torch.empty(2))
+        #     self.assertEqual(len(w), 1)
+
+    @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
         values = torch.tensor((1, 2, 3), device=device)
@@ -5497,7 +5512,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
-                complex_out = torch.empty(1, device=device, dtype=dtype)
+                complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
@@ -12927,7 +12942,7 @@ class TestTorchDeviceType(TestCase):
                     dst2 += [src[i]]
             self.assertEqual(dst, torch.tensor(dst2), atol=0, rtol=0)
 
-            dst3 = torch.empty_like(src, device=device)
+            dst3 = torch.empty(0, device=device, dtype=dtype)
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
