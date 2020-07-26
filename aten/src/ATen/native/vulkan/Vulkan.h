@@ -486,7 +486,7 @@ class ComputeUnit final {
 
 class ComputeUnitFactory {
  public:
-  ComputeUnitFactory(const VkDevice& device);
+  explicit ComputeUnitFactory(const VkDevice device);
   ~ComputeUnitFactory();
   ComputeUnitFactory(const ComputeUnitFactory&) = default;
   ComputeUnitFactory& operator=(const ComputeUnitFactory&) = default;
@@ -515,7 +515,7 @@ class ComputeUnitFactory {
 
   VkDevice device_;
   VkPipelineCache pipelineCache_;
-  std::map<std::string, std::shared_ptr<ComputeUnit>> computeUnits_;
+  std::unordered_map<std::string, std::shared_ptr<ComputeUnit>> computeUnits_;
 };
 
 std::ostream& operator<<(std::ostream& s, const WorkGroupSize& workGroupSize);
