@@ -171,6 +171,85 @@ TensorDomain* TransformReplay::fullSelfReplay(
   return new TensorDomain(new_self_root->domain(), new_domain);
 }
 
+namespace {
+
+// consumer->rootDomain()[i] = producer->rootDomain()[result_vector[i]] if there
+// is a mapping from consumer->rootDomain()[i] to the producer->rootDomain().
+// Else if axis exists in consumer (broadcast) but not in producer,
+// result_vector[i] = -1. If producer has rfactorDomain then the map is actually
+// consumer->rootDomain()[i] = producer->rfactorDomain()[result_vector[i]]
+std::vector<int64_t> rootCtoPMap(
+    const TensorDomain* consumer,
+    const TensorDomain* producer) {
+  // Grab root domains of producer and consumer
+  std::vector<IterDomain*> consumer_root = consumer->rootDomain();
+  std::vector<IterDomain*> producer_root = producer->rootDomain();
+
+  // If producer has an rfactor root, that's what will match with consumer,
+  // as it means the consumer was a result of the rfactor operation.
+  if (producer->hasRFactor()) {
+    producer_root = producer->rfactorDomain();
+  }
+
+  std::vector<int64_t> consumer_to_producer(consumer_root.size(), -1);
+
+  size_t itc = 0, itp = 0;
+  while (itc < consumer_root.size() && itp < producer_root.size()) {
+    if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast() &&
+        !producer_root[itp]->isBroadcast()) {
+      itc++;
+      continue;
+    }
+    if (itp < producer_root.size() && producer_root[itp]->isReduction()) {
+      itp++;
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(
+        itc < consumer_root.size() && itp < producer_root.size(),
+        "Error during replay, wanted to keep going, but ran out of root dimensions.");
+
+    consumer_to_producer[itc] = itp;
+    itc++;
+    itp++;
+  }
+  return consumer_to_producer;
+}
+
+// Create a map from consumer root IterDomains -> producer root IterDomains.
+// Constrain will restrict which consumer root IterDomains we map to the
+// producer IterDomains. Only those root consumer IDs present in the provided
+// unordered_set will be attempted to map to their corresponding producer IDs.
+std::unordered_map<IterDomain*, IterDomain*> mapRootConsumerToProducer(
+    const TensorDomain* consumer,
+    const TensorDomain* producer,
+    bool constrain = false,
+    std::unordered_set<IterDomain*> consumer_root_dims_to_map =
+        std::unordered_set<IterDomain*>()) {
+  auto c_to_p = rootCtoPMap(consumer, producer);
+
+  auto consumer_root = consumer->rootDomain();
+  auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
+                                              : producer->rootDomain();
+
+  std::unordered_map<IterDomain*, IterDomain*> root_id_map;
+
+  for (int64_t itc = 0; itc < c_to_p.size(); itc++) {
+    int64_t itp = c_to_p[itc];
+    if (itp == -1)
+      continue;
+
+    if (!constrain ||
+        (constrain &&
+         consumer_root_dims_to_map.find(consumer_root[itc]) !=
+             consumer_root_dims_to_map.end())) {
+      root_id_map[consumer_root[itc]] = producer_root[itp];
+    }
+  }
+  return root_id_map;
+}
+
+} // namespace
+
 // Producer could have rfactor axes which consumer may want replayed. We can
 // "replay" them as long as it doesn't modify the root rfactor axes. What we
 // really want to do is validate if we replayed these axes to the ones they
@@ -193,50 +272,24 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
       consumer->domain().begin() + consumer_compute_at_axis);
 
   // Figure out all inputs required to generate the compute_at dimensions
-  std::unordered_set<Val*> consumer_CA_root_ids = IterVisitor::getInputsTo(
+  std::unordered_set<Val*> consumer_CA_root_vals = IterVisitor::getInputsTo(
       std::vector<Val*>(consumer_CA_ids.begin(), consumer_CA_ids.end()));
 
+  std::unordered_set<IterDomain*> consumer_CA_root_ids;
+  for (auto val : consumer_CA_root_vals) {
+    if (val->getValType().value() == ValType::IterDomain) {
+      consumer_CA_root_ids.emplace(val->as<IterDomain>());
+    }
+  }
+
   // Map of consumer_CA_root_ids to related producer_CA_ids
-  id_map replay_root_map;
-
-  // Grab root domains of producer and consumer
-  std::vector<IterDomain*> consumer_root = consumer->rootDomain();
-  std::vector<IterDomain*> producer_root = producer->rootDomain();
-
-  // If producer has an rfactor root, that's what will match with consumer,
-  // as it means the consumer was a result of the rfactor operation.
-  if (producer->hasRFactor())
-    producer_root = producer->rfactorDomain();
+  auto replay_root_map =
+      mapRootConsumerToProducer(consumer, producer, true, consumer_CA_root_ids);
 
   // Track which root axes in producer we will send to replay
   std::unordered_set<IterDomain*> producer_roots4replay;
-
-  // Map related axes from producer and consumer roots. Make sure we go to the
-  // end of both.
-  {
-    size_t itc = 0, itp = 0;
-    while (itc < consumer_root.size() || itp < producer_root.size()) {
-      if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast() &&
-          (itp >= producer_root.size() || !producer_root[itp]->isBroadcast())) {
-        itc++;
-        continue;
-      }
-      if (itp < producer_root.size() && producer_root[itp]->isReduction()) {
-        itp++;
-        continue;
-      }
-      TORCH_INTERNAL_ASSERT(
-          itc < consumer_root.size() && itp < producer_root.size(),
-          "Error during replay, wanted to keep going, but ran out of root dimensions.");
-
-      if (consumer_CA_root_ids.find(consumer_root[itc]) !=
-          consumer_CA_root_ids.end()) {
-        replay_root_map[consumer_root[itc]] = producer_root[itp];
-        producer_roots4replay.emplace(producer_root[itp]);
-      }
-      itc++;
-      itp++;
-    }
+  for (auto entry : replay_root_map) {
+    producer_roots4replay.emplace(entry.second);
   }
 
   // Instead of replaying from the root, lets try to play forward the history of
@@ -281,6 +334,9 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   id_map producer_self_replay_map;
   for (auto entry : leaf_ids)
     producer_self_replay_map[entry.first] = entry.first;
+
+  auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
+                                              : producer->rootDomain();
 
   // Any root domain that was not used to generate computeIDs we can also put in
   // the map to forward their transformations.
