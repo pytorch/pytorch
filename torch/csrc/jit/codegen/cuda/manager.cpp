@@ -92,8 +92,9 @@ class CudaFusionManager {
       // search kernel cache failed, we need to codegen new kernel for given
       // inputs;
 
-      //auto copy = dimCollapseGraph(graph);
-      auto fusion = parseJitIR(graph);
+      // we still need to permute input tensor type in the graph properly.
+      auto copy = dimSortGraph(graph);
+      auto fusion = parseJitIR(copy);
 
       // TODO: update the API to let `scheduleFusion` consume & return a fusion
       // magic scheduler updates fusion instance via transformation and setup
@@ -452,6 +453,54 @@ class CudaFusionManager {
     for (auto input : copy->inputs()) {
       if (auto input_type = input->type()->cast<TensorType>()) {
         input->setType(type_transform_fn(input_type));
+      }
+    }
+    return copy;
+  }
+
+  // two thing need to be adjusted:
+  // 1. permutation of size_ -> so we declare broadcast for size-1 dimension
+  //    properly;
+  // 2. contiguity_ -> which is needed when we register input tensor to codegen
+  //    to indicate dimension collapsing.
+  std::shared_ptr<Graph> dimSortGraph(std::shared_ptr<Graph>& graph) {
+    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
+      return graph->copy();
+    }
+    auto acc_type = extractDimensionCollapse(graph);
+
+    if (!acc_type->dim().has_value()) {
+      return graph->copy();
+    }
+
+    auto strategy = getSortStrideScheme(acc_type);
+    // TODO: early return if permutation is no-op;
+
+    std::shared_ptr<Graph> copy = graph->copy();
+
+    auto type_permute_fn = [&](TensorTypePtr type) {
+      //std::vector<c10::ShapeSymbol> vec_shape_symbol = type->symbolic_sizes().sizes().value();
+      auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
+      //std::vector<c10::optional<c10::Stride>> vec_optional_stride = type->stride_properties().sizes().value();
+      auto vec_optional_stride = type->stride_properties().sizes().value();
+
+      int rank = static_cast<int>(type->dim().value());
+
+      std::vector<c10::ShapeSymbol> permuted_vec_ss;
+      std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
+			for (int i = 0; i < rank; i++) {
+				//permuted_vec_ss.emplace_back(type->symbolic_sizes().sizes().value()[strategy[i]]);
+				//permuted_vec_optional_stride.emplace_back(type->stride_properties().sizes().value()[strategy[i]]);
+				permuted_vec_ss.emplace_back(vec_shape_symbol[strategy[i]]);
+				permuted_vec_optional_stride.emplace_back(vec_optional_stride[strategy[i]]);
+			}
+
+      return TensorType::create(type->scalarType(), type->device(), permuted_vec_ss, permuted_vec_optional_stride, type->requires_grad());
+    };
+
+    for (auto input : copy->inputs()) {
+      if (auto input_type = input->type()->cast<TensorType>()) {
+        input->setType(type_permute_fn(input_type));
       }
     }
     return copy;

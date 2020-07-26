@@ -31,6 +31,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
           aten_opt_type_map(tensor_type->scalarType()),
           false) {
   std::vector<IterDomain*> sizes;
+  std::vector<bool> contig_info;
 
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
@@ -49,12 +50,17 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     } else {
       sizes.push_back(new IterDomain(new Int(0), new Int()));
     }
+
+    if (tensor_type->stride_properties()[i].has_value() &&
+        tensor_type->stride_properties()[i]->contiguous_.has_value() &&
+        tensor_type->stride_properties()[i]->contiguous_.value() == true) {
+      contig_info.push_back(true);
+    } else {
+      contig_info.push_back(false);
+    }
   }
 
-  // Need to add contiguity information
-  //TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-
-  domain_ = new TensorDomain(sizes);
+  domain_ = new TensorDomain(sizes, contig_info);
 
   this->name_ = fusion_->registerVal(this);
 }
