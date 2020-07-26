@@ -12,7 +12,7 @@ namespace at { namespace native {
 //   call this function to handle resizing their output tensor.
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing (except for zero-dim to 1-dim single element tensors)
-// NOTE: In the future only output tensors with no elements will be resizable
+// NOTE: In the future the warning will become an error
 static inline void resize_output(Tensor& output, IntArrayRef shape) {
   // Tests for resizing except for...
   // (1) resizing of zero elmeent tensors
