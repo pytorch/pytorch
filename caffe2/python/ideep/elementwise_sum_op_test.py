@@ -44,7 +44,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            inputs=st.integers(2, 7),
            inplace=st.booleans(),
-           **mu.gcs)
+           **mu.gcs_cpu_ideep)
     def test_elementwise_sum_fallback(self,
                                       size,
                                       input_channels,
