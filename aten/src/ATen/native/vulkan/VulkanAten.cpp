@@ -204,7 +204,7 @@ at::Tensor vulkan_max_pool2d(
   TORCH_CHECK(
       self.dim() == 4, "Vulkan max_pool2d is implemented for 4-dim input");
 
-  VulkanTensor& x = vtensor_from_vulkan(self);
+  const auto& x = vtensor_from_vulkan(self);
   auto inputSize = self.sizes();
   const int64_t iN = inputSize[0];
   const int64_t iC = inputSize[1];
@@ -232,8 +232,7 @@ at::Tensor vulkan_max_pool2d(
       oH,
       oW);
 
-  Tensor output = empty_vulkan({iN, iC, oH, oW}, self.options(), {});
-  VulkanTensor& y = vtensor_from_vulkan(output);
+  VulkanTensor y{{iN, iC, oH, oW}};
   y.allocate_storage();
   vulkan::detail::max_pool2d(
       y,
@@ -252,7 +251,7 @@ at::Tensor vulkan_max_pool2d(
       padW,
       dilationH,
       dilationW);
-  return output;
+  return new_with_vtensor_vulkan(std::move(y), self.options());
 }
 
 at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape) {
@@ -263,25 +262,23 @@ at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape) {
 
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
-  VulkanTensor& x = vtensor_from_vulkan(xt);
+  const auto& x = vtensor_from_vulkan(xt);
   auto yt = other.is_vulkan() ? other : other.vulkan();
-  VulkanTensor& y = vtensor_from_vulkan(yt);
+  const auto& y = vtensor_from_vulkan(yt);
   float a = alpha.to<float>();
 
-  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::add(output, x, y, a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
 Tensor& vulkan_add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  auto xt = self.is_vulkan() ? self : self.vulkan();
-  VulkanTensor& x = vtensor_from_vulkan(xt);
-  auto yt = other.is_vulkan() ? other : other.vulkan();
-  VulkanTensor& y = vtensor_from_vulkan(yt);
+  auto& x = vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  auto& y = vtensor_from_vulkan(other.is_vulkan() ? other : other.vulkan());
   float a = alpha.to<float>();
 
-  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::add(output, x, y, a);
   x = std::move(output);
@@ -367,7 +364,7 @@ at::Tensor vulkan_convolution_prepacked(
       VulkanTensor{{params.N, params.OC, params.OH, params.OW}};
   voutput.allocate_storage();
   const bool hasBias = bias.has_value() && bias->defined();
-  if (hasBias && (*bias).is_vulkan()) {
+  if (hasBias && bias->is_vulkan()) {
     const VulkanTensor& vbias = vtensor_from_vulkan(*bias);
     vulkan::detail::conv2d(
         voutput, vinput, vweight, vbias, params, output_min, output_max);
@@ -416,12 +413,10 @@ Tensor vulkan_mm(const Tensor& self, const Tensor& mat2) {
       m1Sizes[1] == m2Sizes[0],
       "vulkan_mm expects self.sizes[1] equal mat2.sizes[0]");
 
-  const VulkanTensor m1 =
-      vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
-  const VulkanTensor m2 =
-      vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
+  const auto& m1 = vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  const auto& m2 = vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
 
-  VulkanTensor output = VulkanTensor{{m1Sizes[0], m2Sizes[1]}};
+  VulkanTensor output{{m1Sizes[0], m2Sizes[1]}};
   output.allocate_storage();
   vulkan::detail::addmm(output, c10::nullopt, m1, m2, 0.f, 1.f);
   return new_with_vtensor_vulkan(std::move(output), self.options());
@@ -431,8 +426,8 @@ Tensor vulkan_clamp(
     const Tensor& self,
     c10::optional<Scalar> min,
     c10::optional<Scalar> max) {
-  VulkanTensor& x = vtensor_from_vulkan(self);
-  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  const auto& x = vtensor_from_vulkan(self);
+  VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::clamp(
       output,
@@ -446,8 +441,8 @@ Tensor& vulkan_clamp_(
     Tensor& self,
     c10::optional<Scalar> min,
     c10::optional<Scalar> max) {
-  VulkanTensor& x = vtensor_from_vulkan(self);
-  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  auto& x = vtensor_from_vulkan(self);
+  VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::clamp(
       output,
