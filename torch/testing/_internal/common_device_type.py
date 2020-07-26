@@ -439,8 +439,13 @@ def _has_sufficient_memory(device, size):
     if device.startswith('cuda'):
         return (torch.cuda.is_available() and
                 torch.cuda.get_device_properties(0).total_memory >= size)
+    if device == 'xla':
+        raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 
-    # Assume CPU
+    if device != 'cpu':
+        raise unittest.SkipTest('Unknown device type')
+
+    # CPU
     if not HAS_PSUTIL:
         raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
 
