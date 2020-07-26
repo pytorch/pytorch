@@ -93,7 +93,7 @@ VulkanTensor cat(
     ArrayRef<VulkanTensor> inputs,
     int64_t dim) {
   VkDeviceSize outputOffset = 0;
-  for (const VulkanTensor& input : inputs) {
+  for (const auto& input : inputs) {
     input.sync_image_to_buffer();
     const auto sizeBytes = sizeof(float) * input.numel();
     copy_buffer_to_buffer(
@@ -156,20 +156,20 @@ void adaptive_avg_pool2d(
 void max_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
-    int iH,
-    int iW,
-    int oH,
-    int oW,
-    int _n,
-    int _c,
-    int kH,
-    int kW,
-    int dH,
-    int dW,
-    int padH,
-    int padW,
-    int dilationH,
-    int dilationW) {
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW,
+    const int dilationH,
+    const int dilationW) {
   auto device = context().device();
   const auto c = _n * _c;
   struct ConstBlock {
@@ -354,7 +354,7 @@ VBuffer bufferFromOptionalHostData(
       ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
   VBuffer buffer{sizeAligned};
   if (data.has_value()) {
-    buffer.copy_from_host_to_device((void*)*data, dataSize);
+    buffer.copy_from_host_to_device(*data, dataSize);
   } else {
     buffer.set_zeros();
   }
