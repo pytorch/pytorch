@@ -32,20 +32,20 @@ void adaptive_avg_pool2d(
 void max_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
-    int iH,
-    int iW,
-    int oH,
-    int oW,
-    int _n,
-    int _c,
-    int kH,
-    int kW,
-    int dH,
-    int dW,
-    int padH,
-    int padW,
-    int dilationH,
-    int dilationW);
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW,
+    const int dilationH,
+    const int dilationW);
 
 VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1);
 
