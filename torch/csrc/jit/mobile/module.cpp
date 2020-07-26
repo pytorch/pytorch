@@ -96,11 +96,37 @@ void slot_params_recurse(
     }
   }
 }
+
+void slot_named_params_recurse(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj,
+    std::map<std::string, at::Tensor>* params,
+    const std::string& parent_name) {
+  auto slots = obj->slots();
+  size_t nslots = slots.size();
+  for (size_t i = 0; i < nslots; ++i) {
+    auto slot = slots[i];
+    std::string name =
+        parent_name.size() == 0 ? parent_name : parent_name + ".";
+    name += obj->type()->getAttributeName(i);
+    if (slot.isTensor()) {
+      (*params)[name] = slot.toTensor();
+    } else if (slot.isObject()) {
+      slot_named_params_recurse(slot.toObject(), params, name);
+    }
+  }
+}
 } // namespace
 
 const std::vector<at::Tensor> Module::parameters() const {
   std::vector<at::Tensor> params;
   slot_params_recurse(object_, &params);
+  return params;
+}
+
+const std::map<std::string, at::Tensor> Module::named_parameters() const {
+  std::map<std::string, at::Tensor> params;
+  const std::string name = "";
+  slot_named_params_recurse(object_, &params, name);
   return params;
 }
 } // namespace mobile

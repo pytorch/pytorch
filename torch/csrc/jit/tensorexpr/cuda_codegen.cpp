@@ -324,7 +324,6 @@ class AtomicAddFuser : public IRMutator {
   Stmt* mutate(const Store* v) override {
     const Buf* buf = v->buf();
     const std::vector<const Expr*>& indices = v->indices();
-    const Expr* value = v->value();
     const Expr* atomic_add_value = nullptr;
     if (isAtomicAdd(v, &atomic_add_value)) {
       return new AtomicAdd(buf, indices, atomic_add_value);
@@ -800,8 +799,6 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<const Expr*>& gpu_block_extents =
       printer_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents =
-      printer_->gpu_thread_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));

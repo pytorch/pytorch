@@ -215,7 +215,7 @@ std::tuple<Tensor, Tensor> _get_scale_zero_point_per_channel_iter_grads(
     auto dZeroPoint_item_vec = at::empty_like(X_i, X_i.options(), MemoryFormat::Preserve);
 
     float scale_i = scale[i].item<float>();
-    int64_t zero_point_i = zero_point[i].item<int64_t>();
+    int64_t zero_point_i = static_cast<int64_t>(std::min(std::max(zero_point[i].item<float>() + 0.5f, quant_min), quant_max));
     fake_quant_grad_learnable_scale_channel_stub(
       scale.device().type(), dScale_item_vec, X_i, dX_i, scale_i, zero_point_i, quant_min, quant_max);
     fake_quant_grad_learnable_zero_point_channel_stub(
@@ -312,8 +312,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   std::tuple<Tensor, Tensor> dScaleZeroPoints = native::_get_scale_zero_point_per_channel_iter_grads(
     dX, X, scale, zero_point, axis, quant_min, quant_max);
 
-  Tensor dScale = std::get<0>(dScaleZeroPoints);
-  Tensor dZeroPoint = std::get<1>(dScaleZeroPoints);
+  Tensor dScale = std::get<0>(dScaleZeroPoints).to(scale.device());
+  Tensor dZeroPoint = std::get<1>(dScaleZeroPoints).to(zero_point.device());
 
   return std::make_tuple(dX, dScale, dZeroPoint);
 }

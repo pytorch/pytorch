@@ -82,6 +82,40 @@ class TestLearningRate(serial.SerializedTestCase):
         )
         self.assertReferenceChecks(gc, op, [iter], ref)
 
+    @given(**hu.gcs_cpu_only)
+    def test_slope_learning_rate_op(self, gc, dc):
+        iter = np.random.randint(low=1, high=1e5, size=1)
+
+        num_iter_1 = int(np.random.randint(low=1e2, high=1e3, size=1))
+        multiplier_1 = 1.0
+        num_iter_2 = num_iter_1 + int(np.random.randint(low=1e2, high=1e3, size=1))
+        multiplier_2 = 0.5
+        base_lr = float(np.random.random(1))
+
+        def ref(iter):
+            iter = float(iter)
+            if iter < num_iter_1:
+                lr = multiplier_1
+            else:
+                lr = max(
+                    multiplier_1 + (iter - num_iter_1) * (multiplier_2 - multiplier_1) / (num_iter_2 - num_iter_1),
+                    multiplier_2
+                )
+            return (np.array(base_lr * lr), )
+
+        op = core.CreateOperator(
+            'LearningRate',
+            'data',
+            'out',
+            policy="slope",
+            base_lr=base_lr,
+            num_iter_1=num_iter_1,
+            multiplier_1=multiplier_1,
+            num_iter_2=num_iter_2,
+            multiplier_2=multiplier_2,
+        )
+        self.assertReferenceChecks(gc, op, [iter], ref)
+
     @given(
         **hu.gcs_cpu_only
     )
