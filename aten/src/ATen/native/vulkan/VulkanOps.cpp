@@ -272,7 +272,7 @@ VBuffer bufferFromOptionalHostData(
       ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
   VBuffer buffer{sizeAligned};
   if (data.has_value()) {
-    buffer.copy_from_host_to_device((void*)*data, dataSize);
+    buffer.copy_from_host_to_device(*data, dataSize);
   } else {
     buffer.set_zeros();
   }
