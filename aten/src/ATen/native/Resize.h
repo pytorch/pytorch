@@ -10,7 +10,8 @@ namespace at { namespace native {
 // Resizes outputs
 // Functions accepting output tensors, like with the "out" kwarg, should
 //   call this function to handle resizing their output tensor.
-// Issues a warning if the output tensor has one or more elements
+// Issues a warning if the output tensor has one or more elements and
+//   needs resizing (except for zero-dim to 1-dim single element tensors)
 // NOTE: In the future only output tensors with no elements will be resizable
 static inline void resize_output(Tensor& output, IntArrayRef shape) {
   // Tests for resizing except for...
