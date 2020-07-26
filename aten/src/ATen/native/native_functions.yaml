@@ -4897,7 +4897,7 @@
 # is self.size[:-2]
 # - func: cholesky_mod.out(Tensor self, bool upper=False, *, Tensor(a!) out, Tensor? jitter=None) -> (Tensor(a!) out, Tensor jitter)
 
-- func: cholesky_mod(Tensor self, bool upper=False, *, Tensor? jitter=None) -> (Tensor result, Tensor jitter)
+- func: cholesky_mod(Tensor self, bool upper=False, *, Tensor? jitter=None) -> (Tensor result, Tensor jitter_out)
   use_c10_dispatcher: with_codegenerated_unboxing_wrapper
   variants: method, function
 

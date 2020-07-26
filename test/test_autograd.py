@@ -2381,6 +2381,32 @@ class TestAutograd(TestCase):
             _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
+    def test_cholesky_mod(self):
+        jitter_tensor = torch.as_tensor([0, 1e-8], dtype=torch.float64)
+        def func(root, upper):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            ret = torch.cholesky_mod(x, upper, jitter=jitter_tensor)
+            return ret
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims, requires_grad=True)
+
+            print('gradcheck', dims)
+            gradcheck(func, [root, upper])
+            print('gradgradcheck')
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            res, jitter = root.cholesky_mod(jitter=jitter_tensor)
+            print('jitter', jitter.shape)
+            chol_mod = res.sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
+
+    @skipIfNoLapack
     def test_eig(self):
         def func(B):
             return torch.eig(B, eigenvectors=True)
