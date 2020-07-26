@@ -13,8 +13,12 @@ namespace at { namespace native {
 // Issues a warning if the output tensor has one or more elements
 // NOTE: In the future only output tensors with no elements will be resizable
 static inline void resize_output(Tensor& output, IntArrayRef shape) {
-  if (!output.sizes().equals(shape) && output.numel() > 0) {
-    TORCH_CHECK(false, "checking for internal output resizing behavior");
+  // Tests for resizing except for...
+  // (1) resizing of zero elmeent tensors
+  // (2) zero-dim <-> one-dim conversion for single element outputs
+  if (!output.sizes().equals(shape) && output.numel() > 0 &&
+      !(output.numel() == 1 && shape.size() == 1 && shape[0] == 1) &&
+      !(output.numel() == 1 && shape.size() == 0)) {
     TORCH_WARN(
       "An output with one or more elements was resized, since it had ",
       "shape ", output.sizes(), ", which does not match the required ",
