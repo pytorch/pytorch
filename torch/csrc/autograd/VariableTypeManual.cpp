@@ -170,12 +170,12 @@ void retain_grad(const Tensor & self) {
       auto var = weak_self.lock();
       if (!var->grad().defined()) {
         if (grad.is_sparse()) {
-          var->grad() = grad.clone();
+          var->mutable_grad() = grad.clone();
         } else {
-          var->grad() = grad.clone(at::MemoryFormat::Contiguous);
+          var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
         }
       } else {
-        var->grad() = var->grad() + grad;
+        var->mutable_grad() = var->grad() + grad;
       }
     }
   });
