@@ -76,9 +76,11 @@ class NCCLTest : public NCCLTestBase {
     }
   }
 
-  void wait(std::shared_ptr<ProcessGroup::Work>& work) {
+  void wait(
+      std::shared_ptr<ProcessGroup::Work>& work,
+      std::chrono::milliseconds timeout = kNoTimeout) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
-    work->wait();
+    work->wait(timeout);
   }
 
   std::vector<at::Tensor> getTensors() {

@@ -22,12 +22,12 @@ void upsample_nearest2d(
 void adaptive_avg_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
-    int64_t IH,
-    int64_t IW,
-    int64_t OH,
-    int64_t OW,
-    int64_t _N,
-    int64_t _C);
+    const int64_t IH,
+    const int64_t IW,
+    const int64_t OH,
+    const int64_t OW,
+    const int64_t IN,
+    const int64_t IC);
 
 void add(
     VulkanTensor& output,
