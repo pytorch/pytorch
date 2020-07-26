@@ -5418,6 +5418,41 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    @onlyOnCPUAndCUDA
+    def test_tensor_ctor_device_inference(self, device):
+        torch_device = torch.device(device)
+        values = torch.tensor((1, 2, 3), device=device)
+
+        # Tests tensor and as_tensor
+        # Note: warnings are suppressed (suppresses warnings)
+        for op in (torch.tensor, torch.as_tensor):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.assertEqual(op(values).device, torch_device)
+                self.assertEqual(op(values, dtype=torch.float64).device, torch_device)
+
+                if self.device_type == 'cuda':
+                    with torch.cuda.device(device):
+                        self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
+
+        # Tests sparse ctor
+        indices = torch.tensor([[0, 1, 1],
+                                [2, 0, 1],
+                                [2, 1, 0]], device=device)
+        sparse_size = (3, 3, 3)
+
+        sparse_default = torch.sparse_coo_tensor(indices, values, sparse_size)
+        self.assertEqual(sparse_default.device, torch_device)
+
+        sparse_with_dtype = torch.sparse_coo_tensor(indices, values, sparse_size, dtype=torch.float64)
+        self.assertEqual(sparse_with_dtype.device, torch_device)
+
+        if self.device_type == 'cuda':
+            with torch.cuda.device(device):
+                sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
+                                                            sparse_size, dtype=torch.float64)
+                self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):

@@ -224,7 +224,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
 
   std::vector<std::vector<at::Tensor>> inputs(size);
 
-  // Try every permutation of root rank and root tensor
+  // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
       // Initialize inputs
@@ -548,7 +548,7 @@ TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
 
 TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
   {
-    if (torch::cuda::device_count() > 1) {
+    if (torch::cuda::is_available()) {
       TemporaryFile file;
       testBroadcast(file.path, at::DeviceType::CUDA);
     }
