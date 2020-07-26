@@ -13,6 +13,7 @@ from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
+from caffe2.python.lazy import TriggerLazyImport
 from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
 
@@ -57,7 +58,9 @@ def _GetRegisteredOperators():
 _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
 
-def RefreshRegisteredOperators():
+def RefreshRegisteredOperators(trigger_lazy=True):
+    if trigger_lazy:
+        TriggerLazyImport()
     global _REGISTERED_OPERATORS
     _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
@@ -66,6 +69,7 @@ _GLOBAL_INIT_ARGS = []
 
 
 def GlobalInit(args):
+    TriggerLazyImport()
     _GLOBAL_INIT_ARGS.extend(args[1:])
     C.global_init(args)
 
@@ -79,6 +83,7 @@ def IsOperator(op_type):
 
 
 def IsOperatorWithEngine(op_type, engine):
+    TriggerLazyImport()
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
@@ -278,6 +283,7 @@ class BlobReference(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        TriggerLazyImport()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
@@ -2211,6 +2217,7 @@ class Net(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        TriggerLazyImport()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
