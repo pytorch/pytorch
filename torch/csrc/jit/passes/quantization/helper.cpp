@@ -46,6 +46,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -221,8 +222,6 @@ bool matchAtenFuncToUse(
       (!n.has_value() || n.value() == use.offset);
 }
 
-// Check if `use` is a CallFunction of name `func_name` and if value
-// `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
@@ -255,12 +254,15 @@ bool matchArgPattern(
   return false;
 }
 
+// TODO add other op signatures.
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
       AtenFuncArgs(
           {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
-      CallFuncArgs({{"linear", 2}}));
+      // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
+      // %offsets.1, %7, %8, %9, %10, %9, %per_sample_weights.1, %13)
+      CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
 
@@ -464,15 +466,17 @@ bool nodeQuantizable(Node* n, QuantType quant_type) {
 }
 
 bool useQuantizable(const Use& use, QuantType quant_type) {
-  for (const auto& func_input : _observe_inputs_aten_func) {
-    if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
-      return use.offset == func_input.arg_index;
+  if (quant_type == QuantType::STATIC) {
+    for (const auto& func_input : _observe_inputs_aten_func) {
+      if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
+        return use.offset == func_input.arg_index;
+      }
     }
-  }
 
-  for (const auto& func_input : _observe_inputs_call_func) {
-    if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
-      return use.offset == func_input.arg_index;
+    for (const auto& func_input : _observe_inputs_call_func) {
+      if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
+        return use.offset == func_input.arg_index;
+      }
     }
   }
 
