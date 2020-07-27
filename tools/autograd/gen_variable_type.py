@@ -1158,7 +1158,7 @@ def emit_body(declaration):
                 # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
                 # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
                 # and use the use_optional_tensor=True behavior always.
-                args = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in declaration['args']]
+                args = ["c10::impl::maybe_unwrap_optional_tensor({})".format(arg) for arg in declaration['args']]
             else:
                 assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 args = declaration['args']
