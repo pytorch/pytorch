@@ -40,10 +40,11 @@ VContext::VContext(const bool enableValidationLayers)
   createInstance();
   findPhysicalDevice();
   createDevice();
+
+  computeUnitFactory_ = std::make_unique<ComputeUnitFactory>(device_);
 }
 
 VContext::~VContext() {
-  vkDestroyCommandPool(device_, commandPool_, nullptr);
   if (enableValidationLayers_) {
     const auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
         instance_, "vkDestroyDebugReportCallbackEXT");
@@ -52,6 +53,11 @@ VContext::~VContext() {
     }
   }
 
+  // ComputeUnitFactory_ owns ComputeUnits and VkPipelineCache, need valid
+  // VkDevice for destructing, destructing before vkDestroyDevice
+  computeUnitFactory_.reset();
+
+  vkDestroyCommandPool(device_, commandPool_, nullptr);
   vkDestroyDevice(device_, nullptr);
   vkDestroyInstance(instance_, nullptr);
 }
@@ -708,8 +714,9 @@ ComputeUnit::~ComputeUnit() {
 void ComputeUnit::createComputePipeline(
     const uint32_t* const code,
     const uint32_t codeSize,
+    const VkPipelineCache pipelineCache,
     const VkDescriptorSetLayout descrSetLayout,
-    const WorkGroupSize& workGroupSize) {
+    const WorkGroupSize workGroupSize) {
   const auto device = context().device();
   VkShaderModuleCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -766,16 +773,17 @@ void ComputeUnit::createComputePipeline(
   pipelineCreateInfo.layout = pipelineLayout_;
 
   VK_CHECK(vkCreateComputePipelines(
-      device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &pipeline_));
+      device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline_));
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 void ComputeUnit::createComputePipelineCompile(
     const std::string& glslSrc,
+    const VkPipelineCache pipelineCache,
     const VkDescriptorSetLayout& descrSetLayout,
-    const WorkGroupSize& workGroupSize) {
+    const WorkGroupSize workGroupSize) {
   shaderc::Compiler compiler{};
-  shaderc::CompileOptions options{};
+  shaderc::CompileOptions options[];
   options.SetGenerateDebugInfo();
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
@@ -797,7 +805,11 @@ void ComputeUnit::createComputePipelineCompile(
       compilationResult.cbegin(), compilationResult.cend());
   const auto codeSizeBytes = 4 * shaderSpvCode.size();
   createComputePipeline(
-      shaderSpvCode.data(), codeSizeBytes, descrSetLayout, workGroupSize);
+      shaderSpvCode.data(),
+      codeSizeBytes,
+      pipelineCache,
+      descrSetLayout,
+      workGroupSize);
 }
 #endif
 
@@ -899,6 +911,79 @@ VBuffer makeUniformConstBuffer(const void* const ptr, const VkDeviceSize size) {
   return constBuffer;
 }
 
+ComputeUnitFactory::ComputeUnitFactory(const VkDevice device)
+    : device_(device) {
+  VkPipelineCacheCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+  createInfo.pNext = nullptr;
+  createInfo.flags = 0;
+  createInfo.initialDataSize = 0;
+  createInfo.pInitialData = nullptr;
+  VK_CHECK(vkCreatePipelineCache(
+      device_, &createInfo, nullptr /* allocator */, &pipelineCache_));
+}
+
+ComputeUnitFactory::~ComputeUnitFactory() {
+  vkDestroyPipelineCache(device_, pipelineCache_, nullptr /* allocator */);
+}
+
+std::string ComputeUnitFactory::getCacheKey(
+    const char* const key,
+    const WorkGroupSize workGroupSize) {
+  std::stringstream ss;
+  ss << key << ':' << workGroupSize.x << ':' << workGroupSize.y << ':'
+     << workGroupSize.z;
+  return ss.str();
+}
+
+ComputeUnit& ComputeUnitFactory::get(
+    const std::string& cacheKey,
+    const std::function<std::shared_ptr<ComputeUnit>()> factoryFn) {
+  const auto it = computeUnits_.find(cacheKey);
+  if (it != computeUnits_.end()) {
+    return *(it->second.get());
+  }
+  auto computeUnit = factoryFn();
+  computeUnits_.insert(std::make_pair(cacheKey, computeUnit));
+  return *(computeUnit.get());
+}
+
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+ComputeUnit& ComputeUnitFactory::get(
+    const char* const key,
+    const char* const glslSrc,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  return get(
+      getCacheKey(key, workGroupSize),
+      [glslSrc,
+       pipelineCache = pipelineCache_,
+       descrSetLayout,
+       workGroupSize]() {
+        return std::make_shared<ComputeUnit>(
+            glslSrc, pipelineCache, descrSetLayout, workGroupSize);
+      });
+}
+#else
+ComputeUnit& ComputeUnitFactory::get(
+    const char* const key,
+    const uint32_t* const code,
+    const uint32_t codeSize,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  return get(
+      getCacheKey(key, workGroupSize),
+      [code,
+       codeSize,
+       pipelineCache = pipelineCache_,
+       descrSetLayout,
+       workGroupSize]() {
+        return std::make_shared<ComputeUnit>(
+            code, codeSize, pipelineCache, descrSetLayout, workGroupSize);
+      });
+}
+#endif
+
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   const auto device = context().device();
@@ -933,9 +1018,9 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(nchw_to_image),
-                          descrSetLayout,
-                          workGroupSize};
+
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(nchw_to_image), descrSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descrSet);
 
   image.addImageMemoryBarrierToGeneral(computeUnit.commandBuffer());
@@ -996,9 +1081,8 @@ void copy_image_to_buffer(
   constBuffer.bind(descrSet, 2);
 
   const WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(image_to_nchw),
-                          descrSetLayout,
-                          workGroupSize};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(image_to_nchw), descrSetLayout, workGroupSize);
 
   computeUnit.createCommandBuffer(descrSet);
   image.addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
