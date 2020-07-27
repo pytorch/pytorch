@@ -29,7 +29,7 @@ namespace torch {
 namespace jit {
 
 TORCH_API void ReconstructScopes(
-    Module& module,
+    const Module& module,
     Graph& g,
     const std::string& prefix);
 
