@@ -298,10 +298,15 @@ test_xla() {
 test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
-  python dump_all_function_schemas.py --filename new_schemas.txt
-  pip_uninstall torch
+  python -m venv venv
+  . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  pip show torch
+  python dump_all_function_schemas.py --filename nightly_schemas.txt
+  deactivate
+  rm -r venv
+  pip show torch
+  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
   popd
   set +x
   assert_git_not_dirty
