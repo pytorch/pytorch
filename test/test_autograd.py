@@ -4411,7 +4411,7 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
-# white list for complex
+# allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
@@ -6537,6 +6537,17 @@ class TestAutogradDeviceType(TestCase):
         c.grad = None
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
+
+    def test_movedim(self, device):
+        x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
+
+        # Positive axis
+        gradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+        gradgradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+
+        # Negative axis
+        gradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+        gradgradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
     def _test_atleast(self, device, torch_fn):
         # 0-dim
