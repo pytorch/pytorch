@@ -185,17 +185,32 @@ class UnaryOpTest(serial.SerializedTestCase):
             })
             assert(0)
 
+    # These tests doesn't need to run multiple times given that it is a
+    # linear sweep and it is deterministic.
+    # Once hypothesis.testing version is updated, we can re-enable
+    # testing with different hypothesis examples.
     def test_sigmoid(self):
         self._test_unary_op("Sigmoid", value=20)
 
+    # These tests doesn't need to run multiple times given that it is a
+    # linear sweep and it is deterministic.
+    # Once hypothesis.testing version is updated, we can re-enable
+    # testing with different hypothesis examples.
     def test_tanh(self):
         self._test_unary_op("Tanh", value=20)
 
+    # These tests doesn't need to run multiple times given that it is a
+    # linear sweep and it is deterministic.
+    # Once hypothesis.testing version is updated, we can re-enable
+    # testing with different hypothesis examples.
     # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
     def test_swish(self):
         self._test_unary_op("Swish", value=20, atol=0.008)
 
-    @settings(max_examples=1)
+    # These tests doesn't need to run multiple times given that it is a
+    # linear sweep and it is deterministic.
+    # Once hypothesis.testing version is updated, we can re-enable
+    # testing with different hypothesis examples.
     def test_logit(self):
         workspace.ResetWorkspace()
         n = 1
