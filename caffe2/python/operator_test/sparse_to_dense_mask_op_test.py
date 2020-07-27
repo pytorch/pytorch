@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
@@ -14,6 +14,7 @@ class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -46,6 +47,7 @@ class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -79,6 +81,7 @@ class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            dim=st.integers(1, 3), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_sparse_to_dense_mask_high_dim(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)

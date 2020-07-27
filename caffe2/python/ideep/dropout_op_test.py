@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
-from hypothesis import assume, given
+from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 

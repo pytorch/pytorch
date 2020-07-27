@@ -6,7 +6,7 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import assume, given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
@@ -32,9 +32,10 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         sum2 = np.sum(X**2, axis=(0, 1), keepdims=False)
         return (sum1, sum2)
 
-    @serial.given(
+    @given(
         N=st.integers(1, 5), C=st.integers(1, 10), H=st.integers(1, 12),
         W=st.integers(1, 12), order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @settings(deadline=10000)
     def test_channel_stats_2d(self, N, C, H, W, order, gc, dc):
         op = core.CreateOperator(
             "ChannelStats",
@@ -56,10 +57,11 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], reference=ref_op)
         self.assertDeviceChecks(dc, op, [X], [0, 1])
 
-    @serial.given(
+    @given(
         N=st.integers(1, 5), C=st.integers(1, 10), D=st.integers(1, 6),
         H=st.integers(1, 6), W=st.integers(1, 6),
         order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @settings(deadline=10000)
     def test_channel_stats_3d(self, N, C, D, H, W, order, gc, dc):
         op = core.CreateOperator(
             "ChannelStats",

@@ -8,7 +8,7 @@ from caffe2.python.test_util import TestCase
 import numpy as np
 import numpy.testing as npt
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 import functools
@@ -172,6 +172,7 @@ class TestReBatchingQueue(TestCase):
         producer_num_iterations=st.integers(1, 10),
         capacity=st.integers(1, 10)
     )
+    @settings(deadline=10000)
     def test_rebatching_parallel_producer_consumer(
         self, num_producers, num_consumers, producer_input_size,
         producer_num_iterations, capacity

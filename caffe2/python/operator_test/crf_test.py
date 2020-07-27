@@ -8,7 +8,7 @@ import numpy as np
 from scipy.special import logsumexp
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 import unittest
 
 
@@ -16,6 +16,7 @@ class TestCRFOp(hu.HypothesisTestCase):
 
     @given(num_tags=st.integers(2, 4),
            num_words=st.integers(2, 15))
+    @settings(deadline=1000)
     def test_crf_with_loss_op(self, num_tags, num_words):
         model = ModelHelper(name='external')
         embeddings_dim = 200
@@ -59,6 +60,7 @@ class TestCRFOp(hu.HypothesisTestCase):
 
     @given(num_tags=st.integers(1, 4),
            num_words=st.integers(2, 4))
+    @settings(deadline=10000)
     def test_crf_gradient(self, num_tags, num_words):
         base_model = ModelHelper(name='base_model')
         transitions = np.random.randn(

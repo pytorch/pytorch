@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from functools import partial
-from hypothesis import given
+from hypothesis import given, settings
 
 import numpy as np
 import unittest
@@ -622,6 +622,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertTrue((out1 == out2).all())
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_sparse_lengths_sum_invalid_index(self, gc, dc):
         D = np.random.rand(50, 3, 4, 5).astype(np.float32)
         I = (np.random.randint(0, 10000, size=10) + 10000).astype(np.int64)

@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -33,6 +33,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
+    @settings(deadline=1000)
     def test_selu_2(self, X, gc, dc, engine):
         alpha = 1.6732
         scale = 1.0507
@@ -49,6 +50,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
+    @settings(deadline=1000)
     def test_selu_3(self, X, gc, dc, engine):
         alpha = 1.3
         scale = 1.1

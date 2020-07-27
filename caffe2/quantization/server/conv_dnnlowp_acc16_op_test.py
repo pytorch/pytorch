@@ -11,7 +11,7 @@ from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     run_conv_or_fc
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -44,6 +44,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_dnnlowp_conv_acc16_int(
         self,
         stride,
@@ -220,6 +221,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_dnnlowp_conv_acc16_outlier(
         self,
         stride,

@@ -6,7 +6,7 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
@@ -123,6 +123,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
            H=st.integers(2, 5), W=st.integers(2, 5),
            epsilon=st.floats(min_value=1e-5, max_value=1e-4),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @settings(deadline=10000)
     def test_group_norm_grad(
             self, N, G, D, H, W, epsilon, order, gc, dc):
         op = core.CreateOperator(

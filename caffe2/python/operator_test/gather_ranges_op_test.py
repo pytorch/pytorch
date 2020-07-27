@@ -4,7 +4,7 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
 from caffe2.python import core, workspace
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 
 def batched_boarders_and_data(
@@ -165,7 +165,8 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
 
 
 class TestGatherRanges(serial.SerializedTestCase):
-    @serial.given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
+    @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_gather_ranges(self, boarders_and_data, gc, dc):
         boarders, data = boarders_and_data
 
@@ -185,7 +186,8 @@ class TestGatherRanges(serial.SerializedTestCase):
             reference=gather_ranges,
         )
 
-    @serial.given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
         data, ranges, lengths, _ = tensor_splits
 
@@ -231,6 +233,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             self.assertEqual(types["lengths_output"], core.DataType.INT32)
 
     @given(tensor_splits=_bad_tensor_splits(), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_empty_range_check(self, tensor_splits, gc, dc):
         data, ranges, lengths, key = tensor_splits
 

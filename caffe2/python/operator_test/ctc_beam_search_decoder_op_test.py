@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from caffe2.python.test_util import caffe2_flaky
 from collections import defaultdict, Counter
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -19,7 +19,7 @@ DEFAULT_PRUNE_THRESHOLD = 0.001
 
 
 class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
-    @serial.given(
+    @given(
         batch=st.sampled_from([1, 2, 4]),
         max_time=st.sampled_from([1, 8, 64]),
         alphabet_size=st.sampled_from([1, 2, 32, 128, 512]),
@@ -27,6 +27,7 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
         num_candidates=st.sampled_from([1, 2]),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=None, max_examples=30)
     def test_ctc_beam_search_decoder(
         self, batch, max_time, alphabet_size, beam_width, num_candidates, gc, dc
     ):

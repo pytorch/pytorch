@@ -8,14 +8,15 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
 
 
 class TestMomentumSGD(serial.SerializedTestCase):
-    @serial.given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
+    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_momentum_sgd(self, n, nesterov, gc, dc):
         param = np.random.rand(n).astype(np.float32)
         grad = np.random.rand(n).astype(np.float32)
@@ -70,7 +71,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
             reference=momentum_sgd
         )
 
-    @serial.given(
+    @given(
         inputs=hu.tensors(n=3),
         momentum=st.floats(min_value=0.1, max_value=0.9),
         nesterov=st.booleans(),
@@ -78,6 +79,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
         data_strategy=st.data(),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_sparse_momentum_sgd(
         self, inputs, momentum, nesterov, lr, data_strategy, gc, dc
     ):

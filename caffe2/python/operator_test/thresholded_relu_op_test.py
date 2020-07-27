@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -55,6 +55,7 @@ class TestThresholdedRelu(serial.SerializedTestCase):
            alpha=st.floats(min_value=1.1, max_value=5.0),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_thresholded_relu_3(self, input, alpha, gc, dc, engine):
         X = TestThresholdedRelu.fix_input(input)
         op = core.CreateOperator("ThresholdedRelu", ["X"], ["Y"],

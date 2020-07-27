@@ -7,7 +7,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -73,6 +73,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
 
     @given(tensor_splits=_tensor_splits(add_axis=True),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_concat_add_axis(self, tensor_splits, gc, dc):
         axis, _, splits = tensor_splits
 

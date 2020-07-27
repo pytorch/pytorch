@@ -46,7 +46,6 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             elements=st.integers(min_value=1, max_value=5),
             min_size=1,
             max_size=2,
-            average_size=2,
         ).flatmap(
             lambda shape: st.tuples(
                 hu.arrays(
@@ -200,7 +199,6 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             elements=st.integers(min_value=1, max_value=5),
             min_size=1,
             max_size=2,
-            average_size=2,
         ).flatmap(
             lambda shape: st.tuples(
                 hu.arrays(

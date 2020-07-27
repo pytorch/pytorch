@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -42,7 +42,8 @@ class TestReductionOps(serial.SerializedTestCase):
             outputs_with_grads=[0],
         )
 
-    @serial.given(n=st.integers(5, 8), **hu.gcs)
+    @given(n=st.integers(5, 8), **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_int_sum(self, n, gc, dc):
         X = np.random.rand(n).astype(np.int32)
 
@@ -62,9 +63,10 @@ class TestReductionOps(serial.SerializedTestCase):
             reference=sum_op,
         )
 
-    @serial.given(n=st.integers(1, 65536),
+    @given(n=st.integers(1, 65536),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_sqrsum(self, n, dtype, gc, dc):
         if dtype == np.float16:
             # fp16 is only supported with CUDA/HIP

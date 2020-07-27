@@ -8,14 +8,16 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 import hypothesis.strategies as st
+from hypothesis import given, settings
 import numpy as np
 
 
 class TestFindOperator(serial.SerializedTestCase):
 
-    @serial.given(n=st.sampled_from([1, 4, 8, 31, 79, 150]),
+    @given(n=st.sampled_from([1, 4, 8, 31, 79, 150]),
         idxsize=st.sampled_from([2, 4, 8, 1000, 5000]),
         **hu.gcs)
+    @settings(deadline=10000)
     def test_find(self, n, idxsize, gc, dc):
         maxval = 10
 

@@ -24,6 +24,7 @@ workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
 
 class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=10000)
     def test_slws_fused_4bit_rowwise_all_same(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -117,7 +118,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 32),
         max_weight=st.integers(0, 1),
     )
-    @settings(max_examples=100)
+    @settings(deadline=10000)
     def test_slws_fused_4bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         workspace.ResetWorkspace()
         np.random.seed(seed)

@@ -20,14 +20,14 @@ from __future__ import print_function
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
 
 
 class TestUpSample(serial.SerializedTestCase):
-    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+    @given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
            width_scale=st.floats(1.0, 4.0) | st.just(2.0),
            height=st.integers(4, 32),
            width=st.integers(4, 32),
@@ -35,6 +35,7 @@ class TestUpSample(serial.SerializedTestCase):
            batch_size=st.integers(1, 4),
            seed=st.integers(0, 65535),
            **hu.gcs)
+    @settings(max_examples=50, deadline=None)
     def test_upsample(self, height_scale, width_scale, height, width,
                      num_channels, batch_size, seed,
                      gc, dc):
@@ -107,7 +108,7 @@ class TestUpSample(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, inputs, 0, [0], stepsize=0.1,
                                       threshold=1e-2)
 
-    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+    @given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
            width_scale=st.floats(1.0, 4.0) | st.just(2.0),
            height=st.integers(4, 32),
            width=st.integers(4, 32),
@@ -115,6 +116,7 @@ class TestUpSample(serial.SerializedTestCase):
            batch_size=st.integers(1, 4),
            seed=st.integers(0, 65535),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_upsample_grad(self, height_scale, width_scale, height, width,
                           num_channels, batch_size, seed, gc, dc):
 

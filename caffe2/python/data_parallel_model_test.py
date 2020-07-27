@@ -11,7 +11,7 @@ import tempfile
 import unittest
 import time
 from mock import Mock
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
@@ -448,12 +448,14 @@ class DataParallelModelTest(TestCase):
         self.assertEqual(transform.call_count, 1)
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    @settings(deadline=2000)
     def test_multi_device_bn_op_level_cpu(self, seed, batch_size):
         self._bn_check_op_level("cpu", seed, batch_size)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    @settings(deadline=2000)
     def test_multi_device_bn_op_level_gpu(self, seed, batch_size):
         self._bn_check_op_level("gpu", seed, batch_size)
 
@@ -580,6 +582,7 @@ class DataParallelModelTest(TestCase):
         _test_backward_pass(x, devices, device_type, scale, tolerance)
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    @settings(deadline=2000)
     def test_multi_device_bn_net_lvl_cpu(self, seed, batch_size):
         if batch_size % 2 == 1:
             batch_size += 1
@@ -588,6 +591,7 @@ class DataParallelModelTest(TestCase):
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    @settings(deadline=2000)
     def test_multi_device_bn_net_lvl_gpu(self, seed, batch_size):
         if batch_size % 2 == 1:
             batch_size += 1
@@ -1133,6 +1137,7 @@ class ParallelizeBMUFTest(TestCase):
     @given(
         cpu_device=st.booleans()
     )
+    @settings(deadline=2000)
     def test_parallelize_bmuf(self, cpu_device):
         assume(cpu_device or workspace.has_gpu_support or workspace.has_hip_support)
 

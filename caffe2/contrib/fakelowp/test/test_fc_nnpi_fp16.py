@@ -24,6 +24,7 @@ GLOW_MATMUL_RTOL = 0
 
 class FCTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=1000)
     def test_clip(self, seed):
         np.random.seed(seed)
         m, n, k = 8, 8, 8
@@ -77,6 +78,7 @@ class FCTest(serial.SerializedTestCase):
         np.testing.assert_allclose(Y_glow, np.full((m, n), 65504.0, dtype))
 
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=1000)
     def test_fc_exercise(self, seed):
         """ Test that the matmul engine is working, this doesn't test
             precision
@@ -137,6 +139,7 @@ class FCTest(serial.SerializedTestCase):
                 assert(0)
 
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=1000)
     def test_fc_numeric_cases(self, seed):
         """ Test numerics, use examples found from the unit test.
             Use Fp16FCAcc16NNPI as a reference.
@@ -241,12 +244,12 @@ class FCTest(serial.SerializedTestCase):
             if n_offenders > 0:
                 print_test_debug_info("fc",
                     {"seed": seed, "iter": i, "m": m, "k": k, "n": n, "X": X0,
-                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2, 
+                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2,
                      "diff": diff, "rowdiff": rowdiff})
                 assert(0)
 
+    @settings(max_examples=5, deadline=None)
     @given(seed=st.integers(0, 65535))
-    @settings(max_examples=5)
     def test_fc_num0(self, seed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.
@@ -330,7 +333,7 @@ class FCTest(serial.SerializedTestCase):
             if n_offenders > 0:
                 print_test_debug_info("fc",
                     {"seed": seed, "iter": _, "m": m, "k": k, "n": n, "X": X0,
-                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2, 
+                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2,
                      "diff": diff, "rowdiff": rowdiff})
                 assert(0)
 

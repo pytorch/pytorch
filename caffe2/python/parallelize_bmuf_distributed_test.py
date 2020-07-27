@@ -10,7 +10,7 @@ import tempfile
 import shutil
 import logging
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 from caffe2.python import workspace
@@ -225,10 +225,11 @@ class DistributedTest(unittest.TestCase):
         cpu_device=st.booleans(),
         nesterov=st.booleans()
     )
+    @settings(deadline=10000)
     def test_bmuf_distributed(self, cpu_device, nesterov):
         if (not cpu_device) and workspace.has_hip_support:
             log.info('Skipping the test on ROCm due to regression in ROCm3.5')
-            return 
+            return
         self._test_bmuf_distributed(cpu_device=cpu_device, nesterov=nesterov)
 
     def _test_bmuf_distributed(self, cpu_device=False, nesterov=False):

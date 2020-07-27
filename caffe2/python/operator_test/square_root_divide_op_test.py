@@ -30,7 +30,7 @@ def _data_and_scale(
             hu.arrays([param_[0], param_[1]], dtype=dtype),
             hu.arrays(
                 [param_[0]], dtype=param_[2],
-                elements=(st.floats(0.0, 10000.0) if param_[2] in [np.float32]
+                elements=(hu.floats(0.0, 10000.0) if param_[2] in [np.float32]
                           else st.integers(0, 10000)),
             ),
         )

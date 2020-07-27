@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 
 from caffe2.python import core, model_helper, brew, utils
@@ -61,6 +61,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            store_mean=st.booleans(),
            seed=st.integers(0, 1000),
            store_inv_stdev=st.booleans())
+    @settings(deadline=1000)
     def test_instance_norm_gradients(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
             epsilon, seed):
