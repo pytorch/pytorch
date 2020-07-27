@@ -305,8 +305,8 @@ Tensor vulkan_mm(const Tensor& self, const Tensor& mat2) {
   TORCH_INTERNAL_ASSERT(
       self.dim() == 2 && mat2.dim() == 2,
       "vulkan_mm expects 2-dimensional tensors");
-  auto m1Sizes = self.sizes();
-  auto m2Sizes = mat2.sizes();
+  const auto m1Sizes = self.sizes();
+  const auto m2Sizes = mat2.sizes();
   TORCH_INTERNAL_ASSERT(
       m1Sizes[1] == m2Sizes[0],
       "vulkan_mm expects self.sizes[1] equal mat2.sizes[0]");
