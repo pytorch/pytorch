@@ -6,6 +6,10 @@
     - attach_workspace:
         at: /tmp/workspace
     - run:
+        name: Install expect
+        command: |
+          sudo apt-get update && sudo apt-get install -y expect
+    - run:
         name: Docs push
         command: |
           pushd /tmp/workspace
