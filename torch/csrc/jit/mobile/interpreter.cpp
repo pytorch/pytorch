@@ -13,11 +13,8 @@ namespace jit {
 char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(
-    std::shared_ptr<Code> code,
-    std::vector<std::string> module_debug_info_list)
-    : code_(std::move(code)),
-      module_debug_info_list_(std::move(module_debug_info_list)) {
+InterpreterState::InterpreterState(std::shared_ptr<Code> code)
+    : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
 
@@ -55,10 +52,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        std::string fn_name = (!module_debug_info_list_[inst.X].empty()) ?
-            module_debug_info_list_[inst.X] + "." + code_->op_names_[inst.X].name :
-            code_->op_names_[inst.X].name;
-        RECORD_FUNCTION(fn_name, stack);
+        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }

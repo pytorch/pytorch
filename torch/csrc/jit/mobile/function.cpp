@@ -6,8 +6,6 @@
 #include <torch/custom_class_detail.h>
 #include <torch/library.h>
 
-#include <iostream>
-
 namespace torch {
 namespace jit {
 
@@ -55,10 +53,6 @@ bool Function::append_operator(
   return true;
 }
 
-void Function::append_module_info(const std::string& module_info) {
-  module_debug_info_list_.push_back(module_info);
-}
-
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
 }
@@ -72,10 +66,9 @@ void Function::set_register_size(size_t size) {
 }
 
 bool Function::run(Stack& stack) const {
-  InterpreterState interp_state(code_, module_debug_info_list_);
+  InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }
-
 } // namespace mobile
 } // namespace jit
 } // namespace torch
