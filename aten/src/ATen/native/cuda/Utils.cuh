@@ -3,13 +3,13 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 namespace {
-constexpr int64_t kILP = 4;
-constexpr int64_t kChunkSize = 65536;
-constexpr int64_t kBlockSize = 1024;
+static constexpr int64_t kILP = 4;
+static constexpr int64_t kChunkSize = 65536;
+static constexpr int64_t kBlockSize = 1024;
 
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
-constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
-constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
+static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
 
 template<int n> struct TensorListMetadata
 {
