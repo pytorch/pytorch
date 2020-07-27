@@ -68,7 +68,7 @@ class DistributedSampler(Sampler):
         # If the dataset length is evenly divisible by # of replicas, then there
         # is no need to drop any data, since the dataset will be split equally.
         if self.drop_last and len(self.dataset) % self.num_replicas != 0:
-            # Split to nearest availabel length that is evenly divisible.
+            # Split to nearest available length that is evenly divisible.
             # This is to ensure each rank receives the same amount of data when
             # using this Sampler.
             self.num_samples = math.ceil(
