@@ -2252,7 +2252,6 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
-<<<<<<< dest:   a95e85fe6601 - autolandbot: Refresh autofdo data for titan-ca...
     def _run_reduction_test(
             self, tensor, expected_tensor, op, reduction_fn=dist.all_reduce, dst=None
     ):
