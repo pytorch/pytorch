@@ -550,6 +550,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             delete p;
           });
       traces_->numEvents = 0;
+    } else {
+      traces_.reset();
     }
     CAFFE_ENFORCE_EQ(
         (*onnxSetIOAndRunGraphPointer_)(
