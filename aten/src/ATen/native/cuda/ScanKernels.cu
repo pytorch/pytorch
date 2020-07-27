@@ -487,7 +487,7 @@ void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, Binar
     Tensor first_elem; // need to save it for all iterations other than first
     if (i > 0) {
       // need to temporarily transform first element of the range we are
-      // operating on self might be multi-d, but we need to index a single
+      // operating on; self might be multi-d, but we need to index a single
       // element
       auto self_view = at::_unsafe_view(self, -1);
       first_elem = self_view[i].clone();

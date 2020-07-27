@@ -12030,7 +12030,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_discontiguous_out_cumsum(self, device):
         x = torch.randn(4, 8, device=device)
-        y = torch.empty(4, 16, device=device)[:,::2]
+        y = torch.empty(4, 16, device=device)[:, ::2]
         out = torch.cumsum(x, 0)
         torch.cumsum(x, 0, out=y)
         self.assertFalse(y.is_contiguous())
