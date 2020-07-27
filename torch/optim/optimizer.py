@@ -4,6 +4,7 @@ from torch._six import container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain
+import warnings
 
 
 class _RequiredParameter(object):
@@ -218,6 +219,12 @@ class Optimizer(object):
                                  name)
             else:
                 param_group.setdefault(name, default)
+
+        params = param_group['params']
+        if len(params) != len(set(params)):
+            warnings.warn("optimizer contains a parameter group with duplicate parameters; "
+                          "in future, this will cause an error; "
+                          "see github.com/pytorch/pytorch/issues/40967 for more information", stacklevel=3)
 
         param_set = set()
         for group in self.param_groups:
