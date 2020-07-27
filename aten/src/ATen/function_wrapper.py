@@ -1114,6 +1114,16 @@ def create_generic(top_env, declarations):
             dispatch_key_var_name = '_dk'
             dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, [swizzle_self(f) for f in formals])
 
+            if option['use_c10_dispatcher'] == 'full':
+                # TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
+                # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+                # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+                # and use the use_optional_tensor=True behavior always.
+                method_actuals = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in option['method_actuals']]
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                method_actuals = option['method_actuals']
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
                 # NB: As this code is currently written, there will NEVER be
@@ -1134,7 +1144,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['method_actuals'])
+                            actuals=method_actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1150,7 +1160,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['method_actuals'])
+                    option, actuals=method_actuals)
 
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
@@ -1180,6 +1190,16 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
+            if option['use_c10_dispatcher'] == 'full':
+                # TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
+                # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+                # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+                # and use the use_optional_tensor=True behavior always.
+                actuals = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in option['actuals']]
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                actuals = option['actuals']
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
@@ -1188,7 +1208,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['actuals'])
+                            actuals=actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1203,7 +1223,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['actuals'])
+                    option, actuals=actuals)
 
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
