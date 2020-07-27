@@ -1047,30 +1047,30 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
     for(size_t i20 = 0; i20 < 4; ++i20 ) {
       T2[ i20 ]
-         = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-         * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+         = T0[ ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) ]
+         * T1[ ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) ];
     }
   } else {
     for(size_t i20 = 0; i20 < 4; ++i20 ) {
       if ( ( ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
         T2[ i20 ]
-           = T0[ ( ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ]
-           * T1[ ( ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) * T1.stride[0] ) ];
+           = T0[ ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) ]
+           * T1[ ( ( ( ( blockIdx.x * 4 ) + i20 ) * 128 ) + threadIdx.x ) ];
       }
     }
   }
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
     for(size_t i21 = 0; i21 < 4; ++i21 ) {
-      T3[ ( ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+      T3[ ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) ]
          = T2[ i21 ]
-         * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+         * T0[ ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) ];
     }
   } else {
     for(size_t i21 = 0; i21 < 4; ++i21 ) {
       if ( ( ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
-        T3[ ( ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) * T3.stride[0] ) ]
+        T3[ ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) ]
            = T2[ i21 ]
-           * T0[ ( ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) * T0.stride[0] ) ];
+           * T0[ ( ( ( ( blockIdx.x * 4 ) + i21 ) * 128 ) + threadIdx.x ) ];
       }
     }
   }
@@ -2770,6 +2770,7 @@ void testGPU_FusionReductionTFT() {
 }
 
 void testGPU_FusionSimpleBCast() {
+  /*
   {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -2856,6 +2857,43 @@ void testGPU_FusionSimpleBCast() {
     auto t4 = t2.add(t3);
 
     TORCH_CHECK(t4.allclose(cg_output));
+  }
+  */
+
+  {
+    // AJTest
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    std::vector<IterDomain*> dom;
+    dom.push_back(new IterDomain(new Int(0), new Int(1), ParallelType::Serial, IterType::BroadcastWithStride));
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+    std::vector<bool> contig(dom.size(), false);
+    TensorView* tv0 = new TensorView(new TensorDomain(dom, contig), DataType::Float);
+
+    TensorView* tv1 = makeDummyTensor(3);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    fusion.printMath();
+
+    TensorView* tv2 = add(tv0, tv1);
+    /*
+    fusion.addOutput(tv2);
+
+    tv2->merge(0);
+    tv2->merge(0);
+    tv2->split(0, 128);
+    tv2->split(0, 4);
+
+    tv0->computeAt(tv2, -1);
+    tv1->computeAt(tv2, -1);
+
+    tv2->axis(0)->parallelize(ParallelType::BIDx);
+    tv2->axis(-1)->parallelize(ParallelType::TIDx);
+    tv2->axis(-2)->parallelize(ParallelType::Unroll);
+    */
   }
 
   // TODO: This test below is not working because index math for smem/local mem

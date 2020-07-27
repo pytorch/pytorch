@@ -21,7 +21,6 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 
 FUSION_GROUP = 'prim::CudaFusionGroup'
 
-
 class TestCudaFuser(JitTestCase):
 
     def setUp(self):
@@ -138,6 +137,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
     def test_broadcasting(self):
+        torch._C._jit_set_bailout_depth(2)
         def t(x: torch.Tensor, y: torch.Tensor, z: float):
             o = x + y
             o = o + z
@@ -151,21 +151,25 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GROUP)
+        '''
+        t_jit2 = torch.jit.script(t)
         x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
         y = torch.randn(1, 32, 32, dtype=torch.float, device="cuda")
-        jit_o = t_jit(x, y, 2.0)
-        jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit2(x, y, 2.0)
+        jit_o = t_jit2(x, y, 2.0)
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GROUP)
+        self.assertGraphContains(t_jit2.graph_for(x, y, 2.0), FUSION_GROUP)
         '''
         x = torch.randn(4, 1, 32, 32, dtype=torch.float, device="cuda")
         y = torch.randn(8, 32, 32, dtype=torch.float, device="cuda")
-        jit_o = t_jit(x, y, 2.0)
-        jit_o = t_jit(x, y, 2.0)
+        t_jit3 = torch.jit.script(t)
+        jit_o = t_jit3(x, y, 2.0)
+        jit_o = t_jit3(x, y, 2.0)
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GROUP)
+        self.assertGraphContains(t_jit3.graph_for(x, y, 2.0), FUSION_GROUP)
+        '''
 
     @unittest.skipIf(True, "Broadcast with different output not supported yet")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
