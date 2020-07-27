@@ -116,7 +116,7 @@ def _strong_wolfe(obj_func,
         # line-search bracket is so small
         if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
             break
-        
+
         # compute new trial value
         t = _cubic_interpolate(bracket[0], bracket_f[0], bracket_gtd[0],
                                bracket[1], bracket_f[1], bracket_gtd[1])
