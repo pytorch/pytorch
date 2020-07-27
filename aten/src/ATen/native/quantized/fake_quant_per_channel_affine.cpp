@@ -310,7 +310,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   fake_quant_grad_per_channel_stub(iter_X.device_type(), iter_X, quant_min, quant_max);
 
   std::tuple<Tensor, Tensor> dScaleZeroPoints = native::_get_scale_zero_point_per_channel_iter_grads(
-    dX, X, scale, zero_point, axis, quant_min, quant_max);
+    dY, X, scale, zero_point, axis, quant_min, quant_max);
 
   Tensor dScale = std::get<0>(dScaleZeroPoints).to(scale.device());
   Tensor dZeroPoint = std::get<1>(dScaleZeroPoints).to(zero_point.device());
