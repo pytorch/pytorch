@@ -143,7 +143,7 @@ inline bool is_eligible(const Tensor& arg) {
 }
 
 // Overload to catch Tensor args
-inline Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
+Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
   if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
@@ -165,6 +165,15 @@ inline Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
   }
 }
 
+// Overload to process optional<Tensor>
+c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg) {
+  if (arg.has_value()) {
+    return cached_cast(to_type, *arg);
+  } else {
+    return c10::nullopt;
+  }
+}
+
 // Overload to process TensorLists
 std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
   std::vector<Tensor> vec;
@@ -177,7 +186,7 @@ std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
 
 // Template to catch non-Tensor args.
 template<typename T>
-inline T cached_cast(at::ScalarType to_type, T arg) {
+T cached_cast(at::ScalarType to_type, T arg) {
   return arg;
 }
 
@@ -192,7 +201,7 @@ Otherwise, set it to the autocast type.
 ********************************************************/
 
 // Overload to catch dtype flags
-inline c10::optional<ScalarType> set_opt_dtype(at::ScalarType to_type, const c10::optional<ScalarType>& dtype) {
+c10::optional<ScalarType> set_opt_dtype(at::ScalarType to_type, const c10::optional<ScalarType>& dtype) {
   return dtype.has_value() ? dtype : to_type;
 }
 

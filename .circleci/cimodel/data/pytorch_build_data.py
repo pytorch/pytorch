@@ -60,6 +60,9 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [XImportant("3.8")]),
         ]),
+        ("conda", [
+            ("", [XImportant("3.7")]),
+        ]),
     ]),
 ]
 
