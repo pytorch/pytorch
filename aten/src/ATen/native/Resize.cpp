@@ -7,8 +7,7 @@
 namespace at { namespace native {
 
 void resize_output(Tensor& output, IntArrayRef shape) {
-  // Tests for resizing except for...
-  // (1) resizing of zero element tensors
+  // Tests for resizing of tensors with one more elements
   if (output.numel() != 0 && !output.sizes().equals(shape)) {
     TORCH_WARN(
       "An output with one or more elements was resized, since it had ",
