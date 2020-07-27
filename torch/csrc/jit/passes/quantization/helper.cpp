@@ -46,6 +46,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
@@ -221,8 +222,6 @@ bool matchAtenFuncToUse(
       (!n.has_value() || n.value() == use.offset);
 }
 
-// Check if `use` is a CallFunction of name `func_name` and if value
-// `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
@@ -255,12 +254,15 @@ bool matchArgPattern(
   return false;
 }
 
+// TODO add other op signatures.
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
       AtenFuncArgs(
           {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
-      CallFuncArgs({{"linear", 2}}));
+      // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
+      // %offsets.1, %7, %8, %9, %10, %9, %per_sample_weights.1, %13)
+      CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
 
