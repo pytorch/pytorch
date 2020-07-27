@@ -351,6 +351,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
    .. automethod:: istft
+   .. automethod:: isreal
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: lcm
@@ -438,7 +439,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
-   .. automethod:: quantile
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales

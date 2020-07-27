@@ -328,7 +328,6 @@ Reduction Ops
     nanprod
     norm
     prod
-    quantile
     std
     std_mean
     sum
@@ -354,6 +353,7 @@ Comparison Ops
     isfinite
     isinf
     isnan
+    isreal
     kthvalue
     le
     lt

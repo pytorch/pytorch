@@ -236,6 +236,7 @@ and we will be able to step into the :func:`@torch.jit.script
 TorchScript compiler for a specific function, see
 :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
+.. _inspecting-code:
 
 Inspecting Code
 ~~~~~~~~~~~~~~~
@@ -287,6 +288,8 @@ You can use this to ensure TorchScript (tracing or scripting) has captured
 your model code correctly.
 
 
+.. _interpreting-graphs:
+
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
 TorchScript also has a representation at a lower level than the code pretty-
@@ -317,7 +320,7 @@ including control flow operators for loops and conditionals. As an example:
 
     ...
 
-``graph`` follows the same rules described in the `inspecting-code` section
+``graph`` follows the same rules described in the :ref:`inspecting-code` section
 with regard to ``forward`` method lookup.
 
 The example script above produces the graph::
