@@ -200,6 +200,10 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
       if (!dom->isBroadcast())
         ndims++;
 
+    for (auto dom : in()->as<TensorView>()->getRootDomain())
+      if (dom->isBroadcast())
+        ndims++;
+
     TORCH_INTERNAL_ASSERT(
         ndims ==
             (int)TensorDomain::noReductions(
