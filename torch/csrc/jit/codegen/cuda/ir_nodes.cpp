@@ -849,6 +849,127 @@ bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
   return false;
 }
 
+// return mapping of consumer_domain[i] = producer_domain[result_vector[i]]
+// assuming there exists a direct consumer-producer mapping. If axis exists in
+// consumer (broadcast) but not in producer, mapping will be result_vector[i] =
+// -1.
+std::vector<int64_t> TensorDomain::mapDomainCtoP(
+    const std::vector<IterDomain*>& consumer,
+    const std::vector<IterDomain*>& producer) {
+  std::vector<int64_t> consumer_to_producer(consumer.size(), -1);
+
+  size_t itc = 0, itp = 0;
+  while (itc < consumer.size() && itp < producer.size()) {
+    if (consumer[itc]->isBroadcast() && !producer[itp]->isBroadcast()) {
+      itc++;
+      continue;
+    }
+    if (producer[itp]->isReduction()) {
+      itp++;
+      continue;
+    }
+
+    consumer_to_producer[itc] = itp;
+    itc++;
+    itp++;
+  }
+  return consumer_to_producer;
+}
+
+// Create a map from consumer root IterDomains -> producer root IterDomains.
+// Constrain will restrict which consumer root IterDomains we map to the
+// producer IterDomains. Only those root consumer IDs present in
+// consumer_root_dims_to_map will be attempted to map to their corresponding
+// producer IDs.
+std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootCtoP(
+    const TensorDomain* consumer,
+    const TensorDomain* producer,
+    bool constrain,
+    std::unordered_set<IterDomain*> consumer_root_dims_to_map) {
+  auto consumer_root = consumer->rootDomain();
+  auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
+                                              : producer->rootDomain();
+
+  auto c_to_p = mapDomainCtoP(consumer_root, producer_root);
+
+  std::unordered_map<IterDomain*, IterDomain*> root_id_map;
+
+  for (int64_t itc = 0; itc < (int64_t)c_to_p.size(); itc++) {
+    int64_t itp = c_to_p[itc];
+    if (itp == -1)
+      continue;
+
+    if (!constrain ||
+        (constrain &&
+         consumer_root_dims_to_map.find(consumer_root[itc]) !=
+             consumer_root_dims_to_map.end())) {
+      root_id_map[consumer_root[itc]] = producer_root[itp];
+    }
+  }
+  return root_id_map;
+}
+
+// return mapping of consumer_domain[i] = producer_domain[result_vector[i]]
+// assuming there exists a direct consumer-producer mapping. If axis exists in
+// consumer (broadcast) but not in producer, mapping will be result_vector[i] =
+// -1.
+std::vector<int64_t> TensorDomain::mapDomainPtoC(
+    const std::vector<IterDomain*>& producer,
+    const std::vector<IterDomain*>& consumer) {
+  std::vector<int64_t> producer_to_consumer(producer.size(), -1);
+
+  size_t itc = 0, itp = 0;
+  while (itc < consumer.size() && itp < producer.size()) {
+    if (consumer[itc]->isBroadcast() && !producer[itp]->isBroadcast()) {
+      itc++;
+      continue;
+    }
+    if (producer[itp]->isReduction()) {
+      itp++;
+      continue;
+    }
+
+    producer_to_consumer[itp] = itc;
+    itc++;
+    itp++;
+  }
+
+  return producer_to_consumer;
+}
+
+// Create a map from producer root IterDomains -> consumer root IterDomains.
+// Constrain will restrict which producer root IterDomains we map to the
+// consumer IterDomains. Only those root producer IDs present in
+// producer_root_dims_to_map will be attempted to map to their corresponding
+// consumer IDs.
+std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootPtoC(
+    const TensorDomain* producer,
+    const TensorDomain* consumer,
+    bool constrain,
+    std::unordered_set<IterDomain*> producer_root_dims_to_map) {
+  auto consumer_root = consumer->rootDomain();
+  auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
+                                              : producer->rootDomain();
+
+  auto p_to_c = mapDomainPtoC(producer_root, consumer_root);
+
+  std::unordered_map<IterDomain*, IterDomain*> root_id_map;
+
+  for (int64_t itp = 0; itp < (int64_t)p_to_c.size(); itp++) {
+    int64_t itc = p_to_c[itp];
+    if (itc == -1)
+      continue;
+
+    if (!constrain ||
+        (constrain &&
+         producer_root_dims_to_map.find(producer_root[itp]) !=
+             producer_root_dims_to_map.end())) {
+      root_id_map[producer_root[itp]] = consumer_root[itc];
+    }
+  }
+  return root_id_map;
+}
+
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {

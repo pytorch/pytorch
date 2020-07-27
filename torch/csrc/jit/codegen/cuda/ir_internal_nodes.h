@@ -462,6 +462,46 @@ class TORCH_CUDA_API TensorDomain : public Val {
   static bool hasBroadcast(const std::vector<IterDomain*>&);
   static bool hasReduction(const std::vector<IterDomain*>&);
 
+  // return mapping of consumer_domain[i] = producer_domain[result_vector[i]]
+  // assuming there exists a direct consumer-producer mapping. If axis exists in
+  // consumer (broadcast) but not in producer, mapping will be result_vector[i]
+  // = -1.
+  static std::vector<int64_t> mapDomainCtoP(
+      const std::vector<IterDomain*>& consumer,
+      const std::vector<IterDomain*>& producer);
+
+  // Create a map from consumer root IterDomains -> producer root IterDomains.
+  // Constrain will restrict which consumer root IterDomains we map to the
+  // producer IterDomains. Only those root consumer IDs present in
+  // consumer_root_dims_to_map will be attempted to map to their corresponding
+  // producer IDs.
+  static std::unordered_map<IterDomain*, IterDomain*> mapRootCtoP(
+      const TensorDomain* consumer,
+      const TensorDomain* producer,
+      bool constrain = false,
+      const std::unordered_set<IterDomain*>& consumer_root_dims_to_map =
+          std::unordered_set<IterDomain*>());
+
+  // return mapping of consumer_domain[i] = producer_domain[result_vector[i]]
+  // assuming there exists a direct consumer-producer mapping. If axis exists in
+  // consumer (broadcast) but not in producer, mapping will be result_vector[i]
+  // = -1.
+  static std::vector<int64_t> mapDomainPtoC(
+      const std::vector<IterDomain*>& producer,
+      const std::vector<IterDomain*>& consumer);
+
+  // Create a map from producer root IterDomains -> consumer root IterDomains.
+  // Constrain will restrict which producer root IterDomains we map to the
+  // consumer IterDomains. Only those root producer IDs present in
+  // producer_root_dims_to_map will be attempted to map to their corresponding
+  // consumer IDs.
+  static std::unordered_map<IterDomain*, IterDomain*> mapRootPtoC(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
+      bool constrain = false,
+      const std::unordered_set<IterDomain*>& producer_root_dims_to_map =
+          std::unordered_set<IterDomain*>());
+
   // pair is in order where second is the consumer of first
   std::pair<TensorDomain*, TensorDomain*> rFactor(const std::vector<int>& axes);
 
