@@ -343,9 +343,9 @@ ReductionParams reductionHeuristic(
               << "\tRed Elems: " << red_elems << " Red Outputs: " << red_outputs
               << " Red On Fastest Dim? " << red_on_fastest_dim << std::endl
               << "Reduction Characteristics:" << std::endl
-              << "\tMultiple Reds Per Block? " << rparams.mul_reds_per_blk
-              << " Cross Block? " << rparams.cross_block << " Cross Grid? "
-              << rparams.cross_grid << std::endl
+              << "\tMultiple Reds Per Block? " << rparams.mul_reds_per_blk_
+              << " Cross Block? " << rparams.cross_block_ << " Cross Grid? "
+              << rparams.cross_grid_ << std::endl
               << "Recommended Blocking:" << std::endl
               << "\tGridX: " << rparams.gdimx_.value_
               << (rparams.gdimx_.mutable_ ? " (M)" : "")
