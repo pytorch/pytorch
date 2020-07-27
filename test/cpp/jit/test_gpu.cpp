@@ -2842,7 +2842,11 @@ void testGPU_FusionSimpleBCast() {
 
     // Set up your input tensor views
     std::vector<IterDomain*> dom;
-    dom.push_back(new IterDomain(new Int(0), new Int(1), ParallelType::Serial, IterType::BroadcastWithStride));
+    dom.push_back(new IterDomain(
+        new Int(0),
+        new Int(1),
+        ParallelType::Serial,
+        IterType::BroadcastWithStride));
     dom.push_back(new IterDomain(new Int(0), new Int()));
     TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
 
