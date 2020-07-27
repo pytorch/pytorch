@@ -7631,18 +7631,24 @@ class TestTorchDeviceType(TestCase):
         run_test(3, 3)
         run_test(4, 4)
         run_test(5, 5)
+        run_test(100, 100)
+        run_test(200, 200)
 
         # small batch of matrices
         run_test(3, 2, 2)
         run_test(3, 3, 3)
         run_test(3, 4, 4)
         run_test(3, 5, 5)
+        run_test(3, 100, 100)
+        run_test(3, 200, 200)
 
         # large batch of matrices
         run_test(3, 3, 2, 2)
         run_test(3, 3, 3, 3)
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
+        run_test(3, 3, 100, 100)
+        run_test(3, 3, 200, 200)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
