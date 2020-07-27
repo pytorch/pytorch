@@ -160,9 +160,9 @@ void add(
   std::array<int64_t, 4> os4 = {1, 1, 1, 1};
   std::copy(os.begin(), os.end(), os4.end() - odim);
   std::array<int64_t, 4> i0s4 = {1, 1, 1, 1};
-  std::copy(i0s.begin(), i0s.end(), i0s4.end() - i0dim);
+  std::copy(i0s.cbegin(), i0s.cend(), i0s4.end() - i0dim);
   std::array<int64_t, 4> i1s4 = {1, 1, 1, 1};
-  std::copy(i1s.begin(), i1s.end(), i1s4.end() - i1dim);
+  std::copy(i1s.cbegin(), i1s.cend(), i1s4.end() - i1dim);
 
   TORCH_INTERNAL_ASSERT(
       (os4 == i0s4) && (i0s4 == i1s4),
