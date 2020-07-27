@@ -867,20 +867,20 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({B1, 2, 3, B0});
-    Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
-    Tensor batched_y = makeBatched(y, {{0, 3}, {1, 0}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/3}, {/*lvl*/1, /*dim*/0}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
-        {x.permute({1, 3, 0, 2}), y.permute({3, 0, 1, 2})});
+        {at::movedim(x, {1, 3}, {0, 1}), at::movedim(y, {0, 3}, {1, 0})});
   }
   {
     // Check that batch dims become broadcasted and are present in all returns
     int64_t B0 = 5, B1 = 7, B2 = 9;
     Tensor x = at::randn({B0, B2, 2, 3});
     Tensor y = at::randn({B0, B1, 2, 3});
-    Tensor batched_x = makeBatched(x, {{0, 0}, {2, 1}});
-    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
@@ -891,8 +891,8 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5;
     Tensor x = at::randn({B0, 3});
     Tensor y = at::randn({B0, 2, 3});
-    Tensor batched_x = makeBatched(x, {{0, 0}});
-    Tensor batched_y = makeBatched(y, {{0, 0}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}});
 
     checkMultiBatchVmapTransform({batched_x, batched_y}, {x, y});
   }
@@ -901,8 +901,8 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B1 = 7, B2 = 11, B3 = 13;
     Tensor x = at::randn({2, B0, 3, B2});
     Tensor y = at::randn({B3, 3, B1});
-    Tensor batched_x = makeBatched(x, {{0, 1}, {2, 3}});
-    Tensor batched_y = makeBatched(y, {{1, 2}, {3, 0}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/2, /*dim*/3}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/1, /*dim*/2}, {/*lvl*/3, /*dim*/0}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
@@ -916,8 +916,8 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B2 = 11;
     Tensor x = at::randn({B0});
     Tensor y = at::randn({B0, B2});
-    Tensor batched_x = makeBatched(x, {{0, 0}});
-    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform({batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
     checkMultiBatchVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
@@ -927,8 +927,8 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B2 = 11;
     Tensor x = at::randn({B0});
     Tensor y = at::randn({B0, B2, 2});
-    Tensor batched_x = makeBatched(x, {{0, 0}});
-    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform({batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
     checkMultiBatchVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
@@ -941,21 +941,21 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({2, 3});
-    Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
 
     checkMultiBatchVmapTransform(
         {batched_x, y},
-        {x.permute({1, 3, 0, 2}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
+        {at::movedim(x, {1, 3}, {0, 1}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
     checkMultiBatchVmapTransform(
         {y, batched_x},
-        {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}), x.permute({1, 3, 0, 2})});
+        {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}), at::movedim(x, {1, 3}, {0, 1})});
   }
   {
     // BatchedTensor has higher example dim than non-batched-tensor
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1, 2, 3});
     Tensor y = at::randn({3});
-    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, y}, {x, y.view({1, 1, 3}).expand({B0, B1, 3})});
@@ -967,7 +967,7 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1, 3});
     Tensor y = at::randn({2, 3});
-    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, y}, {x.view({B0, B1, 3}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
@@ -979,7 +979,7 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1});
     Tensor y = at::randn({});
-    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
 
     checkMultiBatchVmapTransform({batched_x, y}, {x, y.view({1, 1}).expand({B0, B1})});
     checkMultiBatchVmapTransform({y, batched_x}, {y.view({1, 1}).expand({B0, B1}), x});
@@ -1031,14 +1031,14 @@ TEST(VmapTest, TestMultiBatchVmapTransformMultipleTensors) {
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({B1, 4});
     Tensor z = at::randn({2, B2});
-    Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
-    Tensor batched_y = makeBatched(y, {{1, 0}});
-    Tensor batched_z = makeBatched(z, {{2, 1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/1, /*dim*/0}});
+    Tensor batched_z = makeBatched(z, {{/*lvl*/2, /*dim*/1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y, batched_z},
         {
-          x.permute({1, 3, 0, 2}).view({B0, B1, 1, 2, 3}).expand({B0, B1, B2, 2, 3}),
+          at::movedim(x, {1, 3}, {0, 1}).view({B0, B1, 1, 2, 3}).expand({B0, B1, B2, 2, 3}),
           y.view({1, B1, 1, 4}).expand({B0, B1, B2, 4}),
           z.t().view({1, 1, B2, 2}).expand({B0, B1, B2, 2}),
         });
@@ -1049,8 +1049,8 @@ TEST(VmapTest, TestMultiBatchVmapTransformMultipleTensors) {
     Tensor x = at::randn({2, 3});
     Tensor y = at::randn({4, B0});
     Tensor z = at::randn({B1, 2, B2});
-    Tensor batched_y = makeBatched(y, {{0, 1}});
-    Tensor batched_z = makeBatched(z, {{1, 0}, {2, 2}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/1}});
+    Tensor batched_z = makeBatched(z, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/2}});
 
     checkMultiBatchVmapTransform(
         {x, batched_y, batched_z},

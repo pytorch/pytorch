@@ -181,6 +181,14 @@ static Tensor alignBatchDimsAtFront(
   return physical_tensor.view(aligned_sizes);
 }
 
+// The algorithm is as follows:
+// 1. Figure out what all of the collective levels in `logical_tensors` is.
+// 2. Move all batch dims to the front of the tensors and add extra dims
+//    of size 1. At this point, every tensor will have a dimension for
+//    each of the collective levels.
+// 3. Compute the batch_sizes.
+// 4. Expand each physical tensor so that they have output batch size equal
+//    to `batch_sizes`
 VmapPhysicalViewVec
 MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   // Figure out all of the collective vmap levels in `logical_tensors`.

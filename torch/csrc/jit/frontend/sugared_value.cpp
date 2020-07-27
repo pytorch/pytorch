@@ -162,6 +162,19 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
+  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+    // Handle access to Enum's `name` and `value` attribute.
+    auto& g = *m.graph();
+
+    if (field == "name") {
+      auto n = g.insertNode(g.createEnumName(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
+
+    if (field == "value") {
+      auto n = g.insertNode(g.createEnumValue(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
   }
 
   // none of the more-specific cases worked, so see if this is a builtin method
