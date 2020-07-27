@@ -9,6 +9,10 @@
 #include <iostream>
 #include <exception>
 
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/RNNUtils.h>
+#endif
+
 namespace at {
 namespace autocast {
 
@@ -139,7 +143,7 @@ inline at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... ar
 Logic to apply cached casting to any Tensor argument.
 ****************************************************/
 inline bool is_eligible(const Tensor& arg) {
-  return (arg.is_cuda() && arg.is_floating_point() && (arg.scalar_type() != at::kDouble));
+  return (arg.defined() && arg.is_cuda() && arg.is_floating_point() && (arg.scalar_type() != at::kDouble));
 }
 
 // Overload to catch Tensor args
@@ -230,7 +234,7 @@ template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class Ar
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kHalf, args)...);
   }
 };
@@ -239,7 +243,7 @@ struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
@@ -248,7 +252,7 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -263,7 +267,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::t
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
@@ -273,7 +277,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
@@ -309,6 +313,80 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const Tensor 
            "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
            "safe to autocast.");
 }
+
+/***********************************************************
+CuDNN RNNs (the weight reflattening needs special attention)
+***********************************************************/
+
+// To be registered for the "_cudnn_rnn..." schema.
+// _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
+std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
+_cudnn_rnn_cast_reflatten(const Tensor & input,
+                          TensorList weight,
+                          int64_t weight_stride0,
+                          const Tensor& weight_buf,
+                          const Tensor& hx,
+                          const Tensor& cx,
+                          int64_t mode,
+                          int64_t hidden_size,
+                          int64_t num_layers,
+                          bool batch_first,
+                          double dropout,
+                          bool train,
+                          bool bidirectional,
+                          IntArrayRef batch_sizes,
+                          const Tensor & dropout_state) {
+#if AT_CUDNN_ENABLED()
+  c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+
+  for (const auto& t : weight) {
+    TORCH_CHECK(weight[0].scalar_type == t.scalar_type(), "Weight scalar types do not match.");
+  }
+
+  Tensor redispatch_weight_buf;
+  std::vector<Tensor> redispatch_weight;
+  bool needs_cast_and_flatten = (weight_buf.defined() ?
+                                 is_eligible(weight_buf) && (weight_buf.scalar_type != at:kHalf) :
+                                 is_eligible(weight[0]) && (weight[0].scalar_type != at::kHalf));
+  if (needs_cast_and_flatten) {
+    // this is (and should be) autograd-exposed.
+    std::tie(redispatch_weight_buf, redispatch_weight) =
+        at::native::cudnn_rnn::copy_weights_to_flat_buf_views(
+            weight,
+            weight_stride0,
+            input.size(-1),
+            mode,
+            hidden_size,
+            num_layers,
+            batch_first,
+            bidirectional,
+            /*flat_buf_datatype=*/getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
+            /*flat_buf_options=*/weight[0].options.dtype(at::kHalf),
+            /*set_orig_weights_to_flat_buf=*/false);
+  }
+
+  return at:_cudnn_rnn(
+      cached_cast(at::kHalf, input),
+      needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,
+      weight_stride0,
+      needs_cast_and_flatten ? redispatch_weight_buf : weight_buf,
+      cached_cast(at::kHalf, hx),
+      cached_cast(at::kHalf, cx),
+      mode,
+      hidden_size,
+      num_layers,
+      batch_first,
+      dropout,
+      train,
+      bidirectional,
+      batch_sizes,
+      dropout_state);
+#else
+  AT_ERROR("autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
+  return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // never reached, placates the compiler
+#endif
+}
+
 
 #ifndef USE_STATIC_DISPATCH
 namespace {

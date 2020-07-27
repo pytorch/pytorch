@@ -59,14 +59,13 @@ Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_see
 
 #else // AT_CUDNN_ENABLED()
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-#include <ATen/cudnn/Descriptors.h>
-#include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
+#include <ATen/native/cudnn/RNNUtils.h>
 
 namespace at { namespace native {
 
 namespace {
+  using namespace at::native::cudnn_rnn;
+
   // DropoutDescriptor
 
   struct DropoutDescriptorParams {
@@ -605,6 +604,71 @@ namespace {
     return dtype;
   }
 
+  std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
+      TensorList weight_arr,
+      int64_t weight_stride0,
+      int64_t input_size,
+      int64_t mode,
+      int64_t hidden_size,
+      int64_t num_layers,
+      bool batch_first,
+      bool bidirectional,
+      const cudnnDataType_t flat_buf_datatype,
+      const TensorOptions& flat_buf_options,
+      bool set_orig_weights_to_flat_buf) {
+    // flat_buf_datatype is accepted as a separate argument (rather than extracted from flat_buf_options)
+    // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
+    // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
+    // typeMetaToScalarType is a surprisingly nontrivial function.  We should avoid it if we can.
+
+    TORCH_CHECK(weight_arr.size() > 0,
+                "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
+
+    RNNDescriptorParams rnn;
+    rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(flat_buf_datatype), flat_buf_datatype);
+
+    auto handle = getCudnnHandle();
+    RNNDescriptor rnn_desc = rnn.descriptor(handle);
+
+    TensorGeometry x_geom({1, input_size});
+    TensorDescriptor x_desc;
+    // Why do we pad to 5 dims here (and elsewhere)?
+    // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
+    // expects descriptors padded to 3 dimensions.
+    x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
+
+    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
+    auto weight_buf = at::zeros(num_weights, flat_buf_options);
+
+    FilterDescriptor w_desc;
+    w_desc.set(weight_buf, 3);
+
+    // Slice off views into weight_buf
+    std::vector<Tensor> params_arr;
+    size_t params_stride0;
+    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
+
+    MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
+                      params{params_arr, params_stride0};
+
+    // Copy weights
+    _copyParams(weight, params);
+
+    if (set_orig_weights_to_flat_buf) {
+      // Update the storage
+      for (size_t i = 0; i < weight.size(0); i++) {
+        for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
+             orig_param_it != weight[i].end() && new_param_it != params[i].end();
+             orig_param_it++, new_param_it++) {
+          auto orig_param = *orig_param_it, new_param = *new_param_it;
+          orig_param.set_(new_param.view_as(orig_param));
+        }
+      }
+    }
+
+    return {weight_buf, params_arr};
+  }
+
 } // anonymous namespace
 
 // NB: does inplace update into TensorList
@@ -618,51 +682,19 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
-
-  TORCH_CHECK(weight_arr.size() > 0,
-           "_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
-
-  auto any_param = weight_arr[0];
-  auto datatype = getCudnnDataType(any_param);
-
-  RNNDescriptorParams rnn;
-  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
-
-  auto handle = getCudnnHandle();
-  RNNDescriptor rnn_desc = rnn.descriptor(handle);
-
-  TensorGeometry x_geom({1, input_size});
-  TensorDescriptor x_desc;
-  x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
-
-  auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
-  auto weight_buf = at::zeros(num_weights, any_param.options());
-
-  FilterDescriptor w_desc;
-  w_desc.set(weight_buf, 3);
-
-  // Slice off views into weight_buf
-  std::vector<Tensor> params_arr;
-  size_t params_stride0;
-  std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
-
-  MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
-                    params{params_arr, params_stride0};
-
-  // Copy weights
-  _copyParams(weight, params);
-
-  // Update the storage
-  for (size_t i = 0; i < weight.size(0); i++) {
-    for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
-         orig_param_it != weight[i].end() && new_param_it != params[i].end();
-         orig_param_it++, new_param_it++) {
-      auto orig_param = *orig_param_it, new_param = *new_param_it;
-      orig_param.set_(new_param.view_as(orig_param));
-    }
-  }
-
-  return weight_buf;
+  // returns flat weight_buf
+  return std::get<0>(copy_weights_to_flat_buf_views(
+      weight_arr,
+      weight_stride0,
+      input_size,
+      mode,
+      hidden_size,
+      num_layers,
+      batch_first,
+      bidirectional,
+      /*flat_buf_datatype=*/getCudnnDataType(weight_arr[0]),
+      /*flat_buf_options=*/weight_arr[0].options(),
+      /*set_orig_weights_to_flat_buf=*/true));
 }
 
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
