@@ -635,6 +635,48 @@ def onlyCUDA(fn):
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
+class expectedAlertNondeterministic:
+    def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
+        self.device_type = device_type
+        self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
+        self.fn_has_device_arg = fn_has_device_arg
+
+    def __call__(self, fn):
+        @wraps(fn)
+        def efail_fn(slf, device, *args, **kwargs):
+            if self.device_type is None or self.device_type == slf.device_type:
+                deterministic_restore = torch.is_deterministic()
+                torch.set_deterministic(True)
+                try:
+                    if self.fn_has_device_arg:
+                        fn(slf, device, *args, **kwargs)
+                    else:
+                        fn(slf, *args, **kwargs)
+                except RuntimeError as e:
+                    torch.set_deterministic(deterministic_restore)
+                    if self.error_message not in str(e):
+                        slf.fail(
+                            'expected non-deterministic error message to start with "'
+                            + self.error_message
+                            + '" but got this instead: "' + str(e) + '"')
+                    return
+                else:
+                    torch.set_deterministic(deterministic_restore)
+                    slf.fail('expected a non-deterministic error, but it was not raised')
+
+            if self.fn_has_device_arg:
+                return fn(slf, device, *args, **kwargs)
+            else:
+                return fn(slf, *args, **kwargs)
+
+        @wraps(fn)
+        def efail_fn_no_device(slf, *args, **kwargs):
+            return efail_fn(slf, None, *args, **kwargs)
+
+        if self.fn_has_device_arg:
+            return efail_fn
+        else:
+            return efail_fn_no_device
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from utils.fuzzer import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
+from torch.utils._benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
 
 
 _MIN_DIM_SIZE = 16
