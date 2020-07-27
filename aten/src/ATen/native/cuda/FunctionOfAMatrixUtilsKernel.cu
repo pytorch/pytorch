@@ -80,6 +80,7 @@ void _compute_linear_combination_internal_kernel(
       coeff_ptr + offsets[2]
     );
 
+    // perform summation
     for (int32_t i = 0; i < num_summations; ++i) {
       *out_data += in_data[i * in_stride] * coeff_data[i * coeff_stride];
     }
