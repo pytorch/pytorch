@@ -480,7 +480,28 @@ default. If there is no unique way to determine such a case, then a
     File "<stdin>", line 1, in <module>
   TypeError: no implementation found for 'torch.add' on types that implement __torch_function__: [SubTensor, OtherSubTensor]
 
+If one wishes to have a global override for all tensor methods, one can use
+``__torch_function__``. Here is an example that logs all function/method
+calls::
 
+  class LoggingTensor(torch.Tensor):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
+          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          if kwargs is None:
+              kwargs = {}
+          return super().__torch_function__(func, types, args, kwargs)
+
+However, if one instead wishes to override a method on the Tensor subclass,
+there one can do so either by directly overriding the method (by defining
+it for a subclass), or by using ``__torch_function__`` and matching with
+``func``.
+
+One should be careful within ``__torch_function__`` for subclasses to always
+call ``super().__torch_function__(func, ...)`` instead of ``func`` directly,
+as was the case before version 1.7.0. Failing to do this may cause ``func``
+to recurse back into ``__torch_function__`` and therefore cause infinite
+recursion.
 
 Extending :mod:`torch` with a :class:`Tensor` wrapper type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

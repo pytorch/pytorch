@@ -950,6 +950,8 @@ class Tensor(torch._C._TensorBase):
 
         We recommend always calling ``super().__torch_function__`` as the base
         case when doing the above.
+
+        While not mandatory, we recommend making `__torch_function__` a classmethod.
         """
         if kwargs is None:
             kwargs = {}

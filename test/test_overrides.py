@@ -329,7 +329,7 @@ def generate_tensor_like_torch_implementations():
         if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
             implements_sub(func)(wrapped)
         else:
-            implements_tensor_like(func)(HANDLED_FUNCTIONS_WRAPPERS[func])
+            implements_tensor_like(func)(wrapped)
 
 generate_tensor_like_torch_implementations()
 

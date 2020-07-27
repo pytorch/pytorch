@@ -1054,16 +1054,22 @@ def get_overridable_functions():
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
             # ignore private functions or functions that are deleted in torch.__init__
-            if namespace is not torch.Tensor and func_name.startswith('_') or func_name in {'unique_dim', '__weakref__'}:
-                continue
-            # ignore in-place operators
-            if namespace is not torch.Tensor and func_name.endswith('_'):
-                continue
-            # only consider objects with lowercase names
-            if namespace is not torch.Tensor and not func_name.islower():
-                continue
+            if namespace is not torch.Tensor:
+                if func_name.startswith('_'): 
+                    continue
+                elif func_name.endswith('_'):
+                    continue
+                elif not func_name[0].islower():
+                    continue
+                elif func_name == 'unique_dim':
+                    continue
+            else:
+                func = getattr(namespace, func_name)
+                if getattr(object, func_name, None) == func:
+                    continue
+                if func_name == '__weakref__':
+                    continue
             func = getattr(namespace, func_name)
-
             if namespace is torch.Tensor and getattr(object, func_name, None) == func:
                 continue
             # ignore re-exported modules

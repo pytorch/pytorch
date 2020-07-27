@@ -760,11 +760,19 @@ static auto check_has_torch_function(PyObject* obj) -> bool
  * 'torch_api' is a reference to a python torch API namespace.
  *
  */
-
+// Used for Tensor methods with arguments.
 auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+
+// Used fpr functions.
 auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+
+// Used for functions that accept no keyword arguments and have no argument parsing
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
+
+// Used for getters of Tensor properties
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;
+
+// Used for setters of Tensor properties.
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int;
 
 } // namespace torch
