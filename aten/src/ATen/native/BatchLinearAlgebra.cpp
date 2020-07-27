@@ -619,15 +619,12 @@ static void  apply_cholesky_mod(const Tensor& self, Tensor & out, const Tensor &
       // lapackCholesky failed. Copy current 2D matrix to out
       if (batch_size > 1) {
         outTag[i].copy_(selfTag[i]);
+        outTag[i].diagonal().add_(jitter_val);
         jitter_out[i] = jitter_val;
       } else {
         outTag.copy_(selfTag);
+        outTag.diagonal().add_(jitter_val);
         at::fill_(jitter_out, jitter_val);
-      }
-      for (int64_t mm=0; mm<m; mm++)
-      {
-        // Add err_val to the diagonal
-        out_working_ptr[(mm * m) + mm] += jitter_val;
       }
       lapackCholesky<scalar_t>(uplo, m, out_working_ptr, m, &info);
     }

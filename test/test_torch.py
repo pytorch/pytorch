@@ -8115,7 +8115,6 @@ class TestTorchDeviceType(TestCase):
         # default
         jitter = torch.as_tensor([1e-8, 1e-6, 1e-4, 1e-2, 1, 100], dtype=torch.float64)
         C, e = torch.cholesky_mod(A, jitter=jitter)
-        print(e)
 
         B = (C @ C.transpose(-2, -1)) - make_batch_eye(n, e)
         self.assertEqual(A, B, atol=1e-14, rtol=0)
