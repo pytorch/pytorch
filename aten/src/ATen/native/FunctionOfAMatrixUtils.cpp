@@ -38,15 +38,15 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
   );
 
   // restride coefficients
-  auto coefficients_sizes = std::vector<int64_t>(input.dim() + 1, 1);
-  coefficients_sizes[0] = output_first_dim_size;
-  coefficients_sizes[1] = 1;
-  auto coefficients_strides = std::vector<int64_t>(input.dim() + 1, 0);
-  coefficients_strides[0] = coefficients.stride(0);
-  coefficients_strides[1] = 0;
+  auto coefficients_restrided_sizes = std::vector<int64_t>(input.dim() + 1, 1);
+  coefficients_restrided_sizes[0] = output_first_dim_size;
+  coefficients_restrided_sizes[1] = 1;
+  auto coefficients_restrided_strides = std::vector<int64_t>(input.dim() + 1, 0);
+  coefficients_restrided_strides[0] = coefficients.stride(0);
+  coefficients_restrided_strides[1] = 0;
   auto coefficients_restrided = coefficients.as_strided(
-    coefficients_sizes,
-    coefficients_strides
+    coefficients_restrided_sizes,
+    coefficients_restrided_strides
   );
 
   auto iter = TensorIteratorConfig()
