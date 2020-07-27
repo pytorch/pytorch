@@ -438,7 +438,7 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  moduleMethodsTuple(m, elements, false /* save_debug_info */);
+  moduleMethodsTuple(m, elements);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
