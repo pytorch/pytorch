@@ -1667,7 +1667,7 @@ def linear(input, weight, bias=None):
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
           additional dimensions
         - Weight: :math:`(out\_features, in\_features)`
         - Bias: :math:`(out\_features)`
