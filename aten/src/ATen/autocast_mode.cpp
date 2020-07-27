@@ -9,7 +9,7 @@
 #include <iostream>
 #include <exception>
 
-#if AT_CUDNN_ENABLED()
+#ifdef AT_CUDNN_ENABLED()
 #include <ATen/native/cudnn/RNNUtils.h>
 #endif
 
@@ -336,7 +336,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
                           const Tensor & dropout_state) {
-#if AT_CUDNN_ENABLED()
+#ifdef AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 
   for (const auto& t : weight) {

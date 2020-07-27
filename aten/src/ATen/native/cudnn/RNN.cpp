@@ -64,8 +64,6 @@ Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_see
 namespace at { namespace native {
 
 namespace {
-  using namespace at::native::cudnn_rnn;
-
   // DropoutDescriptor
 
   struct DropoutDescriptorParams {
@@ -604,6 +602,11 @@ namespace {
     return dtype;
   }
 
+} // anonymous namespace
+
+// Utilities exposed in RNNUtils.h
+namespace cudnn_rnn {
+
   std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
       TensorList weight_arr,
       int64_t weight_stride0,
@@ -669,7 +672,7 @@ namespace {
     return {weight_buf, params_arr};
   }
 
-} // anonymous namespace
+} // namespace cudnn_rnn
 
 // NB: does inplace update into TensorList
 // It would be a relatively simple matter to refactor this into multiple
