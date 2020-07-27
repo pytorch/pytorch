@@ -916,7 +916,13 @@
 - name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
-- name: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+
+- name: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+
+- name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self) -> Tensor
@@ -1198,6 +1204,9 @@
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
+
+- name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), result)
 
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"

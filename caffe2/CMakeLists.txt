@@ -344,11 +344,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
     )
 
+  set(GENERATED_TESTING_PYTHON
+    "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
+    )
+
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
+    ${GENERATED_TESTING_PYTHON}
     )
 
   add_custom_command(
@@ -375,6 +380,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
+    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
     "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
@@ -416,10 +422,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
