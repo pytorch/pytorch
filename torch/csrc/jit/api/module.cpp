@@ -207,7 +207,8 @@ Module Module::clone_impl(
       const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap, inplace, memo);
       type_remap[orig.type()] = cloned.type();
-      r.register_module(type()->getAttributeName(i), cloned);
+      r.register_module(
+          type()->getAttributeName(i), cloned, type()->getAttribute(i));
     } else {
       // this adds new slot and creates a new attribute for the underlying type
       // if the type is not already cloned, otherwise it will only add a new

@@ -141,8 +141,35 @@ struct TORCH_API Module : public Object {
     _ivalue()->setAttr(name, std::move(v));
   }
 
-  void register_module(const std::string& name, const Module& module) {
-    type()->addOrCheckAttribute(name, module.type());
+  void register_module(
+      const std::string& name,
+      const Module& module,
+      c10::optional<TypePtr> opt_module_type = {}) {
+    TypePtr module_type = nullptr;
+    if (opt_module_type.has_value()) {
+      module_type = opt_module_type.value();
+      TORCH_CHECK(
+          module_type->is_module() &&
+              (module_type->cast<ClassType>() ||
+               module_type->cast<InterfaceType>()),
+          "Expecting an interface type or a class type to register the module, but",
+          " found ",
+          module_type->repr_str());
+      std::stringstream why_not;
+      if (module_type->cast<InterfaceType>() &&
+          !module.type()->isSubtypeOfExt(module_type, &why_not)) {
+        AT_ERROR(
+            "Module object type ",
+            module.type()->repr_str(),
+            " is not compatible with module interface type ",
+            module_type->repr_str(),
+            "\n",
+            why_not.str());
+      }
+    } else {
+      module_type = module.type();
+    }
+    type()->addOrCheckAttribute(name, module_type);
     _ivalue()->setAttr(name, module._ivalue());
   }
 

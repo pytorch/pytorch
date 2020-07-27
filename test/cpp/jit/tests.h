@@ -74,6 +74,7 @@ namespace jit {
   _(ClassDerive)                       \
   _(SaveLoadTorchbind)                 \
   _(ModuleInterfaceSerialization)      \
+  _(ModuleCloneWithModuleInterface)    \
   _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
