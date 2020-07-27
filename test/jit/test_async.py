@@ -10,7 +10,8 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from torch.testing._internal.common_utils import TemporaryFileName
-from typing import List
+from typing import List, Tuple
+from torch import Tensor
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -19,19 +20,19 @@ class TestAsync(JitTestCase):
             return torch.neg(x)
 
         x = torch.rand(3, 4)
-        fut = torch.jit._fork(foo, x)
+        fut = torch.jit.fork(foo, x)
         y_hat = foo(x)
-        y = torch.jit._wait(fut)
+        y = torch.jit.wait(fut)
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
         def foo(inp):
             futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
             for i in range(5):
-                futures.append(torch.jit._fork(lambda x: x, inp))
+                futures.append(torch.jit.fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
-                all_outputs.append(torch.jit._wait(future))
+                all_outputs.append(torch.jit.wait(future))
             return all_outputs
 
         # assert nothing, just to make sure python type parsing works
@@ -49,13 +50,13 @@ class TestAsync(JitTestCase):
             for _ in range(3):
                 future = torch.jit.annotate(
                     Future[List[Tensor]],
-                    torch.jit._fork(foo, x)
+                    torch.jit.fork(foo, x)
                 )
                 futures.append(future)
 
             output = torch.jit.annotate(List[List[Tensor]], [])
             for i in range(3):
-                output.append(torch.jit._wait(futures[i]))
+                output.append(torch.jit.wait(futures[i]))
             return output
 
         x = torch.rand(3, 3)
@@ -71,9 +72,9 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def wait_script(x):
-            fut = torch.jit._fork(foo, x)
+            fut = torch.jit.fork(foo, x)
             y_hat = foo(x)
-            y = torch.jit._wait(fut)
+            y = torch.jit.wait(fut)
             return y, y_hat
 
         y, y_hat = wait_script(x)
@@ -95,9 +96,9 @@ class TestAsync(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, x1, x2):
-                fut = torch.jit._fork(self.foo, x1, x2)
+                fut = torch.jit.fork(self.foo, x1, x2)
                 y_hat = self.foo(x1, x2)
-                y = torch.jit._wait(fut)
+                y = torch.jit.wait(fut)
                 return y, y_hat
 
         x1 = torch.rand(3, 4)
@@ -196,6 +197,48 @@ class TestAsync(JitTestCase):
         self.assertEqual(y1, foo1(x1))
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
+
+    def test_async_kwargs(self):
+        def foo(x1, x2):
+            return 2 * x1 + x2
+
+        x1 = torch.rand(3, 4)
+        x2 = torch.rand(3, 4)
+        y_hat = foo(x1, x2)
+
+        # Cover tracing and bare functions with permutations of args, kwargs
+        for func in [
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1, x2=x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2)),
+            lambda x1, x2: torch.jit._wait(torch.jit._fork(foo, x2=x2, x1=x1))
+        ]:
+            for wrapper in [
+                func,
+                torch.jit.trace(func, (x1, x2)),
+            ]:
+                self.assertEqual(wrapper(x1, x2), y_hat)
+                self.assertEqual(wrapper(x1, x2=x2), y_hat)
+                self.assertEqual(wrapper(x1=x1, x2=x2), y_hat)
+                self.assertEqual(wrapper(x2=x2, x1=x1), y_hat)
+
+        # Cover scripting
+        @torch.jit.script
+        def foo_script_args(x1, x2):
+            return torch.jit._wait(torch.jit._fork(foo, x1, x2))
+
+        @torch.jit.script
+        def foo_script_kwargs(x1, x2):
+            return torch.jit._wait(torch.jit._fork(foo, x1=x1, x2=x2))
+
+        for wrapper in [
+                foo_script_args,
+                foo_script_kwargs,
+        ]:
+            self.assertEqual(wrapper(x1, x2), y_hat)
+            self.assertEqual(wrapper(x1, x2=x2), y_hat)
+            self.assertEqual(wrapper(x1=x1, x2=x2), y_hat)
+            self.assertEqual(wrapper(x2=x2, x1=x1), y_hat)
 
     @_inline_everything
     def test_async_script_trace(self):
@@ -492,6 +535,12 @@ class TestAsync(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_no_future_subtype_message(self):
+        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+            @torch.jit.script
+            def forward(self, x):
+                futs = torch.jit.annotate(List[torch.jit.Future], [])
 
 
 if __name__ == '__main__':

@@ -113,6 +113,8 @@ if(INTERN_BUILD_ATEN_OPS)
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
+  # The sources list might get reordered later based on the capabilites.
+  # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     foreach(IMPL ${cpu_kernel_cpp_in})
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
@@ -122,11 +124,22 @@ if(INTERN_BUILD_ATEN_OPS)
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
-        set(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
       else(MSVC)
-        set(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
-      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
+      # Disable certain warnings for GCC-9.X
+      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+        if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))
+          # See https://github.com/pytorch/pytorch/issues/38855
+          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
+        endif()
+        if("${NAME}" STREQUAL "native/quantized/cpu/kernels/QuantizedOpKernels.cpp")
+          # See https://github.com/pytorch/pytorch/issues/38854
+          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-deprecated-copy")
+        endif()
+      endif()
+      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${EXTRA_FLAGS}")
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
@@ -146,7 +159,11 @@ if(INTERN_BUILD_ATEN_OPS)
 
   set(CUSTOM_BUILD_FLAGS)
   if(INTERN_BUILD_MOBILE)
-    list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    if(USE_VULKAN)
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
+    else()
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    endif()
   endif()
 
   if(SELECTED_OP_LIST)
@@ -166,6 +183,9 @@ if(INTERN_BUILD_ATEN_OPS)
       --force_schema_registration
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
+  if(USE_VULKAN)
+    set(GEN_VULKAN_FLAGS --vulkan)
+  endif()
 
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
@@ -174,6 +194,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
       ${CUSTOM_BUILD_FLAGS}
+      ${GEN_VULKAN_FLAGS}
   )
 
   execute_process(
@@ -211,15 +232,15 @@ if(INTERN_BUILD_ATEN_OPS)
 endif()
 
 function(append_filelist name outputvar)
-  set(_rootdir "${CMAKE_CURRENT_LIST_DIR}/../")
+  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
-      ${CMAKE_SOURCE_DIR}/tools/build_variables.bzl
-      ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
+      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
+      ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('../tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+    WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)
   if(NOT _retval EQUAL 0)

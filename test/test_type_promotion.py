@@ -69,7 +69,7 @@ class TestTypePromotion(TestCase):
         uint8_tensor *= int16_tensor
 
     @float_double_default_dtype
-    def test_unsinged(self, device):
+    def test_unsigned(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
         self.assertEqual(dont_promote.dtype, torch.uint8)
 
@@ -228,7 +228,7 @@ class TestTypePromotion(TestCase):
         # supported dtype
         dtypes1 = torch.testing.get_all_math_dtypes('cuda')
         dtypes2 = torch.testing.get_all_math_dtypes(device)
-        ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
+        ops = [torch.add, torch.sub, torch.mul, torch.true_divide, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
@@ -244,22 +244,20 @@ class TestTypePromotion(TestCase):
                     first = first.transpose(0, 2)
                     second = second.transpose(2, 1)
                     self.assertNotEqual(first.stride(), second.stride(),
-                                        "some non-contiguous issues could be missed if tensors have same strides")
+                                        msg="some non-contiguous issues could be missed if tensors have same strides")
 
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
                 expected = op(first.to(common_dtype), second.to(common_dtype))
-                self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
-                self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result.dtype, expected.dtype, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result, expected, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
         x = torch.ones(4, dtype=torch.double, device=device)
-        self.assertRaises(RuntimeError,
-                          lambda: torch.neg(torch.ones(4, dtype=torch.float, device=device), out=x))
-        self.assertRaises(RuntimeError,
-                          lambda: torch.lerp(x, torch.ones(4, dtype=torch.float, device=device), 1))
+        with self.assertRaises(RuntimeError):
+            torch.lerp(x, torch.ones(4, dtype=torch.float, device=device), 1)
 
     @float_double_default_dtype
     def test_alpha_mismatch(self, device):
@@ -479,15 +477,18 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_indexing(self, device):
+        # https://github.com/pytorch/pytorch/issues/28010
         a = torch.ones(5, 2, dtype=torch.double, device=device)
         b = torch.zeros(5, dtype=torch.int, device=device)
-
-        # lambda cannot contain assignment
-        def f():
+        with self.assertRaises(RuntimeError):
             a[:, [1]] = b.unsqueeze(-1)
-        # https://github.com/pytorch/pytorch/issues/28010
-        self.assertRaisesRegex(RuntimeError, 'expected dtype',
-                               lambda: f())
+
+        x = torch.ones(5, 2, dtype=torch.double, device=device)
+        y = torch.zeros(5, dtype=torch.double, device=device)
+        x[:, [1]] = y.unsqueeze(-1)
+        expected = torch.tensor([(1, 0), (1, 0), (1, 0), (1, 0), (1, 0)], dtype=torch.double, device=device)
+        self.assertEqual(x, expected)
+
 
         # https://github.com/pytorch/pytorch/issues/27824
         tmp = torch.ones(9, 9, dtype=torch.float, device=device)
@@ -617,6 +618,7 @@ class TestTypePromotion(TestCase):
 
         expected = op(dense1.clone(), dense2)
         precision = self._get_precision(expected.dtype, coalesced)
+        rtol = None if precision is None else 0
         test_tensors = [expected, dense1, sparse1, dense2, sparse2]
         e, d1, s1, d2, s2 = [x.clone() for x in test_tensors] if inplace else test_tensors
 
@@ -624,7 +626,7 @@ class TestTypePromotion(TestCase):
         if op_name != 'div':
             sparse = op(s1, s2)
             self.assertEqual(sparse.dtype, e.dtype)
-            self.assertEqual(e, sparse.to_dense(), atol=precision, message=err)
+            self.assertEqual(e, sparse.to_dense(), atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
@@ -634,7 +636,7 @@ class TestTypePromotion(TestCase):
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
-            self.assertEqual(e, dense_sparse, atol=precision, message=err)
+            self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
@@ -655,33 +657,37 @@ class TestTypePromotion(TestCase):
             sparse = op(s1, scalar)
             dense_scalar = op(d1, scalar)
             self.assertEqual(sparse.dtype, dense_scalar.dtype)
-            self.assertEqual(dense_scalar, sparse.to_dense(), atol=precision, message=err)
+            self.assertEqual(dense_scalar, sparse.to_dense(), atol=precision, rtol=rtol, msg=err)
         else:
             # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
             self.assertRaises(RuntimeError, lambda: op(s1, d2.view(d2.numel())[0].item()))
 
-    def _run_all_tests_for_sparse_op(self, op_name, device):
-        dtypes = torch.testing.get_all_math_dtypes(device)
+    def _run_all_tests_for_sparse_op(self, op_name, device, dtypes):
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
     @onlyOnCPUAndCUDA
     def test_sparse_add(self, device):
-        self._run_all_tests_for_sparse_op('add', device)
+        self._run_all_tests_for_sparse_op('add', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     def test_sparse_mul(self, device):
-        self._run_all_tests_for_sparse_op('mul', device)
+        self._run_all_tests_for_sparse_op('mul', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     def test_sparse_div(self, device):
-        self._run_all_tests_for_sparse_op('div', device)
+        self._run_all_tests_for_sparse_op('div', device,
+                                          dtypes=(torch.float32, torch.float64,
+                                                  torch.complex64, torch.complex128))
 
     @onlyOnCPUAndCUDA
     def test_sparse_sub(self, device):
-        self._run_all_tests_for_sparse_op('sub', device)
+        self._run_all_tests_for_sparse_op('sub', device,
+                                          dtypes=torch.testing.get_all_math_dtypes(device))
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
@@ -701,84 +707,26 @@ class TestTypePromotion(TestCase):
         o = torch.empty(1, device=device, dtype=dtype)
 
         # Tests div (including /) deprecation
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             c = a / b
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             c = torch.div(a, b)
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             torch.div(a, b, out=o)
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
+            a.div_(b)
 
-        # Tests addcdiv deprecation
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
-            torch.addcdiv(a, b, b)
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
-            torch.addcdiv(a, b, b, out=o)
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_integer_addcdiv_deprecated(self, device, dtype):
+        t = torch.tensor(1, device=device, dtype=dtype)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.complex64, torch.complex128)
-    def test_abs_angle_complex_to_float(self, device, dtype):
-        # Constructs random complex values
-        from random import random
-        random_vals = []
-        for multiplier in (-1, 1, -10, 10, -100, 100):
-            for _ in range(10):
-                random_vals.append(complex(random() * multiplier, random() * multiplier))
-
-        for vals in (random_vals, []):
-            a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
-            t = torch.tensor(vals, device=device, dtype=dtype)
-
-            for fn_name in ('abs', 'angle'):
-                torch_fn = getattr(torch, fn_name)
-                np_fn = getattr(np, fn_name)
-
-                # Tests function
-                np_result = torch.from_numpy(np_fn(a))
-                torch_result = torch_fn(t).cpu()
-                self.assertEqual(np_result, torch_result, exact_dtype=True)
-
-                # Tests float out
-                float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
-                float_out = torch.empty_like(t).float()
-                torch_fn(t, out=float_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.from_numpy(np_float_out), float_out.cpu())
-
-                # Tests float out (resized out)
-                float_out = torch.empty(1, device=device, dtype=float_dtype)
-                torch_fn(t, out=float_out)
-                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
-
-                # Tests complex out
-                np_complex_out = np_fn(a)
-                complex_out = torch.empty_like(t)
-                torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
-
-                # Tests complex out (resized out)
-                complex_out = torch.empty(1, device=device, dtype=dtype)
-                torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
-
-                # Tests long out behavior (expected failure)
-                long_out = torch.empty(0, device=device, dtype=torch.long)
-                with self.assertRaises(RuntimeError):
-                    torch_fn(t, out=long_out)
-
-                # Tests inplace
-                if fn_name == 'abs':
-                    torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
-                    np_fn(a, out=a)
-                    torch_inplace_method(t)
-                    self.assertEqual(torch.from_numpy(a), t.cpu())
-
-                # Note: angle does not have an in-place variant
-                if fn_name == 'angle':
-                    with self.assertRaises(AttributeError):
-                        torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
+            torch.addcdiv(t, t, t)
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
+            torch.addcdiv(t, t, t, out=t)
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
+            t.addcdiv_(t, t)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
@@ -852,39 +800,91 @@ class TestTypePromotion(TestCase):
 
     @onlyOnCPUAndCUDA
     def test_cat_different_dtypes(self, device):
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
-        out = torch.cat([x, y])
-        self.assertEqual(out, expected_out, exact_dtype=True)
-        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                    device=device, dtype=torch.int32)
-        out = torch.cat([x, y, z])
-        self.assertEqual(out, expected_out, exact_dtype=True)
+        dtypes = torch.testing.get_all_dtypes(include_bfloat16=False)
+        for x_dtype, y_dtype in itertools.product(dtypes, dtypes):
+            x_vals, y_vals = [1, 2, 3], [4, 5, 6]
+
+            x = torch.tensor(x_vals, device=device, dtype=x_dtype)
+            y = torch.tensor(y_vals, device=device, dtype=y_dtype)
+
+            if x_dtype is torch.bool:
+                x_vals = [1, 1, 1]
+            if y_dtype is torch.bool:
+                y_vals = [1, 1, 1]
+
+            res_dtype = torch.result_type(x, y)
+            expected_res = torch.tensor(x_vals + y_vals, device=device, dtype=res_dtype)
+            res = torch.cat([x, y])
+            self.assertEqual(res, expected_res, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_out_different_dtypes(self, device):
-        out = torch.zeros(6, device=device, dtype=torch.int16)
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int16)
-        torch.cat([x, y], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True)
-        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
-        out = torch.zeros(9, device=device, dtype=torch.int64)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                    device=device, dtype=torch.int64)
-        torch.cat([x, y, z], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True)
+        dtypes = torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False)
+        for x_dtype, y_dtype, out_dtype in itertools.product(dtypes, dtypes, dtypes):
+            out = torch.zeros(6, device=device, dtype=out_dtype)
+            x = torch.tensor([1, 2, 3], device=device, dtype=x_dtype)
+            y = torch.tensor([4, 5, 6], device=device, dtype=y_dtype)
+            expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=out_dtype)
+            if (((x_dtype.is_floating_point or y_dtype.is_floating_point)
+                    and not (out_dtype.is_floating_point or out_dtype.is_complex))
+                    or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)):
+                # This combinations do not support type conversion to a different class out type
+                with self.assertRaises(RuntimeError):
+                    torch.cat([x, y], out=out)
+            else:
+                torch.cat([x, y], out=out)
+                self.assertEqual(out, expected_out, exact_dtype=True)
 
+    # Verfies that unary ops require matching out types
     @onlyOnCPUAndCUDA
-    def test_cat_invalid_dtype_promotion(self, device):
-        out = torch.zeros(6, device=device, dtype=torch.int16)
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int16)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.float)
-        with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
-            torch.cat([x, y], out=out)
+    @dtypes(*itertools.product((torch.int64,
+                                torch.float32, torch.float64,
+                                torch.complex64, torch.complex128),
+                               (torch.int64,
+                                torch.float32, torch.float64,
+                                torch.complex64, torch.complex128)))
+    def test_unary_op_out_casting(self, device, dtypes):
+        t = torch.tensor((1), dtype=dtypes[0], device=device)
+        out = torch.empty(1, dtype=dtypes[1], device=device)
+
+        ops = (torch.neg, torch.floor, torch.ceil, torch.cos, torch.erf, torch.log)
+        float_only_ops = {torch.floor, torch.ceil, torch.cos, torch.erf, torch.log}
+        real_only_ops = {torch.floor, torch.ceil, torch.erf}
+        for op in ops:
+            if dtypes[0] is not dtypes[1]:
+                with self.assertRaises(RuntimeError):
+                    op(t, out=out)
+            elif op in real_only_ops and dtypes[0].is_complex:
+                with self.assertRaises(RuntimeError):
+                    op(t, out=out)
+            elif op in float_only_ops and (not dtypes[0].is_floating_point and not dtypes[0].is_complex):
+                with self.assertRaises(RuntimeError):
+                    op(t, out=out)
+            else:
+                self.assertEqual(op(t, out=out), op(t))
+                self.assertEqual(op(t, out=out), out)
+
+    # Verifies that the out= argument doesn't affect the computation, that
+    # is, out = op(...) and op(..., out=out) produce the same result.
+    @onlyOnCPUAndCUDA
+    def test_computation_ignores_out(self, device):
+        t = torch.tensor(33000, dtype=torch.float16, device=device)
+        out = torch.empty(1, dtype=torch.float64, device=device)
+        result = torch.add(t, t, out=out)
+        self.assertEqual(result, t + t, exact_dtype=False)
+        self.assertNotEqual(result, t.double() + t, exact_dtype=False)
+
+        a = torch.tensor(1.5, dtype=torch.float16, device=device)
+        b = torch.tensor(.666, dtype=torch.float16, device=device)
+        result = torch.true_divide(a, b, out=out)
+        self.assertEqual(result, a / b, exact_dtype=False)
+        self.assertNotEqual(result, a.double() / a, exact_dtype=False)
+
+        a = torch.tensor(5, dtype=torch.uint8, device=device)
+        b = torch.tensor(8, dtype=torch.uint8, device=device)
+        result = torch.sub(a, b, out=out)
+        self.assertEqual(result, a - b, exact_dtype=False)
+        self.assertNotEqual(result, a.double() - b, exact_dtype=False)
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

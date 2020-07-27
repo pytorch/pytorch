@@ -1,22 +1,12 @@
-import contextlib
 import numpy as np
 import torch
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
-
-@contextlib.contextmanager
-def num_profiled_runs(num_runs):
-    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
-
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
@@ -1256,7 +1246,7 @@ class TestTensorExprFuser(BaseTestClass):
         scripted(a, b)
         cx = CudaCodeGenExecuted()
         scripted(a, b)
-        assert cx.elapsed_value() == 1
+        assert cx.elapsed_value() == 0
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_multi_rand(self):

@@ -1236,7 +1236,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, atol=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
@@ -2387,7 +2387,7 @@ class TestSparse(TestCase):
             unspecified items is negative infinity rather than zero so
             that
 
-              softmax(sparse.to_dense(fill_value=-inf), dim) == softmax(sparse, dim).to_dense() 
+              softmax(sparse.to_dense(fill_value=-inf), dim) == softmax(sparse, dim).to_dense()
 
             holds for non-empty lines. One empty lines, the softmax
             values are defined as 0 in order to preserve the sparsity

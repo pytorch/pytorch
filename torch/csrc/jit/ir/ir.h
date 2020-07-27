@@ -332,6 +332,16 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+
+  Node* copyMetadata(Node* from) {
+    this->setSourceRange(from->sourceRange());
+    this->setScope(from->scope());
+    if (auto cs = from->callstack()) {
+      this->setCallStack(*cs);
+    }
+    return this;
+  }
+
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }

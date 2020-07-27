@@ -313,6 +313,9 @@ class DeviceCachingAllocator {
     block->allocated = true;
     active_blocks.insert(block);
 
+    c10::reportMemoryUsageToProfiler(
+        block, block->size, c10::Device(c10::DeviceType::CUDA, device));
+
     update_stat_array(stats.allocation, 1, params.stat_types);
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
@@ -326,6 +329,9 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     block->allocated = false;
+
+    c10::reportMemoryUsageToProfiler(
+        block, -block->size, c10::Device(c10::DeviceType::CUDA, block->device));
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -819,6 +825,11 @@ class THCCachingAllocator {
 
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && device < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;

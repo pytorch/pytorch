@@ -33,8 +33,8 @@ inline TensorQuantizationParams ChooseQuantizationParams(
       "In ChooseQuantizationParams, min should be less than or equal to max");
 
   if (reduce_range) {
-    qmin = 0;
-    qmax = 127;
+    qmin = qmin/2;
+    qmax = qmax/2;
   }
   if (min < 0 && max > 0 && preserve_sparsity) {
     int symmetric_qmin = -((qmax - qmin) / 2 + 1);

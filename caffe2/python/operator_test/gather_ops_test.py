@@ -177,7 +177,7 @@ def _inputs(draw):
         draw(hnp.arrays(
             np.float32,
             (batch_size, rows_num, block_size),
-            elements=st.floats(-10.0, 10.0),
+            elements=hu.floats(-10.0, 10.0),
         )),
         draw(hnp.arrays(
             np.int32,

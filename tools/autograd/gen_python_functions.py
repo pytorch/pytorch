@@ -71,7 +71,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -226,9 +226,11 @@ UNPACK_METHODS = {
     'c10::optional<Layout>': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
+    'c10::optional<ArrayRef<double>>': 'doublelistOptional',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',

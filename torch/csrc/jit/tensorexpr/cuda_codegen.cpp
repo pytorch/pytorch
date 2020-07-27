@@ -324,7 +324,6 @@ class AtomicAddFuser : public IRMutator {
   Stmt* mutate(const Store* v) override {
     const Buf* buf = v->buf();
     const std::vector<const Expr*>& indices = v->indices();
-    const Expr* value = v->value();
     const Expr* atomic_add_value = nullptr;
     if (isAtomicAdd(v, &atomic_add_value)) {
       return new AtomicAdd(buf, indices, atomic_add_value);
@@ -724,6 +723,9 @@ void CudaCodeGen::Initialize() {
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
   // TODO: merge HasRand with CudaAnalysis.
+  GenericIntrinsicsExpander intrinsics_expander;
+  apply_mutator(&intrinsics_expander);
+
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
   cuda_analysis_ = std::make_unique<CudaAnalysis>();
@@ -797,8 +799,6 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<const Expr*>& gpu_block_extents =
       printer_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents =
-      printer_->gpu_thread_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
@@ -913,7 +913,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     ptr_to_args[buffer_args.size()] = &rand_seed;
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
-
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
@@ -929,13 +932,9 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       ptr_to_args.data(),
       nullptr));
   USE_TRIGGER(cuda_codegen_executed);
-}
 
-void CudaSetContext(CUcontext pctx) {
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
   }
 }
 
@@ -947,11 +946,17 @@ void CudaCodeGen::CompileToNVRTC(
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(this->device().index());
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // cudaSetDevice does not have to really change the underlying device if it
   // doesn't have to, so calling cudaFree to force that change
-  CudaSetContext(pctx);
-
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
@@ -1003,7 +1008,10 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
-  at::cuda::set_device(prior_device);
+
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 CudaCodeGen::~CudaCodeGen() = default;

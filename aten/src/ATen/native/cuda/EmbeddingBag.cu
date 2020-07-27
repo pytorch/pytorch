@@ -54,7 +54,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
       scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      assert(end >= begin);
+      CUDA_KERNEL_ASSERT(end >= begin);
 
       accscalar_t weightFeatSum = 0;
       scalar_t weightFeatMax;
@@ -245,6 +245,25 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
   AT_CUDA_CHECK(cudaGetLastError());
   return grad_weight;
 }
+}
+
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
+                   const Tensor &offsets, const bool scale_grad_by_freq,
+                   const int64_t mode, bool sparse,
+                   const Tensor& per_sample_weights,
+                   bool include_last_offset) {
+  return _embedding_bag_cuda(
+      weight,
+      indices,
+      offsets,
+      scale_grad_by_freq,
+      mode,
+      sparse,
+      per_sample_weights,
+      include_last_offset);
 }
 
 // Assumes all input tensors are contiguous.

@@ -15,6 +15,7 @@ using at::Scalar;
 using at::MemoryFormat;
 using at::Generator;
 using at::IntArrayRef;
+using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
@@ -66,10 +67,6 @@ static PyMethodDef nn_functions[] = {
 static PyObject* THPNNVariableFunctionsModule = NULL;
 
 void initNNFunctions(PyObject* module) {
-#if PY_MAJOR_VERSION == 2
-  PyObject* nn = Py_InitModule("torch._C._nn", nn_functions);
-  Py_XINCREF(nn);  // Py_InitModule returns "borrowed" reference
-#else
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
      "torch._C._nn",
@@ -78,7 +75,6 @@ void initNNFunctions(PyObject* module) {
      nn_functions
   };
   PyObject* nn = PyModule_Create(&def);
-#endif
   THPNNVariableFunctionsModule = nn;
   if (!nn) {
     throw python_error();

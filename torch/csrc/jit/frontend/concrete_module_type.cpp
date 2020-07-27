@@ -24,8 +24,8 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& name = pr.key();
     const auto& type = pr.value().type_;
     const auto& isParameter = pr.value().isParam_;
-
-    cls->addAttribute(name, type, isParameter);
+    const auto& isBuffer = pr.value().isBuffer_;
+    cls->addAttribute(name, type, isParameter, isBuffer);
   }
 
   for (const auto& pr : constants_) {
@@ -201,13 +201,15 @@ void ConcreteModuleTypeBuilder::addConstant(
 void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
     TypePtr type,
-    bool isParameter) {
+    bool isParameter,
+    bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
   attributes_.insert(
       std::move(name),
-      ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter));
+      ConcreteModuleTypeBuilder::Attribute(
+          unshapedType(type), isParameter, isBuffer));
 }
 
 void ConcreteModuleTypeBuilder::addFunctionAttribute(
@@ -256,13 +258,13 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.key() << ": " << pr.value().type_->python_str()
+    std::cout << "\t" << pr.key() << ": " << pr.value().type_->annotation_str()
               << "\n";
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
-              << info.meta_->getJitType()->python_str() << "\n";
+              << info.meta_->getJitType()->annotation_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
@@ -271,7 +273,7 @@ void ConcreteModuleType::dump() const {
   std::string isPoisoned = data_.isPoisoned_ ? "true" : "false";
   std::cout << "isPoisoned: " << isPoisoned << "\n";
   if (jitType_) {
-    std::cout << "jit type: " << jitType_->python_str() << "\n";
+    std::cout << "jit type: " << jitType_->annotation_str() << "\n";
   }
 }
 

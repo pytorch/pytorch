@@ -61,7 +61,7 @@ TypePtr tryInferTypeWithTypeHint(
         "The RRef being created contains a ScriptModule, "
         "must provide its ModuleInterface type hint. ");
     c10::QualifiedName type_qualified_name = c10::QualifiedName(
-        py::cast<std::string>(py::module::import("torch.jit")
+        py::cast<std::string>(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
@@ -70,7 +70,7 @@ TypePtr tryInferTypeWithTypeHint(
         type_hint_ptr != nullptr &&
             module.value().type()->isSubtypeOfExt(
                 type_hint_ptr, &subtype_check_msg),
-        module.value().type()->python_str(),
+        module.value().type()->repr_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
         ", did you pass a valid interface type?\n",
@@ -100,7 +100,8 @@ TypePtr tryInferTypeWithTypeHint(
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
+    : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -127,6 +128,15 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
       rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
+c10::intrusive_ptr<JitFuture> PyRRef::getProfilingFuture() const {
+  TORCH_INTERNAL_ASSERT(profilingFuture_, "Profiling future has not been set!");
+  return *profilingFuture_;
+}
+
+void PyRRef::setProfilingFuture(c10::intrusive_ptr<JitFuture> profilingFuture) {
+  profilingFuture_ = std::move(profilingFuture);
+}
+
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
@@ -143,14 +153,15 @@ std::string PyRRef::ownerName() const {
   return rref_->ownerName();
 }
 
-py::object PyRRef::toHere() {
+py::object PyRRef::toHere(const float timeoutSeconds) const {
   if (rref_->isOwner()) {
     return localValue();
   } else {
     // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
     // a python object
-    IValue value =
-        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere();
+    IValue value = c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere(
+        timeoutSeconds);
+
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
@@ -168,14 +179,19 @@ py::object PyRRef::toHere() {
   }
 }
 
-py::object PyRRef::localValue() {
+py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
-      "Cannot call localValue() on a non-local reference. Call it on ",
-      owner().name_);
+      "For ",
+      *rref_,
+      ", can't call localValue() on user ",
+      RRefContext::getInstance().agent()->getWorkerInfo(),
+      ". Call it on owner ",
+      owner());
 
   py::object res;
-  auto value = c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue();
+  auto value =
+      c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
   auto& rpcHandler = PythonRpcHandler::getInstance();
   {
     // acquiring GIL as torch::jit::toPyObject creates new py::object without
@@ -238,7 +254,7 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   return PyRRef(std::move(rref));
 }
 
-c10::IValue PyRRef::toIValue() {
+c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);

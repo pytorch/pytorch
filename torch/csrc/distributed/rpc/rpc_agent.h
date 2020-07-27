@@ -32,7 +32,9 @@ struct RpcBackendOptions {
 
   RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
       : rpcTimeoutSeconds(rpcTimeoutSeconds),
-        initMethod(std::move(initMethod)) {}
+        initMethod(std::move(initMethod)) {
+    TORCH_CHECK(rpcTimeoutSeconds >= 0, "RPC Timeout must be non-negative");
+  }
 
   float rpcTimeoutSeconds;
   std::string initMethod;
@@ -75,6 +77,10 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
   const std::string name_;
   const worker_id_t id_;
 };
+
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const WorkerInfo& workerInfo);
 
 // Struct for options to configure the RPC Retry protocol.
 struct TORCH_API RpcRetryOptions {

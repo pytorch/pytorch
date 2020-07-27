@@ -148,6 +148,12 @@ void RpcAgent::retryExpiredRpcs() {
       it = earliestRpcList.erase(it);
     }
 
+    // If there are no more RPC's set to be retried at the current timepoint,
+    // we can remove the corresponsing unordered_set from the retry map.
+    if (earliestRpcList.empty()) {
+      rpcRetryMap_.erase(earliestTimeout);
+    }
+
     lock.unlock();
     // We attach callbacks to the futures outside of the lock to prevent
     // potential deadlocks.
@@ -178,15 +184,6 @@ void RpcAgent::retryExpiredRpcs() {
       errorFuture->setError(errorMsg);
     }
     errorFutures.clear();
-
-    // If there are no more RPC's set to be retried at the current timepoint,
-    // we can remove the corresponsing unordered_set from the retry map.
-    {
-      std::lock_guard<std::mutex> retryMapLock(rpcRetryMutex_);
-      if (earliestRpcList.empty()) {
-        rpcRetryMap_.erase(earliestTimeout);
-      }
-    }
   }
 }
 
@@ -197,8 +194,7 @@ void RpcAgent::rpcRetryCallback(
   if (futureMessage->hasError()) {
     // Adding one since we want to include the original send as well and not
     // just the retry count.
-    LOG(INFO) << "Send try " << std::to_string(earliestRpc->retryCount_ + 1)
-              << " failed";
+    LOG(INFO) << "Send try " << (earliestRpc->retryCount_ + 1) << " failed";
     if (!rpcAgentRunning_.load()) {
       // If the RPC Agent has shutdown, we cannot retry messages. Thus we mark
       // the future with an error since the RPC was never completed
@@ -243,21 +239,34 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {
-  return currentRpcAgent_ != nullptr;
+  return std::atomic_load(&currentRpcAgent_) != nullptr;
 }
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
-  TORCH_INTERNAL_ASSERT(currentRpcAgent_, "Current RPC agent is not set!");
-  return currentRpcAgent_;
+  std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
+  TORCH_INTERNAL_ASSERT(agent, "Current RPC agent is not set!");
+  return agent;
 }
 
 void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
   if (rpcAgent) {
-    TORCH_INTERNAL_ASSERT(!currentRpcAgent_, "Current RPC agent is set!");
+    std::shared_ptr<RpcAgent> previousAgent;
+    // Use compare_exchange so that we don't actually perform the exchange if
+    // that would trigger the assert just below. See:
+    // https://en.cppreference.com/w/cpp/atomic/atomic_compare_exchange
+    std::atomic_compare_exchange_strong(
+        &currentRpcAgent_, &previousAgent, std::move(rpcAgent));
+    TORCH_INTERNAL_ASSERT(
+        previousAgent == nullptr, "Current RPC agent is set!");
   } else {
-    TORCH_INTERNAL_ASSERT(currentRpcAgent_, "Current RPC agent is not set!");
+    // We can't use compare_exchange (we don't know what value to expect) but we
+    // don't need to, as the only case that would trigger the assert is if we
+    // replaced nullptr with nullptr, which we can just do as it has no effect.
+    std::shared_ptr<RpcAgent> previousAgent =
+        std::atomic_exchange(&currentRpcAgent_, std::move(rpcAgent));
+    TORCH_INTERNAL_ASSERT(
+        previousAgent != nullptr, "Current RPC agent is not set!");
   }
-  currentRpcAgent_ = std::move(rpcAgent);
 }
 
 void RpcAgent::setTypeResolver(std::shared_ptr<TypeResolver> typeResolver) {
@@ -282,6 +291,11 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
      stack traces for the threads owned by the agent */
   // Default implementation: return getMetrics().
   return getMetrics();
+}
+
+std::ostream& operator<<(std::ostream& os, const WorkerInfo& workerInfo) {
+  return os << "WorkerInfo(id=" << workerInfo.id_
+            << ", name=" << workerInfo.name_ << ")";
 }
 
 } // namespace rpc

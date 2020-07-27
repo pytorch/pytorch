@@ -27,11 +27,13 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
 IS_WINDOWS = sys.platform == "win32"
 
 
-# This effectively allows re-using the same extension (compiled once) in
-# multiple tests, just to split up the tested properties.
-def dont_wipe_extensions_build_folder(func):
-    func.dont_wipe = True
-    return func
+def remove_build_path():
+    if sys.platform == "win32":
+        print("Not wiping extensions build folder because Windows")
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root)
 
 
 class TestCppExtensionJIT(common.TestCase):
@@ -45,33 +47,17 @@ class TestCppExtensionJIT(common.TestCase):
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        test_name = self.id().split(".")[-1]
-        dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
-        if dont_wipe:
-            print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
-            )
-            return
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
-
     def tearDown(self):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
     @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+
+    @classmethod
     def tearDownClass(cls):
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
+        remove_build_path()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -146,10 +132,10 @@ class TestCppExtensionJIT(common.TestCase):
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = ['sm_' + xx for xx in expected_values]
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: {}\n"
-                                     "Stderr: {}\nOutput: {}".format(
-                                         flags, actual_arches, expected_arches,
-                                         err, output))
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -430,8 +416,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -463,8 +447,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -562,8 +544,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -585,9 +565,7 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @dont_wipe_extensions_build_folder
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -744,21 +722,21 @@ class TestCppExtensionJIT(common.TestCase):
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should not be detected
+            # Catched with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 2)
 
-            # Catched with python error should not be detected
+            # Catched with python error should also be detected
             with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
                 warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should not be detected
+            # Catched with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 4)
 
         # Make sure raising warnings are handled properly
         with warnings.catch_warnings(record=True) as w:

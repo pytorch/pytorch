@@ -50,7 +50,7 @@ void postSetStateValidate(const IValue& v) {
               "The field '{}' was left uninitialized after '__setstate__', "
               "but expected a value of type '{}'",
               attrName,
-              attrType->python_str()));
+              attrType->repr_str()));
     }
   }
 }
@@ -129,7 +129,7 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
-  std::vector<at::Tensor> constants_table_;
+  std::vector<at::IValue> constants_table_;
   SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
@@ -151,7 +151,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       auto obj = c10::ivalue::Object::create(type, n);
       // XXX: Do not optimize __setstate__, so that we don't try to
       // specialize the class before it is initialized.
-      setGraphExecutorOptimize(false);
+      GraphOptimizerEnabledGuard guard(false);
       Function& set_state = cls->getMethod("__setstate__");
       // since we are in the middle of unpickling we might still have lists and
       // dicts that do not have accurate tags (e.g. they report they are
@@ -163,7 +163,6 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       restoreAccurateTypeTags(
           input, set_state.getSchema().arguments().at(1).type());
       set_state({obj, input});
-      setGraphExecutorOptimize(true);
       postSetStateValidate(obj);
       return obj;
     } else {
@@ -265,7 +264,7 @@ Module ScriptModuleDeserializer::deserialize(
   }
   auto tuple = readArchive("constants").toTuple();
   for (auto constant : tuple->elements()) {
-    constants_table_.push_back(constant.toTensor());
+    constants_table_.push_back(constant.toIValue());
   }
   auto m = Module(readArchive("data").toObject());
   rewriteQuantizedConvForBC(m);

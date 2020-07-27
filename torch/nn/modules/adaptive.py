@@ -4,6 +4,9 @@ from collections import namedtuple
 
 import torch
 
+from torch import Tensor
+from typing import List, Sequence
+
 from . import Sequential, ModuleList, Linear
 from .module import Module
 from ..functional import log_softmax
@@ -98,7 +101,22 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
 
-    def __init__(self, in_features, n_classes, cutoffs, div_value=4., head_bias=False):
+    in_features: int
+    n_classes: int
+    cutoffs: List[int]
+    div_value: float
+    head_bias: bool
+    head: Linear
+    tail: ModuleList
+
+    def __init__(
+        self,
+        in_features: int,
+        n_classes: int,
+        cutoffs: Sequence[int],
+        div_value: float = 4.,
+        head_bias: bool = False
+    ) -> None:
         super(AdaptiveLogSoftmaxWithLoss, self).__init__()
 
         cutoffs = list(cutoffs)
@@ -138,13 +156,13 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
             self.tail.append(projection)
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         self.head.reset_parameters()
         for i2h, h2o in self.tail:
             i2h.reset_parameters()
             h2o.reset_parameters()
 
-    def forward(self, input, target):
+    def forward(self, input: Tensor, target: Tensor) -> _ASMoutput:
         if input.size(0) != target.size(0):
             raise RuntimeError('Input and target should have the same size '
                                'in the batch dimension.')
@@ -217,7 +235,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         return out
 
-    def log_prob(self, input):
+    def log_prob(self, input: Tensor) -> Tensor:
         r""" Computes log probabilities for all :math:`\texttt{n\_classes}`
 
         Args:
@@ -237,7 +255,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         head_output = self.head(input)
         return self._get_full_log_prob(input, head_output)
 
-    def predict(self, input):
+    def predict(self, input: Tensor) -> Tensor:
         r""" This is equivalent to `self.log_pob(input).argmax(dim=1)`,
         but is more efficient in some cases.
 

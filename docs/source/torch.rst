@@ -106,7 +106,7 @@ Generators
     :toctree: generated
     :nosignatures:
 
-    _C.Generator
+    Generator
 
 .. _random-sampling:
 
@@ -245,12 +245,15 @@ Pointwise Ops
     abs
     absolute
     acos
+    acosh
     add
     addcdiv
     addcmul
     angle
     asin
+    asinh
     atan
+    atanh
     atan2
     bitwise_not
     bitwise_and
@@ -261,6 +264,7 @@ Pointwise Ops
     conj
     cos
     cosh
+    deg2rad
     div
     digamma
     erf
@@ -279,15 +283,19 @@ Pointwise Ops
     log10
     log1p
     log2
+    logaddexp
+    logaddexp2
     logical_and
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder
@@ -317,8 +325,10 @@ Reduction Ops
     mean
     median
     mode
+    nanprod
     norm
     prod
+    quantile
     std
     std_mean
     sum
@@ -326,6 +336,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -378,6 +389,9 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
@@ -397,9 +411,14 @@ Other Operations
     einsum
     flatten
     flip
+    fliplr
+    flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
+    logcumsumexp
     renorm
     repeat_interleave
     roll
@@ -411,6 +430,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations

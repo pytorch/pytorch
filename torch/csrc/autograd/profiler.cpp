@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <ATen/record_function.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <iostream>
@@ -22,6 +23,28 @@
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
+
+  constexpr auto kProfilerConfigIValuesSize = 3;
+  constexpr auto kEventIValuesSize = 11;
+  enum EventIValueIdx {
+    KIND = 0,
+    NAME,
+    THREAD_ID,
+    HANDLE,
+    NODE_ID,
+    CPU_MEM_USAGE,
+    CPU_NS,
+    CUDA_RECORDED,
+    CUDA_MEM_USAGE,
+    CUDA_DEVICE,
+    CUDA_US
+  };
+
+  enum ProfilerIValueIdx {
+    STATE = 0,
+    REPORT_INPUT_SHAPES,
+    PROFILE_MEMORY,
+  };
 
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
@@ -120,14 +143,12 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 //
 
 // Profiler state
-struct ProfilerThreadLocalState : public at::DebugInfoBase {
-  explicit ProfilerThreadLocalState(
-      ProfilerState state,
-      bool report_input_shapes)
-    : config_(state, report_input_shapes) {}
+struct ProfilerThreadLocalState
+    : public c10::MemoryReportingInfoBase {
   explicit ProfilerThreadLocalState(
       const ProfilerConfig& config)
-    : config_(config) {}
+    : config_(config), remoteProfiledEvents_{c10::nullopt} {}
+  ~ProfilerThreadLocalState() override = default;
 
   inline const ProfilerConfig& config() const {
     return config_;
@@ -139,6 +160,13 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     for (auto& kv : event_lists_map_) {
       auto& list = kv.second;
       result.emplace_back(list->consolidate());
+    }
+    // Consolidate remote events if applicable as well.
+    if (remoteProfiledEvents_) {
+      result.insert(
+          result.end(),
+          std::make_move_iterator(remoteProfiledEvents_->begin()),
+          std::make_move_iterator(remoteProfiledEvents_->end()));
     }
     return result;
   }
@@ -152,11 +180,24 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      getEventList().record(
-          EventKind::Mark,
-          at::StringView(std::move(name)),
-          at::RecordFunction::currentThreadId(),
-          include_cuda && config_.state == ProfilerState::CUDA);
+      Event evt(
+        EventKind::Mark,
+        at::StringView(std::move(name)),
+        at::RecordFunction::currentThreadId(),
+        include_cuda && config_.state == ProfilerState::CUDA
+      );
+      evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      getEventList().record(std::move(evt));
+    }
+  }
+
+  void setOrAddRemoteProfiledEvents(std::vector<Event>&& remoteProfiledEvents) {
+    // Lock to serialize access from multiple callback threads.
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    if (remoteProfiledEvents_) {
+      (*remoteProfiledEvents_).emplace_back(remoteProfiledEvents);
+    } else {
+      remoteProfiledEvents_ = {std::move(remoteProfiledEvents)};
     }
   }
 
@@ -164,7 +205,8 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
       const at::StringView& name,
       const char* msg = "",
       int64_t sequence_nr = -1,
-      std::vector<std::vector<int64_t>>&& shapes = {}) {
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      at::RecordFunctionHandle handle = 0) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -177,22 +219,30 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
           name,
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
-          std::move(shapes));
+          handle,
+          std::move(shapes),
+          at::RecordFunction::getDefaultNodeId());
     }
   }
 
-  void popRange(uint64_t thread_id) {
+  void popRange(uint64_t thread_id, at::RecordFunctionHandle handle) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePop();
     } else {
-      getEventList(thread_id).record(
-          EventKind::PopRange,
+      // In some cases RecordFunction (and popRange) may be
+      // called on a different thread than pushRange
+      // As a convention, we put the async pop on the original
+      // thread and save current thread id in pop event
+      Event evt(EventKind::PopRange,
           at::StringView(""),
-          thread_id,
-          config_.state == ProfilerState::CUDA);
+          at::RecordFunction::currentThreadId(),
+          config_.state == ProfilerState::CUDA,
+          handle);
+      evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      getEventList(thread_id).record(std::move(evt));
     }
   }
 
@@ -202,6 +252,24 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
 
   at::CallbackHandle callbackHandle() const {
     return handle_;
+  }
+
+  void reportMemoryUsage(
+      void* /* unused */, int64_t alloc_size, c10::Device device) override {
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+      uint64_t thread_id = at::RecordFunction::currentThreadId();
+      Event evt(
+          EventKind::MemoryAlloc,
+          at::StringView(""),
+          thread_id,
+          config_.state == ProfilerState::CUDA);
+      evt.updateMemoryStats(alloc_size, device);
+      getEventList(thread_id).record(std::move(evt));
+    }
+  }
+
+  bool memoryProfilingEnabled() const override {
+    return config_.profile_memory;
   }
 
  private:
@@ -262,8 +330,10 @@ struct ProfilerThreadLocalState : public at::DebugInfoBase {
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
-  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false);
+
+  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_ = 0;
+  c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -297,9 +367,10 @@ void pushProfilingCallbacks() {
               inputSizes.emplace_back();
             }
           }
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+          state_ptr->pushRange(
+              fn.name(), msg, fn.seqNr(), std::move(inputSizes), fn.handle());
         } else {
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {});
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle());
         }
       },
       [](const at::RecordFunction& fn) {
@@ -307,9 +378,10 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-        state_ptr->popRange(fn.getStartCallbacksThreadId());
+        state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
       })
-    .needsInputs(state_ptr->config().report_input_shapes));
+    .needsInputs(state_ptr->config().report_input_shapes)
+    .needsIds(true));
   state_ptr->setCallbackHandle(handle);
 }
 
@@ -325,6 +397,41 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 }
 
 ProfilerConfig::~ProfilerConfig() = default;
+
+at::IValue ProfilerConfig::toIValue() const {
+  c10::impl::GenericList eventIValueList(at::AnyType::get());
+  eventIValueList.reserve(kProfilerConfigIValuesSize);
+  eventIValueList.emplace_back(static_cast<int64_t>(state));
+  eventIValueList.emplace_back(report_input_shapes);
+  eventIValueList.emplace_back(profile_memory);
+  return eventIValueList;
+}
+
+ProfilerConfig ProfilerConfig::fromIValue(
+    const at::IValue& profilerConfigIValue) {
+  TORCH_INTERNAL_ASSERT(
+      profilerConfigIValue.isList(),
+      "Expected IValue to contain type c10::impl::GenericList");
+  auto ivalues = profilerConfigIValue.toList();
+  TORCH_INTERNAL_ASSERT(
+      ivalues.size() == kProfilerConfigIValuesSize,
+      c10::str(
+          "Expected exactly ",
+          kProfilerConfigIValuesSize,
+          " ivalues to resconstruct ProfilerConfig."));
+  return ProfilerConfig(
+      static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
+      ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
+      ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
+}
+
+ProfilerConfig getProfilerConfig() {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(
+      state_ptr,
+      "Tried to access profiler config, but profiler is not enabled!");
+  return state_ptr->config();
+}
 
 bool profilerEnabled() {
   auto state_ptr = getProfilerTLSState();
@@ -383,22 +490,82 @@ thread_event_lists disableProfiler() {
   return state_ptr->consolidate();
 }
 
+void addEventList(std::vector<Event>&& profiledEvents) {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(state_ptr, "Profiler must be enabled.");
+  state_ptr->setOrAddRemoteProfiledEvents(std::move(profiledEvents));
+}
+
 void Event::record(bool record_cuda) {
   if (record_cuda) {
-    cuda_stubs->record(&device_, &event, &cpu_ns_);
+    cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
   cpu_ns_ = getTime();
 }
 
-double Event::cuda_elapsed_us(const Event & e) {
-  if(!e.has_cuda() || !has_cuda()) {
-    throw std::logic_error("Events were not recorded for CUDA");
+/* static */ Event Event::fromIValue(const at::IValue& eventIValue) {
+  TORCH_INTERNAL_ASSERT(
+      eventIValue.isList(),
+      "Expected IValue to contain type c10::impl::GenericList");
+  auto ivalues = eventIValue.toList();
+  TORCH_INTERNAL_ASSERT(
+      ivalues.size() >= kEventIValuesSize,
+      "Expected at least ",
+      kEventIValuesSize,
+      " elements to reconstruct Event.");
+
+  Event evt(
+      static_cast<EventKind>(
+          ivalues.get(EventIValueIdx::KIND).toInt()), // EventKind
+      at::StringView(ivalues.get(EventIValueIdx::NAME).toStringRef()), // name
+      ivalues.get(EventIValueIdx::THREAD_ID).toInt(), // thread_id
+      static_cast<at::RecordFunctionHandle>(
+          ivalues.get(EventIValueIdx::HANDLE).toDouble()), // handle
+      {}, // TODO: record shapes
+      ivalues.get(EventIValueIdx::NODE_ID).toInt(), // node id
+      true, // is remote
+      ivalues.get(EventIValueIdx::CPU_MEM_USAGE).toInt(), // cpu_mem_usage
+      ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
+      ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
+      ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
+      ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt(), // device
+      ivalues.get(EventIValueIdx::CUDA_US).toInt() // cuda_us
+  );
+  return evt;
+}
+
+at::IValue Event::toIValue() const {
+  c10::impl::GenericList eventIValueList(at::AnyType::get());
+  eventIValueList.reserve(kEventIValuesSize);
+  eventIValueList.emplace_back(static_cast<int64_t>(kind_));
+  eventIValueList.emplace_back(std::string(name_.str()));
+  eventIValueList.emplace_back(thread_id_);
+  eventIValueList.emplace_back(static_cast<double>(handle_));
+  eventIValueList.emplace_back(node_id_);
+  eventIValueList.emplace_back(cpu_memory_usage_);
+  eventIValueList.emplace_back(cpu_ns_);
+  // CUDA event information
+  bool cuda_profiling_enabled = has_cuda();
+  eventIValueList.emplace_back(cuda_profiling_enabled);
+  eventIValueList.emplace_back(static_cast<int64_t>(cuda_memory_usage_));
+  eventIValueList.emplace_back(device_);
+  eventIValueList.emplace_back(cuda_us_);
+  return at::IValue(eventIValueList);
+}
+
+double Event::cuda_elapsed_us(const Event& e) const {
+  TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
+  TORCH_CHECK(
+      e.device() == device(),
+      c10::str(
+          "Events are not on the same device: ", e.device(), " vs ", device()));
+  if (isRemote() && e.isRemote()) {
+    // validate that cuda_us_ has been set properly.
+    TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >= 0);
+    return static_cast<double>(e.cuda_us_ - cuda_us_);
   }
-  if(e.device() != device()) {
-    throw std::logic_error("Events are not on the same device");
-  }
-  return cuda_stubs->elapsed(event, e.event);
+  return cuda_stubs->elapsed(&cuda_event, &e.cuda_event);
 }
 
 CUDAStubs::~CUDAStubs() = default;
@@ -415,6 +582,50 @@ static jit::CodeTemplate event_template(R"(
   "args": {}
 })");
 
+void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events) {
+  TORCH_CHECK(out, "Could not open file");
+  Event* profiler_start = nullptr;
+  for (Event* e : events) {
+    if (0 == strcmp(e->name(), "__start_profile")) {
+      profiler_start = e;
+      break;
+    }
+  }
+  TORCH_CHECK(profiler_start, "Could not find __start_profile mark");
+
+  struct PairHash {
+    size_t operator()(std::pair<at::RecordFunctionHandle, int> p) const
+        noexcept {
+      return std::hash<at::RecordFunctionHandle>()(p.first) ^ std::hash<int64_t>()(p.second);
+    }
+  };
+  std::unordered_map<std::pair<at::RecordFunctionHandle, int64_t>, Event*, PairHash> events_map;
+  out << "[\n";
+  bool first = true;
+  for (Event* evt : events) {
+    if (evt->kind() == "push") {
+      events_map[std::make_pair(evt->handle(), evt->node_id())] = evt;
+    } else if (evt->kind() == "pop") {
+      if (!first) {
+        out << ",\n";
+      }
+      first = false;
+      auto it = events_map.find(std::make_pair(evt->handle(), evt->node_id()));
+      TORCH_CHECK(it != events_map.end(), "Unmatched pop event");
+      Event* evt_start = it->second;
+      events_map.erase(it);
+
+      jit::TemplateEnv env;
+      env.s("name", evt_start->name());
+      env.d("ts", profiler_start->cpu_elapsed_us(*evt_start));
+      env.d("dur", evt_start->cpu_elapsed_us(*evt));
+      env.d("tid", evt_start->thread_id());
+      out << event_template.format(env);
+    }
+  }
+  out << "]\n";
+}
+
 
 RecordProfile::RecordProfile(std::ostream& out)
 : out_(out) {
@@ -427,14 +638,17 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerConfig(ProfilerState::CPU, false /* report shapes */));
+  enableProfiler(ProfilerConfig(
+      ProfilerState::CPU,
+      /* report_input_shapes */ false,
+      /* profile_memory */ false));
 }
 
 RecordProfile::~RecordProfile() {
   thread_event_lists event_lists = disableProfiler();
   std::vector<Event*> events;
-  for(auto& l : event_lists) {
-    for(auto& e : l) {
+  for (auto& l : event_lists) {
+    for (auto& e : l) {
         events.push_back(&e);
     }
   }
@@ -445,37 +659,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  TORCH_CHECK(out_, "could not open file");
-  Event* start = nullptr;
-  for (Event* e : events) {
-    if(0 == strcmp(e->name(), "__start_profile")) {
-      start = e;
-      break;
-    }
-  }
-  TORCH_CHECK(start, "could not find start?");
-  std::vector<Event*> stack;
-  out_ << "[\n";
-  bool first = true;
-  for(Event* e : events) {
-    if(e->kind() == "push") {
-      stack.push_back(e);
-    } else if(e->kind() == "pop") {
-      if(!first) {
-        out_ << ",\n";
-      }
-      first = false;
-      Event* e_start = stack.back();
-      stack.pop_back();
-      jit::TemplateEnv env;
-      env.s("name", e_start->name());
-      env.d("ts", start->cpu_elapsed_us(*e_start));
-      env.d("dur", e_start->cpu_elapsed_us(*e));
-      env.d("tid", e_start->thread_id());
-      out_ << event_template.format(env);
-    }
-  }
-  out_ << "]\n";
+  writeProfilerEventsToStream(out_, events);
 }
 
 }}}

@@ -57,7 +57,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 // in the 'constants' vector. This table is will be stored in a container format
 // and given to the import_method when restoring the code.
 struct ConstantTableValue : public SugaredValue {
-  ConstantTableValue(const std::vector<at::Tensor>* constants)
+  explicit ConstantTableValue(const std::vector<at::IValue>* constants)
       : constants_(constants) {}
   std::string kind() const override {
     return "CONSTANTS";
@@ -86,14 +86,14 @@ struct ConstantTableValue : public SugaredValue {
   }
 
  private:
-  const std::vector<at::Tensor>* constants_;
+  const std::vector<at::IValue>* constants_;
 };
 
 struct SourceImporterImpl : public Resolver,
                             std::enable_shared_from_this<SourceImporterImpl> {
   SourceImporterImpl(
       const std::shared_ptr<CompilationUnit> cu,
-      const std::vector<at::Tensor>* tensor_table,
+      const std::vector<at::IValue>* constant_table,
       SourceLoader source_loader,
       size_t version)
       : cu_(cu), source_loader_(std::move(source_loader)) {
@@ -102,7 +102,7 @@ struct SourceImporterImpl : public Resolver,
         {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
-        {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
+        {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", SpecialFormValue::create(prim::fork)},
         {"annotate", SpecialFormValue::create(prim::annotate)},
         {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
@@ -358,6 +358,7 @@ struct SourceImporterImpl : public Resolver,
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
+    std::unordered_set<std::string> buffer_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -384,6 +385,14 @@ struct SourceImporterImpl : public Resolver,
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
+              } else if (name == "__buffers__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Buffers only exist on modules at the moment");
+                const auto buffer_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& buffer : buffer_list) {
+                  buffer_names.insert(StringLiteral(buffer).text());
+                }
               } else {
                 if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
                         qualified_classname, assign)) {
@@ -439,7 +448,8 @@ struct SourceImporterImpl : public Resolver,
           TORCH_INTERNAL_ASSERT(name != "__parameters__");
           const auto type = type_parser.parseTypeFromExpr(assign.type().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         } break;
         case TK_SUBSCRIPT: {
           const auto name =
@@ -447,7 +457,8 @@ struct SourceImporterImpl : public Resolver,
                   .text();
           const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         }
       }
     }
@@ -556,12 +567,12 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
 SourceImporter::SourceImporter(
     // The compilation unit that will own the imported source
     std::shared_ptr<CompilationUnit> cu,
-    const std::vector<at::Tensor>* tensor_table,
+    const std::vector<IValue>* constant_table,
     SourceLoader loader,
     size_t version)
     : pImpl(std::make_shared<SourceImporterImpl>(
           std::move(cu),
-          tensor_table,
+          constant_table,
           std::move(loader),
           version)) {}
 

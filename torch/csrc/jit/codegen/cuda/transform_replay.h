@@ -1,9 +1,7 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <algorithm>
 #include <vector>
@@ -118,76 +116,39 @@ namespace fuser {
  *
  */
 
-struct TORCH_CUDA_API TransformReplay : public TransformIter {
- private:
-  /*
-   * Functions to backward propagate influence from split/merge/reorder
-   */
-  void replayBackward(Split* expr);
-  void replayBackward(Merge* expr);
-  void replayBackward(Reorder* expr);
+class TensorDomain;
+class TensorView;
 
-  // Entry for backward influence propagation on td following record
-  TensorDomain* replayBackward(TensorDomain* td, bool generate_record = false);
-
-  /*
-   * Replay functions, takes a TensorView and steps through the operations in
-   * "record" based on influence axes. Will also update influence and propagate
-   * it forward.
-   */
-  TensorDomain* replay(Split* expr, TensorDomain* tv);
-  TensorDomain* replay(Merge* expr, TensorDomain* tv);
-  TensorDomain* replay(Reorder* expr, TensorDomain* tv);
-
-  /*
-   * Takes replay_ref and replays its transformations on replay_target
-   * Replays from begining of both TensorDomains. could be more efficient to try
-   * and find a common ancestor to start from, but likely not a worthwhile
-   * optimization.
-   */
-  TensorDomain* runReplay(
-      TensorDomain* replay_ref,
-      TensorDomain* replay_target,
-      int compute_at_axis);
-
-  /*
-   * Takes replay_ref and replays its transformations on replay_target
-   * Replays from begining of both TensorDomains. could be more efficient to try
-   * and find a common ancestor to start from, but likely not a worthwhile
-   * optimization.
-   */
-  TensorView* runReplay(
-      TensorView* replay_ref,
-      TensorView* replay_target,
-      int compute_at_axis);
-
-  // Running influence vector
-  std::vector<bool> influence;
-
-  // compute_at_axis
-  int compute_at_axis;
-
-  // In the replay we won't apply all transformations, but will need relative
-  // axes for later transformations. axis_map[full transform position] = partial
-  // transform position Full transform position is relative to if we played all
-  // transformations if full transform position is not in partial transform
-  // position it will return -1
-  // axis_map[fake_pos] = real_pos
-  std::vector<int> axis_map;
-
+class TORCH_CUDA_API TransformReplay {
  public:
-  static TensorView* replay(
-      TensorView* replay_ref,
-      TensorView* replay_target,
-      int compute_at_axis);
+  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayPasC(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
+      int consumer_compute_at_axis);
 
-  static TensorView* fullReplay(
-      TensorView* replay_ref,
-      TensorView* replay_target);
+  // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
+  static std::pair<TensorView*, unsigned int> replayPasC(
+      TensorView* producer,
+      TensorView* consumer,
+      int consumer_compute_at_axis);
 
-  static TensorDomain* fullReplay(
-      TensorDomain* replay_ref,
-      TensorDomain* replay_target);
+  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  static std::pair<TensorDomain*, unsigned int> replayCasP(
+      const TensorDomain* consumer,
+      const TensorDomain* producer,
+      int producer_compute_at_axis);
+
+  // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
+  static std::pair<TensorView*, unsigned int> replayCasP(
+      TensorView* consumer,
+      TensorView* producer,
+      int producer_compute_at_axis);
+
+  // Self replay.
+  static TensorDomain* fullSelfReplay(
+      const TensorDomain* new_self_root,
+      const TensorDomain* self);
 };
 
 } // namespace fuser

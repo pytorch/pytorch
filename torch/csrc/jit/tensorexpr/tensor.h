@@ -48,6 +48,13 @@ class Tensor : KernelScopedObject {
     return buf_;
   }
 
+  void initializeTo(const Expr* initializer) {
+    initializer_ = initializer;
+  }
+  const Expr* initializer() const {
+    return initializer_;
+  }
+
   Tensor(const Buf* buf, Function* function, int output_index)
       : buf_(buf), function_(function), output_index_(output_index) {}
   template <typename... Ts>
@@ -61,6 +68,7 @@ class Tensor : KernelScopedObject {
   const Buf* buf_;
   Function* function_;
   int output_index_;
+  const Expr* initializer_{nullptr};
 };
 
 TORCH_API Tensor* Compute(
@@ -135,7 +143,9 @@ Tensor* Reduce(
   dims.insert(dims.end(), reduce_dims.begin(), reduce_dims.end());
   Function* func =
       new Function(func_name, func_result, dims, all_vars, reduce_op);
-  return new Tensor(func_result, func, 0);
+  Tensor* t = new Tensor(func_result, func, 0);
+  t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
+  return t;
 }
 
 // Overload which allows inline lambda functions for the body_func.

@@ -26,15 +26,17 @@ enum class ValType {
 enum class DataType { Bool, Float, Half, Int, Null };
 
 enum class ExprType {
+  Invalid,
   UnaryOp,
   BinaryOp,
   TernaryOp,
+  ReductionOp,
+  BroadcastOp,
   ForLoop,
   IfThenElse,
   Allocate,
   Split,
-  Merge,
-  Reorder
+  Merge
 };
 
 enum class UnaryOpType {
@@ -43,7 +45,7 @@ enum class UnaryOpType {
   Asin,
   Atan,
   Atanh,
-  // Cast,
+  Cast,
   Ceil,
   Cos,
   Cosh,
@@ -51,11 +53,9 @@ enum class UnaryOpType {
   Expm1,
   Erf,
   Erfc,
-  FloatToHalf,
   Floor,
   Frac,
   Gelu,
-  HalfToFloat,
   Lgamma,
   Log,
   Log10,
@@ -67,6 +67,7 @@ enum class UnaryOpType {
   Relu,
   Rsqrt,
   Round,
+  Set,
   Sigmoid,
   Sin,
   Sinh,
@@ -93,7 +94,7 @@ enum class BinaryOpType {
   // TypeAs,
 
   // Logical Ops
-  // Int operations, leave position oif Mod we depend on its location of first
+  // Int operations, leave position of Mod we depend on its location of first
   Mod,
   CeilDiv,
   And,
@@ -119,9 +120,10 @@ enum class ParallelType {
   Serial
 };
 
+enum class MemoryType { Local, Shared, Global };
+
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
-c10::optional<UnaryOpType> cast_type(const DataType& t1, const DataType& t2);
 bool is_logical_op(const BinaryOpType& bot);
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type);
@@ -134,11 +136,16 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
 
-std::string stringify(const ParallelType);
 std::string stringifyThreadSize(const ParallelType);
+std::string stringifyThread(const ParallelType);
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+
+TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+    const std::pair<DataType, DataType>&);
+
+size_t dataTypeSize(DataType type);
 
 } // namespace fuser
 } // namespace jit

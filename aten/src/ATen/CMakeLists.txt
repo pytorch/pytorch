@@ -63,6 +63,8 @@ file(GLOB mkldnn_cpp "mkldnn/*.cpp")
 file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
+file(GLOB native_vulkan_cpp "native/vulkan/*.cpp")
+file(GLOB native_vulkan_stub_cpp "native/vulkan/stub/*.cpp")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
@@ -75,6 +77,7 @@ file(GLOB native_cuda_cu_sp "native/cuda/Unique.cu" "native/cuda/TensorFactories
 file(GLOB native_cuda_cu "native/cuda/*.cu")
 exclude(native_cuda_cu "${native_cuda_cu}" ${native_cuda_cu_sp})
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
+file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
@@ -94,24 +97,8 @@ file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
 
 # Add files needed from jit folders
-list(APPEND ATen_CORE_HEADERS
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/parse_string_literal.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/tree.h
-)
-list(APPEND ATen_CORE_SRCS
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.cpp
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.cpp
-)
+append_filelist("jit_core_headers" ATen_CORE_HEADERS)
+append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
@@ -120,6 +107,11 @@ if(AT_MKL_ENABLED)
 endif()
 if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
+endif()
+if(USE_VULKAN)
+  set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
+else()
+  set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_stub_cpp})
 endif()
 
 if(USE_CUDA AND USE_ROCM)
@@ -218,6 +210,8 @@ if(UNIX)
     add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
   endif(HAVE_MALLOC_USABLE_SIZE)
 endif(UNIX)
+
+ADD_DEFINITIONS(-DUSE_EXTERNAL_MZCRC)
 
 if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
@@ -340,6 +334,7 @@ endif()
 # Include CPU paths for CUDA/HIP as well
 list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})
 list(APPEND ATen_HIP_INCLUDE ${ATen_CPU_INCLUDE})
+list(APPEND ATen_VULKAN_INCLUDE ${ATen_CPU_INCLUDE})
 
 # We have two libraries: libATen_cpu.so and libATen_cuda.so,
 # with libATen_cuda.so depending on libATen_cpu.so.  The CPU library
@@ -371,16 +366,15 @@ configure_file(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/AT
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
-if(INTERN_BUILD_MOBILE)
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
-else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
+if(NOT INTERN_BUILD_MOBILE)
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
-  string(REPLACE "${Caffe2_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
+  string(REPLACE "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   get_filename_component(DIR ${HEADER_SUB} DIRECTORY)
   install(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 endforeach()
@@ -406,6 +400,9 @@ else()
   add_subdirectory(test)
 endif()
 
+list(APPEND ATen_MOBILE_BENCHMARK_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/tensor_add.cpp)
+
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
@@ -418,11 +415,15 @@ set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
+set(ATen_MOBILE_BENCHMARK_SRCS ${ATen_MOBILE_BENCHMARK_SRCS} PARENT_SCOPE)
+set(ATen_MOBILE_TEST_SRCS ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
 set(ATen_HIP_INCLUDE ${ATen_HIP_INCLUDE} PARENT_SCOPE)
+set(ATen_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)

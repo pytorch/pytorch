@@ -4,14 +4,14 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
 #include <algorithm>
 #include <string>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -236,9 +236,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   auto input_contig = input.contiguous();
 
   auto packB = w.get();
-  // Adjust weight zero point, similar to weight data.
-  auto kernel_zp = w_zp + 128;
-  auto kernel_scale = w_scale;
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
   auto input_scale = input_contig.q_scale();
@@ -249,29 +246,48 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     auto weight_contig = orig_weight;
     auto bias_fp32 = bias_;
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+
+    float* weight_scales_data = w_scales.data_ptr<float>();
+    // We calculate requant scale here as the vector holding the requant scale
+    // is owned by this module. The pointer is then passed to qnnpack backend.
+    generate_requantization_scales(
+        w_scales, input_scale, output_scale, requantization_scales);
+
     at::Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
         at::device(c10::kCPU).dtype(c10::kQUInt8),
-        kernel_scale,
-        kernel_zp);
+        weight_scales_data[0],
+        w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
-    auto qbias = at::quantize_per_tensor(
-        bias_fp32, kernel_scale * input_scale, 0, c10::kQInt32);
+    const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
+    at::Tensor qbias;
+    // Original bias was float, so we requantize it here.
+    if (is_per_channel) {
+      at::Tensor bias_quant_scales =
+          weight_contig.q_per_channel_scales() * input_scale;
+      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
+      qbias = at::native::quantize_per_channel_cpu(
+          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
+    } else {
+      qbias = at::native::quantize_per_tensor(
+          bias_fp32, weight_contig.q_scale() * input_scale, 0, c10::kQInt32);
+    }
+
     // Update the input scale to not pack again.
     this->input_scale = input_scale;
     w.reset();
     w = std::make_unique<qnnpack::PackBMatrix>(
         cols_w /* input_channels */,
         rows_w /* output_channels */,
-        kernel_zp,
-        kernel_scale,
-        (uint8_t*)qnnp_w_data,
-        (int32_t*)qbias.data_ptr<c10::qint32>());
+        w_zero_points.data(),
+        requantization_scales.data(),
+        reinterpret_cast<uint8_t*>(qnnp_w_data),
+        reinterpret_cast<int32_t*>(qbias.data_ptr<c10::qint32>()));
     packB = w.get();
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
       // On mobile, we release the original weight by resetting the intrusive_ptr.
@@ -315,11 +331,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       cols_input /* input_channels */,
       rows_w /* output_channels */,
       input_contig.q_zero_point(),
-      input_contig.q_scale(),
-      kernel_zp,
-      kernel_scale,
+      w_zero_points.data(),
+      requantization_scales.data(),
       output_zero_point,
-      output_scale,
       output_min,
       output_max,
       (uint8_t*)input_contig.data_ptr<c10::quint8>(),
@@ -327,7 +341,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
       rows_w /* output_stride */,
-      caffe2::mobile_pthreadpool() /* threadpool */);
+      // TODO (Ashkan): Disabling temporarily.
+      // Throws a floating point exception with OSS pthreadpool.
+      caffe2::pthreadpool_() /* threadpool */);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
@@ -375,12 +391,12 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("linear", QLinearInt8<false>::run);
-  m.impl("linear_relu", QLinearInt8<true>::run);
+  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
+  m.impl("linear_relu", TORCH_FN(QLinearInt8<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("linear", QLinearInt8<false>::run);
+  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
 }
 
 } // namespace

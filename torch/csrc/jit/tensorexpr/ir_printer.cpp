@@ -266,6 +266,17 @@ void IRPrinter::visit(const BaseCallNode* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const FunctionCall* v) {
+  os() << *v->tensor()->buf() << "(";
+  for (int i = 0; i < v->nparams(); i++) {
+    if (i > 0) {
+      os() << ", ";
+    }
+    os() << *v->param(i);
+  }
+  os() << ")";
+}
+
 void IRPrinter::visit(const Term* v) {
   os() << "Term(";
   v->scalar()->accept(this);
@@ -306,7 +317,6 @@ void IRPrinter::visit(const RoundOff* v) {
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->accumulator() << ", ";
-  os() << *v->initializer() << ", ";
   os() << v->complete() << ", ";
 
   bool first = true;

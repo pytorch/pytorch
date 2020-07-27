@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/library.h>
-#include <ATen/native/c10_utils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
@@ -103,10 +102,10 @@ Tensor qcat_out(const c10::List<Tensor>& qxs, int64_t dim, Tensor out) {
 } // namespace
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("cat", qcat<false>);
-  m.impl("cat_relu", qcat<true>);
-  m.impl("cat_out", qcat_out<false>);
-  m.impl("cat_relu_out", qcat_out<true>);
+  m.impl("cat", TORCH_FN(qcat<false>));
+  m.impl("cat_relu", TORCH_FN(qcat<true>));
+  m.impl("cat_out", TORCH_FN(qcat_out<false>));
+  m.impl("cat_relu_out", TORCH_FN(qcat_out<true>));
 }
 
 Tensor quantized_cat(TensorList qxs, int64_t dim) {

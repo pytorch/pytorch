@@ -148,6 +148,10 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 // is a custom C++ class, otherwise return false.
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
+// This API is for testing purposes ONLY. It should not be used in
+// any load-bearing code.
+TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
+
 namespace jit {
 using ::torch::registerCustomClass;
 using ::torch::registerCustomClassMethod;
