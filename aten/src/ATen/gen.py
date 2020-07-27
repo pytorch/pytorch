@@ -50,26 +50,26 @@ parser.add_argument(
     action='store_true',
     help='Generate Vulkan backend functions')
 parser.add_argument(
-    '--op_registration_whitelist',
+    '--op_registration_allowlist',
     nargs='*',
-    help='filter op registrations by the whitelist (if set); '
+    help='filter op registrations by the allowlist (if set); '
          'each item is `namespace`::`operator name` without overload name; '
          'e.g.: aten::empty aten::conv2d ...')
 parser.add_argument(
-    '--backend_whitelist',
+    '--backend_allowlist',
     nargs='*',
-    help='filter dispatch backend by the whitelist (if set), '
+    help='filter dispatch backend by the allowlist (if set), '
          'e.g.: CPU CUDA QuantizedCPU ...')
 parser.add_argument(
     '--per_op_registration',
     action='store_true',
     help='group function registrations by op name and write to separate files; '
-         'must also set --op_registration_whitelist param')
+         'must also set --op_registration_allowlist param')
 parser.add_argument(
     '--force_schema_registration',
     action='store_true',
     help='force it to generate schema-only registrations for all ops, including'
-         'those that are not listed on --op_registration_whitelist')
+         'those that are not listed on --op_registration_allowlist')
 options = parser.parse_args()
 
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
@@ -193,11 +193,11 @@ quantized_scalar_types = [
     ('QInt32', 'qint32', 'QInt32AccrealNotDefined', 'Qint32IsFloatingTypeNotDefined'),
 ]
 
-# whitelist used to filter op registrations for custom build
-if options.op_registration_whitelist is not None:
-    op_registration_whitelist = set(options.op_registration_whitelist)
+# allowlist used to filter op registrations for custom build
+if options.op_registration_allowlist is not None:
+    op_registration_allowlist = set(options.op_registration_allowlist)
 else:
-    op_registration_whitelist = None
+    op_registration_wallowist = None
 
 # shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
@@ -216,8 +216,8 @@ top_env = {
 }
 
 
-def is_whitelisted_backend(backend):
-    return options.backend_whitelist is None or backend in options.backend_whitelist
+def is_allowlisted_backend(backend):
+    return options.backend_allowlist is None or backend in options.backend_allowlist
 
 def is_cuda_backend(backend):
     return backend in ("QuantizedCUDA", "CUDA")
@@ -270,12 +270,12 @@ def add_op_registrations(per_type_registrations, per_op_registrations, schema_re
         opname = op_registration.operator_name
         registration = op_registration.registration_code
 
-        # collect schema registration for all ops (whitelisted or not)
+        # collect schema registration for all ops (allowlisted or not)
         if schema_registrations is not None:
             schema_registrations.append(op_registration.schema_registration_code)
 
-        # apply whitelist
-        if op_registration_whitelist is not None and opname not in op_registration_whitelist:
+        # apply allowlist
+        if op_registration_allowlist is not None and opname not in op_registration_allowlist:
             continue
         if options.per_op_registration:
             # per op registration
@@ -292,7 +292,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     env['Type'] = "{}{}Type".format(density_tag, backend)
     env['DeviceType'] = backend_to_devicetype(backend)
     env['Backend'] = density_tag + backend
-    if not is_whitelisted_backend(env['Backend']):
+    if not is_allowlisted_backend(env['Backend']):
         return
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
@@ -412,7 +412,7 @@ def declare_outputs():
         file_manager.will_write(f)
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
-        if not is_whitelisted_backend(full_backend):
+        if not is_allowlisted_backend(full_backend):
             continue
         fm = file_manager
         if is_cuda_backend(backend):
@@ -428,10 +428,10 @@ def declare_outputs():
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
 
     if options.per_op_registration:
-        if op_registration_whitelist is None:
-            raise Exception("Must set --op_registration_whitelist for per-op registration.")
-        for whitelisted_op in op_registration_whitelist:
-            fname = gen_per_op_registration_filename(whitelisted_op)
+        if op_registration_allowlist is None:
+            raise Exception("Must set --op_registration_allowlist for per-op registration.")
+        for allowlisted_op in op_registration_allowlist:
+            fname = gen_per_op_registration_filename(allowlisted_op)
             file_manager.will_write(fname)
 
     if options.force_schema_registration:
@@ -451,7 +451,7 @@ def generate_per_op_registration(per_op_registrations):
     if not options.per_op_registration:
         return
 
-    # Ensure all whitelisted operators have a corresponding registration file.
+    # Ensure all allowlisted operators have a corresponding registration file.
     # Generate an empty placeholder file for nonexistent operators, which might
     # be registered manually instead of via codegen.
     # This can simplify the custom BUCK build which consumes the output of this
@@ -460,9 +460,9 @@ def generate_per_op_registration(per_op_registrations):
     # Manually registered operators might call codegen registered operators thus
     # we cannot simply ignore them when calculating transitive dependencies for
     # custom build.
-    for whitelisted_op in op_registration_whitelist:
-        if whitelisted_op not in per_op_registrations:
-            per_op_registrations[whitelisted_op] = []
+    for allowlisted_op in op_registration_allowlist:
+        if allowlisted_op not in per_op_registrations:
+            per_op_registrations[allowlisted_op] = []
 
     for opname, function_registrations in per_op_registrations.items():
         fname = gen_per_op_registration_filename(opname)
