@@ -59,6 +59,7 @@ class Tags(object):
     parameter server.
     """
     COMPONENT = 'component:'
+    PIPELINE = 'pipeline:'
     """
     Valid tag prefixes for distributed training framework.
     """

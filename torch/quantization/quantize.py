@@ -235,7 +235,6 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     prepare(model, inplace=True)
     run_fn(model, run_args)
     convert(model, mapping, inplace=True)
-    _remove_qconfig(model)
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
@@ -307,7 +306,6 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     model.eval()
     propagate_qconfig_(model, qconfig_spec)
     convert(model, mapping, inplace=True)
-    _remove_qconfig(model)
     return model
 
 def prepare_qat(model, mapping=None, inplace=False):
@@ -328,7 +326,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
     model = prepare(model, inplace=inplace)
-    convert(model, mapping, inplace=True)
+    _convert(model, mapping, inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
@@ -352,7 +350,28 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     convert(model, inplace=True)
     return model
 
-def convert(module, mapping=None, inplace=False):
+def convert(module, mapping=None, inplace=False, remove_qconfig=True):
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module. And remove qconfig at the end if remove_qconfig
+    is set to True.
+
+    Args:
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
+                 module type, can be overwritten to allow swapping user defined
+                 Modules
+        inplace: carry out model transformations in-place, the original module
+                 is mutated
+        remove_qconfig: whether to remove qconfig after convert
+    """
+    if not inplace:
+        module = copy.deepcopy(module)
+    _convert(module, mapping, inplace=True)
+    if remove_qconfig:
+        _remove_qconfig(module)
+    return module
+
+def _convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
 
@@ -386,7 +405,7 @@ def convert(module, mapping=None, inplace=False):
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
-            convert(mod, mapping, inplace=True)
+            _convert(mod, mapping, inplace=True)
         reassign[name] = swap_module(mod, mapping)
 
     for key, value in reassign.items():
