@@ -11,13 +11,103 @@ from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
-from .._jit_internal import boolean_dispatch, List, Optional, _overload, Tuple
+from .._jit_internal import (
+    boolean_dispatch, List, Optional, _overload, Tuple,
+    BroadcastingList1, BroadcastingList2, BroadcastingList3)
 from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
 
-conv1d = _add_docstr(torch.conv1d, r"""
+
+# See NOTE [ convolution padding modes ]
+@_overload  # noqa: F811
+def conv1d(
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList1[int] = 1, padding: Optional[str] = None,
+        dilation: BroadcastingList1[int] = 1, groups: int = 1) -> Tensor:
+    pass
+
+
+@_overload  # noqa: F811
+def conv1d(  # noqa: F811
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList1[int] = 1,
+        padding: Optional[BroadcastingList1[int]] = None,
+        dilation: BroadcastingList1[int] = 1,
+        groups: int = 1) -> Tensor:
+    if not torch.jit.is_scripting():
+        if ((type(input) is not Tensor or type(weight) is not Tensor) and
+                has_torch_function((input, weight))):
+            return handle_torch_function(
+                conv1d, (input, weight), input, weight, bias, stride,
+                padding, dilation, groups)
+    if padding is None:
+        return _VF.conv1d(input, weight, bias, stride, (0,), dilation, groups)
+
+    return _VF.conv1d(
+        input, weight, bias, stride, padding, dilation, groups)
+
+
+@_overload  # noqa: F811
+def conv2d(
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList2[int] = 1, padding: Optional[str] = None,
+        dilation: BroadcastingList2[int] = 1, groups: int = 1) -> Tensor:
+    pass
+
+
+@_overload  # noqa: F811
+def conv2d(  # noqa: F811
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList2[int] = 1,
+        padding: Optional[BroadcastingList2[int]] = None,
+        dilation: BroadcastingList2[int] = 1,
+        groups: int = 1) -> Tensor:
+    if not torch.jit.is_scripting():
+        if ((type(input) is not Tensor or type(weight) is not Tensor) and
+                has_torch_function((input, weight))):
+            return handle_torch_function(
+                conv2d, (input, weight), input, weight, bias, stride,
+                padding, dilation, groups)
+
+    if padding is None:
+        return _VF.conv2d(input, weight, bias, stride, (0, 0), dilation, groups)
+
+    return _VF.conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+
+@_overload  # noqa: F811
+def conv3d(
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList3[int] = 1, padding: Optional[str] = None,
+        dilation: BroadcastingList3[int] = 1, groups: int = 1) -> Tensor:
+    pass
+
+
+@_overload  # noqa: F811
+def conv3d(  # noqa: F811
+        input: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
+        stride: BroadcastingList3[int] = 1,
+        padding: Optional[BroadcastingList3[int]] = None,
+        dilation: BroadcastingList3[int] = 1,
+        groups: int = 1) -> Tensor:
+    if not torch.jit.is_scripting():
+        if ((type(input) is not Tensor or type(weight) is not Tensor) and
+                has_torch_function((input, weight))):
+            return handle_torch_function(
+                conv3d, (input, weight), input, weight, bias, stride,
+                padding, dilation, groups)
+
+    if padding is None:
+        return _VF.conv3d(
+            input, weight, bias, stride, (0, 0, 0), dilation, groups)
+
+    return _VF.conv3d(
+        input, weight, bias, stride, padding, dilation, groups)
+
+
+conv1d = _add_docstr(conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
@@ -33,13 +123,22 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+    Padding mode 'valid' is the same as no padding. 'same' pads the input so
+    the output has shape ``ceil(in_shape / stride)`` in each dimension.
+    For the default ``stride = 1``, the output is the same size as the input.
+
+    .. warning::
+        For ``padding='same'``, if the ``weight`` is even-length and
+        ``dilation`` is odd in any dimension, a full :func:`pad` operation
+        may be needed internally. Lowering performance.
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
@@ -51,9 +150,9 @@ Examples::
     >>> filters = torch.randn(33, 16, 3)
     >>> inputs = torch.randn(20, 16, 50)
     >>> F.conv1d(inputs, filters)
-""")
+""")  # noqa: E501
 
-conv2d = _add_docstr(torch.conv2d, r"""
+conv2d = _add_docstr(conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
@@ -69,6 +168,14 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+    Padding mode 'valid' is the same as no padding. 'same' pads the input so
+    the output has shape ``ceil(in_shape / stride)`` in each dimension.
+    For the default ``stride = 1``, the output is the same size as the input.
+
+    .. warning::
+        For ``padding='same'``, if the ``weight`` is even-length and
+        ``dilation`` is odd in any dimension, a full :func:`pad` operation
+        may be needed internally. Lowering performance.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -76,7 +183,7 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
@@ -91,7 +198,7 @@ Examples::
     >>> F.conv2d(inputs, filters, padding=1)
 """)  # noqa: E501
 
-conv3d = _add_docstr(torch.conv3d, r"""
+conv3d = _add_docstr(conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
@@ -107,13 +214,22 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+    Padding mode 'valid' is the same as no padding. 'same' pads the input so
+    the output has shape ``ceil(in_shape / stride)`` in each dimension.
+    For the default ``stride = 1``, the output is the same size as the input.
+
+    .. warning::
+        For ``padding='same'``, if the ``weight`` is even-length and
+        ``dilation`` is odd in any dimension, a full :func:`pad` operation
+        may be needed internally. Lowering performance.
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1

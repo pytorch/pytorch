@@ -22,10 +22,10 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-static inline std::vector<int64_t> conv_output_size(
+static inline std::vector<int64_t> conv_output_size_lr(
     IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
-) {
+    IntArrayRef padding_l, IntArrayRef padding_r,
+    IntArrayRef stride, IntArrayRef dilation = IntArrayRef()) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
   bool has_dilation = dilation.size() > 0;
@@ -36,9 +36,15 @@ static inline std::vector<int64_t> conv_output_size(
   for (size_t d = 2; d < dim; ++d) {
     auto dilation_ = has_dilation ? dilation[d - 2] : 1;
     auto kernel = dilation_ * (weight_size[d] - 1) + 1;
-    output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    output_size[d] = (input_size[d] + padding_l[d - 2] + padding_r[d - 2] - kernel) / stride[d - 2] + 1;
   }
   return output_size;
+}
+
+inline std::vector<int64_t> conv_output_size(
+    IntArrayRef input_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()) {
+  return conv_output_size_lr(input_size, weight_size, padding, padding, stride, dilation);
 }
 
 static inline std::vector<int64_t> conv_input_size(

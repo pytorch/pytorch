@@ -4,6 +4,7 @@
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/xnnpack/Engine.h>
 
 #include <ATen/Config.h>
@@ -555,6 +556,133 @@ at::Tensor conv3d(
                          false, {{0, 0, 0}}, groups);
 }
 
+
+static Tensor convolution_same(
+    const Tensor &input, const Tensor &weight, const Tensor &bias,
+    IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
+
+  auto k = weight.dim();
+  auto dim = k - 2;
+  TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  auto weight_sizes = weight.sizes();
+  auto input_sizes = input.sizes();
+  TORCH_CHECK(k == input.dim(),
+              "Expected ", k, "-dimensional input for ",
+              k, "-dimensional weight", weight_sizes, ", but got ",
+              input.dim(), "-dimensional input of size ",
+              input.sizes(), " instead");
+  TORCH_CHECK(stride.size() == dim || stride.size() == 1,
+              "stride cannot broadcast to ", dim, " dimensions");
+  TORCH_CHECK(dilation.size() == dim || dilation.size() == 1,
+              "dilation cannot broadcast to ", dim, " dimensions");
+
+  // Calculate the correct padding
+  DimVector padding_l, padding_r;
+  bool symmetric_padding = true;
+  for (int64_t i = 0; i < dim; ++i) {
+    auto s = stride.size() == 1 ? stride[0] : stride[i];
+    auto d = dilation.size() == 1 ? dilation[0] : dilation[i];
+    auto pad = pooling_same_mode_padding_lr(
+        input_sizes[i + 2], weight_sizes[i + 2], s, d);
+    padding_l.push_back(pad.first);
+    padding_r.push_back(pad.second);
+    if (pad.first != pad.second) {
+      symmetric_padding = false;
+    }
+  }
+
+  if (symmetric_padding) {
+    // All backends handle symmetric padding natively
+    DimVector output_padding(static_cast<size_t>(dim));
+    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+                               false, output_padding, groups);
+  }
+
+#if AT_MKLDNN_ENABLED()
+  // mkldnn has built-in support for asymmetric padding
+  if (input.is_mkldnn()) {
+    ConvParams params;
+    params.stride = expand_param_if_needed(stride, "stride", dim);
+    params.padding.assign(padding_l.begin(), padding_l.end());
+    params.dilation = expand_param_if_needed(dilation, "dilation", dim);
+    params.transposed = false;
+    params.output_padding = std::vector<int64_t>(dim);
+    params.groups = groups;
+
+    if (params.use_mkldnn(input, weight)) {
+      TORCH_CHECK(input.options().type_equal(weight.options()),
+                  "Input type (", input.toString(), ") and weight type (", weight.toString(),
+                  ") should be the same");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
+                  "Input type (", input.toString(), ") and bias type (", bias.toString(),
+                  ") should be the same");
+      Tensor output;
+      return at::mkldnn_convolution(
+          input, weight, bias, padding_l, padding_r,
+          params.stride, params.dilation, params.groups);
+    }
+  }
+#endif
+
+  TORCH_WARN_ONCE("Using padding='same' with even kernel lengths may"
+                  " require a zero-padded copy of the input be created");
+  SmallVector<int64_t, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
+  for (int i = 0; i < dim; ++i) {
+    // Apply padding by the difference, leaving only a symmetric padding
+    auto delta_pad = padding_r[i] - padding_l[i];
+    auto pad_idx = 2 * (dim - 1 - i);  // F.pad goes from last dim to first
+    if (delta_pad > 0) {
+      pad_nd[pad_idx + 1] = delta_pad;
+    } else {
+      pad_nd[pad_idx] = delta_pad;
+      padding_l[i] = padding_r[i];
+    }
+  }
+  auto padded_input = at::constant_pad_nd(input, pad_nd, 0);
+  DimVector output_padding(static_cast<size_t>(dim));
+  return at::convolution(padded_input, weight, bias, stride, padding_l,
+                         dilation, false, output_padding, groups);
+}
+
+at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  if (padding == "same") {
+    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
+  } else if (padding == "valid") {
+    const int64_t padding_[] = {0};
+    return at::native::conv1d(input, weight, bias, stride, padding_, dilation, groups);
+  }
+  TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+}
+
+at::Tensor conv2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  if (padding == "same") {
+    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
+  } else if (padding == "valid") {
+    const int64_t padding_[] = {0, 0};
+    return at::native::conv2d(input, weight, bias, stride, padding_, dilation, groups);
+  }
+  TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+}
+
+at::Tensor conv3d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  if (padding == "same") {
+    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
+  } else if (padding == "valid") {
+    const int64_t padding_[] = {0, 0, 0};
+    return at::native::conv3d(input, weight, bias, stride, padding_, dilation, groups);
+  }
+  TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+}
+
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
@@ -642,11 +770,9 @@ at::Tensor _convolution(
     return out.view(o);
   }
 
-  if (k == 3) {
+  if (k == 3 && !input_is_mkldnn) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input_is_mkldnn) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -788,7 +914,7 @@ at::Tensor _convolution(
     output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
-  if (k == 3) {
+  if (k == 3 && !input_is_mkldnn) {
     output = view3d(output);
   }
 
@@ -893,16 +1019,20 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
 }
 
 std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
-    const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
-    const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
+    const Tensor& ggI_r, const Tensor& ggW_r, const Tensor& ggb,
+    const Tensor& gO_r, const Tensor& weight_r, const Tensor& input_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
-
-  auto ggW = ggW_r;
-  auto gO = gO_r;
-  auto weight = weight_r;
+  // FIXME: Fails for mkldnn tensors with error
+  // RuntimeError: could not construct a memory descriptor using a format tag
+  auto as_dense = [](const Tensor &t) { return t.is_mkldnn() ? t.to_dense() : t; };
+  auto ggI = as_dense(ggI_r);
+  auto ggW = as_dense(ggW_r);
+  auto gO = as_dense(gO_r);
+  auto input = as_dense(input_r);
+  auto weight = as_dense(weight_r);
 
   ConvParams params;
   params.stride = stride_.vec();
@@ -1120,7 +1250,84 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     }
   }
 
+  if (input_r.is_mkldnn()) {
+    gI = gI.to_mkldnn();
+  }
+  if (gO_r.is_mkldnn()) {
+    ggO = ggO.to_mkldnn();
+  }
+  if (weight_r.is_mkldnn()) {
+    gW = gW.to_mkldnn();
+  }
+
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+}
+
+std::tuple<Tensor,Tensor,Tensor> _convolution_asymmetric_padding_double_backward(
+    const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
+    const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
+    IntArrayRef stride_, IntArrayRef padding_l, IntArrayRef padding_r,
+    IntArrayRef dilation_, bool transposed_, IntArrayRef output_padding_,
+    int64_t groups_, bool benchmark, bool deterministic, bool cudnn_enabled,
+    bool allow_tf32, std::array<bool, 3> output_mask) {
+  DimVector implicit_padding(padding_l.size());
+  DimVector explicit_padding(padding_l.size() * 2);
+  bool explicit_pad_required = false;
+
+  for (int64_t i = 0; i < padding_l.size(); ++i) {
+    auto pad_idx = (padding_l.size() - i - 1) * 2;
+    if (padding_l[i] < padding_r[i]) {
+      implicit_padding[i] = padding_l[i];
+      explicit_padding[pad_idx + 1] = padding_r[i] - padding_l[i];
+      explicit_pad_required = true;
+    } else if (padding_l[i] > padding_r[i]) {
+      implicit_padding[i] = padding_r[i];
+      explicit_padding[pad_idx] = padding_l[i] - padding_r[i];
+      explicit_pad_required = true;
+    }
+  }
+
+  if (!explicit_pad_required) {
+    return native::_convolution_double_backward(
+        ggI, ggW_r, ggb, gO_r, weight_r, input, stride_, padding_l, dilation_,
+        transposed_, output_padding_, groups_, benchmark, deterministic,
+        cudnn_enabled, allow_tf32, output_mask);
+  }
+
+  // pad input and ggI, pad requires dense tensors so convert from mkldnn as required
+  auto as_dense = [](const Tensor &t) { return t.is_mkldnn() ? t.to_dense() : t; };
+  auto ggI_d = as_dense(ggI);
+  auto ggW_d = as_dense(ggW_r);
+  auto gO_d = as_dense(gO_r);
+  auto input_d = as_dense(input);
+  auto weight_d = as_dense(weight_r);
+
+  auto ggI_pad = at::constant_pad_nd(ggI_d, explicit_padding, 0);
+  auto input_pad = at::constant_pad_nd(input_d, explicit_padding, 0);
+
+  Tensor ggO, gI, gW;
+  std::tie(ggO, gI, gW) = native::_convolution_double_backward(
+      ggI_pad, ggW_d, ggb, gO_d, weight_d, input_pad, stride_, implicit_padding,
+      dilation_, transposed_, output_padding_, groups_, benchmark, deterministic,
+      cudnn_enabled, allow_tf32, output_mask);
+
+  // Reverse padding on gI to match original input
+  for (auto &x : explicit_padding) {
+    x = -x;
+  }
+  gI = at::constant_pad_nd(gI, explicit_padding, 0);
+
+  if (input.is_mkldnn()) {
+    gI = gI.to_mkldnn();
+  }
+  if (gO_r.is_mkldnn()) {
+    ggO = ggO.to_mkldnn();
+  }
+  if (weight_r.is_mkldnn()) {
+    gW = gW.to_mkldnn();
+  }
+
+  return std::tuple<Tensor, Tensor, Tensor>{ggO, gI, gW};
 }
 
 }} // at::native

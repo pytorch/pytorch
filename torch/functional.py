@@ -12,6 +12,7 @@ from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
 from torch import _VF
+from torch.nn.functional import conv1d, conv2d, conv3d
 
 __all__ = [
     'atleast_1d',
@@ -23,6 +24,9 @@ __all__ = [
     'block_diag',
     'cdist',
     'chain_matmul',
+    'conv1d',
+    'conv2d',
+    'conv3d',
     'einsum',
     'istft',
     'lu',

@@ -78,6 +78,9 @@ _builtin_ops = [
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
+    (torch._VF.conv1d, "aten::conv1d"),  # type:ignore
+    (torch._VF.conv2d, "aten::conv2d"),  # type:ignore
+    (torch._VF.conv3d, "aten::conv3d"),  # type:ignore
     (torch._VF.stft, "aten::stft"),  # type: ignore
     (torch._VF.istft, "aten::istft"),  # type: ignore
     (torch._VF.cdist, "aten::cdist"),  # type: ignore
@@ -97,7 +100,8 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique", "unique_consecutive"]
+    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique",
+           "unique_consecutive", "conv1d", "conv2d", "conv3d"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
