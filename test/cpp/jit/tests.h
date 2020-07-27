@@ -124,7 +124,6 @@ namespace jit {
   _(GPU_FusionTVMerge)                              \
   _(GPU_FusionTVReorder)                            \
   _(GPU_FusionEquality)                             \
-  _(GPU_FusionReplaceAll)                           \
   _(GPU_FusionParser)                               \
   _(GPU_FusionDependency)                           \
   _(GPU_FusionCodeGen)                              \

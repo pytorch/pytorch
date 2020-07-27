@@ -309,58 +309,6 @@ Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   return ite;
 }
 
-// START REPLACE ALL
-
-void ReplaceAll::replaceInpOut() {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  for (auto it : mutations) {
-    Val* val = it.first;
-    if (fusion->hasInput(val)) {
-      fusion->replaceInput(it.first, it.second);
-    } else if (fusion->hasOutput(val)) {
-      fusion->replaceOutput(it.first, it.second);
-    }
-  }
-}
-
-void ReplaceAll::instancesOf(Val* instance, Val* with) {
-  std::unordered_map<Val*, Val*> replacement_map;
-  replacement_map[instance] = with;
-  ReplaceAll::instancesOf(replacement_map);
-}
-
-void ReplaceAll::instancesOf(std::unordered_map<Val*, Val*> replacement_map) {
-  ReplaceAll ra(std::move(replacement_map));
-  // Get a copy because this will be modified in place, we shouldn't auto
-  // iterate on it
-  std::vector<Expr*> to_mutate;
-  for (Expr* expr : FusionGuard::getCurFusion()->unordered_exprs())
-    to_mutate.push_back(expr);
-
-  for (Expr* expr : to_mutate)
-    ra.mutate(expr);
-
-  ra.replaceInpOut();
-}
-
-void ReplaceAll::instancesWithin(Val* instance, Val* with, Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(instance, with);
-  ra.mutate(within);
-}
-
-void ReplaceAll::instancesWithin(
-    std::unordered_map<Val*, Val*> replacement_map,
-    Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(std::move(replacement_map));
-  ra.mutate(within);
-}
-
 } // namespace fuser
 } // namespace jit
 } // namespace torch
