@@ -4,6 +4,14 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(_compute_linear_combination_stub);
 
+// If `coefficients` is a [m, n] Tensor and
+// `input` is a [n, ...] Tensor, then the output
+// `output` is going to be a [m, ...] Tensor such that
+// for i in range(m):
+//    for j in range(n):
+//        output[i, ...] += coefficients[i, j] * input[j, ...]
+// Note: if input.dtype == scalar_t<T>, then coefficients.dtype == T.
+// This is relevant when scalar_t<T> == complex<T>.
 Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficients) {
   auto output_first_dim_size = coefficients.size(0);
   auto input_first_dim_size = coefficients.size(1);
