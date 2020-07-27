@@ -1219,7 +1219,7 @@ graph(%Ra, %Rb):
         g = traced.graph
         torch._C._jit_pass_inline(g)
         torch._C._jit_pass_reconstruct_scopes(traced._c, g)
-        FileCheck().check("scope: top.sub.forward").run(g)
+        FileCheck().check("scope: top(MyModule).sub(SubModule).forward").run(g)
 
     def test_expand_quantlint(self):
         pass
