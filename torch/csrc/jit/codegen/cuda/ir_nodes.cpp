@@ -885,7 +885,7 @@ std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootCtoP(
     const TensorDomain* consumer,
     const TensorDomain* producer,
     bool constrain,
-    std::unordered_set<IterDomain*> consumer_root_dims_to_map) {
+    const std::unordered_set<IterDomain*>& consumer_root_dims_to_map) {
   auto consumer_root = consumer->rootDomain();
   auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
                                               : producer->rootDomain();
@@ -946,7 +946,7 @@ std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootPtoC(
     const TensorDomain* producer,
     const TensorDomain* consumer,
     bool constrain,
-    std::unordered_set<IterDomain*> producer_root_dims_to_map) {
+    const std::unordered_set<IterDomain*>& producer_root_dims_to_map) {
   auto consumer_root = consumer->rootDomain();
   auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
                                               : producer->rootDomain();
