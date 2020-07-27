@@ -2861,7 +2861,6 @@ void testGPU_FusionSimpleBCast() {
   */
 
   {
-    // AJTest
     Fusion fusion;
     FusionGuard fg(&fusion);
 
@@ -2879,7 +2878,6 @@ void testGPU_FusionSimpleBCast() {
     fusion.printMath();
 
     TensorView* tv2 = add(tv0, tv1);
-    /*
     fusion.addOutput(tv2);
 
     tv2->merge(0);
@@ -2893,7 +2891,23 @@ void testGPU_FusionSimpleBCast() {
     tv2->axis(0)->parallelize(ParallelType::BIDx);
     tv2->axis(-1)->parallelize(ParallelType::TIDx);
     tv2->axis(-2)->parallelize(ParallelType::Unroll);
-    */
+
+    constexpr int x = 63, y = 33, z = 15;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({1, z}, options);
+    at::Tensor t1 = at::randn({x, y, z}, options);
+
+    at::Tensor cg_output = at::empty({x, y, z}, options);
+
+    torch::jit::fuser::cuda::FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    fe.runFusion({t0, t1}, {cg_output});
+
+    auto t2 = t0.add(t1);
+
+    TORCH_CHECK(t2.allclose(cg_output));
   }
 
   // TODO: This test below is not working because index math for smem/local mem
@@ -2960,6 +2974,7 @@ void testGPU_FusionSimpleBCast() {
 
   //   TORCH_CHECK(t4.allclose(cg_output));
   // }
+
 }
 
 // Test a simple Gemm but also play around with fusion executor features
