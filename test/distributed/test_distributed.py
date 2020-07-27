@@ -2377,6 +2377,10 @@ class _DistTestBase(object):
         for tensor in tensor_list[1:]:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(
+        BACKEND != "nccl" and BACKEND != "gloo",
+        "Only NCCL and GLOO backend support DistributedDataParallel",
+    )
     @skip_if_lt_x_gpu(2)
     def test_DistributedSampler_padding(self):
         # Tests padding of distributed sampler.
