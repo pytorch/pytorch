@@ -359,32 +359,25 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
       "Invalid axis in transform replayCasP.");
 
   // producer ids we need to match in consumer
-  std::vector<IterDomain*> producer_CA_ids;
-  {
-    int itp = 0;
-    while (itp < producer_compute_at_axis) {
-      if (producer->axis(itp)->isReduction()) {
-        itp++;
-      } else {
-        producer_CA_ids.emplace_back(producer->axis(itp++));
-      }
-    }
-  }
-
-  // Figure out all inputs required to generate the compute_at dimensions
-  std::unordered_set<Val*> all_CA_id_deps = DependencyCheck::getAllValsBetween(
-      std::unordered_set<Val*>(
-          producer->rootDomain().begin(), producer->rootDomain().end()),
-      std::vector<Val*>(producer_CA_ids.begin(), producer_CA_ids.end()));
+  std::vector<IterDomain*> producer_CA_ids(
+      producer->domain().begin(),
+      producer->domain().begin() + producer_compute_at_axis);
+  producer_CA_ids = TensorDomain::noReductions(producer_CA_ids);
 
   // Grab root domains of producer and consumer
   std::vector<IterDomain*> consumer_root = consumer->rootDomain();
 
-  // If producer has an rfactor root, that's the one that will match the
-  // consumer
+  // If producer has an rfactor root, that's what will match the consumer
   std::vector<IterDomain*> producer_root = producer->hasRFactor()
       ? producer->rfactorDomain()
       : producer->rootDomain();
+
+  // Figure out all inputs required to generate the compute_at dimensions. We
+  // need all deps because inputs on producer may be in rootDomain, but we may
+  // need in rFactorDomain
+  std::unordered_set<Val*> all_CA_id_deps = DependencyCheck::getAllValsBetween(
+      {producer_root.begin(), producer_root.end()},
+      {producer_CA_ids.begin(), producer_CA_ids.end()});
 
   // Figure out which root IDs we need:
   std::unordered_set<IterDomain*> producer_CA_root_ids;
