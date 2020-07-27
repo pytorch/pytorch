@@ -12002,7 +12002,6 @@ class TestTorchDeviceType(TestCase):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
     def _test_large_cum_fn_helper(self, x, fn):
-        print(x.min(), x.max())
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
         actual = fn(x).cpu().float()
