@@ -163,13 +163,13 @@ static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
 
 static void isposinf_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a == std::numeric_limits<scalar_t>::infinity(); });
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 
 static void isneginf_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a == -std::numeric_limits<scalar_t>::infinity(); });
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 

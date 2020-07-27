@@ -6472,9 +6472,10 @@ class TestTorchDeviceType(TestCase):
             else:
                 self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
 
-            out = torch.empty_like(t)
+            # test the boolean tensor as the `out=` parameter
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.tensor(target_vals, device=device, dtype=torch.bool)
             torch_op(t, out=out)
-            t_target = torch.tensor(target_vals, device=device, dtype=dtype)
             self.assertEqual(out, t_target)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
@@ -6486,9 +6487,10 @@ class TestTorchDeviceType(TestCase):
         for torch_op, numpy_op in ops:
             self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
 
+            # test the boolean tensor as the `out=` parameter
             t = torch.tensor(vals, device=device, dtype=dtype)
-            t_target = torch.tensor((0, 0, 0), device=device, dtype=dtype)
-            out = torch.empty_like(t)
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.zeros_like(t, dtype=torch.bool)
             torch_op(t, out=out)
             self.assertEqual(out, t_target)
 
@@ -6505,6 +6507,16 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
                 torch_op(t, out=out)
 
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
+        # test non-boolean tensors as the `out=` parameters
+        # boolean outputs are tested in the above testcases
+        vals = (float('inf'), -float('inf'), 1.2)
+        t = torch.tensor(vals, device=device)
+        for torch_op in (torch.isposinf, torch.isneginf):
+            out = torch.empty_like(t, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
+                torch_op(t, out=out)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)

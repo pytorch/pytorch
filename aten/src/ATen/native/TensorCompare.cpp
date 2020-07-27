@@ -116,6 +116,7 @@ Tensor isposinf(const Tensor &self) {
 
 Tensor& isposinf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
@@ -126,7 +127,6 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
       .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
-      .cast_common_dtype_to_outputs(true)
       .build();
     isposinf_stub(iter.device_type(), iter);
   }
@@ -141,6 +141,7 @@ Tensor isneginf(const Tensor &self) {
 
 Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
@@ -151,7 +152,6 @@ Tensor& isneginf_out(Tensor& result, const Tensor& self) {
       .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
-      .cast_common_dtype_to_outputs(true)
       .build();
     isneginf_stub(iter.device_type(), iter);
   }

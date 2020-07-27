@@ -38,7 +38,7 @@ void isposinf_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
     gpu_kernel(
       iter,
-      [] GPU_LAMBDA (scalar_t a) -> scalar_t { return a == std::numeric_limits<scalar_t>::infinity(); }
+      [] GPU_LAMBDA (scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); }
     );
   });
 }
@@ -47,7 +47,7 @@ void isneginf_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
     gpu_kernel(
       iter,
-      [] GPU_LAMBDA (scalar_t a) -> scalar_t { return a == -std::numeric_limits<scalar_t>::infinity(); }
+      [] GPU_LAMBDA (scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); }
     );
   });
 }
