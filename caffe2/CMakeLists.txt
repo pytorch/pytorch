@@ -428,6 +428,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
