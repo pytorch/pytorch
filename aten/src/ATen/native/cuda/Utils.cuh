@@ -7,18 +7,6 @@ static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 1024;
 
-// TensorListMetadata has to be < 4KB - the limit for kernel launch argument
-static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
-static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
-
-template<int n> struct TensorListMetadata
-{
-  void* addresses[n][depth_to_max_tensors[n-1]];
-  int sizes[depth_to_max_tensors[n-1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
-  int block_to_chunk[depth_to_max_blocks[n-1]];
-};
-
 template<typename T>
 __device__ __forceinline__ bool is_aligned(T* p){
   return ((uint64_t)p) % (kILP * sizeof(T)) == 0;
