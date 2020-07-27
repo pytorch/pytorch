@@ -38,13 +38,13 @@ const VContext& context();
 
 // VulkanTensor is a handle that holds shared pointer to VulkanTensor:Impl,
 // that owns Tensor representation on GPU.
-//  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
+// VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
 //
 // VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
 // data. Tensor can be represented in several formats.
 //
 // 0. VBuffer - (wrapper on  vulkan VkBuffer), supports all tensor dimensions,
-// data is in  Contiguous format (NCHW), in plan to preserve at::Tensor memory
+// data is in Contiguous format (NCHW), in plan to preserve at::Tensor memory
 // format (3d or 4d tensors can be in NHWC ChannelsLast format). It is located
 // in host visible memory that can be memory mapped to CPU memory.
 //
@@ -60,14 +60,13 @@ const VContext& context();
 // For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C
 // sizes[0]) / 4
 //
-// For dim==2: image.x - W sizes[1];  image.y - H sizes[0]; image.z : 1
+// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
 //
 // For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
 //
 //
 // 2. VImage (other format) - Currently not added, but for some operations
-// another texture
-//  packing format can be beneficial for performance.
+// another texture packing format can be beneficial for performance.
 //
 // Contract about synchronization between representations:
 // 1.VImage(TexC4) representation is allocated lazily with calling image(),
@@ -95,7 +94,7 @@ class VulkanTensor final {
   class Impl;
 
  public:
-  VulkanTensor(){};
+  VulkanTensor() = default;
   explicit VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
 
@@ -117,7 +116,7 @@ class VulkanTensor final {
   bool has_storage() const;
   void allocate_storage();
   void set_data_from_host(const float* inputData);
-  void copy_data_to_host(float* outputData);
+  void copy_data_to_host(float* outputData) const;
 
   bool has_buffer() const;
   VBuffer* buffer();
@@ -146,7 +145,7 @@ class VulkanTensor final {
 
 class VContext final {
  public:
-  VContext(bool enableValidationLayers);
+  explicit VContext(bool enableValidationLayers);
   ~VContext();
   VContext(const VContext&) = delete;
   VContext& operator=(const VContext&) = delete;
@@ -209,6 +208,9 @@ class VBuffer final {
     MapMemory& operator=(const MapMemory&) = delete;
     MapMemory(MapMemory&&) = default;
     MapMemory& operator=(MapMemory&&) = default;
+    inline const void* ptr() const {
+      return mappedMemory_;
+    }
     inline void* ptr() {
       return mappedMemory_;
     }
@@ -274,7 +276,7 @@ class VBuffer final {
   VkDeviceMemory bufferMemory_;
 };
 
-VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size);
+VBuffer makeUniformConstBuffer(const void* ptr, VkDeviceSize size);
 
 class VImage final {
  public:
@@ -377,7 +379,7 @@ void allocateDescriptorSet(
 
 void createDescriptorSetLayoutSinglePool(
     VkDevice device,
-    std::vector<VkDescriptorType> descrTypes,
+    const std::vector<VkDescriptorType>& descrTypes,
     VkDescriptorSetLayout* descrSetLayout,
     VkDescriptorPool* descrPool,
     VkDescriptorSet* descrSet);
@@ -394,8 +396,8 @@ class ComputeUnit final {
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   ComputeUnit(
       const char* glslSrc,
-      const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize) {
+      const VkDescriptorSetLayout descrSetLayout,
+      const WorkGroupSize& workGroupSize) {
     createComputePipelineCompile(glslSrc, descrSetLayout, workGroupSize);
   }
 #else
@@ -403,7 +405,7 @@ class ComputeUnit final {
       const uint32_t* spvCode,
       const unsigned int spvCodeSize,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize) {
+      const WorkGroupSize& workGroupSize) {
     const auto codeSize = spvCodeSize;
     createComputePipeline(spvCode, codeSize, descrSetLayout, workGroupSize);
   }
@@ -418,14 +420,14 @@ class ComputeUnit final {
   void createComputePipeline(
       const uint32_t* code,
       const uint32_t codeSize,
-      const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize);
+      const VkDescriptorSetLayout descrSetLayout,
+      const WorkGroupSize& workGroupSize);
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   void createComputePipelineCompile(
-      std::string glslSrc,
+      const std::string& glslSrc,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize);
+      const WorkGroupSize& workGroupSize);
 #endif
 
   void createCommandBuffer(VkDescriptorSet& descriptorSet);
