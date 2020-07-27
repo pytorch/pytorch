@@ -932,6 +932,19 @@ void mexp_impl(
     };
 
     for (int i = 0; i < total_n_degs - 1; ++i) {
+      // // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+      // auto idx_norm_le_theta = (norm <= thetas[i]).nonzero().squeeze(-1);
+      // auto sub_a = at::index_select(a.unsqueeze(0), 0, idx_norm_le_theta);
+      // // indices corresponding to the row/column parts
+      // auto idx_matrix_part = at::arange(
+      //   0, sub_a.size(-1),
+      //   sub_a.options().dtype(at::kLong)
+      // );
+      // res.index_put_(
+      //   {/*idx_norm_le_theta,*/ idx_matrix_part, idx_matrix_part},
+      //   compute_Ts[i](sub_a)
+      // );
+
       if ((norm <= thetas[i]).all().template item<bool>()) {
         res.copy_(compute_Ts[i](a));
         return;
@@ -1059,11 +1072,11 @@ Tensor matrix_exp(const Tensor& a) {
           mexp(a_3d.select(0, i))
         );
       }
+      return res;
     }
     else { // if CUDA
-      res.copy_(mexp(a, true));
+      return mexp(a, true);
     }
-    return res;
   }
 }
 
