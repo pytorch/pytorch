@@ -751,7 +751,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: clamp
-    QuantizedCPU: quantized_clamp
+    QuantizedCPU: clamp_quantized_cpu
     Vulkan: vulkan_clamp
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
@@ -1852,20 +1852,20 @@
   variants: function, method
   dispatch:
     CPU, CUDA: mean_cpu_gpu
-    QuantizedCPU: quantized_mean_cpu
+    QuantizedCPU: mean_quantized_cpu
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: mean_cpu_gpu
-    QuantizedCPU: quantized_mean_cpu
+    QuantizedCPU: mean_quantized_cpu
     Vulkan: mean_vulkan
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: mean_out_cpu_gpu
-    QuantizedCPU: quantized_mean_out_cpu
+    QuantizedCPU: mean_out_quantized_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -2197,6 +2197,14 @@
   use_c10_dispatcher: full
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: movedim.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #
@@ -2215,7 +2223,7 @@
   use_c10_dispatcher: full
   dispatch:
     CPU: channel_shuffle
-    QuantizedCPU: quantized_channel_shuffle
+    QuantizedCPU: channel_shuffle_quantized_cpu
 
 - func: is_pinned(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -2420,14 +2428,14 @@
   dispatch:
     CPU, CUDA: relu
     MkldnnCPU: mkldnn_relu
-    QuantizedCPU: quantized_relu
+    QuantizedCPU: relu_quantized_cpu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU, CUDA: relu_
     MkldnnCPU: mkldnn_relu_
-    QuantizedCPU: quantized_relu_
+    QuantizedCPU: relu_quantized_cpu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   use_c10_dispatcher: full
@@ -2514,7 +2522,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: sigmoid
-    QuantizedCPU: quantized_sigmoid
+    QuantizedCPU: sigmoid_quantized_cpu
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
@@ -2807,7 +2815,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: tanh
-    QuantizedCPU: quantized_tanh
+    QuantizedCPU: tanh_quantized_cpu
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2825,7 +2833,7 @@
   dispatch:
     CPU: threshold
     CUDA: threshold_cuda
-    QuantizedCPU: quantized_threshold
+    QuantizedCPU: threshold_quantized_cpu
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
@@ -3681,7 +3689,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    QuantizedCPU: dequantize_tensors_quant
+    QuantizedCPU: dequantize_tensors_quantized_cpu
 
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
@@ -3699,26 +3707,26 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_scales_quant
+    QuantizedCPU: q_per_channel_scales
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_zero_points_quant
+    QuantizedCPU: q_per_channel_zero_points
 
 - func: q_per_channel_axis(Tensor self) -> int
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_axis_quant
+    QuantizedCPU: q_per_channel_axis
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: int_repr_quant_cpu
-    QuantizedCUDA: int_repr_quant_cuda
+    QuantizedCPU: int_repr_quantized_cpu
+    QuantizedCUDA: int_repr_quantized_cuda
 
 - func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
   use_c10_dispatcher: full
@@ -5072,7 +5080,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: min
-    QuantizedCPU: min_quant
+    QuantizedCPU: min_quantized_cpu
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -5085,7 +5093,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: max
-    QuantizedCPU: max_quant
+    QuantizedCPU: max_quantized_cpu
 
 # Return: (Tensor min, Tensor max)
 - func: _min_max(Tensor self) -> (Tensor, Tensor)
@@ -5112,7 +5120,7 @@
   dispatch:
     CPU: legacy::cpu::_th_sort
     CUDA: legacy::cuda::_th_sort
-    QuantizedCPU: sort_quant
+    QuantizedCPU: sort_quantized_cpu
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
@@ -5136,7 +5144,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: topk
-    QuantizedCPU: quantized_topk_cpu
+    QuantizedCPU: topk_quantized_cpu
 
 - func: all(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -5181,7 +5189,7 @@
   dispatch:
     CPU: cpu_equal
     CUDA: cuda_equal
-    QuantizedCPU: quantized_equal_cpu
+    QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5295,13 +5303,13 @@
   dispatch:
     CPU: _cat_cpu
     CUDA: cat_cuda
-    QuantizedCPU: quantized_cat
+    QuantizedCPU: cat_quantized_cpu
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _cat_out_cpu
     CUDA: cat_out_cuda
-    QuantizedCPU: quantized_cat_out
+    QuantizedCPU: cat_out_quantized_cpu
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
@@ -5588,7 +5596,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid
-    QuantizedCPU: quantized_hardsigmoid
+    QuantizedCPU: hardsigmoid_quantized_cpu
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
@@ -5603,14 +5611,14 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_out
-    QuantizedCPU: quantized_hardtanh_out
+    QuantizedCPU: hardtanh_out_quantized_cpu
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh
-    QuantizedCPU: quantized_hardtanh
+    QuantizedCPU: hardtanh_quantized_cpu
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5625,7 +5633,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_
-    QuantizedCPU: quantized_hardtanh_
+    QuantizedCPU: hardtanh_quantized_cpu_
     Vulkan: vulkan_hardtanh_
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -5648,14 +5656,14 @@
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu_out
-    QuantizedCPU: quantized_leaky_relu_out
+    QuantizedCPU: leaky_relu_out_quantized_cpu
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu
-    QuantizedCPU: quantized_leaky_relu
+    QuantizedCPU: heaky_relu_quantized_cpu
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
@@ -5665,7 +5673,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu_
-    QuantizedCPU: quantized_leaky_relu_
+    QuantizedCPU: leaky_relu_quantized_cpu_
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5774,7 +5782,7 @@
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
-    QuantizedCPU: quantized_adaptive_avg_pool2d
+    QuantizedCPU: adaptive_avg_pool2d_quantized_cpu
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -5788,7 +5796,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
-    QuantizedCPU: quantized_adaptive_avg_pool3d_out
+    QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   use_c10_dispatcher: full
@@ -5796,7 +5804,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
-    QuantizedCPU: quantized_adaptive_avg_pool3d
+    QuantizedCPU: adaptive_avg_pool3d_quantized_cpu
 
 - func: adaptive_avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5881,7 +5889,7 @@
     CPU: avg_pool2d_cpu
     CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
-    QuantizedCPU: quantized_avg_pool2d
+    QuantizedCPU: avg_pool2d_quantized_cpu
 
 - func: avg_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5910,7 +5918,7 @@
     CPU: avg_pool3d_cpu
     CUDA: avg_pool3d_cuda
     MkldnnCPU: mkldnn_avg_pool3d
-    QuantizedCPU: quantized_avg_pool3d
+    QuantizedCPU: avg_pool3d_quantized_cpu
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -6258,7 +6266,7 @@
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
-    QuantizedCPU: quantized_upsample_bilinear2d_cpu
+    QuantizedCPU: upsample_bilinear2d_quantized_cpu
 
 - func: upsample_bilinear2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -6363,7 +6371,7 @@
   dispatch:
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
-    QuantizedCPU: quantized_upsample_nearest2d_cpu
+    QuantizedCPU: upsample_nearest2d_quantized_cpu
     Vulkan: upsample_nearest2d_vulkan
 
 - func: upsample_nearest2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
@@ -6391,7 +6399,7 @@
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
-    QuantizedCPU: quantized_upsample_nearest3d_cpu
+    QuantizedCPU: upsample_nearest3d_quantized_cpu
 
 - func: upsample_nearest3d_backward.grad_input(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -6423,7 +6431,7 @@
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
-    QuantizedCPU: quantized_upsample_bilinear2d_cpu
+    QuantizedCPU: upsample_bilinear2d_quantized_cpu
 
 - func: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
@@ -6472,7 +6480,7 @@
   dispatch:
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
-    QuantizedCPU: quantized_upsample_nearest2d_cpu
+    QuantizedCPU: upsample_nearest2d_quantized_cpu
 
 - func: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
@@ -6485,7 +6493,7 @@
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
-    QuantizedCPU: quantized_upsample_nearest3d_cpu
+    QuantizedCPU: upsample_nearest3d_quantized_cpu
 
 - func: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
