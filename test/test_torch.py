@@ -5429,14 +5429,14 @@ class TestTorchDeviceType(TestCase):
             # No warnings
             torch.add(a, b, out=torch.empty(3))
             torch.add(a, b, out=torch.empty(0))
+            self.assertEqual(len(w), 0)
 
-            # Verifies 0-dim <-> 1-dim conversion is OK for single element tensors
-            torch.add(torch.tensor((1,)), torch.tensor((2,)), out=torch.empty(1))
-            torch.add(torch.tensor(1), torch.tensor(2), out=torch.empty((1,)))
-
-            # Throws warning
+            # Cases that throw warnings
+            torch.add(torch.tensor((1,)), torch.tensor((2,)), out=torch.empty(1).squeeze())
+            torch.add(torch.tensor(1), torch.tensor(2), out=torch.empty(1))
             torch.add(a, b, out=torch.empty(2))
-            self.assertEqual(len(w), 1)
+
+            self.assertEqual(len(w), 3)
 
     @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):
