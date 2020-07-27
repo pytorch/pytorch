@@ -935,13 +935,13 @@ Tensor mexp_impl(
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
-      auto idx_norm_le_theta = (
+      auto idx_curr_norm_interval = (
         (norm_lower_bound < norm) * (norm <= norm_upper_bound)
       ).nonzero().squeeze(-1);
 
-      if (idx_norm_le_theta.numel() > 0) {
-        auto sub_a = at::index_select(a, 0, idx_norm_le_theta);
-        res.index_put_({idx_norm_le_theta}, compute_Ts[i](sub_a));
+      if (idx_curr_norm_interval.numel() > 0) {
+        auto sub_a = at::index_select(a, 0, idx_curr_norm_interval);
+        res.index_put_({idx_curr_norm_interval}, compute_Ts[i](sub_a));
         return res;
       }
     }
