@@ -5,12 +5,12 @@ import torch.nn as nn
 from torch.nn.parameter import Parameter
 
 
-def _quantize(x, scale, zp, q_min, q_max):
-    r"""Reference function for quantizing x.
+def _quantize(x, scale, zp):
+    r"""Reference function for quantizing x -- non-clamped.
     """
-    return ((x / scale) + zp).round().clamp(q_min, q_max)
+    return ((x / scale) + zp).round()
 
-def _quantize_vectorized(x, ch_axis, scale, zp, q_min, q_max):
+def _quantize_vectorized(x, ch_axis, scale, zp):
     r"""Reference function for quantizing a vectorized vesion of x;
     applies to per channel fake quantization.
     """
@@ -18,9 +18,27 @@ def _quantize_vectorized(x, ch_axis, scale, zp, q_min, q_max):
     axis_mask[ch_axis] = x.shape[ch_axis]
     scale_remasked = scale.reshape(axis_mask)
     zp_remasked = zp.reshape(axis_mask)
-    return (x / scale_remasked + zp_remasked).round().clamp(q_min, q_max)
+    return (x / scale_remasked + zp_remasked).round()
 
-def _calculate_scale_grad(grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max):
+def _calculate_X_grad(dY, Xq, q_min, q_max):
+    r"""Reference function for calculating the gradient per tensor for the input.
+    The gradient for input is calculated as below.
+
+    Let Xq be the quantized version of X (clamped at qmin and qmax).
+
+    :math:
+        \frac{dy}{dx} =
+            \begin{cases}
+                dy& \text{ if } q_{\min} \le X_q \le q_{\max} \\
+                0& \text{ else }
+            \end{cases}
+    """
+    mask = (Xq >= q_min) * (Xq <= q_max)
+    dX = torch.zeros_like(dY)
+    dX[mask] = dY[mask]
+    return dX
+
+def _calculate_scale_grad(dY, X, X_fq, X_q, scale, zero_point, q_min, q_max, device):
     r"""Reference function for calculating the gradient for scale.
     The gradient for scale is calculated as below:
 
@@ -29,29 +47,29 @@ def _calculate_scale_grad(grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max)
     Let Delta and z be the scale and the zero point.
 
     :math:
-        \frac{d\Delta }{dx} =
+        \frac{dy}{d\Delta} =
             \begin{cases}
                 q_{\min} - z& \text{ if } X_q= q_{\min} \\
                 q_{\max} - z& \text{ if } X_q= q_{\max} \\
                 (X_{fq} - X) / \Delta & \text{ else }
             \end{cases}
     """
-    indicate_small_scale = (X_q == q_min).float()
-    indicate_big_scale = (X_q == q_max).float()
-    indicate_middle_scale = torch.ones(indicate_small_scale.shape) - \
+    indicate_small_scale = (X_q == q_min).float().to(device)
+    indicate_big_scale = (X_q == q_max).float().to(device)
+    indicate_middle_scale = torch.ones(indicate_small_scale.shape, device=device) - \
         indicate_small_scale - indicate_big_scale
 
-    grad_small_scale = q_min - zero_point
-    grad_big_scale = q_max - zero_point
-    grad_middle_scale = (X_fq - X) / scale
+    dScale_small = q_min - zero_point
+    dScale_big = q_max - zero_point
+    dScale_middle = (X_fq - X) / scale
 
-    grad_scale = indicate_small_scale * grad_small_scale + \
-        indicate_big_scale * grad_big_scale + \
-        indicate_middle_scale * grad_middle_scale
+    dScale = indicate_small_scale * dScale_small + \
+        indicate_big_scale * dScale_big + \
+        indicate_middle_scale * dScale_middle
 
-    return grad_scale * grad_X
+    return dScale * dY
 
-def _calculate_zero_point_grad(grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max):
+def _calculate_zero_point_grad(dY, X, X_fq, X_q, scale, zero_point, q_min, q_max, device):
     r"""Reference function for calculating the gradient for zero point.
     The gradient for zero point is calculated as below:
 
@@ -60,23 +78,23 @@ def _calculate_zero_point_grad(grad_X, X, X_fq, X_q, scale, zero_point, q_min, q
     Let Delta and z be the scale and the zero point.
 
     :math:
-        \frac{dz }{dx} =
+        \frac{dy}{dz} =
             \begin{cases}
                 -\Delta& \text{ if } X_q= q_{\min} \text{ or } X_q = q_{\max} \\
                 0 & \text{ else }
             \end{cases}
     """
-    indicate_saturate_zp = (X_q == q_min).float() + (X_q == q_max).float()
-    indicate_unsaturate_zp = torch.ones(indicate_saturate_zp.shape) - \
+    indicate_saturate_zp = ((X_q == q_min).float() + (X_q == q_max).float()).to(device)
+    indicate_unsaturate_zp = torch.ones(indicate_saturate_zp.shape, device=device) - \
         indicate_saturate_zp
 
-    grad_saturate_zp = -scale
-    grad_unsaturate_zp = 0
+    dZeroPoint_saturate = -scale
+    dZeroPoint_unsaturate = 0
 
-    grad_zp = indicate_saturate_zp * grad_saturate_zp + \
-        indicate_unsaturate_zp * grad_unsaturate_zp
+    dZeroPoint = indicate_saturate_zp * dZeroPoint_saturate + \
+        indicate_unsaturate_zp * dZeroPoint_unsaturate
 
-    return grad_zp * grad_X
+    return dZeroPoint * dY
 
 class _LearnableFakeQuantizePerTensorOp(torch.autograd.Function):
     r"""A helper class to perform the necessary per tensor fake quantization on
@@ -98,22 +116,26 @@ class _LearnableFakeQuantizePerTensorOp(torch.autograd.Function):
         return X_fq
 
     @staticmethod
-    def backward(ctx, grad_X):
+    def backward(ctx, dY):
         X, scale, zero_point = ctx.saved_tensors
+        device = X.device
+        dY = dY.to(device)
         q_min, q_max, X_fq, grad_factor = ctx.other
 
         zero_point = int((zero_point + 0.5).clamp(q_min, q_max).item())
-        X_q = _quantize(X, scale, zero_point, q_min, q_max)
+        X_q = _quantize(X, scale, zero_point).to(device)
+        dX = _calculate_X_grad(dY, X_q, q_min, q_max).to(device)
 
-        grad_scale = _calculate_scale_grad(
-            grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max).sum().unsqueeze(0)
-        grad_zp = _calculate_zero_point_grad(
-            grad_X, X, X_fq, X_q, scale, zero_point, q_min, q_max).sum().unsqueeze(0)
+        X_q = X_q.clamp(q_min, q_max)
+        dScale = _calculate_scale_grad(
+            dX, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
+        dZeroPoint = _calculate_zero_point_grad(
+            dX, X, X_fq, X_q, scale, zero_point, q_min, q_max, device).sum().unsqueeze(0)
 
-        grad_scale *= grad_factor
-        grad_zp *= grad_factor
+        dScale *= grad_factor
+        dZeroPoint *= grad_factor
 
-        return grad_X, grad_scale, grad_zp, None, None, None
+        return dX, dScale, dZeroPoint, None, None, None
 
 
 class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
@@ -132,8 +154,10 @@ class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
         return X_fq
 
     @staticmethod
-    def backward(ctx, grad_X):
+    def backward(ctx, dY):
         X, scale, zero_point = ctx.saved_tensors
+        device = X.device
+        dY = dY.to(device)
         q_min, q_max, X_fq, ch_axis, grad_factor = ctx.other
 
         axis_mask = [1] * X.ndim
@@ -142,27 +166,26 @@ class _LearnableFakeQuantizePerChannelOp(torch.autograd.Function):
         scale_vec = scale.detach().type(torch.float32)
         zp_vec = ((zero_point.detach() + 0.5).clamp(q_min, q_max)).type(torch.int64)
 
-        grad_scale = torch.zeros([scale_vec.size(0)])
-        grad_zp = torch.zeros([zp_vec.size(0)])
+        scale_vec = scale_vec.reshape(axis_mask).to(device)
+        zp_vec = zp_vec.reshape(axis_mask).to(device)
 
-        scale_vec = scale_vec.reshape(axis_mask)
-        zp_vec = zp_vec.reshape(axis_mask)
-
-        X_q = _quantize_vectorized(X, ch_axis, scale_vec, zp_vec, q_min, q_max)
+        X_q = _quantize_vectorized(X, ch_axis, scale_vec, zp_vec).to(device)
+        dX = _calculate_X_grad(dY, X_q, q_min, q_max).to(device)
 
         axis_for_reduction = set(range(X_fq.ndim))
         axis_for_reduction.remove(ch_axis)
         axis_for_reduction = tuple(axis_for_reduction)
 
-        grad_scale = _calculate_scale_grad(
-            grad_X, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max).sum(axis_for_reduction)
-        grad_zp = _calculate_zero_point_grad(
-            grad_X, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max).sum(axis_for_reduction)
+        X_q = X_q.clamp(q_min, q_max)
+        dScale = _calculate_scale_grad(
+            dX, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
+        dZeroPoint = _calculate_zero_point_grad(
+            dX, X, X_fq, X_q, scale_vec, zp_vec, q_min, q_max, device).sum(axis_for_reduction)
 
-        grad_scale *= grad_factor
-        grad_zp *= grad_factor
+        dScale *= grad_factor
+        dZeroPoint *= grad_factor
 
-        return grad_X, grad_scale, grad_zp, None, None, None, None
+        return dX, dScale, dZeroPoint, None, None, None, None
 
 
 class _LearnableFakeQuantize(nn.Module):
