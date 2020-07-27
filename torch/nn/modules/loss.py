@@ -296,11 +296,11 @@ class PoissonNLLLoss(_Loss):
 
 
 class KLDivLoss(_Loss):
-    r"""The `Kullback-Leibler divergence`_ Loss
+    r"""The Kullback-Leibler divergence loss measure
 
-    KL divergence is a useful distance measure for continuous distributions
-    and is often useful when performing direct regression over the space of
-    (discretely sampled) continuous output distributions.
+    `Kullback-Leibler divergence`_ is a useful distance measure for continuous
+    distributions and is often useful when performing direct regression over
+    the space of (discretely sampled) continuous output distributions.
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
@@ -330,8 +330,7 @@ class KLDivLoss(_Loss):
     are averaged over batch dimension only. ``'mean'`` mode's behavior will be changed to the same as
     ``'batchmean'`` in the next major release.
 
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    .. _`kullback-leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
