@@ -10,5 +10,8 @@ TORCH_API std::shared_ptr<Graph> Canonicalize(
     bool keep_unique_names = true);
 
 TORCH_API void CanonicalizeOutputs(std::shared_ptr<Graph>& graph);
+
+c10::optional<const Use> firstOrLastUse(Value* v, bool find_first);
+
 } // namespace jit
 } // namespace torch
