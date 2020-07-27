@@ -27,7 +27,12 @@ struct LaunchParam {
   int value_ = 1;
 
   bool operator==(const LaunchParam& other) const {
-    return other.value_ == value_ && other.mutable_ == mutable_;
+    // If the params are mutable, we don't care about the value
+    if (mutable_ && other.mutable_) {
+      return true;
+    } else {
+      return other.value_ == value_;
+    }
   }
 };
 
