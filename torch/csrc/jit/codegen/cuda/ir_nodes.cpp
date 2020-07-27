@@ -894,7 +894,7 @@ std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootCtoP(
 
   std::unordered_map<IterDomain*, IterDomain*> root_id_map;
 
-  for (int64_t itc = 0; itc < c_to_p.size(); itc++) {
+  for (int64_t itc = 0; itc < (int64_t)c_to_p.size(); itc++) {
     int64_t itp = c_to_p[itc];
     if (itp == -1)
       continue;
@@ -955,7 +955,7 @@ std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootPtoC(
 
   std::unordered_map<IterDomain*, IterDomain*> root_id_map;
 
-  for (int64_t itp = 0; itp < p_to_c.size(); itp++) {
+  for (int64_t itp = 0; itp < (int64_t)p_to_c.size(); itp++) {
     int64_t itc = p_to_c[itp];
     if (itc == -1)
       continue;
