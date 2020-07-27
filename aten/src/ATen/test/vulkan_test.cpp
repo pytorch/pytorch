@@ -4,6 +4,9 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/vulkan/Context.h>
 
+#define COUT_FLF std::cout << __FILE__ << __LINE__ << __FUNCTION__
+#define COUT_FLFE COUT_FLF << std::endl
+
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   double maxValue = 0.0;
   for (auto& tensor : inputs) {
@@ -733,33 +736,107 @@ TEST(VulkanTest, tensor5d_transpose) {
   auto t_out_expected = t_in.transpose(1, 2);
   auto t_out = tv_in.transpose(1, 2).cpu();
   const auto check = almostEqual(t_out, t_out_expected);
-  // if (!check) {
-  std::cout << "expected:" << t_out_expected << std::endl;
-  std::cout << "got:" << t_out << std::endl;
-  //}
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
   ASSERT_TRUE(check);
 }
 
-// TEST(VulkanTest, view) {
-//  if (!at::vulkan::is_available())
-//    return;
-//
-//  auto t_in =
-//      at::rand({2, 4, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-//
-//  auto t_out_expected = t_in.view({2, 2, 2, 3, 3});
-//
-//  auto tv_in = t_in.vulkan();
-//  auto tv_out = tv_in.view({2, 2, 2, 3, 3});
-//  auto t_out = tv_out.cpu();
-//
-//  const auto check = almostEqual(t_out, t_out_expected);
-//  if (!check) {
-//    std::cout << "expected:" << t_out_expected << std::endl;
-//    std::cout << "got:" << t_out << std::endl;
-//  }
-//  ASSERT_TRUE(check);
-//}
+TEST(VulkanTest, view) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({2, 4, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = t_in.view({2, 2, 2, 3, 3});
+  auto tv_in = t_in.vulkan();
+  auto tv_out = tv_in.view({2, 2, 2, 3, 3});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  COUT_FLFE;
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, slice) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  std::cout << "t_in:" << t_in << std::endl;
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.slice(1, 2, 4, 1);
+  auto t_out = tv_in.slice(1, 2, 4, 1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, select) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  std::cout << "t_in:" << t_in << std::endl;
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.slice(1, 1);
+  auto t_out = tv_in.slice(1, 1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, unsqueeze) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  std::cout << "t_in:" << t_in << std::endl;
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.unsqueeze(1);
+  auto t_out = tv_in.unsqueeze(1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
 
 TEST(VulkanTest, max_pool2d) {
   if (!at::vulkan::is_available())

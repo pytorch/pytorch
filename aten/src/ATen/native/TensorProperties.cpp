@@ -6,6 +6,7 @@
 #include <torch/library.h>
 
 #include <ATen/Config.h>
+
 namespace at {
 namespace native {
 
@@ -80,6 +81,9 @@ Tensor contiguous(const Tensor & self) {
 }
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
+  if(self.is_vulkan()) {
+    return self;
+  }
   if (self.is_contiguous(memory_format)) {
     return self;
   }

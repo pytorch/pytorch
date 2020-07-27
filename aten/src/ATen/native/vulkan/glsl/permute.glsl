@@ -13,6 +13,7 @@ layout(set = 0, binding = 2) uniform constBlock {
   ivec4 inStrides[2];
   ivec4 outStrides[2];
   ivec4 outDims[2];
+  int inOffset;
 }
 uConst;
 
@@ -38,7 +39,7 @@ void main() {
   ivec4 oIdx0 = ivec4(0, 0, oi0, oi1);
   ivec4 oIdx1 = ivec4(oi2, oi3, oi4, oi5);
   if (all(lessThan(oIdx0, uConst.outDims[0])) &&
-      all(lessThan(oIdx0, uConst.outDims[0]))) {
+      all(lessThan(oIdx1, uConst.outDims[1]))) {
     ivec4 ins0 = uConst.inStrides[0];
     ivec4 ins1 = uConst.inStrides[1];
     int inIdxInt = oIdx0.x * ins0.x + oIdx0.y * ins0.y + oIdx0.z * ins0.z +
@@ -52,6 +53,6 @@ void main() {
     outIdxInt += oIdx1.x * outs1.x + oIdx1.y * outs1.y + oIdx1.z * outs1.z +
         oIdx1.w * outs1.w;
 
-    uOutput.data[outIdxInt] = uInput.data[inIdxInt];
+    uOutput.data[outIdxInt] = uInput.data[uConst.inOffset + inIdxInt];
   }
 }

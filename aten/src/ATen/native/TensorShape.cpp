@@ -22,6 +22,9 @@
 #include <ATen/native/vulkan/VulkanAten.h>
 #endif
 
+#define COUT_FLF std::cout << __FILE__ << __LINE__ << __FUNCTION__
+#define COUT_FLFE COUT_FLF << std::endl
+
 namespace at {
 namespace native {
 
@@ -494,6 +497,7 @@ Tensor block_diag(TensorList tensors) {
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+  COUT_FLFE;
   TORCH_CHECK(self.dim() > 0,
            "chunk expects at least a 1-dimensional tensor");
   TORCH_CHECK(chunks > 0,
@@ -501,6 +505,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
 
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
 
+  COUT_FLFE;
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
@@ -727,6 +732,7 @@ Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  COUT_FLFE;
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
@@ -738,6 +744,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+  COUT_FLFE;
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
@@ -902,6 +909,11 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 }
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+#ifdef USE_VULKAN
+  if (self.is_vulkan()) {
+    return at::native::vulkan_select(self, dim, index);
+  }
+#endif
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
@@ -1022,6 +1034,12 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 }
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  COUT_FLF << " size:" << self.sizes() << " dim:" << dim << " start:" << start << " end:" << end << " step:" << step << std::endl;
+#ifdef USE_VULKAN
+    if (self.is_vulkan()) {
+      return at::native::vulkan_slice(self, dim, start, end, step);
+    }
+#endif
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -1053,6 +1071,7 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   strides[dim] *= step;
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
+  COUT_FLFE;
   return result;
 }
 
@@ -1089,6 +1108,7 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
 }
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+  COUT_FLFE;
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
   int64_t num_splits = split_sizes.size();
@@ -1469,6 +1489,11 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
+#ifdef USE_VULKAN
+  if (self.is_vulkan()) {
+    return at::native::vulkan_unsqueeze(self, dim);
+  }
+#endif
 
   if (self.is_sparse()) {
     return unsqueeze_sparse(self, dim);
