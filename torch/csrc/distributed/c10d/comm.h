@@ -21,6 +21,7 @@ void broadcast_coalesced(
 class GradBucket {
  public:
   explicit GradBucket(std::vector<at::Tensor> tensors);
+
   const std::vector<at::Tensor>& getTensors();
 
  private:
@@ -64,6 +65,11 @@ class TORCH_API PythonCommHook : public CommHookInterface {
     pybind11::gil_scoped_acquire ag;
     state_.dec_ref();
     hook_.dec_ref();
+    // explicitly setting PyObject* state_ and hook_ to nullptr to prevent
+    // py::object's dtor to decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    state_.ptr() = nullptr;
+    hook_.ptr() = nullptr;
   }
 
   c10::intrusive_ptr<torch::jit::Future> runHook(
