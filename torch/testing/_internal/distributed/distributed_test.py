@@ -1925,15 +1925,15 @@ class _DistTestBase(object):
     def test_DistributedDataParallel_requires_grad(self):
         # a module without gradients shouldn't be accepted
         self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
+        self._barrier()
 
     @unittest.skipIf(
         BACKEND != "nccl" and BACKEND != "gloo",
         "Only NCCL and GLOO backend support DistributedDataParallel",
     )
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     @skip_if_rocm
     def test_DistributedDataParallel_non_default_stream(self):
-        print(f"Num gpus {torch.cuda.device_count()}")
         stream = torch.cuda.Stream()
         rank = self.rank
         with torch.cuda.stream(stream):

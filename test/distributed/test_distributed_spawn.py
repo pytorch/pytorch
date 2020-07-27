@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import os
 import sys
+import unittest
 
 import torch.distributed as dist
 from torch._utils_internal import (
@@ -13,9 +14,12 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     initialize_temp_directories,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import Barrier, _DistTestBase
 
+if NO_MULTIPROCESSING_SPAWN:
+    print('spawn not available, skipping tests')
+    sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -24,6 +28,9 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    )
     class TestDistBackendWithSpawn(MultiProcessTestCase, _DistTestBase):
         @property
         def init_method(self):
@@ -62,7 +69,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 dist.init_process_group(
                     init_method=self.init_method,
                     backend=BACKEND,
-                    world_size=int(WORLD_SIZE),
+                    world_size=int(self.world_size),
                     rank=self.rank,
                 )
             except RuntimeError as e:

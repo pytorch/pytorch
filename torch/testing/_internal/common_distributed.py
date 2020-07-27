@@ -124,7 +124,7 @@ def skip_if_rocm(func):
 
     return wrapper
 
-TIMEOUT_DEFAULT = 25
+TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {}
 
 
@@ -265,6 +265,7 @@ class MultiProcessTestCase(TestCase):
                 args=(rank, self._current_test_name(), self.file_name))
             process.start()
             self.processes.append(process)
+
 
     def _fork_processes(self):
         proc = torch.multiprocessing.get_context("fork").Process
