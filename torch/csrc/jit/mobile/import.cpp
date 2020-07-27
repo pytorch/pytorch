@@ -10,6 +10,7 @@
 #include <torch/custom_class.h>
 
 #include <exception>
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -62,10 +63,14 @@ IValue expect_field(
 
 std::string operator_str(
     const std::string& name,
-    const std::string& overloadname) {
+    const std::string& overloadname,
+    const std::string& module_info) {
   std::string result = name;
   if (!overloadname.empty()) {
     result += "." + overloadname;
+  }
+  if (!module_info.empty()) {
+    result = module_info + "." + result;
   }
   return result;
 }
@@ -125,7 +130,20 @@ void parseMethods(
             ->elements();
     const auto& types_list =
         expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
-    const auto& register_size = expect_field(table, "register_size", 4).toInt();
+    const auto& register_size = expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE).toInt();
+
+    std::vector<IValue> module_debug_info_list;
+    bool hasDebugInfo = m_tuple.size() > 2;
+    if (hasDebugInfo) {
+      IValue debug_info = m_tuple[2];
+      module_debug_info_list =
+          expect_field(debug_info, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
+              .toTuple()
+              ->elements();
+      TORCH_CHECK(
+          module_debug_info_list.size() == ops_list.size(),
+          "The numbers of operators and module info strings do not match.");
+    }
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
@@ -140,16 +158,19 @@ void parseMethods(
     }
 
     std::unordered_set<std::string> unsupported_op_names;
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
+    for (size_t i = 0; i < ops_list.size(); ++i) {
+      auto op_item = ops_list[i].toTuple()->elements();
       TORCH_CHECK(
           op_item.size() == 2,
           "There should be two parts in an operator name.");
+      const std::string& module_debug_info = (hasDebugInfo) ?
+          module_debug_info_list[i].toString()->string() : "";
       auto op_found = function->append_operator(
           op_item[0].toString()->string(), op_item[1].toString()->string());
+      function->append_module_info(module_debug_info);
       if (!op_found) {
         unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string()));
+            op_item[0].toString()->string(), op_item[1].toString()->string(), module_debug_info));
       }
     }
     if (!unsupported_op_names.empty()) {

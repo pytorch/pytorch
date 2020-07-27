@@ -21,6 +21,7 @@ class Function {
   bool append_operator(
       const std::string& name,
       const std::string& overload_name);
+  void append_module_info(const std::string& module_info);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 
@@ -29,6 +30,7 @@ class Function {
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
+  std::vector<std::string> module_debug_info_list_;
 };
 
 } // namespace mobile

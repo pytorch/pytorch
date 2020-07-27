@@ -18,13 +18,16 @@ struct Code {
 };
 
 struct InterpreterState {
-  TORCH_API explicit InterpreterState(std::shared_ptr<Code> code);
+  TORCH_API explicit InterpreterState(
+      std::shared_ptr<Code> code,
+      std::vector<std::string> module_debug_info_list);
   TORCH_API bool run(Stack& stack);
 
  private:
   std::shared_ptr<Code> code_;
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
+  std::vector<std::string> module_debug_info_list_;
 };
 
 } // namespace mobile
