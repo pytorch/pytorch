@@ -479,7 +479,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
       const TensorDomain* consumer,
       const TensorDomain* producer,
       bool constrain = false,
-      std::unordered_set<IterDomain*> consumer_root_dims_to_map =
+      const std::unordered_set<IterDomain*>& consumer_root_dims_to_map =
           std::unordered_set<IterDomain*>());
 
   // return mapping of consumer_domain[i] = producer_domain[result_vector[i]]
@@ -499,7 +499,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
       const TensorDomain* producer,
       const TensorDomain* consumer,
       bool constrain = false,
-      std::unordered_set<IterDomain*> producer_root_dims_to_map =
+      const std::unordered_set<IterDomain*>& producer_root_dims_to_map =
           std::unordered_set<IterDomain*>());
 
   // pair is in order where second is the consumer of first
