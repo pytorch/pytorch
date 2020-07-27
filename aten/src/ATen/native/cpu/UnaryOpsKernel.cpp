@@ -293,27 +293,10 @@ static void sign_kernel(TensorIterator& iter){
 }
 
 static void signbit_kernel(TensorIterator& iter){
-  if (iter.dtype() == ScalarType::Bool) {
-    if (iter.input_dtype() == ScalarType::Bool) {
-      cpu_kernel(iter, [](bool a) -> bool { return a; });
-    } else {
-      AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
-      });
-    }
-  } else {
-    if (iter.input_dtype() == ScalarType::Bool) {
-      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "signbit_cpu", [&]() {
-        cpu_kernel(iter, [](bool a) -> scalar_t { return a; });
-      });
-    } else {
-      AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a < 0; });
-      });
-    }
-  }
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a < 0; });
+  });
 }
-
 
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {

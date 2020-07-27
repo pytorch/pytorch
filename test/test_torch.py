@@ -11349,52 +11349,50 @@ class TestTorchDeviceType(TestCase):
         a_bool.sign_()
         self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
 
-    def test_signbit(self, device):
-        for dtype in torch.testing.get_all_math_dtypes(device):
-            if dtype.is_complex:
-                continue
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.torch.testing.get_all_fp_dtypes()))
+    def test_signbit_float(self, device, dtype):
+        t = torch.randn(5, 5, device=device)
 
-            # Include NaN for floating point numbers
-            if dtype.is_floating_point:
-                dt_info = torch.finfo(dtype)
+        if dtype == torch.bfloat16:
+            t_bf16 = torch.tensor([1, 0, -1], device=device, dtype=dtype)
+            self.assertEqual(torch.signbit(t_bf16), torch.tensor([False, False, True]))
+        else:
+            self.compare_with_numpy(torch.signbit, np.signbit, t)
 
-                # Create tensor (with NaN checking)
-                a = torch.tensor([float('nan'), -12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                a_target = torch.tensor([False, True, False, False, True, False], device=device, dtype=bool)
+        t_target = torch.signbit(t)
+        out = torch.empty_like(t, device=device, dtype=torch.bool)
+        torch.signbit(t, out=out)
+        self.assertEqual(out, t_target)
 
-            else:
-                dt_info = torch.iinfo(dtype)
+        t_sp = (0, float('inf'), -float('inf'), float('nan'))
+        if dtype == torch.bfloat16:
+            t_sp_df16 = torch.tensor(t_sp, device=device, dtype=dtype)
+            self.assertEqual(torch.signbit(t_sp_df16), torch.tensor([False, False, True, False]))
+        else:
+            self.compare_with_numpy(torch.signbit, np.signbit, t_sp, device, dtype)
 
-                # If unsigned type, everything should be False
-                if dt_info.min == 0:
-                    a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                    a_target = torch.tensor([False, False, False, False, False], device=device, dtype=bool)
-                else:
-                    a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                    a_target = torch.tensor([True, False, False, True, False], device=device, dtype=bool)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_signbit_int_and_bool(self, device, dtype):
+        t = torch.randint(-5, 5, (5, 5), device=device)
+        self.compare_with_numpy(torch.signbit, np.signbit, t)
 
-            self.assertEqual(a.signbit(), a_target, msg='signbit device={} dtype={}'.format(device, dtype))
-            self.assertEqual(torch.signbit(a), a_target, msg='signbit device={} dtype={}'.format(device, dtype))
+        t_target = torch.signbit(t)
+        out = torch.empty_like(t, device=device, dtype=torch.bool)
+        torch.signbit(t, out=out)
+        self.assertEqual(out, t_target)
 
-            out = torch.empty_like(a)
-            torch.signbit(a, out=out)
-            self.assertEqual(out.bool(), a_target, msg='signbit_out device={} dtype={}'.format(device, dtype))
+    @dtypes(torch.complex64, torch.complex128)
+    def test_signbit_complex(self, device, dtype):
+        vals = (complex(0, -1), complex(-1, 2))
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        out = torch.empty_like(t).real.bool()
 
-            a.signbit_()
-            self.assertEqual(a.bool(), a_target.bool(), msg='signbit_ device={} dtype={}'.format(device, dtype))
-
-        # Include test for bool dtype
-        a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
-        a_bool_target = torch.tensor([True, True, False, True], device=device).bool()
-        self.assertEqual(a_bool.signbit(), a_bool_target, msg='signbit device={} dtype=bool'.format(device))
-        self.assertEqual(torch.signbit(a_bool), a_bool_target, msg='signbit device={} dtype=bool'.format(device))
-
-        a_out = torch.empty_like(a_bool)
-        torch.signbit(a_bool, out=a_out)
-        self.assertEqual(a_out, a_bool_target, msg='signbit_out device={} dtype=bool'.format(device))
-
-        a_bool.signbit_()
-        self.assertEqual(a_bool, a_bool_target, msg='signbit_ device={} dtype=bool'.format(device))
+        with self.assertRaisesRegex(RuntimeError, 'clamp is not yet implemented for complex tensors.'):
+            torch.signbit(t)
+        with self.assertRaisesRegex(RuntimeError, 'clamp is not yet implemented for complex tensors.'):
+            torch.signbit(t, out=out)
 
     def test_logical_any(self, device):
         x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)

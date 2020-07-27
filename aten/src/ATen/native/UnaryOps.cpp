@@ -367,25 +367,28 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor& signbit_out(Tensor& result, const Tensor& self) {
-  TensorIterator iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
-    .add_output(result)
-    .add_input(self)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .build();
-  signbit_stub(iter.device_type(), iter);
+  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  result.resize_(self.sizes());
+
+  if (self.dtype() == at::kBool) {
+    return result.fill_(false);
+  } else {
+    TensorIterator iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(self)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .build();
+    signbit_stub(iter.device_type(), iter);
+  }
   return result;
 }
 
 Tensor signbit(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::signbit_out(result, self);
-}
-
-Tensor& signbit_(Tensor& self) {
-  return at::signbit_out(self, self);
 }
 
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {

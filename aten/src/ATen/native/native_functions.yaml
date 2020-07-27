@@ -4973,9 +4973,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: signbit_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: signbit_out

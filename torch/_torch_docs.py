@@ -5706,22 +5706,23 @@ Example::
 
 add_docstr(torch.signbit,
            r"""
-signbit(input, out=None) -> Tensor
+signbit(input, *, out=None) -> Tensor
 
-Returns a new tensor with the signbits of the elements of :attr:`input`.
+Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
 
 .. math::
     \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
 """ + r"""
+
 Args:
-    {input}
-    {out}
+  {input}
+
+Keyword args:
+  {out}
 
 Example::
 
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
-    >>> a
-    tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
 """.format(**common_args))

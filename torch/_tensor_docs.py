@@ -2839,13 +2839,6 @@ signbit() -> Tensor
 See :func:`torch.signbit`
 """)
 
-add_docstr_all('signbit_',
-               r"""
-signbit_() -> Tensor
-
-In-place version of :meth:`~Tensor.signbit`
-""")
-
 add_docstr_all('sin',
                r"""
 sin() -> Tensor

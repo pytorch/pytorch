@@ -487,7 +487,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sign
    .. automethod:: sign_
    .. automethod:: signbit
-   .. automethod:: signbit_
    .. automethod:: sin
    .. automethod:: sin_
    .. automethod:: sinh
