@@ -914,8 +914,7 @@ Tensor compute_T18(const Tensor& A) {
 }
 
 template <typename scalar_t>
-void mexp_impl(
-  Tensor& res,
+Tensor mexp_impl(
   const Tensor& a,
   std::array<scalar_t, total_n_degs> thetas,
   bool compute_highest_degree_approx = false
@@ -946,8 +945,7 @@ void mexp_impl(
       // );
 
       if ((norm <= thetas[i]).all().template item<bool>()) {
-        res.copy_(compute_Ts[i](a));
-        return;
+        return compute_Ts[i](a);
       }
     }
   }
@@ -963,6 +961,7 @@ void mexp_impl(
   // Square
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
   const auto s_cpu = s.to(at::kCPU);
+  auto res = at::empty_like(a);
   for (int64_t i = 0; i < a.size(0); ++i) {
     auto s_val = s_cpu.select(0, i).template item<int>();
     auto mexp = mexp_scaled.select(0, i);
@@ -971,12 +970,12 @@ void mexp_impl(
     }
     res.select(0, i).copy_(mexp);
   }
+  return res;
 }
 
 // matrix exponential
 Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
-  auto res = at::empty_like(a);
-  auto res_3d = res.view({-1, a.size(-2), a.size(-1)});
+  // squash batch dimensions to one dimension for simplicity
   const auto a_3d = a.view({-1, a.size(-2), a.size(-1)});
 
   if (a.scalar_type() == at::ScalarType::Float
@@ -990,7 +989,8 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
       3.010066362817634e+00  // deg 18
     };
 
-    mexp_impl<float>(res_3d, a_3d, thetas_float, compute_highest_degree_approx);
+    return mexp_impl<float>(a_3d, thetas_float, compute_highest_degree_approx)
+      .view(a.sizes());
   }
   else { // if Double or ComplexDouble
     constexpr std::array<double, total_n_degs> thetas_double = {
@@ -1002,10 +1002,9 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
       1.090863719290036e+00  // deg 18
     };
 
-    mexp_impl<double>(res_3d, a_3d, thetas_double, compute_highest_degree_approx);
+    return mexp_impl<double>(a_3d, thetas_double, compute_highest_degree_approx)
+      .view(a.sizes());
   }
-
-  return res;
 }
 
 // Based on:
