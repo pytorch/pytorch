@@ -1119,7 +1119,7 @@ def create_generic(top_env, declarations):
                 # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
                 # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
                 # and use the use_optional_tensor=True behavior always.
-                method_actuals = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in option['method_actuals']]
+                method_actuals = ["c10::impl::maybe_unwrap_optional_tensor({})".format(arg) for arg in option['method_actuals']]
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 method_actuals = option['method_actuals']
@@ -1195,7 +1195,7 @@ def create_generic(top_env, declarations):
                 # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
                 # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
                 # and use the use_optional_tensor=True behavior always.
-                actuals = ["maybe_unwrap_optional_tensor({})".format(arg) for arg in option['actuals']]
+                actuals = ["c10::impl::maybe_unwrap_optional_tensor({})".format(arg) for arg in option['actuals']]
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 actuals = option['actuals']
