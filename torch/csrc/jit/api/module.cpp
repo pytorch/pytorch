@@ -203,19 +203,22 @@ Module Module::clone_impl(
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
     IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
+    TypePtr attr_type = type()->getAttribute(i);
+    if (attr_type->is_module()) {
       const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap, inplace, memo);
       type_remap[orig.type()] = cloned.type();
       r.register_module(
-          type()->getAttributeName(i), cloned, type()->getAttribute(i));
+          type()->getAttributeName(i),
+          cloned,
+          attr_type->cast<ClassType>() ? cloned.type() : attr_type);
     } else {
       // this adds new slot and creates a new attribute for the underlying type
       // if the type is not already cloned, otherwise it will only add a new
       // slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
-          type()->getAttribute(i),
+          attr_type,
           // we'll deepcopy the IValue in non inplace option
           inplace ? s : s.deepcopy(memo),
           type()->is_parameter(i),
