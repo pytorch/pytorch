@@ -8,20 +8,24 @@ from torch import Size
 class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
-    Args:
-        start_dim: first dim to flatten (default = 1).
-        end_dim: last dim to flatten (default = -1).
 
     Shape:
         - Input: :math:`(N, *dims)`
         - Output: :math:`(N, \prod *dims)` (for the default case).
 
+    Args:
+        start_dim: first dim to flatten (default = 1).
+        end_dim: last dim to flatten (default = -1).
 
     Examples::
+        >>> input = torch.randn(32, 1, 5, 5)
         >>> m = nn.Sequential(
         >>>     nn.Conv2d(1, 32, 5, 1, 1),
         >>>     nn.Flatten()
         >>> )
+        >>> output = m(input)
+        >>> output.size()
+        torch.Size([32, 288])
     """
     __constants__ = ['start_dim', 'end_dim']
     start_dim: int
