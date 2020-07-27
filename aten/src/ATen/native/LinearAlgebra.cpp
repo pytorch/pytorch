@@ -919,6 +919,7 @@ Tensor mexp_impl(
   std::array<scalar_t, total_n_degs> thetas,
   bool compute_highest_degree_approx = false
 ) {
+  auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
 
   if (!compute_highest_degree_approx) {
@@ -931,21 +932,12 @@ Tensor mexp_impl(
     };
 
     for (int i = 0; i < total_n_degs - 1; ++i) {
-      // // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
-      // auto idx_norm_le_theta = (norm <= thetas[i]).nonzero().squeeze(-1);
-      // auto sub_a = at::index_select(a.unsqueeze(0), 0, idx_norm_le_theta);
-      // // indices corresponding to the row/column parts
-      // auto idx_matrix_part = at::arange(
-      //   0, sub_a.size(-1),
-      //   sub_a.options().dtype(at::kLong)
-      // );
-      // res.index_put_(
-      //   {/*idx_norm_le_theta,*/ idx_matrix_part, idx_matrix_part},
-      //   compute_Ts[i](sub_a)
-      // );
-
-      if ((norm <= thetas[i]).all().template item<bool>()) {
-        return compute_Ts[i](a);
+      // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+      auto idx_norm_le_theta = (norm <= thetas[i]).nonzero().squeeze(-1);
+      if (idx_norm_le_theta.numel() > 0) {
+        auto sub_a = at::index_select(a, 0, idx_norm_le_theta);
+        res.index_put_({idx_norm_le_theta}, compute_Ts[i](sub_a));
+        return res;
       }
     }
   }
@@ -961,7 +953,6 @@ Tensor mexp_impl(
   // Square
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
   const auto s_cpu = s.to(at::kCPU);
-  auto res = at::empty_like(a);
   for (int64_t i = 0; i < a.size(0); ++i) {
     auto s_val = s_cpu.select(0, i).template item<int>();
     auto mexp = mexp_scaled.select(0, i);
