@@ -109,9 +109,6 @@ Tensor isinf(const Tensor &self) {
 }
 
 Tensor isposinf(const Tensor &self) {
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
-    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
-  }
   Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::isposinf_out(result, self);
   return result;
@@ -137,9 +134,6 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor isneginf(const Tensor &self) {
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
-    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
-  }
   Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
   at::isneginf_out(result, self);
   return result;
