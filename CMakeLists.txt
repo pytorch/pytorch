@@ -500,7 +500,7 @@ if(USE_VULKAN_SHADERC_RUNTIME)
 endif()
 
 # ---[ Whitelist file if whitelist is specified
-include(cmake/Whitelist.cmake)
+include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
