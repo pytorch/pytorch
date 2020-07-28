@@ -913,6 +913,34 @@ Tensor compute_T18(const Tensor& A) {
   return res;
 }
 
+template<typename scalar_t>
+void compute_T18_scale_square(
+  Tensor& mexp_out,
+  const Tensor& a,
+  const Tensor& norm,
+  scalar_t theta
+) {
+  // Scale
+  const auto s = at::max(
+    at::zeros_like(norm),
+    at::ceil(at::log2(norm / theta))
+  ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
+  const auto pow2s = at::pow(2, s);
+  const auto a_scaled = a / pow2s;
+
+  // Square
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+  auto s_cpu = s.to(at::kCPU);
+  for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+    auto s_val = s_cpu.select(0, i).template item<int64_t>();
+    auto mexp = mexp_scaled.select(0, i);
+    for (int64_t p = 0; p < s_val; ++p) {
+      mexp = at::matmul(mexp, mexp);
+    }
+    mexp_out.select(0, i).copy_(mexp);
+  }
+}
+
 template <typename scalar_t>
 Tensor mexp_impl(
   const Tensor& a,
@@ -947,29 +975,15 @@ Tensor mexp_impl(
       .nonzero().squeeze(-1);
     auto a_large_norm = at::index_select(a, 0, idx_large_norm);
     auto large_norm_subset = at::index_select(norm, 0, idx_large_norm);
+    auto mexp_out = at::empty_like(a_large_norm);
+    compute_T18_scale_square(
+      mexp_out,
+      a_large_norm,
+      large_norm_subset,
+      thetas[total_n_degs - 1]
+    );
+    res.index_put_({idx_large_norm}, mexp_out);
 
-    // Scale
-    const auto s = at::max(
-      at::zeros_like(large_norm_subset),
-      at::ceil(at::log2(large_norm_subset / thetas[total_n_degs - 1]))
-    ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
-    const auto pow2s = at::pow(2, s);
-    const auto a_large_norm_scaled = a_large_norm / pow2s;
-
-    // Square
-    auto mexp_scaled = at::native::compute_T18<scalar_t>(a_large_norm_scaled);
-    auto mexp_buffer = at::empty_like(mexp_scaled);
-    auto s_cpu = s.to(at::kCPU);
-    for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
-      auto s_val = s_cpu.select(0, i).template item<int>();
-      auto mexp = mexp_scaled.select(0, i);
-      for (int64_t p = 0; p < s_val; ++p) {
-        mexp = at::matmul(mexp, mexp);
-      }
-      mexp_buffer.select(0, i).copy_(mexp);
-    }
-
-    res.index_put_({idx_large_norm}, mexp_buffer);
     return res;
   }
 
