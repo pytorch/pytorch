@@ -30,18 +30,66 @@ void UnrollPass::handle(Expr* expr) {
 }
 
 namespace {
-Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
+Bool* getPredicate(
+    std::vector<Expr*> tv_ops,
+    std::vector<Val*> inds_,
+    Bool* thread_pred) {
   TORCH_INTERNAL_ASSERT(
-      inds_.size() == tv->nDims() ||
-      inds_.size() == tv->domain()->noReductions().size());
+      !tv_ops.empty() && !inds_.empty(),
+      "Provided empty values to getPredicate.");
+
+  // Need to start with an output to (effectively) grab its root domain size
+  std::vector<bool> overall_contiguity =
+      ir_utils::getTVOutput(tv_ops[0])->domain()->contiguity();
+
+  // We want to get all the contiguity information from all TensorViews in the
+  // exprs provided we need to support checking the predicate with the worst
+  // case contiguity information across these TVs.
+  for (auto tv_op : tv_ops) {
+    TensorView* consumer_tv = nullptr;
+
+    for (auto out : tv_op->outputs()) {
+      if (!ir_utils::isTV(out))
+        continue;
+      consumer_tv = out->as<TensorView>();
+
+      TORCH_INTERNAL_ASSERT(
+          inds_.size() == consumer_tv->nDims() ||
+              inds_.size() == consumer_tv->domain()->noReductions().size(),
+          "Invalid indices vector provided for getPredicate");
+
+      TORCH_INTERNAL_ASSERT(
+          consumer_tv->domain()->contiguity().size() ==
+              overall_contiguity.size(),
+          "Invalid expressions in getPredicate, their out domains don't match up,",
+          " they shouldn't be in the same loop nest together.");
+
+      overall_contiguity = IndexCompute::contiguityAnd(
+          overall_contiguity, consumer_tv->domain()->contiguity());
+    }
+
+    for (auto inp : tv_op->inputs()) {
+      if (!ir_utils::isTV(inp))
+        continue;
+      overall_contiguity = IndexCompute::contiguityAnd(
+          overall_contiguity,
+          IndexCompute::contiguityPasC(
+              inp->as<TensorView>()->domain(), consumer_tv->domain()));
+    }
+  }
+
+  // Need a tv to base the indexing on, just grab the first.
+  auto consumer_tv = ir_utils::getTVOutput(tv_ops[0]);
 
   // Do we need to adjust for reduction axes?
-  bool reductions = inds_.size() != tv->nDims();
+  const bool reductions = inds_.size() != consumer_tv->nDims();
 
+  // Sanitize the indices
   std::vector<Val*> inds;
   if (reductions) {
-    for (size_t ind_i = 0, tv_i = 0; tv_i < tv->nDims();) {
-      if (tv->axis(tv_i++)->isReduction()) {
+    for (size_t ind_i = 0, consumer_tv_i = 0;
+         consumer_tv_i < consumer_tv->nDims();) {
+      if (consumer_tv->axis(consumer_tv_i++)->isReduction()) {
         inds.push_back(new Int(0));
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -53,15 +101,14 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
     inds = inds_;
   }
 
-  if (tv->nDims() > inds.size()) {
-    for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
-      if (tv->axis(i)->isReduction())
-        inds.insert(inds.begin() + i, new Int(0));
-    }
-  }
-  std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
-      new kir::TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
+  // Compute indices based on consumer_tv and all contiguity information
+  // combined
+  std::vector<Bool*> all_preds =
+      PredicateCompute::computePredicates(new kir::TensorIndex(
+          consumer_tv,
+          IndexCompute::get(consumer_tv->domain(), inds, overall_contiguity)));
 
+  // If we have thread predicates, add those
   if (thread_pred != nullptr) {
     all_preds.push_back(thread_pred);
   }
@@ -89,6 +136,7 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
 
   return cond->as<Bool>();
 }
+
 } // namespace
 
 // This function is one huge mess that should be refactored.
@@ -103,20 +151,15 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     OptOutDispatch::handle(expr);
   }
 
-  TensorView* out = nullptr;
-  bool has_global = false;
-  for (Expr* expr : fl->body().exprs())
+  std::vector<Expr*> tv_ops;
+  for (Expr* expr : fl->body().exprs()) {
     if (ir_utils::isTVOp(expr)) {
-      // Predicate determining op for unroll
-      out = ir_utils::asTV(expr->output(0));
-      has_global = has_global || out->getMemoryType() == MemoryType::Global;
-      for (auto inp : expr->inputs())
-        if (ir_utils::isTV(inp))
-          has_global = has_global ||
-              ir_utils::asTV(inp)->getMemoryType() == MemoryType::Global;
+      // Predicate determining ops for unroll
+      tv_ops.push_back(expr);
     }
+  }
 
-  bool has_TV_op = out != nullptr;
+  bool has_TV_op = !tv_ops.empty();
 
   if (within_unroll && has_TV_op) {
     // Setup unrolled loop information:
@@ -152,8 +195,10 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     }
 
     // Make predicates for the unrolling, and the epilogue
-    Bool* unroll_predicate =
-        getPredicate(out, unroll_pred_inds, getThreadPredicate(out));
+    Bool* unroll_predicate = getPredicate(
+        tv_ops,
+        unroll_pred_inds,
+        getThreadPredicate(ir_utils::getTVOutput(tv_ops[0])));
     // Make the IfThenElse controlling the unrolling
     kir::IfThenElse* unroll_ite = new kir::IfThenElse(
         unroll_predicate, {}, {}, first_unroll->parentScope());
@@ -180,7 +225,9 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
       // Setup the expressions that need predicates around them.
       Bool* inline_predicate = getPredicate(
-          out, ir_utils::indices(for_loops), getThreadPredicate(out));
+          {expr},
+          ir_utils::indices(for_loops),
+          getThreadPredicate(ir_utils::getTVOutput(expr)));
 
       kir::IfThenElse* inline_ite = new kir::IfThenElse(
           inline_predicate, {expr}, {}, inner_most_inlined_loop);
@@ -201,7 +248,9 @@ void UnrollPass::handle(kir::ForLoop* fl) {
       TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
 
       Bool* pred = getPredicate(
-          out, ir_utils::indices(for_loops), getThreadPredicate(out));
+          {expr},
+          ir_utils::indices(for_loops),
+          getThreadPredicate(ir_utils::getTVOutput(expr)));
 
       // If we need a predicate, put expr inside an if then else
       if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {

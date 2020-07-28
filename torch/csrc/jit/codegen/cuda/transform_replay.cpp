@@ -168,7 +168,8 @@ TensorDomain* TransformReplay::fullSelfReplay(
     }
   }
 
-  return new TensorDomain(new_self_root->domain(), new_domain);
+  return new TensorDomain(
+      new_self_root->domain(), new_domain, self->contiguity());
 }
 
 // Producer could have rfactor axes which consumer may want replayed. We can
@@ -342,7 +343,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
       new_IDs.push_back(id);
 
   TensorDomain* replayed = new TensorDomain(
-      producer->rootDomain(), producer->rfactorDomain(), new_IDs);
+      producer->rootDomain(),
+      producer->rfactorDomain(),
+      new_IDs,
+      producer->contiguity());
   return {replayed, producer_compute_at_axis};
 }
 
@@ -513,7 +517,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
       new_IDs.push_back(id);
 
   TensorDomain* replayed = new TensorDomain(
-      consumer->rootDomain(), consumer->rfactorDomain(), new_IDs);
+      consumer->rootDomain(),
+      consumer->rfactorDomain(),
+      new_IDs,
+      consumer->contiguity());
 
   return {replayed, producer_CA_ids.size()};
 }

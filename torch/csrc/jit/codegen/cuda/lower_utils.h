@@ -63,6 +63,8 @@ bool isTV(const Val* const);
 
 bool isTVOp(const Expr*);
 
+TensorView* getTVOutput(const Expr*);
+
 bool isScalarOp(const Expr*);
 
 void ASSERT_EXPR(Statement*);

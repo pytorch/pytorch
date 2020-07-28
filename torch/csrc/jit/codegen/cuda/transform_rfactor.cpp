@@ -288,7 +288,11 @@ TensorDomain* TransformRFactor::runReplay(
     if (dom->isRFactorProduct())
       rfactor_root.push_back(dom);
 
-  return new TensorDomain(new_root, rfactor_root, new_domain);
+  return new TensorDomain(
+      new_root,
+      rfactor_root,
+      new_domain,
+      std::vector<bool>(new_root.size(), true));
 }
 
 // We want to take any axes marked in axes and remove them from the TensorDomain
@@ -380,7 +384,8 @@ TensorDomain* TransformRFactor::runReplay2(
     }
   }
 
-  return new TensorDomain(new_root, new_domain);
+  return new TensorDomain(
+      new_root, new_domain, std::vector<bool>(new_root.size(), true));
 }
 
 } // namespace fuser

@@ -472,18 +472,42 @@ Val* IterDomain::extent() const {
   return extent_;
 }
 
-TensorDomain::TensorDomain(std::vector<IterDomain*> _domain)
-    : Val(ValType::TensorDomain), root_domain_(std::move(_domain)) {
+TensorDomain::TensorDomain(
+    std::vector<IterDomain*> _domain,
+    std::vector<bool> _contiguity)
+    : Val(ValType::TensorDomain),
+      root_domain_(std::move(_domain)),
+      contiguity_(
+          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                              : std::move(_contiguity)) {
+  TORCH_CHECK(
+      contiguity_.size() == root_domain_.size(),
+      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      contiguity_.size(),
+      " but needed one of size ",
+      root_domain_.size());
+
   domain_ = std::vector<IterDomain*>(root_domain_.begin(), root_domain_.end());
   resetDomains();
 }
 
 TensorDomain::TensorDomain(
     std::vector<IterDomain*> _root_domain,
-    std::vector<IterDomain*> _domain)
+    std::vector<IterDomain*> _domain,
+    std::vector<bool> _contiguity)
     : Val(ValType::TensorDomain, DataType::Null, false),
       root_domain_(std::move(_root_domain)),
-      domain_(std::move(_domain)) {
+      domain_(std::move(_domain)),
+      contiguity_(
+          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                              : std::move(_contiguity)) {
+  TORCH_CHECK(
+      contiguity_.size() == root_domain_.size(),
+      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      contiguity_.size(),
+      " but needed one of size ",
+      root_domain_.size());
+
   std::vector<Val*> domain_vals(domain_.begin(), domain_.end());
   auto inps = IterVisitor::getInputsTo(domain_vals);
 
@@ -507,11 +531,22 @@ TensorDomain::TensorDomain(
 TensorDomain::TensorDomain(
     std::vector<IterDomain*> _root_domain,
     std::vector<IterDomain*> _rfactor_domain,
-    std::vector<IterDomain*> _domain)
+    std::vector<IterDomain*> _domain,
+    std::vector<bool> _contiguity)
     : Val(ValType::TensorDomain, DataType::Null, false),
       root_domain_(std::move(_root_domain)),
       domain_(std::move(_domain)),
-      rfactor_domain_(std::move(_rfactor_domain)) {
+      rfactor_domain_(std::move(_rfactor_domain)),
+      contiguity_(
+          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                              : std::move(_contiguity)) {
+  TORCH_CHECK(
+      contiguity_.size() == root_domain_.size(),
+      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      contiguity_.size(),
+      " but needed one of size ",
+      root_domain_.size());
+
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(domain_.begin(), domain_.end()));
 
@@ -547,7 +582,8 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       domain_(ir_cloner->clone(src->domain_)),
       no_bcast_domain_(ir_cloner->clone(src->no_bcast_domain_)),
       no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
-      rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)) {}
+      rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
+      contiguity_(src->contiguity()) {}
 
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (nDims() != other->nDims())

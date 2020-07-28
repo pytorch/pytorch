@@ -83,7 +83,9 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
     }
   }
 
-  return new TensorView(new TensorDomain(out_domain), dtype);
+  return new TensorView(
+      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+      dtype);
 }
 
 std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
@@ -430,7 +432,8 @@ static TensorView* newForReduction(
         isReduction ? IterType::Reduction : id->getIterType()));
   }
 
-  TensorDomain* td = new TensorDomain(new_domain);
+  TensorDomain* td =
+      new TensorDomain(new_domain, std::vector<bool>(new_domain.size(), true));
   return new TensorView(td, tv->getDataType().value());
 }
 
@@ -535,8 +538,10 @@ TensorView* broadcast(
     }
     ibdim++;
   }
-  TensorView* out_tensor =
-      new TensorView(new TensorDomain(out_domain), inp->getDataType().value());
+
+  TensorView* out_tensor = new TensorView(
+      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+      inp->getDataType().value());
   new BroadcastOp(out_tensor, inp);
   return out_tensor;
 }

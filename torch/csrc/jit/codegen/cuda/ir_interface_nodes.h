@@ -386,10 +386,6 @@ class TORCH_CUDA_API TensorView : public Val {
       TensorView* current,
       TensorView* producer);
 
-  // Make a copy of the domain (used for Tensor based constructor), likely to be
-  // removed soon.
-  void copyDomain(const TensorDomain* td);
-
   // Return position in compute_at_view that lines up with this->axis(pos)?
   int getComputeAtRelPos(int pos);
   void setThisComputeAtAxis();

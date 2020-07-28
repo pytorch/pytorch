@@ -171,14 +171,21 @@ void IRPrinter::handle(const IterDomain* id) {
 
 void IRPrinter::handle(const kir::TensorIndex* ti) {
   os << "T" << ti->view()->name();
-  if (ti->nDims() == 0) {
+  std::vector<Val*> non_zero_inds;
+  for (auto* ind : ti->indices()) {
+    if (!ind->isZeroInt()) {
+      non_zero_inds.push_back(ind);
+    }
+  }
+
+  if (non_zero_inds.size() == 0) {
     os << "[ 0 ]";
     return;
   }
 
   os << "[ ";
   bool first = true;
-  for (auto* ind : ti->indices()) {
+  for (auto* ind : non_zero_inds) {
     if (!first)
       os << " + ";
     print_inline(ind);
