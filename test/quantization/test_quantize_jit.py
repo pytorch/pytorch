@@ -2351,7 +2351,9 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 x = x.repeat(4, 2)
                 y = []
                 y.append(x)
+                z = torch.stack(y, 0)
                 x, _ = y
+                x = z
                 x = self.conv2(x)
                 return x
 
