@@ -370,6 +370,7 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   const auto C = std::accumulate(
       sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];
 
@@ -378,7 +379,7 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
     int32_t inputSize[4];
     float s;
   };
-  ConstBlock cb{{W, H, C, 0}, s};
+  ConstBlock cb{{W, H, C_4, 0}, s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -406,7 +407,7 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
   input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
+  computeUnit.dispatchCommandBuffer(W, H, C_4, workGroupSize);
   computeUnit.endCommandBuffer();
   computeUnit.submitAndWaitCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -418,6 +419,7 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   const auto C = std::accumulate(
       sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];
 
@@ -426,7 +428,7 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
     int32_t inputSize[4];
     float s;
   };
-  ConstBlock cb{{W, H, C, 0}, s};
+  ConstBlock cb{{W, H, C_4, 0}, s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -454,7 +456,7 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
   input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  computeUnit.dispatchCommandBuffer(W, H, C, workGroupSize);
+  computeUnit.dispatchCommandBuffer(W, H, C_4, workGroupSize);
   computeUnit.endCommandBuffer();
   computeUnit.submitAndWaitCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
