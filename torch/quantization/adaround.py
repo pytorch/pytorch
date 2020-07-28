@@ -69,7 +69,7 @@ def loss_function(model, input, white_list={nnqat.Conv2d}):
     for name, submodule in model.named_modules():
         # if type(submodule) in white_list and hasattr(submodule, 'weight_fake_quant'):
         if isinstance(submodule, OuputWrapper):
-            result += loss_function_leaf(submodule)
+            result = result + loss_function_leaf(submodule)
             print("results running: ", result)
     return result
 
