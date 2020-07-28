@@ -261,7 +261,7 @@ if _enabled:
     # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(Module, metaclass=FunctionMeta):
+    class ScriptModule(Module, metaclass=ScriptMeta):
         """
         ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
