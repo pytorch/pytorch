@@ -23,7 +23,7 @@ Tensor quantized_threshold_impl(
 }
 
 // at::native functions for the native_functions.yaml
-Tensor quantized_threshold(
+Tensor threshold_quantized_cpu(
     const Tensor& qx,
     Scalar threshold,
     Scalar value) {
@@ -35,7 +35,7 @@ Tensor quantized_threshold(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("threshold", TORCH_FN(quantized_threshold));
+  m.impl("threshold", TORCH_FN(threshold_quantized_cpu));
 }
 
 } // namespace native
