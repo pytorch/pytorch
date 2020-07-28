@@ -449,7 +449,7 @@ enable_testing()
 
 # ---[ Build variables set within the cmake tree
 include(cmake/BuildVariables.cmake)
-set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
+set(CAFFE2_ALLOWLIST "" CACHE STRING "A allowlist file of files that one should build.")
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -499,8 +499,8 @@ if(USE_VULKAN_SHADERC_RUNTIME)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
-# ---[ Whitelist file if whitelist is specified
-include(cmake/Whitelist.cmake)
+# ---[ Allowlist file if allowlist is specified
+include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
