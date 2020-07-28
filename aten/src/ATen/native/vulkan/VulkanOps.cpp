@@ -285,6 +285,184 @@ void avg_pool2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1) {
+  auto idim = input.dim();
+  TORCH_INTERNAL_ASSERT(
+      idim <= 8, "Vulkan transpose is implemented only for dim <= 8");
+  auto device = context().device();
+  struct ConstBlock {
+    int32_t istrides[8];
+    int32_t ostrides[8];
+    int32_t odims[8];
+    int32_t storageOffset;
+  };
+
+  auto isizes = input.sizes();
+  auto osizes = isizes;
+  std::swap(osizes[dim0], osizes[dim1]);
+  VulkanTensor output{osizes};
+  output.allocate_storage();
+
+  int32_t idims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t odims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  for (int i = 0; i < idim; i++) {
+    idims8[8 - idim + i] = isizes[i];
+    odims8[8 - idim + i] = osizes[i];
+  }
+  int32_t istrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t ostrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  for (int i = 6; i >= 0; --i) {
+    istrides8[i] = idims8[i + 1] * istrides8[i + 1];
+    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
+  }
+  std::swap(istrides8[8 - idim + dim0], istrides8[8 - idim + dim1]);
+
+  ConstBlock cb{};
+  std::copy(
+      std::begin(istrides8), std::end(istrides8), std::begin(cb.istrides));
+  std::copy(
+      std::begin(ostrides8), std::end(ostrides8), std::begin(cb.ostrides));
+  std::copy(std::begin(odims8), std::end(odims8), std::begin(cb.odims));
+  cb.storageOffset = 0;
+
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.buffer()->bind(descriptorSet, 0);
+  input.buffer()->bind(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(permute), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.buffer()->addBufferMemoryBarrier(
+      computeUnit.commandBuffer(), 0, input.buffer()->sizeBytes());
+  computeUnit.dispatchCommandBuffer(
+      odims8[6] * odims8[7],
+      odims8[4] * odims8[5],
+      odims8[2] * odims8[3],
+      workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+  return output;
+}
+
+VulkanTensor slice(
+    const VulkanTensor& input,
+    int64_t dim,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
+  auto isizes = input.sizes();
+  auto osizes = isizes;
+  if (start < 0) {
+    start += isizes[dim];
+  }
+  if (end < 0) {
+    end += isizes[dim];
+  }
+  if (start < 0) {
+    start = 0;
+  } else if (start >= isizes[dim]) {
+    start = isizes[dim];
+  }
+  if (end < start) {
+    end = start;
+  } else if (end >= isizes[dim]) {
+    end = isizes[dim];
+  }
+  auto len = end - start;
+  osizes[dim] = (len + step - 1) / step;
+
+  VulkanTensor output{osizes};
+  output.allocate_storage();
+
+  auto idim = input.dim();
+  int32_t idims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t odims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  for (int i = 0; i < idim; i++) {
+    idims8[8 - idim + i] = isizes[i];
+    odims8[8 - idim + i] = osizes[i];
+  }
+  int32_t istrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  int32_t ostrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  for (int i = 6; i >= 0; --i) {
+    istrides8[i] = idims8[i + 1] * istrides8[i + 1];
+    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
+  }
+  ostrides8[8 - idim + dim] *= step;
+  auto storage_offset = start * istrides8[8 - idim + dim];
+
+  auto device = context().device();
+  struct ConstBlock {
+    int32_t istrides[8];
+    int32_t ostrides[8];
+    int32_t odims[8];
+    int32_t storageOffset;
+  };
+
+  ConstBlock cb{};
+  std::copy(
+      std::begin(istrides8), std::end(istrides8), std::begin(cb.istrides));
+  std::copy(
+      std::begin(ostrides8), std::end(ostrides8), std::begin(cb.ostrides));
+  std::copy(std::begin(odims8), std::end(odims8), std::begin(cb.odims));
+  cb.storageOffset = storage_offset;
+
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.buffer()->bind(descriptorSet, 0);
+  input.buffer()->bind(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(permute), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.buffer()->addBufferMemoryBarrier(
+      computeUnit.commandBuffer(), 0, input.buffer()->sizeBytes());
+  computeUnit.dispatchCommandBuffer(
+      odims8[6] * odims8[7],
+      odims8[4] * odims8[5],
+      odims8[2] * odims8[3],
+      workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+  return output;
+}
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
