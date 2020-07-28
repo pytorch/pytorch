@@ -1200,8 +1200,18 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
     object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+    gloo_group = None
+    # Avoid copying intermediate tensors back and forth to CUDA by using gloo PG
+    # for object collectives.
+    if get_backend(group) == Backend.NCCL:
+        gloo_group = new_group(
+            ranks=[i for i in range(get_world_size()) if not _rank_not_in_group(group)],
+            backend=Backend.GLOO,
+        )
     # Allgather tensor sizes
-    all_gather(object_size_list, local_size, group=group)
+    all_gather(
+        object_size_list, local_size, group=group if gloo_group is None else gloo_group
+    )
     max_object_size = max(object_size_list)
     # allocate a tensor of max size, and copy byte tensor into it.
     # TODO: Is there a more efficient way to do this / can we just resize inpt_tensor to max_object_size?
@@ -1210,7 +1220,11 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     output_tensors = [
         torch.empty(max_object_size, dtype=torch.uint8) for _ in range(group_size)
     ]
-    all_gather(output_tensors, local_max_size_tensor, group=group)
+    all_gather(
+        output_tensors,
+        local_max_size_tensor,
+        group=group if gloo_group is None else gloo_group,
+    )
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.ByteTensor)
@@ -1251,9 +1265,19 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
     object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+    # Avoid copying intermediate tensors back and forth to CUDA by using gloo PG
+    # for object collectives.
+    gloo_group = None
+    if get_backend(group) == Backend.NCCL:
+        gloo_group = new_group(
+            ranks=[i for i in range(get_world_size()) if not _rank_not_in_group(group)],
+            backend=Backend.GLOO,
+        )
     # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
     # since each rank needs to broadcast a tensor of the same (maximal) size.
-    all_gather(object_size_list, local_size, group=group)
+    all_gather(
+        object_size_list, local_size, group=group if gloo_group is None else gloo_group
+    )
     max_object_size = max(object_size_list)
     local_max_size_tensor = torch.ByteTensor(size=(max_object_size,))
     local_max_size_tensor[: local_size.item()] = input_tensor
@@ -1265,7 +1289,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         local_max_size_tensor,
         gather_list=output_tensors if my_rank == dst else None,
         dst=dst,
-        group=group,
+        group=group if gloo_group is None else gloo_group,
     )
     if my_rank != dst:
         return
