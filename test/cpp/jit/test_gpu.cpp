@@ -2856,55 +2856,57 @@ void testGPU_FusionSimpleBCast() {
     TORCH_CHECK(t4.allclose(cg_output));
   }
 
-  // Disabling the tests because of failing test on broadcast indexing
-  // {
-  //   Fusion fusion;
-  //   FusionGuard fg(&fusion);
+#if 0
+  // TODO: Disabling the tests because of failing test on broadcast indexing
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
 
-  //   // Set up your input tensor views
-  //   std::vector<IterDomain*> dom;
-  //   dom.push_back(new IterDomain(new Int(0), new Int()));
-  //   dom.push_back(new IterDomain(
-  //       new Int(0),
-  //       new Int(1),
-  //       ParallelType::Serial,
-  //       IterType::BroadcastWithStride));
-  //   TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+    // Set up your input tensor views
+    std::vector<IterDomain*> dom;
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+    dom.push_back(new IterDomain(
+        new Int(0),
+        new Int(1),
+        ParallelType::Serial,
+        IterType::BroadcastWithStride));
+    TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
 
-  //   TensorView* tv1 = makeDummyTensor(3);
-  //   fusion.addInput(tv0);
-  //   fusion.addInput(tv1);
+    TensorView* tv1 = makeDummyTensor(3);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  //   TensorView* tv2 = add(tv0, tv1);
+    TensorView* tv2 = add(tv0, tv1);
 
-  //   tv2->merge(0);
-  //   tv2->merge(0);
+    tv2->merge(0);
+    tv2->merge(0);
 
-  //   fusion.addOutput(tv2);
+    fusion.addOutput(tv2);
 
-  //   tv0->computeAt(tv2, -1);
-  //   tv1->computeAt(tv2, -1);
+    tv0->computeAt(tv2, -1);
+    tv1->computeAt(tv2, -1);
 
-  //   tv2->axis(0)->parallelize(ParallelType::BIDx);
+    tv2->axis(0)->parallelize(ParallelType::BIDx);
 
-  //   constexpr int x = 63, y = 33, z = 15;
+    constexpr int x = 63, y = 33, z = 15;
 
-  //   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA,
-  //   0);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA,
+    0);
 
-  //   at::Tensor t0 = at::randn({y, 1}, options);
-  //   at::Tensor t1 = at::randn({x, y, z}, options);
+    at::Tensor t0 = at::randn({y, 1}, options);
+    at::Tensor t1 = at::randn({x, y, z}, options);
 
-  //   at::Tensor cg_output = at::empty({x, y, z}, options);
+    at::Tensor cg_output = at::empty({x, y, z}, options);
 
-  //   torch::jit::fuser::cuda::FusionExecutor fe;
-  //   fe.compileFusion(&fusion);
-  //   fe.runFusion({t0, t1}, {cg_output});
+    torch::jit::fuser::cuda::FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    fe.runFusion({t0, t1}, {cg_output});
 
-  //   auto t2 = t0.add(t1);
+    auto t2 = t0.add(t1);
 
-  //   TORCH_CHECK(t2.allclose(cg_output));
-  // }
+    TORCH_CHECK(t2.allclose(cg_output));
+  }
+#endif
 
   {
     Fusion fusion;
@@ -2960,68 +2962,70 @@ void testGPU_FusionSimpleBCast() {
 
   // TODO: This test below is not working because index math for smem/local mem
   // is wrong when dealing with broadcasts. Need to fix.
-  // {
-  //   Fusion fusion;
-  //   FusionGuard fg(&fusion);
+#if 0
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
 
-  //   auto zero = new Int(0);
-  //   auto M = new IterDomain(zero, new Int(2));
-  //   auto K = new IterDomain(zero, new Int(3));
-  //   auto N = new IterDomain(zero, new Int(4));
+    auto zero = new Int(0);
+    auto M = new IterDomain(zero, new Int(2));
+    auto K = new IterDomain(zero, new Int(3));
+    auto N = new IterDomain(zero, new Int(4));
 
-  //   // Set up your input tensor views
-  //   TensorView* tv0 =
-  //       new TensorView(new TensorDomain({M, K}, {true, true}),
-  //       DataType::Float);
-  //   TensorView* tv1 =
-  //       new TensorView(new TensorDomain({K, N}, {true, true}),
-  //       DataType::Float);
+    // Set up your input tensor views
+    TensorView* tv0 =
+        new TensorView(new TensorDomain({M, K}, {true, true}),
+        DataType::Float);
+    TensorView* tv1 =
+        new TensorView(new TensorDomain({K, N}, {true, true}),
+        DataType::Float);
 
-  //   fusion.addInput(tv0);
-  //   fusion.addInput(tv1);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
 
-  //   // TODO add pointwise ops on the begining before the bcast.
+    // TODO add pointwise ops on the begining before the bcast.
 
-  //   TensorView* tv2 = broadcast(tv0, {false, false, true});
-  //   TensorView* tv3 = broadcast(tv1, {true, false, false});
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
 
-  //   TensorView* tv4 = add(tv2, tv3);
+    TensorView* tv4 = add(tv2, tv3);
 
-  //   fusion.addOutput(tv4);
+    fusion.addOutput(tv4);
 
-  //   tv4->merge(0);
-  //   tv4->merge(0);
+    tv4->merge(0);
+    tv4->merge(0);
 
-  //   // tv4->axis(0)->parallelize(ParallelType::Unroll);
+    // tv4->axis(0)->parallelize(ParallelType::Unroll);
 
-  //   // fusion.printMath();
-  //   // fusion.printKernel();
+    // fusion.printMath();
+    // fusion.printKernel();
 
-  //   // tv0->computeAt(tv4, -1);
-  //   // tv1->computeAt(tv4, -1);
+    // tv0->computeAt(tv4, -1);
+    // tv1->computeAt(tv4, -1);
 
-  //   // tv4->axis(0)->parallelize(ParallelType::BIDx);
+    // tv4->axis(0)->parallelize(ParallelType::BIDx);
 
-  //   constexpr int x = 63, y = 33, z = 15;
+    constexpr int x = 63, y = 33, z = 15;
 
-  //   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA,
-  //   0);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA,
+    0);
 
-  //   at::Tensor t0 = at::randn({x, y}, options);
-  //   at::Tensor t1 = at::randn({y, z}, options);
+    at::Tensor t0 = at::randn({x, y}, options);
+    at::Tensor t1 = at::randn({y, z}, options);
 
-  //   at::Tensor cg_output = at::empty({x, y, z}, options);
+    at::Tensor cg_output = at::empty({x, y, z}, options);
 
-  //   torch::jit::fuser::cuda::FusionExecutor fe;
-  //   fe.compileFusion(&fusion);
-  //   fe.runFusion({t0, t1}, {cg_output});
+    torch::jit::fuser::cuda::FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    fe.runFusion({t0, t1}, {cg_output});
 
-  //   auto t2 = t0.unsqueeze(-1).expand({x, y, z});
-  //   auto t3 = t1.expand({x, y, z});
-  //   auto t4 = t2.add(t3);
+    auto t2 = t0.unsqueeze(-1).expand({x, y, z});
+    auto t3 = t1.expand({x, y, z});
+    auto t4 = t2.add(t3);
 
-  //   TORCH_CHECK(t4.allclose(cg_output));
-  // }
+    TORCH_CHECK(t4.allclose(cg_output));
+  }
+#endif
 }
 
 // Test a simple Gemm but also play around with fusion executor features

@@ -23,7 +23,7 @@ ContigMergeInfo isContiguousMerge(
     const std::vector<bool>& root_contiguity) {
   // Check if all inputs to merge operation are contiguous in root domain
   // (consecutive, and marked contiguous)
-  ContigMergeInfo CMI;
+  ContigMergeInfo contig_merge_info;
 
   auto merge_inputs = IterVisitor::getInputsTo({merge->out()});
 
@@ -37,7 +37,7 @@ ContigMergeInfo isContiguousMerge(
     }
   }
 
-  CMI.zero_root_ids = merge_input_ids;
+  contig_merge_info.zero_root_ids = merge_input_ids;
 
   bool contig_dims = true;
 
@@ -55,7 +55,7 @@ ContigMergeInfo isContiguousMerge(
       contig_dims = false;
     }
 
-    CMI.last_root_id = id;
+    contig_merge_info.last_root_id = id;
 
     start = start == nullptr ? id : start;
 
@@ -67,12 +67,12 @@ ContigMergeInfo isContiguousMerge(
   }
 
   if (!(merge_input_ids.empty() && contig_dims)) {
-    CMI.zero_root_ids.clear();
-    CMI.last_root_id = nullptr;
-    return CMI;
+    contig_merge_info.zero_root_ids.clear();
+    contig_merge_info.last_root_id = nullptr;
+    return contig_merge_info;
   }
 
-  CMI.zero_root_ids.erase(CMI.last_root_id);
+  contig_merge_info.zero_root_ids.erase(contig_merge_info.last_root_id);
 
   auto exprs = ExprSort::getExprs(
       merge->out()->fusion(), std::vector<Val*>({merge->out()}));
@@ -81,9 +81,9 @@ ContigMergeInfo isContiguousMerge(
 
   for (auto expr : exprs) {
     if (expr->getExprType().value() == ExprType::Split) {
-      CMI.zero_root_ids.clear();
-      CMI.last_root_id = nullptr;
-      return CMI;
+      contig_merge_info.zero_root_ids.clear();
+      contig_merge_info.last_root_id = nullptr;
+      return contig_merge_info;
     }
 
     for (auto inp : expr->inputs()) {
@@ -113,12 +113,12 @@ ContigMergeInfo isContiguousMerge(
       std::inserter(inp_out_diff, inp_out_diff.begin()));
 
   if (inp_out_diff.empty()) {
-    CMI.mergeable = true;
+    contig_merge_info.mergeable = true;
   } else {
-    CMI.zero_root_ids.clear();
-    CMI.last_root_id = nullptr;
+    contig_merge_info.zero_root_ids.clear();
+    contig_merge_info.last_root_id = nullptr;
   }
-  return CMI;
+  return contig_merge_info;
 }
 
 } // namespace
@@ -151,12 +151,12 @@ void IndexCompute::handle(Merge* merge) {
 
   auto out_ind = out_it->second;
 
-  auto mergableInfo =
+  const auto mergable_info =
       isContiguousMerge(merge, td_->rootDomain(), root_contiguity_);
 
-  if (mergableInfo.mergeable) {
-    index_map_[mergableInfo.last_root_id] = out_ind;
-    for (auto root_ind : mergableInfo.zero_root_ids) {
+  if (mergable_info.mergeable) {
+    index_map_[mergable_info.last_root_id] = out_ind;
+    for (auto root_ind : mergable_info.zero_root_ids) {
       index_map_[root_ind] = new Int(0);
     }
     return;
@@ -245,14 +245,14 @@ std::vector<bool> IndexCompute::contiguityAnd(
       contig1.size() == contig2.size(),
       "Called contiguityAnd with mismatched vectors.");
 
-  std::vector<bool> contig3;
+  std::vector<bool> contig_result;
   std::transform(
       contig1.begin(),
       contig1.end(),
       contig2.begin(),
-      std::back_inserter(contig3),
+      std::back_inserter(contig_result),
       std::logical_and<>());
-  return contig3;
+  return contig_result;
 }
 
 std::vector<bool> IndexCompute::contiguityPasC(

@@ -82,7 +82,7 @@ Bool* getPredicate(
   auto consumer_tv = ir_utils::getTVOutput(tv_ops[0]);
 
   // Do we need to adjust for reduction axes?
-  bool reductions = inds_.size() != consumer_tv->nDims();
+  const bool reductions = inds_.size() != consumer_tv->nDims();
 
   // Sanitize the indices
   std::vector<Val*> inds;
