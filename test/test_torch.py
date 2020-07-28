@@ -6440,7 +6440,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
         x = (torch.randn(3, 3))
-        if dtype in [torch.half, torch.float, torch.double]:
+        if dtype.is_floating_point:
             x[x < 0.2] = float('nan')
  
         torch_fn_with_axis = partial(torch.nanprod, axis=0)
