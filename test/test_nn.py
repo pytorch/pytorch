@@ -8326,6 +8326,15 @@ class TestNN(NNTestCase):
             torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
         self.assertEqual(len(w), 1)
 
+    def test_flatten(self):
+        tensor_input = torch.randn(2, 1, 2, 3)
+
+        # Flatten Tensor
+
+        flatten = nn.Flatten(start_dim=1, end_dim=-1)
+        tensor_output = flatten(tensor_input)
+        self.assertEqual(tensor_output.size(), torch.Size([2, 6]))
+
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
