@@ -1,6 +1,9 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include "ATen/core/interned_strings.h"
+#include "ATen/core/jit_type.h"
+#include "jit/frontend/tree_views.h"
+#include "jit/ir/constants.h"
 #include "jit/ir/ir.h"
 #include "jit/jit_log.h"
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
@@ -9,6 +12,78 @@
 namespace torch {
 namespace jit {
 
+
+
+
+static void foldGradSumToSize(Block* b) {
+
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+        auto n = *it;
+        if (it->kind() == aten::_grad_sum_to_size) {
+          auto in_type = it->input(0)->type()->expect<TensorType>();
+          auto out_type = it->output()->type()->expect<TensorType>();
+          auto in_syms = in_type->symbolic_sizes();
+          auto out_syms = out_type->symbolic_sizes();
+          if (in_syms.rank().has_value() && out_syms.rank().has_value()) {
+            if (*in_syms.sizes() == *out_syms.sizes()) {
+              GRAPH_DEBUG("Removing ", getHeader(*it));
+              it->input(0)->setType(it->output()->type());
+              it->output()->replaceAllUsesWith(it->input(0));
+              it.destroyCurrent();
+              continue;
+            }
+            auto max_rank = std::max(*out_syms.rank(), *in_syms.rank());
+            auto in_sizes = *in_syms.sizes();
+            auto padded_dims = max_rank - *out_syms.rank();
+
+            // TODO: Figure out how to reshape back
+            if (padded_dims) {
+              continue;
+            }
+
+            // std::vector<c10::ShapeSymbol> out_sizes(padded_dims, c10::ShapeSymbol::fromStaticSize(1));
+            // auto orig_out_sizes = *out_syms.sizes();
+            // out_sizes.insert(out_sizes.end(),orig_out_sizes.begin(), orig_out_sizes.end());
+            auto out_sizes = *out_syms.sizes();
+
+            std::vector<int64_t> reduce_axes; 
+            bool dimension_match = true;
+            for (size_t i = 0; i < max_rank; i++) {
+              if (out_sizes[i].is_static()) {
+                if (out_sizes[i].static_size() == 1) {
+                  reduce_axes.push_back(i);
+                }
+                // no reduction since out_sizes isn't equal to 1
+              } else if (out_sizes[i] != in_sizes[i]) {
+                dimension_match = false;
+                break;
+              }
+            }
+
+            if (!dimension_match) {
+              continue;
+            }
+
+          auto graph = b->owningGraph();
+          auto axes_constant = graph->insertConstant(IValue{reduce_axes});
+          auto keep_dims = graph->insertConstant(IValue{true});
+          auto sum = graph->insert(aten::sum, {it->input(0), axes_constant, keep_dims});
+
+          // if (padded_dims > 0) {
+          //   sum = graph->insert(aten::reshape_as, {sum, });
+          // }
+          n->output()->replaceAllUsesWith(sum);
+          it.destroyCurrent();
+        }
+      else {
+        for (auto ib : n->blocks()) {
+          foldGradSumToSize(ib);
+        }
+      }
+    }
+
+  }
+}
 
 static bool isBackwardGraph(Graph& g) {
   return std::any_of(g.nodes().begin(), g.nodes().end(), [](Node* n){return n->kind() == prim::AutogradAnyNonZero; });
@@ -26,8 +101,14 @@ struct AutogradZeroSpecializer {
 
   AutogradZeroSpecializer(Graph& graph): g(graph) {
     if (getProfilingMode() && isBackwardGraph(g)) {
+      removeProfilingNodes(g.block());
+      GRAPH_DUMP("After removing profiling nodes", &g);
       auto vif = versionGraph();
+      GRAPH_DUMP("After versioning graph", &g);
       specializeAutogradOps(vif->blocks()[0]);
+      GRAPH_DUMP("After specializeAutogradOps graph", &g);
+      foldGradSumToSize(vif->blocks()[0]);
+      GRAPH_DUMP("After FoldGraphSumToSize graph", &g);
     }
     else {
       setStatesOnGraphInputs();
@@ -63,6 +144,22 @@ private:
     }
   }
 
+  static void removeProfilingNodes(Block* b) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      if (it->kind() == prim::profile) {
+        if (it->outputs().size()) {
+          it->input()->setType(it->output()->type());
+          it->output()->replaceAllUsesWith(it->input());
+        }
+        it.destroyCurrent();
+      } else {
+        for (Block* ib : it->blocks()) {
+          removeProfilingNodes(ib);
+        }
+      }
+    }
+  }
+
   Node* versionGraph() {
     auto vif = g.create(prim::If, {}, g.outputs().size());
     auto true_block = vif->addBlock();
@@ -74,6 +171,7 @@ private:
     false_block->cloneFrom(g.block(), value_map);
     replaceBlockInputsWithGraph(&g, false_block);
 
+    // replace backwards outputs
     auto ret = g.return_node();
     for (size_t i = 0; i < ret->inputs().size(); i++) {
       auto ogo = ret->input(i);
@@ -81,12 +179,6 @@ private:
       ngo->copyMetadata(ogo);
       ret->replaceInput(i, ngo);
     }
-    
-    // remove all original nodes
-    // for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
-    //   it.destroyCurrent();
-    // }
-
     g.prependNode(vif);
 
     // insert type checks on inputs
@@ -96,6 +188,23 @@ private:
     for (size_t i = 0; i < g.inputs().size(); i++) {
       auto inp = g.inputs()[i];
       if (auto tt = inp->type()->cast<TensorType>()) {
+        // auto uses = inp->uses();
+        // if (uses.empty()) {
+        //   continue;
+        // }
+
+        // c10::TensorTypePtr merged_type = nullptr;
+        // for (auto use : uses) {
+        //   auto utype = use.user->type()->cast<TensorType>();
+        //   if (!merged_type) {
+        //     merged_type = utype;
+        //   }
+        //   else {
+        //     merged_type = merged_type->merge(utype);
+        //   }
+        // }
+
+
         // TODO: consider using a specialized op
         auto guard = g.create(prim::TypeCheck, {inp, cond}, 2);
         g.insertNode(guard);
@@ -173,6 +282,13 @@ private:
           if (n->inputs().size() > 0) {
             state[n->output()] = State::Unknown;
             // state[n->input()];
+          }
+          else {
+            if (auto ptt = n->output()->type()->expect<TensorType>()) {
+              state[n->output()] = ptt->undefined()
+                  ? *ptt->undefined() ? State::Zero : State::Nonzero
+                  : State::Unknown;
+            }
           }
           break;
         }
