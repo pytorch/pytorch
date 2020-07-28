@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import numpy as np
 import torch
-import utils.common as common
+from torch.utils._benchmark.utils import common
 
 
 __all__ = ["Timer"]
@@ -90,7 +90,7 @@ class Timer(object):
                     break
                 number *= 10
 
-            total_time = 0
+            total_time = 0.0
             times = []
 
             while total_time < min_run_time:

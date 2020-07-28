@@ -23,5 +23,17 @@ TORCH_API mobile::Module _load_for_mobile(
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt);
+
+TORCH_API std::map<std::string, at::Tensor> _load_mobile_data(
+    std::istream& in,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API std::map<std::string, at::Tensor> _load_mobile_data(
+    const std::string& filename,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API std::map<std::string, at::Tensor> _load_mobile_data(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device = c10::nullopt);
 } // namespace jit
 } // namespace torch

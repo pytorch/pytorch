@@ -142,6 +142,28 @@ at::Tensor upsample_nearest2d_vulkan(
   return output;
 }
 
+at::Tensor vulkan_adaptive_avg_pool2d(
+    const at::Tensor& input,
+    IntArrayRef outputSize) {
+  TORCH_INTERNAL_ASSERT(
+      input.dim() == 4,
+      "vulkan_adaptive_avg_pool2d expects 4-dimensional input");
+  auto& x = vtensor_from_vulkan(input);
+  auto inputSize = input.sizes();
+  auto in = inputSize[0];
+  auto ic = inputSize[1];
+  auto ih = inputSize[2];
+  auto iw = inputSize[3];
+
+  auto oh = outputSize[0];
+  auto ow = outputSize[1];
+  Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
+  VulkanTensor& y = vtensor_from_vulkan(output);
+  y.allocate_storage();
+  vulkan::detail::adaptive_avg_pool2d(y, x, ih, iw, oh, ow, in, ic);
+  return output;
+}
+
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   VulkanTensor& x = vtensor_from_vulkan(self);
   VulkanTensor& y = vtensor_from_vulkan(other);
