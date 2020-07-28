@@ -412,6 +412,7 @@ class _DistTestBase(object):
 
         # Explicitly pass world size to the barrier because we've
         # just destroyed any state in torch.distributed.
+        WORLD_SIZE = os.environ["WORLD_SIZE"]
         self._barrier(wait_for=int(WORLD_SIZE))
 
         # Reinitialize global process group
