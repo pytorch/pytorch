@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-
 namespace at { namespace native {
 
 std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
