@@ -893,32 +893,6 @@ void testGPU_FusionEquality() {
   TORCH_CHECK(!neg1->sameAs(neg2));
 }
 
-void testGPU_FusionReplaceAll() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  Float* f0 = new Float();
-  Float* f1 = new Float{1.f};
-  Float* f2 = new Float{2.f};
-  Float* f3 = new Float();
-  Float* f4 = static_cast<Float*>(add(f1, f0));
-
-  // replace the output f4 with f3
-  ReplaceAll::instancesOf(f4, f3);
-  // f3 should now have an origin function
-  TORCH_CHECK(fusion.origin(f3) != nullptr);
-
-  // Should have removed f4 completely so we shouldn't have any other expr than
-  // f3 construction
-  TORCH_CHECK(fusion.exprs().size() == 1);
-
-  // Replace constant Float's of value 1.f with 2.f
-  ReplaceAll::instancesOf(f1, f2);
-  BinaryOp* bop = static_cast<BinaryOp*>(fusion.origin(f3));
-  // make sure the binary op (origin of f3) actually changed to 2.f
-  TORCH_CHECK(static_cast<Float*>(bop->lhs())->sameAs(new Float{2.f}));
-}
-
 void testGPU_FusionDependency() {
   Fusion fusion;
   FusionGuard fg(&fusion);
