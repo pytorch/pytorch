@@ -55,11 +55,6 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
   return { permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims()) };
 }
 
-std::vector<VmapPhysicalView>
-MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
-  TORCH_INTERNAL_ASSERT(false, "NYI");
-}
-
 int64_t VmapPhysicalView::numBatchDims() const {
   return levels_.count();
 }
@@ -184,6 +179,63 @@ static Tensor alignBatchDimsAtFront(
     level++;
   }
   return physical_tensor.view(aligned_sizes);
+}
+
+// The algorithm is as follows:
+// 1. Figure out what all of the collective levels in `logical_tensors` is.
+// 2. Move all batch dims to the front of the tensors and add extra dims
+//    of size 1. At this point, every tensor will have a dimension for
+//    each of the collective levels.
+// 3. Compute the batch_sizes.
+// 4. Expand each physical tensor so that they have output batch size equal
+//    to `batch_sizes`
+VmapPhysicalViewVec
+MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
+  // Figure out all of the collective vmap levels in `logical_tensors`.
+  std::bitset<kVmapNumLevels> collective_levels;
+  for (const auto& logical_tensor : logical_tensors) {
+    auto* batched = maybeGetBatched(logical_tensor);
+    if (batched) {
+      collective_levels |= createLevelsBitset(batched->bdims());
+    }
+  }
+
+  // Populate physical_tensors.
+  // This contains a list of regular (non-Batched) Tensors where all of the
+  // batch dims have been moved to the front of the tensor. Any previously
+  // non-existing batch dims get added to the tensors as new dimensions of size 1.
+  std::vector<Tensor> physical_tensors;
+  int64_t num_batch_dims = collective_levels.count();
+  for (const auto& logical_tensor : logical_tensors) {
+    auto requested_example_dim = /*logical_dim*/logical_tensor.dim();
+    auto physical_tensor = alignBatchDimsAtFront(
+        logical_tensor, collective_levels, requested_example_dim);
+    physical_tensors.push_back(std::move(physical_tensor));
+  }
+
+  // Compute batch_sizes
+  VmapDimVector batch_sizes(num_batch_dims, 1);
+  for (const auto& physical_tensor : physical_tensors) {
+    auto physical_sizes = physical_tensor.sizes();
+    for (int64_t dim = 0; dim < num_batch_dims; dim++) {
+      if (physical_sizes[dim] != 1) {
+        batch_sizes[dim] = physical_sizes[dim];
+      }
+    }
+  }
+
+  // Expand each physical_tensor so that it has batch sizes `batch_sizes`
+  VmapPhysicalViewVec result;
+  for (const auto& physical_tensor : physical_tensors) {
+    VmapDimVector expanded_size(batch_sizes.begin(), batch_sizes.end());
+    auto physical_sizes = physical_tensor.sizes();
+    expanded_size.insert(
+        expanded_size.end(),
+        physical_sizes.begin() + num_batch_dims,
+        physical_sizes.end());
+    result.emplace_back(physical_tensor.expand(expanded_size), collective_levels);
+  }
+  return result;
 }
 
 static std::pair<std::bitset<kVmapNumLevels>,int64_t>
