@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 namespace at { namespace native {
-
+namespace {
 std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
     return t.layout() == at::kStrided;
@@ -17,5 +17,5 @@ std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar sca
   }
   return result;
 }
-
+}
 }} // namespace at::native
