@@ -68,7 +68,41 @@ class TestForeach(TestCase):
         for t in tensors:
             self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_add_list_same_size_tensors(self, device, dtype):
+        N = 20
+        H = 20
+        W = 20
+        tensors1 = []
+        tensors2 = []
+        for _ in range(N):
+            tensors1.append(torch.zeros(H, W, device=device, dtype=dtype))
+            tensors2.append(torch.ones(H, W, device=device, dtype=dtype))
 
+
+        res = torch._foreach_add(tensors1, tensors2)
+        for t in res:
+            #if dtype == torch.bool and device == 'cpu':
+            #    dtype = torch.int64
+            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_add_list__same_size_tensors(self, device, dtype):
+        N = 20
+        H = 20
+        W = 20
+        tensors1 = []
+        tensors2 = []
+        for _ in range(N):
+            tensors1.append(torch.zeros(H, W, device=device, dtype=dtype))
+            tensors2.append(torch.ones(H, W, device=device, dtype=dtype))
+
+
+        torch._foreach_add_(tensors1, tensors2)
+        for t in tensors1:
+            #if dtype == torch.bool and device == 'cpu':
+            #    dtype = torch.int64
+            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
 
 instantiate_device_type_tests(TestForeach, globals())
 
