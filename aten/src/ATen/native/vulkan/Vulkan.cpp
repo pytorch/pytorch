@@ -989,7 +989,8 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
     int32_t w;
     int32_t h;
   };
-  ConstBlock constBlock{image.w(), image.h()};
+  ConstBlock constBlock{static_cast<int32_t>(image.w()),
+                        static_cast<int32_t>(image.h())};
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
@@ -1050,7 +1051,8 @@ void copy_image_to_buffer(
     int32_t w;
     int32_t h;
   };
-  ConstBlock constBlock{image.w(), image.h()};
+  ConstBlock constBlock{static_cast<int32_t>(image.w()),
+                        static_cast<int32_t>(image.h())};
   VBuffer constBuffer =
       makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
 
