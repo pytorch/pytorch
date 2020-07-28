@@ -272,7 +272,7 @@ class CudaFusionManager {
 
   std::vector<at::Tensor> dimSortOutputs(
       const std::shared_ptr<Graph>& graph,
-      const std::vector<at::Tensor> outputs) {
+      const std::vector<at::Tensor>& outputs) {
     if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
       return outputs;
     }
@@ -287,7 +287,8 @@ class CudaFusionManager {
 
     std::vector<at::Tensor> permuted_outputs;
     TORCH_INTERNAL_ASSERT(outputs.size() == graph->outputs().size());
-    for (auto output : outputs) {
+    permuted_outputs.reserve(outputs.size());
+    for (const auto& output : outputs) {
       permuted_outputs.emplace_back(output.permute(restore_strategy));
     }
     return permuted_outputs;
@@ -313,7 +314,7 @@ class CudaFusionManager {
 
     std::shared_ptr<Graph> copy = graph->copy();
 
-    auto type_permute_fn = [&](TensorTypePtr type) {
+    auto type_permute_fn = [&](const TensorTypePtr& type) {
       // std::vector<c10::ShapeSymbol> vec_shape_symbol =
       // type->symbolic_sizes().sizes().value();
       auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
