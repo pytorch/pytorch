@@ -9,8 +9,6 @@ from torch.testing._internal.common_device_type import \
 
 
 # Returns a tensor of the requested shape, dtype, and device
-# Requesting a half CPU tensor returns a float CPU tensor with
-# values representable by a half.
 # Initialization uses randint for non-float types and randn for float types.
 def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
     # Returns a tensor filled with ones
