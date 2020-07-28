@@ -479,7 +479,7 @@ class TestVmapAPI(TestCase):
         self.assertEqual(result, x - y.view(100, 10, 10, 1))
 
     def test_fallback_masked_fill(self):
-        # NB: One day we will implement a batching rule for index_add
+        # NB: One day we will implement a batching rule for masked_fill
         # If/when we do, this test should be replaced to test the fallback
         # path on another operator to avoid bitrot.
         def run_test(batch_size):

@@ -27,9 +27,6 @@ static bool areAllReturnsTensors(const FunctionSchema& schema) {
 }
 
 static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
-  for (const auto& arg : schema.arguments()) {
-    std::cout << arg.type() << std::endl;
-  }
   return std::any_of(
       schema.arguments().begin(),
       schema.arguments().end(),
@@ -38,25 +35,28 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
 
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
-  auto num_returns = op.schema().returns().size();
+  const auto num_returns = schema.returns().size();
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
               "Batching rule not implemented for ", schema, "; ",
               "the fallback path doesn't work on in-place or view ops.");
   TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
-              "Batching rule not implemented for ", op.schema(), ". ",
+              "Batching rule not implemented for ", schema, ". ",
               "We could not generate a fallback.");
   TORCH_CHECK(num_returns == 1,
-              "Batching rule not implemented for ", op.schema(), ". ",
+              "Batching rule not implemented for ", schema, ". ",
               "We do not yet support operations with multiple returns.");
-  TORCH_WARN("Batching rule not implemented for ", op.schema(), " falling back "
+  TORCH_WARN("Batching rule not implemented for ", schema, " falling back "
              "to slow (for loop and stack) implementation");
 
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments = torch::jit::last(stack, num_arguments);
+
   // Figure out which arguments are BatchedTensor. Save them to a vector.
-  // For each BatchedTensor, also record what position of `stack` they came from.
-  std::vector<Tensor> batched_tensor_inputs;
+  // For each BatchedTensor, also record what position of `arguments` they came from.
+  SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
-  for (int64_t idx = 0; idx < stack->size(); ++idx) {
-    const auto& ivalue = (*stack)[idx];
+  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+    const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
       continue;
     }
@@ -88,54 +88,49 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       1,
       std::multiplies<int64_t>());
 
-  // Populate `num_batches` number of torch::jit::Stack, one for each computation.
-  std::vector<torch::jit::Stack> unbatched_stacks(num_batches);
-  auto pushToEachStack = [&](const auto& ivalue) {
-    for (auto& stack : unbatched_stacks) {
-      torch::jit::push(stack, ivalue);
-    }
-  };
-  auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
-	auto input_physical_views_iter = input_physical_views.begin();
-  for (int64_t idx = 0; idx < stack->size(); ++idx) {
-    const auto& ivalue = (*stack)[idx];
-    if (idx != *batched_tensor_inputs_pos_iter) {
-      // ivalue isn't a BatchedTensor
-      pushToEachStack(ivalue);
-      continue;
-    }
-    // ivalue is a BatchedTensor
-    const auto& physical_view_for_ivalue = *input_physical_views_iter;
-    for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
-      auto index = computeIndex(linear_idx, batch_sizes);
-      torch::jit::push(
-          unbatched_stacks[linear_idx],
-          physical_view_for_ivalue.tensor().index(index));
-    }
-    batched_tensor_inputs_pos_iter++;
-    input_physical_views_iter++;
-  }
+  // Strategy: For each batch, we are going to push slices (where applicable)
+  // of the arguments onto `working_stack`, call `op`, and store the result in
+  // `output_shards`.
+  torch::jit::Stack working_stack;
+  std::vector<Tensor> output_shards;
+  output_shards.reserve(num_batches);
 
-  // Call the operation once for batch
-  for (auto& stack : unbatched_stacks) {
-    op.callBoxed(&stack);
+  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+    auto index = computeIndex(linear_idx, batch_sizes);
+    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    auto input_physical_views_iter = input_physical_views.begin();
+    for (int64_t arg_idx = 0; arg_idx < arguments.size(); ++arg_idx) {
+      const auto& ivalue = arguments[arg_idx];
+      if (arg_idx != *batched_tensor_inputs_pos_iter) {
+        // ivalue isn't a BatchedTensor
+        torch::jit::push(&working_stack, ivalue);
+        continue;
+      }
+      // ivalue is a BatchedTensor
+      const auto& physical_view_for_ivalue = *input_physical_views_iter;
+      torch::jit::push(
+          &working_stack,
+          physical_view_for_ivalue.tensor().index(index));
+      batched_tensor_inputs_pos_iter++;
+      input_physical_views_iter++;
+    }
+
+    op.callBoxed(&working_stack);
+
+    // We assume there is a single tensor return
+    output_shards.emplace_back(torch::jit::pop(&working_stack).toTensor());
   }
 
   // Stack the tensors together to form the result.
-  stack->clear();
-  std::vector<Tensor> output_shards;
-  for (const auto& stack : unbatched_stacks) {
-    TORCH_INTERNAL_ASSERT(stack.size() == 1)
-    output_shards.push_back(stack[0].toTensor());
-  }
   auto flat_output = at::stack(output_shards);
   VmapDimVector output_sizes(batch_sizes);
   output_sizes.insert(
       output_sizes.end(),
       flat_output.sizes().begin() + 1,
       flat_output.sizes().end());
+  torch::jit::drop(stack, num_arguments);
   torch::jit::push(
-      *stack,
+      stack,
       input_physical_views.front().newLogicalFromPhysical(flat_output.view(output_sizes)));
 }
 
