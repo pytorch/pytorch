@@ -36,15 +36,12 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
 
-  printf("\n new tensor");
   for (decltype(tensor_type->dim().value()) i = 0;
        i < tensor_type->dim().value();
        i++) {
-    printf("\n\t cur dim: %ld, size: %ld", i, tensor_type->sizes()[i].value());
     if (tensor_type->sizes()[i].has_value() &&
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
-      printf(" broadcasted!");
       sizes.push_back(new IterDomain(
           new Int(0),
           new Int(1),
@@ -72,7 +69,6 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
         contig_info.push_back(false);
       }
     }
-    printf("\n\t cur dim: %ld, contig: %d", i, contig_info[i]?1:0);
   }
 
   domain_ = new TensorDomain(sizes, contig_info);

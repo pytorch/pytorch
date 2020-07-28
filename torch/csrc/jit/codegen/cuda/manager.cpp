@@ -65,9 +65,7 @@ class CudaFusionManager {
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
     // is exactly what we wanted.
-    std::cout << "\nprior to canonical\n" << *graph << std::endl;
     Canonicalize(graph, false);
-    std::cout << "\nafter canonical\n" << *graph << std::endl;
     auto repr = graph->toString(false);
 
     // create new graph_cache_ entry;
@@ -132,10 +130,7 @@ class CudaFusionManager {
     for (const auto& input : graph->inputs()) {
       // only check tensor types;
       if (auto input_type = input->type()->cast<TensorType>()) {
-        //printf("\nlook at inputs:\n");
-        //debugPrint(input_type);
         if (!input_type->dim().has_value()) {
-          printf("early termination");
           // early termination when detecting undefined tensor;
           return TensorType::get()->withUndefined();
         }
@@ -147,8 +142,6 @@ class CudaFusionManager {
         } else {
           acc_type = input_type;
         }
-        //printf("\nacc type\n");
-        //debugPrint(acc_type);
       }
     }
     return acc_type;
@@ -156,7 +149,6 @@ class CudaFusionManager {
 
   void debugPrint(TensorTypePtr type) {
     if (auto sizes = type->symbolic_sizes().sizes()) {
-      printf("size: ");
       //for (const auto& shape_symbol : sizes.value()) {
       int rank = static_cast<int>(sizes->size());
       for (int i = 0; i < rank; i++) {
@@ -287,13 +279,11 @@ class CudaFusionManager {
 			  	//       added;
  			    if ((*stride_properties)[i]->contiguous_.has_value() &&
               (*stride_properties)[i]->contiguous_.value()) {
-            printf("\ncollaping %d", i);
             // contiguous flag is true for non-fast-changing-dimension (non-fcd)
             // we could collapse it with neighboring dimension, hence we
  			  		// increase the counter.
 			  		num_collapsed_dims++;
           } else {
-            printf("\nnot collaping %d", i);
             // non-contiguous dimension expected next, push a new entry to collapsed_dims;
             collapsed_dims.emplace_back();
           }
@@ -339,9 +329,6 @@ class CudaFusionManager {
     }
     auto acc_type = extractDimensionCollapse(graph);
 
-    printf("\nacc_type");
-    debugPrint(acc_type);
-
     if (!acc_type->dim().has_value()) {
       return inputs.vec();
     }
@@ -349,10 +336,6 @@ class CudaFusionManager {
     auto strategy = getSortStrideScheme(acc_type);
     // TODO: early return if permutation is no-op;
 
-    printf("\n ==== strategy: permute dims");
-    for (const auto& dim : strategy) {
-      printf("%ld, ", dim);
-    }
     std::vector<IValue> permuted_inputs;
     for (const auto& input : inputs) {
       if (input.isTensor()) {
@@ -562,7 +545,6 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     // This is needed because our current broadcast on size-1 dimension 
     if (!IsNewExecutorEnabled()) {
       EraseShapeInformation(graph);
-      std::cout << "\nerased shape\n" << *graph << std::endl;
       for (size_t i = 0; i < nInputs; i++) {
         graph->inputs()[i]->setType(inputs[i].type());
       }
@@ -571,7 +553,6 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       // types in order to support fp16, where we cast input to fp32 and output
       // back to fp16.
       TypePropagate(graph);
-      std::cout << "\npropogated Type\n" << *graph << std::endl;
     }
 
     auto outputs =

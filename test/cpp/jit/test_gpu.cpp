@@ -1217,8 +1217,6 @@ void testGPU_FusionSimplePWise() {
   int nDims = 3;
 
   // Set up your input tensor views
-  // TensorView* tv0 = makeTensorWithContig(nDims, {true, true, true});
-  // TensorView* tv1 = makeTensorWithContig(nDims, {false, true, true});
   TensorView* tv0 = makeContigTensor(nDims);
   TensorView* tv1 = makeContigTensor(nDims);
 
