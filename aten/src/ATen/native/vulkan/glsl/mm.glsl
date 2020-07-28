@@ -11,7 +11,6 @@ layout(set = 0, binding = 3) uniform constBlock {
   int K;
 }
 uConstBlock;
-layout(set = 0, binding = 4) uniform mediump sampler3D uT;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
@@ -26,7 +25,6 @@ void main() {
       vec4 m2ki = texelFetch(uM2, ivec3(pos.x, ki, pos.z), 0);
       mmv += m1ki * m2ki;
     }
-    vec4 tv = texelFetch(uT, pos, 0);
-    imageStore(uOutput, pos, uConstBlock.beta * tv + uConstBlock.alpha * mmv);
+    imageStore(uOutput, pos, uConstBlock.alpha * mmv);
   }
 }
