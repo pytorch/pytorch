@@ -42,10 +42,12 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
     const int dilation_h, const int dilation_w, scalar_t* top_data,
     int64_t* top_mask) {
   CUDA_KERNEL_LOOP(index, nthreads) {
-    int pw = index % pooled_width;
-    int ph = (index / pooled_width) % pooled_height;
-    int c = (index / pooled_width / pooled_height) % channels;
-    int n = index / pooled_width / pooled_height / channels;
+    int n = index;
+    int temp = index / pooled_width;
+    const int pw = n - temp * pooled_width; n = temp; temp /= pooled_height;
+    const int ph = n - temp * pooled_height; n = temp; temp /= channels;
+    const int c = n - temp * channels; n = temp; // temp /= 1;
+
     int hstart = ph * stride_h - pad_h;
     int wstart = pw * stride_w - pad_w;
     int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
@@ -175,7 +177,7 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
     scalar_t* bottom_diff) {
   CUDA_KERNEL_LOOP(index, height*width) {
     int h = index / width;
-    int w = index % width;
+    int w = index - h * width;
     int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
     int phend = p_end(h, pad_h, pooled_height, stride_h);
     int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);
