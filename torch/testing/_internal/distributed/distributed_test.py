@@ -2361,7 +2361,7 @@ class _DistTestBase(object):
         BACKEND != "nccl" and BACKEND != "gloo",
         "Only NCCL and GLOO backend support DistributedDataParallel",
     )
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
     def test_DistributedSampler_padding(self):
         # Tests padding of distributed sampler.
         world_size = dist.get_world_size()
