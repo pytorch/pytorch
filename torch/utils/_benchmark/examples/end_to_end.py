@@ -26,8 +26,8 @@ import textwrap
 
 import numpy as np
 import torch
-from op_fuzzers import unary
-from utils import Timer, Measurement
+from torch.utils._benchmark.op_fuzzers import unary
+from torch.utils._benchmark import Timer, Measurement
 
 
 _MAIN, _SUBPROCESS = "main", "subprocess"

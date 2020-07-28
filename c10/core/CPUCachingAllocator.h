@@ -4,10 +4,10 @@
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace c10 {
 
@@ -26,8 +26,8 @@ class CPUCachingAllocator {
     // 1. If an allocated memory pointer exists in allocation_map_ then
     //    it must not exist in available_map_, and vice-e-versa.
     // 2. All the pointers in available_map_ must be unique.
-    std::unordered_map<void*, size_t> allocation_map_;
-    std::unordered_map<size_t, std::deque<void*>> available_map_;
+    ska::flat_hash_map<void*, size_t> allocation_map_;
+    ska::flat_hash_map<size_t, std::deque<void*>> available_map_;
     inline void* allocate_and_cache(const size_t bytes);
     inline void* use_cached(const size_t bytes);
   public:

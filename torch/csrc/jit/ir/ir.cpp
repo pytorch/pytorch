@@ -1595,6 +1595,21 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
   return n;
 }
 
+Node* Graph::createEnumName(Value* e) {
+  e->type()->expect<EnumType>();
+  assert(e->type()->cast<EnumType>());
+  auto n = create(prim::EnumName, {e});
+  n->output()->setType(StringType::get());
+  return n;
+}
+
+Node* Graph::createEnumValue(Value* e) {
+  auto enum_type = e->type()->expect<EnumType>();
+  auto n = create(prim::EnumValue, {e});
+  n->output()->setType(enum_type->getValueType());
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
