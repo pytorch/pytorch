@@ -1,7 +1,7 @@
 #include <stack>
 
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
@@ -33,19 +33,22 @@ namespace jit {
 //
 // After (generic case):
 //
-// %n = prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
+// %n =
+// prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
 //
-void hoistConvPackedParams(Module& rootModule, Node* getConvPackedParamsNode,
-    const std::string& prefix, int& nameUniqueCounter) {
-
+void hoistConvPackedParams(
+    Module& rootModule,
+    Node* getConvPackedParamsNode,
+    const std::string& prefix,
+    int& nameUniqueCounter) {
   auto method = rootModule.get_method("forward");
   auto graph = method.graph();
   Value* rootModuleAsValue = graph->inputs()[0];
 
   // get a path from root module to conv module
   Value* convModuleAsValue = getConvPackedParamsNode->inputs()[0];
-  std::vector<std::string> rootToConvPath = getModuleAccessPath(
-    convModuleAsValue, rootModuleAsValue);
+  std::vector<std::string> rootToConvPath =
+      getModuleAccessPath(convModuleAsValue, rootModuleAsValue);
 
   // get a module object representing the conv
   Module convModule = findChildModule(rootModule, rootToConvPath);
@@ -88,22 +91,23 @@ void HoistConvPackedParams(script::Module& m) {
   int nameUniqueCounter = 0;
 
   while (!blocks_to_visit.empty()) {
-
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
 
     for (Node* n : b->nodes()) {
       // make sure this node is fetching {foo}.{_packed_params}
-      bool isGetPackedParamsNode = n->kind() == prim::GetAttr &&
-        n->s(attr::name) == "_packed_params";
+      bool isGetPackedParamsNode =
+          n->kind() == prim::GetAttr && n->s(attr::name) == "_packed_params";
       if (isGetPackedParamsNode) {
-
         // make sure the foo in {foo}.{_packed_params} is a quantized conv
         c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
-        bool moduleNameIsQuantizedConv = moduleName.has_value() && (
-          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
-          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
-          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv3d");
+        bool moduleNameIsQuantizedConv = moduleName.has_value() &&
+            (moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+             moduleName.value() ==
+                 "__torch__.torch.nn.quantized.modules.conv.Conv3d");
 
         if (moduleNameIsQuantizedConv) {
           GRAPH_UPDATE("Hoisting ", *n, " to root module.");
@@ -118,7 +122,6 @@ void HoistConvPackedParams(script::Module& m) {
     } // for
 
   } // while
-
 }
 
 } // namespace jit
