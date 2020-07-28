@@ -235,14 +235,14 @@ TensorInfo::TensorInfo(const QTensorProto& t)
 } // namespace details
 
 template <>
-std::vector<onnxTensorDescriptorV1> OnnxifiOp<CPUContext>::
-    buildInitializationList(
-        Workspace* ws,
-        const std::vector<std::string>& initializers,
-        std::vector<std::string>* weight_names,
-        std::vector<std::vector<uint64_t>>* weight_shapes,
-        std::vector<std::vector<float>>* all_scales,
-        std::vector<std::vector<int32_t>>* all_offsets) const {
+std::vector<onnxTensorDescriptorV1>
+OnnxifiOp<CPUContext>::buildInitializationList(
+    Workspace* ws,
+    const std::vector<std::string>& initializers,
+    std::vector<std::string>* weight_names,
+    std::vector<std::vector<uint64_t>>* weight_shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<int32_t>>* all_offsets) const {
   std::unordered_set<std::string> initialization_list(
       initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -539,8 +539,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    traces_.reset();
     if (enable_tracing_) {
-      traces_.reset();
       traces_ = std::shared_ptr<onnxTraceEventList>(
           new onnxTraceEventList(), [this](onnxTraceEventList* p) {
             if (p && onnxReleaseTraceEventsPointer_) {
