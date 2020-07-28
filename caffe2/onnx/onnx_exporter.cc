@@ -258,6 +258,8 @@ void revertRenamedExternalOutputForIfOp(
   ArgumentHelper helper(*if_op);
   Argument *then_arg = nullptr, *else_arg = nullptr;
 
+  revertRenamedExternalOutput(if_op, renamed_external_outputs);
+
   if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
     then_arg = getArgumentFromName(if_op, "then_net");
     NetDef* net = then_arg->mutable_n();
