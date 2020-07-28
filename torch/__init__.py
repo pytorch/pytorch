@@ -1,9 +1,9 @@
 
 r"""
-The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
-Tensors and arbitrary types, and other useful utilities.
+Torch is a scientific computing framework with wide support for 
+machine learning algorithms that puts GPUs first. It is easy to
+use and efficient, thanks to an easy and fast scripting language,
+LuaJIT, and an underlying C/CUDA implementation.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
