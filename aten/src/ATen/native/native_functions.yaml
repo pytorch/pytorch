@@ -1988,6 +1988,7 @@
     CPU: mm_cpu
     CUDA: mm_cuda
     SparseCPU, SparseCUDA: _sparse_mm
+    Vulkan: vulkan_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

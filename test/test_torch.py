@@ -275,85 +275,6 @@ class AbstractTestCases:
             self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
             self.assertIsNotNone(torch.Tensor().new().storage())
 
-        def _testSelection(self, torchfn, mathfn, skip_indices=False):
-            # contiguous
-            m1 = torch.randn(100, 100)
-            res1 = torchfn(m1)
-            res2 = m1[0, 0]
-            for i, j in iter_indices(m1):
-                res2 = mathfn(res2, m1[i, j])
-            self.assertEqual(res1, res2)
-
-            # non-contiguous
-            m1 = torch.randn(10, 10, 10)
-            m2 = m1[:, 4]
-            res1 = torchfn(m2)
-            res2 = m2[0, 0]
-            for i, j in iter_indices(m2):
-                res2 = mathfn(res2, m2[i][j])
-            self.assertEqual(res1, res2)
-
-            # with indices
-            if not skip_indices:
-                m1 = torch.randn(100, 100)
-                res1val, res1ind = torchfn(m1, 1, False)
-                res2val = m1[:, 0:1].clone().squeeze()
-                res2ind = res1ind.clone().fill_(0)
-                for i, j in iter_indices(m1):
-                    if mathfn(res2val[i], m1[i, j]) != res2val[i]:
-                        res2val[i] = m1[i, j]
-                        res2ind[i] = j
-
-                maxerr = 0
-                for i in range(res1val.size(0)):
-                    maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
-                    self.assertEqual(res1ind[i], res2ind[i])
-                self.assertLessEqual(abs(maxerr), 1e-5)
-
-            # NaNs
-            for index in (0, 4, 99):
-                m1 = torch.randn(100)
-                m1[index] = nan
-                res1val, res1ind = torch.max(m1, 0)
-                self.assertTrue(math.isnan(res1val))
-                self.assertEqual(res1ind, index)
-                res1val = torchfn(m1)
-                self.assertTrue(math.isnan(res1val))
-
-            # Bool
-            m1 = torch.tensor([True, False, True], dtype=torch.bool)
-            res1 = torchfn(m1)
-            res2 = m1[0]
-            for i in iter_indices(m1):
-                res2 = mathfn(res2, m1[i])
-            self.assertEqual(res1, res2)
-
-            # Long
-            m1 = torch.LongTensor(100).random_(-1000, 1000)
-            res1 = torchfn(m1)
-            res2 = m1[0]
-            for i in iter_indices(m1):
-                res2 = mathfn(res2, m1[i])
-            self.assertEqual(res1, res2)
-
-
-        def test_max(self):
-            self._testSelection(torch.max, max)
-
-        def test_min(self):
-            self._testSelection(torch.min, min)
-
-        def test_min_max(self):
-            # TODO: implement indices, in a future PR
-            # min correctness
-            self._testSelection(lambda x: torch._min_max(x)[0],
-                                lambda x, y: min(x, y),
-                                skip_indices=True)
-            # max correctness
-            self._testSelection(lambda x: torch._min_max(x)[1],
-                                lambda x, y: max(x, y),
-                                skip_indices=True)
-
         def test_dim_reduction_uint8_overflow(self):
             example = [[-1, 2, 1], [5, 3, 6]]
             x = torch.tensor(example, dtype=torch.uint8)
@@ -5496,6 +5417,41 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    @onlyOnCPUAndCUDA
+    def test_tensor_ctor_device_inference(self, device):
+        torch_device = torch.device(device)
+        values = torch.tensor((1, 2, 3), device=device)
+
+        # Tests tensor and as_tensor
+        # Note: warnings are suppressed (suppresses warnings)
+        for op in (torch.tensor, torch.as_tensor):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.assertEqual(op(values).device, torch_device)
+                self.assertEqual(op(values, dtype=torch.float64).device, torch_device)
+
+                if self.device_type == 'cuda':
+                    with torch.cuda.device(device):
+                        self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
+
+        # Tests sparse ctor
+        indices = torch.tensor([[0, 1, 1],
+                                [2, 0, 1],
+                                [2, 1, 0]], device=device)
+        sparse_size = (3, 3, 3)
+
+        sparse_default = torch.sparse_coo_tensor(indices, values, sparse_size)
+        self.assertEqual(sparse_default.device, torch_device)
+
+        sparse_with_dtype = torch.sparse_coo_tensor(indices, values, sparse_size, dtype=torch.float64)
+        self.assertEqual(sparse_with_dtype.device, torch_device)
+
+        if self.device_type == 'cuda':
+            with torch.cuda.device(device):
+                sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
+                                                            sparse_size, dtype=torch.float64)
+                self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.complex64, torch.complex128)
@@ -12024,6 +11980,40 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+    def _test_large_cum_fn_helper(self, x, fn):
+        x_cpu = x.cpu().float()
+        expected = fn(x_cpu)
+        actual = fn(x).cpu().float()
+        self.assertEqual(expected, actual.cpu().float())
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumsum(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = -3
+        x[1::3] = 2
+        x[2::3] = 1
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumprod(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = 8
+        x[1::3] = .25
+        x[2::3] = .5
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+
+    def test_discontiguous_out_cumsum(self, device):
+        x = torch.randn(4, 8, device=device)
+        y = torch.empty(4, 16, device=device)[:, ::2]
+        out = torch.cumsum(x, 0)
+        torch.cumsum(x, 0, out=y)
+        self.assertFalse(y.is_contiguous())
+        self.assertEqual(out, y, atol=0., rtol=0.)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -15485,6 +15475,72 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
         self.assertTrue(torch.min(a).item() == -inf)
 
+    def _test_minmax_helper(self, torchfn, reffn, device, dtype, skip_indices=False):
+        def create_input(shape, device, dtype):
+            if dtype.is_floating_point:
+                return torch.randn(*shape, device=device, dtype=dtype)
+            else:
+                low = 0 if dtype == torch.bool else -1000
+                high = 2 if dtype == torch.bool else 1000
+                return torch.randint(low, high, shape, device=device, dtype=dtype)
+        x = create_input((100, 100), device, dtype)
+        self.compare_with_numpy(torchfn, reffn, x)
+        # non contiguous
+        x = create_input((10, 10, 10), device, dtype)
+        x = x[:, 4]
+        self.compare_with_numpy(torchfn, reffn, x)
+        # indices
+        if not skip_indices:
+            size = 5
+            x = create_input((size, size), device, dtype)
+            inputs = (x, x.t())
+            dims = (0, 1)
+            for xinp, d in product(inputs, dims):
+                self.compare_with_numpy(lambda x: torchfn(x, d, False)[0], lambda x: reffn(x, d, keepdims=False), xinp)
+                v, i = torchfn(xinp, d, False)
+                if d == 1:
+                    self.assertEqual(xinp[torch.arange(size), i], v, atol=0, rtol=0)
+                else:
+                    self.assertEqual(xinp[i, torch.arange(size)], v, atol=0, rtol=0)
+        # nan
+        if dtype.is_floating_point:
+            for index in (0, 4, 99):
+                x = create_input((100,), device, dtype)
+                x[index] = nan
+                if not skip_indices:
+                    v, i = torchfn(x, 0)
+                    self.assertEqual(v, nan)
+                    self.assertEqual(i, index)
+                self.assertEqual(torchfn(x), nan)
+
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
+    @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_max(self, device, dtype):
+        self._test_minmax_helper(torch.max, np.amax, device, dtype)
+
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
+    @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_min(self, device, dtype):
+        self._test_minmax_helper(torch.min, np.amin, device, dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypesIfCPU(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_minmax(self, device, dtype):
+        if self.device_type == "cuda":
+            # FIXME when minmax is implemented on cuda
+            with self.assertRaises(RuntimeError):
+                self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
+            return
+
+        self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
+        self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
+
     def test_bincount(self, device):
         # negative input throws
         with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
@@ -16919,16 +16975,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(y, z)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
         res1 = m1.clone()
-        q = 2.1
+        q = 3
         res1[:, 3].fmod_(q)
         res2 = m1.clone()
         for i in range(m1.size(1)):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
+
+        zero = torch.zeros_like(m1)
+        if dtype in torch.testing.get_all_int_dtypes():
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(0)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(zero)
+        else:
+            self.assertTrue(torch.all(m1.fmod(0).isnan()))
+            self.assertTrue(torch.all(m1.fmod(zero).isnan()))
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
@@ -17697,13 +17763,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
             a // b
-
-    @onlyCPU
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_fmod_zero(self, device, dtype):
-        a = torch.tensor([1, 0], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.fmod(a)
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
