@@ -1227,7 +1227,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     Arguments:
         obj (Any): Input object. Must be picklable.
         object_gather_list (list[Any]): Output list. On the dst rank, it should
-        be correctly sized as the size of teh group for this collective and will
+        be correctly sized as the size of the group for this collective and will
         contain the output. Must ne None on non-dst ranks. Default=None.
         dst (int, optional): Destination rank (default is 0)
         group: (ProcessGroup, optional): The process group to work on.
@@ -1380,11 +1380,14 @@ def all_gather_coalesced(output_tensor_lists,
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
     if dst == my_rank:
         if not gather_list:
-            raise ValueError("Argument ``gather_list`` must be specified "
-                            "on destination rank.")
+            raise ValueError(
+                "Argument ``gather_list`` must be specified " "on destination rank."
+            )
     elif gather_list:
-        raise ValueError("Argument ``gather_list`` must NOT be specified "
-                        "on non-destination ranks.")
+        raise ValueError(
+            "Argument ``gather_list`` must NOT be specified "
+            "on non-destination ranks."
+        )
 
 
 def gather(tensor,
