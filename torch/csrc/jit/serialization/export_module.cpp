@@ -14,16 +14,12 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-// #include <torch/csrc/jit/passes/quantization/helper.h>
-
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
-#include <iostream>
-// #include <queue>
 #include <stack>
 #include <string>
 #include <vector>
@@ -71,11 +67,10 @@ c10::IValue getFunctionTuple(
 
   Inline(*graph);
   if (save_debug_info) {
-    ReconstructScopes(const_cast<Module&>(module), *graph, "top");
+    ReconstructScopes(module, *graph, "top");
   }
 
   torch::jit::Code code(graph, func.name());
-
   auto instructions_copy = code.instructions();
 
   // operator names

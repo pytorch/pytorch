@@ -9,11 +9,11 @@ namespace jit {
 class ReconstructScopesPass {
  public:
   ReconstructScopesPass(const Module& m, Graph& g, std::string p)
-      : root_module(&m), graph(&g), prefix(std::move(p)) {};
+      : root_module(&m), graph(&g), prefix(std::move(p)), has_duplicated_function(false) {};
   void run();
 
  private:
-  Module* root_module;
+  const Module* root_module;
   Graph* graph;
   std::string prefix;
   bool has_duplicated_function;
@@ -24,16 +24,16 @@ class ReconstructScopesPass {
   void visitBlock(Block* b, const std::string& root_scope_string);
   void visitNode(Node* n, const std::string& root_scope_string);
 
-  std::string getSubModuleName(Module& module, const std::string& prefix);
-  void constructFunctionToModuleMap(Module& module);
+  std::string getSubModuleName(const Module& module, const std::string& prefix);
+  void constructFunctionToModuleMap(const Module& module);
   void constructRelativeNamesForModules(
-      Module& module,
+      const Module& module,
       const std::string& prefix);
 
   std::string getScopeString(const InlinedCallStackEntry& frame) const;
 };
 
-void ReconstructScopesPass::constructFunctionToModuleMap(Module& module) {
+void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
   for (auto& method : module.get_methods()) {
     Function* func_ptr = &method.function();
     if (!has_duplicated_function &&
@@ -48,7 +48,7 @@ void ReconstructScopesPass::constructFunctionToModuleMap(Module& module) {
 }
 
 std::string ReconstructScopesPass::getSubModuleName(
-    Module& module,
+    const Module& module,
     const std::string& prefix) {
   std::string moduleType = module.type()->str();
   size_t lastDotIndex = moduleType.rfind('.');
@@ -59,7 +59,7 @@ std::string ReconstructScopesPass::getSubModuleName(
 }
 
 void ReconstructScopesPass::constructRelativeNamesForModules(
-    Module& module,
+    const Module& module,
     const std::string& prefix) {
   module_names[module._ivalue()] = getSubModuleName(module, prefix);
   for (NameModule s : module.named_children()) {
@@ -134,7 +134,7 @@ void ReconstructScopesPass::run() {
   constructRelativeNamesForModules(*root_module, prefix);
 
   if (has_duplicated_function) {
-    std::cout << "There are some duplicated module instances." << std::endl;
+    std::cout << "WARNING: There are some duplicated module instances." << std::endl;
     std::cout << "Displaying only the class names of submodules." << std::endl;
   }
 
