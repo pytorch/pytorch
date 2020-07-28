@@ -157,7 +157,13 @@ static Tensor alignBatchDimsAtFront(
   auto tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
   TORCH_INTERNAL_ASSERT(tensor_example_dim <= requested_example_dim);
 
-  std::vector<int64_t> aligned_sizes(requested_levels.count() + requested_example_dim, 1);
+  if (tensor_levels == requested_levels && tensor_example_dim == requested_example_dim) {
+    // Optimization: no need to do another view if the physical tensor is
+    // already the correct shape
+    return physical_tensor;
+  }
+
+  VmapDimVector aligned_sizes(requested_levels.count() + requested_example_dim, 1);
 
   // align the example dims (non-bdims dims) first
   // aligned_sizes[-tensor_example_dim:] = tensor_sizes[-tensor_example_dim:]
