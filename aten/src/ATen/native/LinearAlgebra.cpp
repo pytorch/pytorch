@@ -962,11 +962,12 @@ Tensor mexp_impl(
       // Square
       auto mexp_scaled = at::native::compute_T18<scalar_t>(a_large_norm_scaled);
       auto mexp_buffer = at::empty_like(mexp_scaled);
+      auto s_cpu = s.to(at::kCPU);
       for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+        auto s_val = s_cpu.select(0, i).template item<int>();
         auto mexp = mexp_scaled.select(0, i);
-        while ((s.select(0, i) > 0).nonzero().numel()) {
+        for (int64_t p = 0; p < s_val; ++p) {
           mexp = at::matmul(mexp, mexp);
-          s.select(0, i) -= 1;
         }
         mexp_buffer.select(0, i).copy_(mexp);
       }
@@ -1090,7 +1091,7 @@ Tensor matrix_exp(const Tensor& a) {
       return mexp(a, false);
     }
     else { // if CUDA
-      return mexp(a, true);
+      return mexp(a, false);
     }
   }
 }
