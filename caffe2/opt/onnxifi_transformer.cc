@@ -151,7 +151,7 @@ void fetchInputsToIfOpsSubnet(NetDef* net) {
   NetDef clone(*net);
   clone.clear_op();
   for (auto& op : net->op()) {
-    if (op.type() == "If") {
+    if (op.type() == "If" || op.type() == "AsyncIf") {
       OperatorDef new_op(op);
       ArgumentHelper helper(op);
       std::set<std::string> subnet_inputs, subnet_outputs;
@@ -1405,6 +1405,10 @@ void OnnxifiTransformer::transform(
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
 
+  if (opts_.debug) {
+    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt");
+  }
+
   // Get model id and reset Onnxifi op id to 0
   model_id_ = getModelId(*pred_net);
   onnxifi_op_id_ = 0;
@@ -1474,6 +1478,7 @@ void OnnxifiTransformer::transform(
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
+  net_opt.set_type(pred_net->type());
 
   pred_net->Swap(&net_opt);
 
