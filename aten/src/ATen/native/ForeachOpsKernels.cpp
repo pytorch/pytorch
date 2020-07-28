@@ -1,5 +1,4 @@
-#include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
+#include <ATen/ATen.h>
 
 namespace at { namespace native {
 
