@@ -67,8 +67,8 @@ class TORCH_API TensorExprKernel {
   void runKernel(Stack& stack);
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
-  std::vector<ExprHandle> sizesForValue(torch::jit::Value* v);
-  std::vector<ExprHandle> inferSizesForValue(torch::jit::Value* v);
+  std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
+  std::vector<ExprHandle> inferSizesForValue(const torch::jit::Value* v);
   std::vector<ExprHandle> sizesFromVaryingShape(
       const c10::VaryingShape<int64_t>& shape);
 
@@ -114,9 +114,16 @@ class TORCH_API TensorExprKernel {
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
+  template <typename T>
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
+      const std::vector<T>& axes) {
+    auto ti = tensors_.find(v->unique());
+    if (ti != tensors_.end()) {
+      return broadcast(ti->second, axes);
+    }
+    return constant(v);
+  }
 
   Tensor* computeOneOperand(
       const std::string& name,
@@ -158,7 +165,7 @@ class TORCH_API TensorExprKernel {
           const ExprHandle&,
           const ExprHandle&)>& innerExpr);
 
-  Tensor* computeValue(torch::jit::Value* v);
+  Tensor* computeValue(const torch::jit::Value* v);
 
   void flattenTensors(BackendType backendType);
   Stmt* generateStmt(BackendType backendType);
