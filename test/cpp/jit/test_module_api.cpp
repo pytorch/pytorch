@@ -97,14 +97,14 @@ void testModuleCloneWithModuleInterface() {
     subMod2.define(method, nativeResolver());
   }
 
-  parentMod.register_module(
+  parentMod.register_attribute(
       "subMod1",
-      subMod1._ivalue(),
-      cu->get_interface("__torch__.OneInterface"));
-  parentMod.register_module(
+      cu->get_interface("__torch__.OneInterface"),
+      subMod1._ivalue());
+  parentMod.register_attribute(
       "subMod2",
-      subMod2._ivalue(),
-      cu->get_interface("__torch__.OneInterface"));
+      cu->get_interface("__torch__.OneInterface"),
+      subMod2._ivalue());
 
   parentMod.define(parentForward, nativeResolver());
 
