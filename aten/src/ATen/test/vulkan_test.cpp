@@ -134,6 +134,21 @@ TEST(VulkanTest, addmm) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, mm) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_m1 = at::rand({10, 20}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_m2 = at::rand({20, 30}, at::device(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = t_m1.mm(t_m2);
+
+  auto tv_m1 = t_m1.vulkan();
+  auto tv_m2 = t_m2.vulkan();
+  auto tv_out = tv_m1.mm(tv_m2);
+  auto t_out = tv_out.cpu();
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
 TEST(VulkanTest, clamp) {
   if (!at::vulkan::is_available())
     return;
