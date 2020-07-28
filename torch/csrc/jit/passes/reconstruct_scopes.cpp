@@ -6,8 +6,8 @@ namespace jit {
 
 class ReconstructScopesPass {
  public:
-  ReconstructScopesPass(Module& m, Graph& g, const std::string& p)
-      : root_module(&m), graph(&g), prefix(p){};
+  ReconstructScopesPass(const Module& m, Graph& g, std::string p)
+      : root_module(&m), graph(&g), prefix(std::move(p)) {};
   void run();
 
  private:
@@ -94,7 +94,7 @@ void ReconstructScopesPass::run() {
 }
 
 void ReconstructScopes(
-    Module& module,
+    const Module& module,
     Graph& g,
     const std::string& prefix = "top") {
   ReconstructScopesPass p(module, g, prefix);
