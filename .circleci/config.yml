@@ -1356,21 +1356,19 @@ jobs:
     - attach_workspace:
         at: /tmp/workspace
     - run:
-        name: Install expect
+        name: Generate netrc
         command: |
-          sudo apt-get update && sudo apt-get install -y expect
+          # set credentials for https pushing
+          cat > ~/.netrc \<<DONE
+            machine github.com
+            login pytorchbot
+            password ${GITHUB_PYTORCHBOT_TOKEN}
+          DONE
     - run:
         name: Docs push
         command: |
           pushd /tmp/workspace
-          /usr/bin/expect \<<DONE
-            spawn git push -u origin master
-            expect "Username*"
-            send "pytorchbot\n"
-            expect "Password*"
-            send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
-            expect eof
-          DONE
+          git push -u origin master
 
   pytorch_python_doc_build:
     environment:
