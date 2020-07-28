@@ -945,7 +945,7 @@ Tensor mexp_impl(
       }
     }
 
-    auto idx_large_norm = (norm >= thetas[total_n_degs - 1])
+    auto idx_large_norm = (norm >= thetas[total_n_degs - 2])
       .nonzero().squeeze(-1);
     if (idx_large_norm.numel() > 0) {
       auto a_large_norm = at::index_select(a, 0, idx_large_norm);
@@ -1086,17 +1086,8 @@ Tensor matrix_exp(const Tensor& a) {
     return mexp(a);
   }
   else {
-    auto res = at::empty(a.sizes(), a.options());
     if (a.device().type() == at::kCPU) {
-      auto res_3d = res.view({-1, res.size(-2), res.size(-1)});
-      auto const a_3d = a.view({-1, a.size(-2), a.size(-1)});
-      // iterate over matrices in a batch
-      for (int64_t i = 0; i < a_3d.size(0); ++i) {
-        res_3d.select(0, i).copy_(
-          mexp(a_3d.select(0, i))
-        );
-      }
-      return res;
+      return mexp(a, false);
     }
     else { // if CUDA
       return mexp(a, true);
