@@ -185,8 +185,8 @@ void IndexCompute::handle(Expr* e) {
 IndexCompute::IndexCompute(
     const TensorDomain* _td,
     const std::vector<Val*>& indices,
-    const std::vector<bool>& _root_contiguity)
-    : td_(_td), root_contiguity_(_root_contiguity) {
+    std::vector<bool> _root_contiguity)
+    : td_(_td), root_contiguity_(std::move(_root_contiguity)) {
   if (td_->nDims() == 0 || indices.empty()) {
     indices_.push_back(new Int(0));
     return;

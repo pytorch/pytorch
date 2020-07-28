@@ -68,7 +68,7 @@ class IndexCompute : public BackwardVisitor {
   IndexCompute(
       const TensorDomain* _td,
       const std::vector<Val*>& indices,
-      const std::vector<bool>& _root_contiguity);
+      std::vector<bool> _root_contiguity);
 
   const TensorDomain* td_;
   std::unordered_map<IterDomain*, Val*> index_map_;

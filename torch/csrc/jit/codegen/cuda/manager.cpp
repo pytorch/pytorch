@@ -124,7 +124,7 @@ class CudaFusionManager {
     return false;
   }
 
-  TensorTypePtr extractDimensionCollapse(const std::shared_ptr<Graph>& graph) {
+  TensorTypePtr mergeInputTensorType(const std::shared_ptr<Graph>& graph) {
     // run over inputs to extract common types;
     TensorTypePtr acc_type = TensorType::get();
     for (const auto& input : graph->inputs()) {
@@ -147,7 +147,7 @@ class CudaFusionManager {
     return acc_type;
   }
 
-  void debugPrint(TensorTypePtr type) {
+  void debugPrint(const TensorTypePtr& type) {
     if (auto sizes = type->symbolic_sizes().sizes()) {
       // for (const auto& shape_symbol : sizes.value()) {
       int rank = static_cast<int>(sizes->size());
@@ -203,7 +203,7 @@ class CudaFusionManager {
     return permutation;
   }
 
-  at::DimVector getSortStrideScheme(TensorTypePtr type) {
+  at::DimVector getSortStrideScheme(const TensorTypePtr& type) {
     // `permute_seq` is the returned permutation to achieve sorted stride;
     at::DimVector permute_seq;
 
@@ -244,93 +244,13 @@ class CudaFusionManager {
     return permute_seq;
   }
 
-  std::vector<std::vector<int>> getCollapsingScheme(TensorTypePtr type) {
-    // `collapsed_dims` is the returned dimension collapsing strategy;
-    std::vector<std::vector<int>> collapsed_dims;
-
-    auto sizes = type->symbolic_sizes().sizes();
-    auto stride_properties = type->stride_properties().sizes();
-
-    TORCH_INTERNAL_ASSERT(
-        sizes.has_value() && stride_properties.has_value(),
-        "unknown sizes or stride_properties, collapsing shouldn't happen");
-
-    // TODO: reuse this;
-    const int rank = static_cast<int>(sizes->size());
-
-    // stores axes with stride_index;
-    std::set<int> ordered_axes;
-
-    // TODO: this does not support broadcast yet;
-    for (int i = 0; i < rank; i++) {
-      if (auto index = (*stride_properties)[i]->stride_index_) {
-        ordered_axes.insert(*index);
-      }
-    }
-
-    collapsed_dims.emplace_back();
-    int num_collapsed_dims = 0;
-    int unallocated_axis = 0;
-    for (int i = rank - 1; i >= 0; i--) {
-      if (auto index = (*stride_properties)[i]->stride_index_) {
-        // pushing axis index to current entry in collapsed_dims;
-        collapsed_dims.back().emplace_back(*index);
-        // we can not collapse fasted changing dimension;
-        if (i != 0) {
-          // TODO: exclude reduction axes from collapsing when the support is
-          //       added;
-          if ((*stride_properties)[i]->contiguous_.has_value() &&
-              (*stride_properties)[i]->contiguous_.value()) {
-            // contiguous flag is true for non-fast-changing-dimension (non-fcd)
-            // we could collapse it with neighboring dimension, hence we
-            // increase the counter.
-            num_collapsed_dims++;
-          } else {
-            // non-contiguous dimension expected next, push a new entry to
-            // collapsed_dims;
-            collapsed_dims.emplace_back();
-          }
-        }
-      } else {
-        // no designated axis for this slot, so we push an axis with no order;
-        while (ordered_axes.count(unallocated_axis) != 0) {
-          ++unallocated_axis;
-        }
-        collapsed_dims.back().emplace_back(unallocated_axis++);
-        collapsed_dims.emplace_back();
-      }
-    }
-    return collapsed_dims;
-  }
-
-  at::Tensor dimCollapseInput(
-      const at::Tensor& tensor,
-      const std::vector<std::vector<int>>& dim_col_strategy) {
-    int collapsed_rank = dim_col_strategy.size();
-    int rank = tensor.dim();
-
-    std::vector<int64_t> sizes;
-    std::vector<int64_t> strides;
-
-    for (const auto& dims : dim_col_strategy) {
-      int size = 1;
-      for (int index : dims) {
-        size *= tensor.size(index); // accumulate size
-      }
-      sizes.emplace_back(size);
-      strides.emplace_back(tensor.stride(dims.back())); // set the stride
-    }
-    // return tensor with collapsed dimensions
-    return tensor.as_strided(sizes, strides);
-  }
-
   std::vector<IValue> dimSortInputs(
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs) {
     if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
       return inputs.vec();
     }
-    auto acc_type = extractDimensionCollapse(graph);
+    auto acc_type = mergeInputTensorType(graph);
 
     if (!acc_type->dim().has_value()) {
       return inputs.vec();
@@ -350,58 +270,13 @@ class CudaFusionManager {
     return permuted_inputs;
   }
 
-  // TODO: we are currently using output types in `graph` in order to restore
-  //       sizes from a collapsed dimension.
-  //       This is not sufficient though, given that symbolic shape could only
-  //       be resolved at run-time. We need to use shape inference (in the
-  //       context) in order to get the complete output tensor shapes prior to
-  //       dimension collapsing.
-  std::vector<at::Tensor> dimCollapseOutputs(
-      const std::shared_ptr<Graph>& graph,
-      const std::vector<at::Tensor> outputs) {
-    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
-      return outputs;
-    }
-    auto acc_type = extractDimensionCollapse(graph);
-    auto strategy = getCollapsingScheme(acc_type);
-
-    if (!acc_type->dim().has_value()) {
-      return outputs;
-    }
-
-    std::vector<at::Tensor> uncollapsed_outputs;
-    TORCH_INTERNAL_ASSERT(outputs.size() == graph->outputs().size());
-    for (int i = 0; i < static_cast<int>(outputs.size()); i++) {
-      auto output_type = graph->outputs()[i]->type()->cast<TensorType>();
-      TORCH_INTERNAL_ASSERT(output_type->isComplete());
-
-      size_t rank = *output_type->dim();
-
-      std::vector<int64_t> sizes(rank);
-      std::vector<int64_t> strides(rank);
-      int64_t cur_stride = static_cast<int64_t>(*output_type->numel());
-
-      // we go from slowest to fastest;
-      for (const auto& dims : strategy) {
-        for (int index : dims) {
-          int64_t cur_size = *output_type->sizes()[index];
-          sizes[index] = cur_size;
-          cur_stride /= cur_size;
-          strides[index] = cur_stride;
-        }
-      }
-      uncollapsed_outputs.emplace_back(outputs[i].as_strided(sizes, strides));
-    }
-    return uncollapsed_outputs;
-  }
-
   std::vector<at::Tensor> dimSortOutputs(
       const std::shared_ptr<Graph>& graph,
       const std::vector<at::Tensor> outputs) {
     if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
       return outputs;
     }
-    auto acc_type = extractDimensionCollapse(graph);
+    auto acc_type = mergeInputTensorType(graph);
     if (!acc_type->dim().has_value()) {
       return outputs;
     }
@@ -418,32 +293,6 @@ class CudaFusionManager {
     return permuted_outputs;
   }
 
-  std::shared_ptr<Graph> dimCollapseGraph(std::shared_ptr<Graph>& graph) {
-    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
-      return graph->copy();
-    }
-    auto acc_type = extractDimensionCollapse(graph);
-    auto strategy = getCollapsingScheme(acc_type);
-
-    if (!acc_type->dim().has_value()) {
-      return graph->copy();
-    }
-
-    std::shared_ptr<Graph> copy = graph->copy();
-    // TODO: copy over size 1 when we add support for broadcasting;
-    // we only need to modify rank
-    auto type_transform_fn = [&](TensorTypePtr type) {
-      return type->withDim(strategy.size());
-    };
-
-    for (auto input : copy->inputs()) {
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        input->setType(type_transform_fn(input_type));
-      }
-    }
-    return copy;
-  }
-
   // two thing need to be adjusted:
   // 1. permutation of size_ -> so we declare broadcast for size-1 dimension
   //    properly;
@@ -453,7 +302,7 @@ class CudaFusionManager {
     if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
       return graph->copy();
     }
-    auto acc_type = extractDimensionCollapse(graph);
+    auto acc_type = mergeInputTensorType(graph);
 
     if (!acc_type->dim().has_value()) {
       return graph->copy();
