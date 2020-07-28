@@ -216,7 +216,7 @@ class cudaStatus(object):
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
-        msg = _cudart.cudaGetErrorString(code).decode('utf-8')
+        msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
 
 
@@ -361,7 +361,7 @@ def device_count() -> int:
         return 0
 
 def get_arch_list() -> List[str]:
-    r"""Returns list CUDA architecutres this library was compiled for."""
+    r"""Returns list CUDA architectures this library was compiled for."""
     if not is_available():
         return []
     arch_flags = torch._C._cuda_getArchFlags()

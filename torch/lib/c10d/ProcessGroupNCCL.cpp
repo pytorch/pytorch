@@ -143,6 +143,9 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   cudaEvents_.resize(devices.size());
   ncclComms_.resize(devices.size());
+
+  futureWork_ = c10::make_intrusive<c10::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()));
 }
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
@@ -202,21 +205,36 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-// Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
+  // Call Synchronize without a timeout. We use this method to avoid adding a
+  // timeout argument to the public synchronize API.
+  synchronizeInternal(kNoTimeout);
+}
+
+void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
   }
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
+  synchronizeStreams();
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
+    // Use the passed in timeout if provided, otherwise use the default
+    // opTimeout for each WorkNCCL object.
+    std::chrono::milliseconds workTimeout =
+        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - workStartTime_) > opTimeout_) {
+              currentTimepoint - workStartTime_) > workTimeout) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -254,8 +272,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-bool ProcessGroupNCCL::WorkNCCL::wait() {
-  synchronize();
+bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
 }
@@ -288,7 +306,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateWatchdog_(false),
-      opTimeout_(opTimeout) {
+      opTimeout_(opTimeout),
+      checkFutObjs_(
+          std::make_shared<std::unordered_set<
+              std::shared_ptr<ProcessGroupNCCL::CheckFutureWork>>>(0)) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -649,6 +670,24 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
+    getFuture() {
+  return futureWork_;
+}
+
+void ncclKernelCompletionCallback(
+    cudaStream_t /* unused */,
+    cudaError_t /* unused */,
+    void* userData) {
+  auto castedUserData =
+      static_cast<ProcessGroupNCCL::CheckFutureWork*>(userData);
+
+  TORCH_CHECK(
+      castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
+
+  castedUserData->markFutureCompleted();
+};
+
 template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -686,6 +725,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
+  // Create and store a CheckFutureWork object to be used in
+  // ncclKernelCompletionCallback function.
+  auto checkFutObj = std::make_shared<ProcessGroupNCCL::CheckFutureWork>(
+      work, outputs, checkFutObjs_, checkFutObjMutex_);
+
+  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
+  checkFutObjs_->insert(checkFutObj);
+
   {
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -693,6 +740,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+
+      // Add a cudaStreamCallback on the same stream. CUDA will automatically
+      // call ncclKernelCompletionCallback once the appropriate NCCL kernel
+      // is done and workNCCL's Future work will be marked as completed
+      // using this callback.
+      cudaStreamAddCallback(
+          ncclStream, ncclKernelCompletionCallback, checkFutObj.get(), 0);
     }
   }
 

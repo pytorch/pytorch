@@ -56,6 +56,16 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const torch::jit::Value* v,
+    const std::vector<ExprHandle>& axes) {
+  auto ti = tensors_.find(v->unique());
+  if (ti != tensors_.end()) {
+    return broadcast(ti->second, axes);
+  }
+  return constant(v);
+}
+
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
@@ -88,6 +98,12 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(torch::jit::Value* v) {
     }
   }
 
+  known_sizes_[v] = inferSizesForValue(v);
+  return known_sizes_.at(v);
+}
+
+std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
+    torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::_cast_Float:
     case aten::sigmoid:
@@ -183,9 +199,30 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(torch::jit::Value* v) {
       return shape;
     }
 
+    case aten::unsqueeze: {
+      auto const& n = v->node();
+      auto shape = sizesForValue(n->input(0));
+
+      int64_t dim = constant(n->input(1)).AsNode<IntImm>()->value();
+      // From the documentation
+      // (https://pytorch.org/docs/master/generated/torch.unsqueeze.html):
+      //
+      // A dim value within the range [-input.dim() - 1, input.dim() + 1) can be
+      // used. Negative dim will correspond to unsqueeze() applied at dim = dim
+      // + input.dim() + 1.
+      if (dim < 0) {
+        dim = dim + shape.size() + 1;
+      }
+      if (dim < 0 || dim > shape.size()) {
+        throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
+      }
+
+      shape.insert(shape.begin() + dim, ExprHandle(1));
+      return shape;
+    }
+
     case aten::cat:
     case aten::slice:
-    case aten::unsqueeze:
       throw std::runtime_error(
           "Shape info is not implemented for this kind of node");
 
@@ -368,8 +405,9 @@ Tensor* TensorExprKernel::computeOneOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes)};
+            tensorOrConstant(n->inputs()[0], indices)};
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0]);
@@ -390,9 +428,10 @@ Tensor* TensorExprKernel::computeTwoOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
         };
 
         promoteInputs(inputs);
@@ -414,10 +453,11 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -444,14 +484,15 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
         // First expr is the condition, which we don't promote
-        inputs.emplace(inputs.begin(), tensorOrConstant(n->inputs()[0], axes));
+        inputs.emplace(inputs.begin(), tensorOrConstant(n->inputs()[0], indices));
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
@@ -475,10 +516,11 @@ Tensor* TensorExprKernel::computeThreeOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -507,11 +549,12 @@ Tensor* TensorExprKernel::computeFourOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
-            tensorOrConstant(n->inputs()[3], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
+            tensorOrConstant(n->inputs()[3], indices),
         };
 
         promoteInputs(inputs);
@@ -993,6 +1036,53 @@ Tensor* TensorExprKernel::computeValue(torch::jit::Value* v) {
           });
     }
 
+    case aten::unsqueeze: {
+      return Compute(
+          "aten_unsqueeze",
+          dimsFromSizes(sizesForValue(v)),
+          [this, v](const std::vector<VarHandle>& axes) {
+            auto const& n = v->node();
+            int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
+            if (dim < 0) {
+              if (axes.size() == 0) {
+                throw malformed_input("axes are zero handling unsqueeze");
+              }
+              dim += axes.size();
+            }
+            // To construct an expression for an 'unsqueezed' tensor we need to
+            // drop the DIM-th axis, i.e.
+            //    unsqueezed_v[i,j,k,l] = v[i,j,l] # dim = 2 - drop index 'k'
+            //                 0 1 2 3
+            std::vector<ExprHandle> indices;
+            int64_t i = 0;
+            for (auto a : axes) {
+              if (i++ != dim) {
+                indices.push_back(ExprHandle(a.node()));
+              }
+            }
+
+            return tensorOrConstant(n->inputs()[0], indices);
+          });
+    }
+
+    case aten::_sigmoid_backward: {
+      return computeTwoOperand(
+          "aten_sigmoid_backward",
+          v,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs * rhs * (ExprHandle(1.0f) - rhs);
+          });
+    }
+
+    case aten::_tanh_backward: {
+      return computeTwoOperand(
+          "aten_tanh_backward",
+          v,
+          [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs * (ExprHandle(1.0f) - rhs * rhs);
+          });
+    }
+
     case aten::cat: {
       return Compute(
           "aten_cat",
@@ -1019,7 +1109,6 @@ Tensor* TensorExprKernel::computeValue(torch::jit::Value* v) {
             return load;
           });
     }
-
     case aten::slice: {
       return Compute(
           "aten_slice",
@@ -1033,45 +1122,6 @@ Tensor* TensorExprKernel::computeValue(torch::jit::Value* v) {
             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
             newAxes[dim] = stride * newAxes[dim] + start;
             return tensorOrConstant(n->inputs()[0], newAxes);
-          });
-    }
-
-    case aten::unsqueeze: {
-      return Compute(
-          "aten_unsqueeze",
-          dimsFromSizes(sizesForValue(v)),
-          [this, v](const std::vector<VarHandle>& axes) {
-            auto const& n = v->node();
-            int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
-            if (dim < 0) {
-              if (axes.size() == 0) {
-                throw malformed_input("axes are zero handling unsqueeze");
-              }
-
-              dim += axes.size() - 1;
-            }
-
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            newAxes.erase(newAxes.begin() + dim);
-            return tensorOrConstant(n->inputs()[0], newAxes);
-          });
-    }
-
-    case aten::_sigmoid_backward: {
-      return computeTwoOperand(
-          "aten_sigmoid_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs * (ExprHandle(1.0f) - rhs);
-          });
-    }
-
-    case aten::_tanh_backward: {
-      return computeTwoOperand(
-          "aten_tanh_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * (ExprHandle(1.0f) - rhs * rhs);
           });
     }
 

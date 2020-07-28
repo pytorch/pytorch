@@ -1,8 +1,10 @@
-#include <algorithm>
 #include "unary_fp16_fake_op.h"
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/utils/eigen_utils.h"
-#include "caffe2/caffe2/contrib/fakelowp/fp16_fma.h"
+#include "caffe2/contrib/fakelowp/fp16_fma.h"
+#include "caffe2/core/operator.h"
+
+C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
 
@@ -529,9 +531,15 @@ at::Half CalcSwishByLUT(at::Half x) {
   return at::Half(res1 + res2);
 }
 
-at::Half CalcLogit(at::Half input) {
-  float eps = at::Half(1e-6); //default eps value
-  float x = clamp(at::Half(input), at::Half(eps), at::Half(1 - eps));
+at::Half CalcLogit(at::Half input, float eps) {
+  // Clamp the input in the range of eps to (1-eps)
+  float x = at::Half(input);
+  if (at::Half(input) < at::Half(eps)) {
+    x = at::Half(eps);
+  }
+  if (at::Half(input) > at::Half(1 - eps)) {
+    x = at::Half(1 - eps);
+  }
   if (x < 0.0f || x > 1.0f) {
     return at::Half(NAN);
   } else {
@@ -836,17 +844,39 @@ struct SwishEmulatorFunctor {
   }
 };
 
-struct LogitEmulatorFunctor {
-  bool operator()(
-      const int N,
-      const float* X,
-      float* Y,
-      CPUContext* /* unused */) const {
+template <class Context>
+class LogitEmulatorFunctor final : public Operator<Context> {
+public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  template <class... Args>
+  explicit LogitEmulatorFunctor(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(float, "eps", eps_, 1e-6f) {}
+  ~LogitEmulatorFunctor() noexcept override {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(0);
+    const int N = X.numel();
+    auto* Y = Output(0, X.sizes(), at::dtype<float>());
+    Y->ResizeLike(X);
+    const float* X_data = X.template data<float>();
+    float* Y_data = Y->template mutable_data<float>();
+    std::vector<float> X_rounded(N);
+    fbgemm::RoundToFloat16(
+        X_data,
+        X_rounded.data(),
+        N,
+        FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+    X_data = X_rounded.data();
     for (int i = 0; i < N; i++) {
-      Y[i] = CalcLogit((at::Half)X[i]);
+      Y_data[i] = CalcLogit((at::Half)X_data[i], eps_);
     }
     return true;
   }
+
+private:
+  const float eps_;
 };
 
 REGISTER_CPU_OPERATOR(
@@ -877,7 +907,7 @@ The input and output of this operator are converted to fp16 precision.
 
 REGISTER_CPU_OPERATOR(
     LogitFakeFp16NNPI,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogitEmulatorFunctor>);
+    LogitEmulatorFunctor<CPUContext>);
 
 OPERATOR_SCHEMA(LogitFakeFp16NNPI)
     .NumInputs(1)

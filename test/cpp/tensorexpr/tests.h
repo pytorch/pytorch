@@ -41,6 +41,8 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(SplitWithTailWithLoopOptions)           \
+  _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
   _(ScheduleInlineFunc01)                   \
@@ -58,9 +60,9 @@ namespace jit {
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
   _(ReduceRfactor)                          \
-  _(Reduce3DRfactor)                        \
-  _(Reduce3DRfactor2)                       \
-  _(Reduce3DRfactor3)                       \
+  _(Reduce3DRfactorInternal)                \
+  _(Reduce3DRfactorInner)                   \
+  _(Reduce3DRfactorOuter)                   \
   _(Reduce3DRfactorWithOuter)               \
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
@@ -316,8 +318,9 @@ namespace jit {
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
-  _(LLVMRFactorReduction)                  \
-  _(LLVMRFactorVectorizedReduction)
+  _(LLVMRFactorReduction)
+
+// _(LLVMRFactorVectorizedReduction)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \

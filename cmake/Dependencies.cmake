@@ -87,13 +87,13 @@ if(USE_TBB)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
-  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
   set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
@@ -584,7 +584,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
               "-P"
               "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(WARNING "Patching failed for Google Test. The build may fail.")
     endif()
   endif()
@@ -634,7 +634,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
               "-P"
               "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(WARNING "Reverting changes failed for Google Test. The build may fail.")
     endif()
   endif()
@@ -877,7 +877,7 @@ if(BUILD_PYTHON)
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" "--version"
         RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
     endif()
     if(PYTHON_VERSION)
@@ -955,7 +955,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(NOT ${pybind11_PREFER_third_party})
+if(NOT pybind11_PREFER_third_party)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
@@ -1226,7 +1226,7 @@ if(USE_NCCL)
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
     caffe2_update_option(USE_NCCL OFF)
-  elseif(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(WARNING "NCCL is currently only supported under Linux.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(USE_CUDA)
@@ -1736,7 +1736,7 @@ endif()
 # End ATen checks
 #
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
 #
