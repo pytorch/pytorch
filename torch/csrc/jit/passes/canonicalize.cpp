@@ -112,7 +112,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
       // take whichever node is in the earlier block
       auto index_1 = blockIndex(n1->owningBlock());
       auto index_2 = blockIndex(n2->owningBlock());
-      return index_1 < index_2 == checking_before;
+      return (index_1 < index_2) == checking_before;
     }
 
     n1 = new_n1;
@@ -123,7 +123,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
 bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
   // If two uses are the same node, we order on offset
   if (a.user == b.user) {
-    return a.offset < b.offset == checking_before;
+    return (a.offset < b.offset) == checking_before;
   }
 
   return isBeforeOrAfter(a.user, b.user, checking_before);
