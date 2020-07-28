@@ -17,10 +17,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import Barrier, _DistTestBase
 
-if NO_MULTIPROCESSING_SPAWN:
-    print('spawn not available, skipping tests')
-    sys.exit(0)
-
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
@@ -30,6 +26,9 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
     @unittest.skipIf(
         TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    )
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN, "Spawn not available, skipping tests."
     )
     class TestDistBackendWithSpawn(MultiProcessTestCase, _DistTestBase):
         @property

@@ -412,15 +412,14 @@ class _DistTestBase(object):
 
         # Explicitly pass world size to the barrier because we've
         # just destroyed any state in torch.distributed.
-        WORLD_SIZE = os.environ["WORLD_SIZE"]
-        self._barrier(wait_for=int(WORLD_SIZE))
+        self._barrier(wait_for=int(os.environ["WORLD_SIZE"]))
 
         # Reinitialize global process group
         timeout = timedelta(seconds=1)
         dist.init_process_group(
             init_method=INIT_METHOD,
             backend=BACKEND,
-            world_size=int(WORLD_SIZE),
+            world_size=int(os.environ["WORLD_SIZE"]),
             rank=self.rank,
             timeout=timeout,
         )
@@ -2024,7 +2023,7 @@ class _DistTestBase(object):
             global_bs,
             True,
             offset,
-            int(WORLD_SIZE)
+            dist.get_world_size()
         )
         self._barrier()
 
@@ -2038,7 +2037,7 @@ class _DistTestBase(object):
         # testing with one module replica per process
         gpus = [rank]
 
-        num_processes = int(WORLD_SIZE)
+        num_processes = dist.get_world_size()
         local_bs = 2
         bs_offset = int(rank * 2)
         global_bs = int(num_processes * 2)
@@ -2093,7 +2092,7 @@ class _DistTestBase(object):
         )
 
         local_bs = len(gpus) * 2
-        global_bs = int(WORLD_SIZE) * local_bs
+        global_bs = dist.get_world_size() * local_bs
         input_cpu = torch.randn(global_bs, 2)
         target = torch.randn(global_bs, 2)
         loss = nn.MSELoss()
@@ -2142,7 +2141,7 @@ class _DistTestBase(object):
         )
 
         local_bs = 1
-        global_bs = int(WORLD_SIZE)
+        global_bs = dist.get_world_size()
         input_cpu = torch.randn(global_bs, 2)
         target = torch.randn(global_bs, 2)
         loss = nn.MSELoss()
@@ -2174,7 +2173,7 @@ class _DistTestBase(object):
         model = nn.parallel.DistributedDataParallel(ONLY_SBN_NET.cuda(rank), device_ids=[rank])
 
         input_var = []
-        for i in range(int(WORLD_SIZE)):
+        for i in range(dist.get_world_size()):
             input_var_rank = torch.cat([
                 torch.ones(2, 1, 10 ** (i + 1)) * (0.1 ** (i - 1)),
                 torch.ones(2, 1, 10 ** (i + 1)) * (0.3 ** (i - 1))
@@ -2205,7 +2204,7 @@ class _DistTestBase(object):
         # cpu training setup
         model = BN_NET
 
-        num_processes = int(WORLD_SIZE)
+        num_processes = dist.get_world_size()
         local_bs = rank + 2
         bs_offset = int((rank + 3) * rank / 2)
         global_bs = int((num_processes + 3) * num_processes / 2)
