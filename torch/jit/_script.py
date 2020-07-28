@@ -20,7 +20,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import get_function_from_type
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -261,7 +261,7 @@ if _enabled:
     # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):
+    class ScriptModule(Module, metaclass=FunctionMeta):
         """
         ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
