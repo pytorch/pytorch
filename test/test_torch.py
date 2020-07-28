@@ -6439,7 +6439,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.int32, torch.int64, torch.half, torch.float, torch.double)
     @dtypes(torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
-        x = (torch.randn(3, 3))
+        x = (torch.randn(3, 3), device=device, dtype=dtype)
         if dtype.is_floating_point:
             x[x < 0.2] = float('nan')
  
@@ -6451,9 +6451,8 @@ class TestTorchDeviceType(TestCase):
 
         torch_fns = [torch_fn_with_axis, torch_fn_without_axis]
         np_fns = [np_fn_with_axis, np_fn_without_axis]
-
         for torch_fn, np_fn in zip(torch_fns, np_fns):
-            self.compare_with_numpy(torch_fn, np_fn, x, device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
