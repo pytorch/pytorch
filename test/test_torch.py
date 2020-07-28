@@ -16975,16 +16975,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(y, z)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
         res1 = m1.clone()
-        q = 2.1
+        q = 3
         res1[:, 3].fmod_(q)
         res2 = m1.clone()
         for i in range(m1.size(1)):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
+
+        zero = torch.zeros_like(m1)
+        if dtype in torch.testing.get_all_int_dtypes():
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(0)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(zero)
+        else:
+            self.assertTrue(torch.all(m1.fmod(0).isnan()))
+            self.assertTrue(torch.all(m1.fmod(zero).isnan()))
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
@@ -17753,13 +17763,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
             a // b
-
-    @onlyCPU
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_fmod_zero(self, device, dtype):
-        a = torch.tensor([1, 0], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.fmod(a)
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
