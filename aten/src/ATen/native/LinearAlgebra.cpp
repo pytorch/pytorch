@@ -945,6 +945,36 @@ Tensor mexp_impl(
         return res;
       }
     }
+
+    auto idx_large_norm = (norm >= thetas[total_n_degs - 1])
+      .nonzero().squeeze(-1);
+    if (idx_large_norm.numel() > 0) {
+      auto a_large_norm = at::index_select(a, 0, idx_large_norm);
+      auto large_norm_subset = at::index_select(norm, 0, idx_large_norm);
+
+      // Scale
+      const auto s = at::max(
+        at::zeros_like(large_norm_subset),
+        at::ceil(at::log2(large_norm_subset / thetas[total_n_degs - 1]))
+      ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
+      const auto pow2s = at::pow(2, s);
+      const auto a_large_norm_scaled = a_large_norm / pow2s;
+
+      // Square
+      auto mexp_scaled = at::native::compute_T18<scalar_t>(a_large_norm_scaled);
+      auto mexp_buffer = at::empty_like(mexp_scaled);
+      for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+        auto mexp = mexp_scaled.select(0, i);
+        while ((s.select(0, i) > 0).nonzero().numel()) {
+          mexp = at::matmul(mexp, mexp);
+          s.select(0, i) -= 1;
+        }
+        mexp_buffer.select(0, i).copy_(mexp);
+      }
+
+      res.index_put_({idx_large_norm}, mexp_buffer);
+      return res;
+    }
   }
 
   // Scale
