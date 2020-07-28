@@ -13,8 +13,8 @@
 
 #include <unordered_map>
 
-#include <c10/core/DeviceType.h>
 #include <ATen/DimVector.h>
+#include <c10/core/DeviceType.h>
 
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 
@@ -109,7 +109,7 @@ class CudaFusionManager {
     fe = kernel_cache_[kernel_id].get();
     return dimSortOutputs(graph, fe->runFusion(inputs_ref));
   }
- 
+
  private:
   // TODO: Dimension collapsing should be abstracted out and integrated into
   // graph caching.
@@ -149,7 +149,7 @@ class CudaFusionManager {
 
   void debugPrint(TensorTypePtr type) {
     if (auto sizes = type->symbolic_sizes().sizes()) {
-      //for (const auto& shape_symbol : sizes.value()) {
+      // for (const auto& shape_symbol : sizes.value()) {
       int rank = static_cast<int>(sizes->size());
       for (int i = 0; i < rank; i++) {
         const auto& shape_symbol = sizes.value()[i];
@@ -209,7 +209,8 @@ class CudaFusionManager {
 
     auto stride_properties = type->stride_properties().sizes();
 
-    TORCH_INTERNAL_ASSERT(stride_properties.has_value(),
+    TORCH_INTERNAL_ASSERT(
+        stride_properties.has_value(),
         "unknown sizes or stride_properties, collapsing shouldn't happen");
 
     // TODO: reuse this;
@@ -222,12 +223,12 @@ class CudaFusionManager {
     for (int i = 0; i < rank; i++) {
       if (auto index = (*stride_properties)[i]->stride_index_) {
         ordered_axes.insert(*index);
-			}
+      }
     }
 
     int unallocated_axis = 0;
     // we push from slowest to fastest
-    for (int i = rank-1; i >= 0; i--) {
+    for (int i = rank - 1; i >= 0; i--) {
       if (auto index = (*stride_properties)[i]->stride_index_) {
         // pushing axis index to current entry in permute_seq;
         permute_seq.emplace_back(*index);
@@ -250,7 +251,8 @@ class CudaFusionManager {
     auto sizes = type->symbolic_sizes().sizes();
     auto stride_properties = type->stride_properties().sizes();
 
-    TORCH_INTERNAL_ASSERT(sizes.has_value() && stride_properties.has_value(),
+    TORCH_INTERNAL_ASSERT(
+        sizes.has_value() && stride_properties.has_value(),
         "unknown sizes or stride_properties, collapsing shouldn't happen");
 
     // TODO: reuse this;
@@ -263,31 +265,32 @@ class CudaFusionManager {
     for (int i = 0; i < rank; i++) {
       if (auto index = (*stride_properties)[i]->stride_index_) {
         ordered_axes.insert(*index);
-			}
+      }
     }
 
     collapsed_dims.emplace_back();
     int num_collapsed_dims = 0;
     int unallocated_axis = 0;
-    for (int i = rank-1; i >= 0; i--) {
+    for (int i = rank - 1; i >= 0; i--) {
       if (auto index = (*stride_properties)[i]->stride_index_) {
         // pushing axis index to current entry in collapsed_dims;
         collapsed_dims.back().emplace_back(*index);
         // we can not collapse fasted changing dimension;
         if (i != 0) {
           // TODO: exclude reduction axes from collapsing when the support is
-			  	//       added;
- 			    if ((*stride_properties)[i]->contiguous_.has_value() &&
+          //       added;
+          if ((*stride_properties)[i]->contiguous_.has_value() &&
               (*stride_properties)[i]->contiguous_.value()) {
             // contiguous flag is true for non-fast-changing-dimension (non-fcd)
             // we could collapse it with neighboring dimension, hence we
- 			  		// increase the counter.
-			  		num_collapsed_dims++;
+            // increase the counter.
+            num_collapsed_dims++;
           } else {
-            // non-contiguous dimension expected next, push a new entry to collapsed_dims;
+            // non-contiguous dimension expected next, push a new entry to
+            // collapsed_dims;
             collapsed_dims.emplace_back();
           }
- 			  }
+        }
       } else {
         // no designated axis for this slot, so we push an axis with no order;
         while (ordered_axes.count(unallocated_axis) != 0) {
@@ -299,10 +302,10 @@ class CudaFusionManager {
     }
     return collapsed_dims;
   }
-    
+
   at::Tensor dimCollapseInput(
-			const at::Tensor& tensor,
-  		const std::vector<std::vector<int>>& dim_col_strategy) {
+      const at::Tensor& tensor,
+      const std::vector<std::vector<int>>& dim_col_strategy) {
     int collapsed_rank = dim_col_strategy.size();
     int rank = tensor.dim();
 
@@ -317,7 +320,7 @@ class CudaFusionManager {
       sizes.emplace_back(size);
       strides.emplace_back(tensor.stride(dims.back())); // set the stride
     }
- 		// return tensor with collapsed dimensions
+    // return tensor with collapsed dimensions
     return tensor.as_strided(sizes, strides);
   }
 
@@ -462,23 +465,31 @@ class CudaFusionManager {
     std::shared_ptr<Graph> copy = graph->copy();
 
     auto type_permute_fn = [&](TensorTypePtr type) {
-      //std::vector<c10::ShapeSymbol> vec_shape_symbol = type->symbolic_sizes().sizes().value();
+      // std::vector<c10::ShapeSymbol> vec_shape_symbol =
+      // type->symbolic_sizes().sizes().value();
       auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
-      //std::vector<c10::optional<c10::Stride>> vec_optional_stride = type->stride_properties().sizes().value();
+      // std::vector<c10::optional<c10::Stride>> vec_optional_stride =
+      // type->stride_properties().sizes().value();
       auto vec_optional_stride = type->stride_properties().sizes().value();
 
       int rank = static_cast<int>(type->dim().value());
 
       std::vector<c10::ShapeSymbol> permuted_vec_ss;
       std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-			for (int i = 0; i < rank; i++) {
-				//permuted_vec_ss.emplace_back(type->symbolic_sizes().sizes().value()[strategy[i]]);
-				//permuted_vec_optional_stride.emplace_back(type->stride_properties().sizes().value()[strategy[i]]);
-				permuted_vec_ss.emplace_back(vec_shape_symbol[strategy[i]]);
-				permuted_vec_optional_stride.emplace_back(vec_optional_stride[strategy[i]]);
-			}
+      for (int i = 0; i < rank; i++) {
+        // permuted_vec_ss.emplace_back(type->symbolic_sizes().sizes().value()[strategy[i]]);
+        // permuted_vec_optional_stride.emplace_back(type->stride_properties().sizes().value()[strategy[i]]);
+        permuted_vec_ss.emplace_back(vec_shape_symbol[strategy[i]]);
+        permuted_vec_optional_stride.emplace_back(
+            vec_optional_stride[strategy[i]]);
+      }
 
-      return TensorType::create(type->scalarType(), type->device(), permuted_vec_ss, permuted_vec_optional_stride, type->requires_grad());
+      return TensorType::create(
+          type->scalarType(),
+          type->device(),
+          permuted_vec_ss,
+          permuted_vec_optional_stride,
+          type->requires_grad());
     };
 
     for (auto input : copy->inputs()) {
@@ -542,7 +553,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
     // Only needed if we are doing codegen
     // if no shape information available, we feed current shape into the kernel;
-    // This is needed because our current broadcast on size-1 dimension 
+    // This is needed because our current broadcast on size-1 dimension
     if (!IsNewExecutorEnabled()) {
       EraseShapeInformation(graph);
       for (size_t i = 0; i < nInputs; i++) {

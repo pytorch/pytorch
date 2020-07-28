@@ -58,7 +58,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     // TODO: this is a temporary WAR to avoid contiguous_ flag on broadcasted
     // dim, which results in wrong indexing math.
     if (sizes[i]->isBroadcast() ||
-        (i != tensor_type->dim().value()-1 && sizes[i+1]->isBroadcast())) {
+        (i != tensor_type->dim().value() - 1 && sizes[i + 1]->isBroadcast())) {
       contig_info.push_back(false);
     } else {
       if (tensor_type->stride_properties()[i].has_value() &&
