@@ -148,6 +148,16 @@ void rewriteSubnet(
       }
     }
   }
+  for (auto& external_input : *(net->mutable_external_input())) {
+    if (oldname_to_newname.find(external_input) != oldname_to_newname.end()) {
+      external_input = oldname_to_newname[external_input];
+    }
+  }
+  for (auto& external_output : *(net->mutable_external_output())) {
+    if (oldname_to_newname.find(external_output) != oldname_to_newname.end()) {
+      external_output = oldname_to_newname[external_output];
+    }
+  }
 }
 
 Argument* getArgumentFromName(OperatorDef* op, const std::string& name) {

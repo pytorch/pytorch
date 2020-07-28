@@ -11980,6 +11980,40 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+    def _test_large_cum_fn_helper(self, x, fn):
+        x_cpu = x.cpu().float()
+        expected = fn(x_cpu)
+        actual = fn(x).cpu().float()
+        self.assertEqual(expected, actual.cpu().float())
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumsum(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = -3
+        x[1::3] = 2
+        x[2::3] = 1
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumprod(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = 8
+        x[1::3] = .25
+        x[2::3] = .5
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+
+    def test_discontiguous_out_cumsum(self, device):
+        x = torch.randn(4, 8, device=device)
+        y = torch.empty(4, 16, device=device)[:, ::2]
+        out = torch.cumsum(x, 0)
+        torch.cumsum(x, 0, out=y)
+        self.assertFalse(y.is_contiguous())
+        self.assertEqual(out, y, atol=0., rtol=0.)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
