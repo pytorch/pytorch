@@ -224,7 +224,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
 
   std::vector<std::vector<at::Tensor>> inputs(size);
 
-  // Try every permutation of root rank and root tensoro
+  // Try every permutation of root rank and root tensor
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
       // Initialize inputs
@@ -285,7 +285,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   };
   for (auto rank = 0; rank < size; rank++) {
     const std::vector<int32_t>& blob = blobs[rank];
-    inputs[rank] = at::from_blob((int32_t*)(blob.data()), blob.size(), b);
+    inputs[rank] = at::from_blob((int32_t*)(blob.data()), blob.size()).to(b);
   }
 
   // Allocate outputs
@@ -330,7 +330,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
       {5, 17, 18, 24, 36},
   };
   for (auto rank = 0; rank < size; rank++) {
-    auto& tensor = outputs[rank];
+    at::Tensor tensor = outputs[rank].cpu();
     EXPECT_EQ(tensor.numel(), expected[rank].size());
     auto data = tensor.data_ptr<int32_t>();
     for (auto j = 0; j < tensor.numel(); j++) {
@@ -548,9 +548,18 @@ TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
 
 TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
   {
-    if (torch::cuda::is_available()) {
+    if (torch::cuda::device_count() > 1) {
       TemporaryFile file;
       testBroadcast(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+TEST(ProcessGroupGlooTest, testAlltoallCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAlltoall(file.path, at::DeviceType::CUDA);
     }
   }
 }
