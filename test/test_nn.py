@@ -10139,11 +10139,13 @@ class TestNNDeviceType(NNTestCase):
         large_view = im[..., 127::128]
         small_image = torch.rand_like(large_view)
         large_view[...] = small_image
-        for mode in ('nearest', 'bilinear'):
-            for align_corners in (True, False):
-                expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
-                actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
-                self.assertEqual(expect, actual)
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
+            expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
+            actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+            self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
@@ -10163,11 +10165,13 @@ class TestNNDeviceType(NNTestCase):
         large_view = im[..., 127::128]
         small_image = torch.rand_like(large_view)
         large_view[...] = small_image
-        for mode in ('nearest', 'bilinear'):
-            for align_corners in (True, False):
-                expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
-                actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
-                self.assertEqual(expect, actual)
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
+            expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
+            actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+            self.assertEqual(expect, actual)
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
