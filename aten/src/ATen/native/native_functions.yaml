@@ -2495,7 +2495,7 @@
 - func: silu(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  
+
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
 
@@ -3767,6 +3767,10 @@
   variants: function
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _saturate_weight_to_fp16(Tensor weight) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
