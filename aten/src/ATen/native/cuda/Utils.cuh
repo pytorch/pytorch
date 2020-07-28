@@ -3,9 +3,9 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 namespace {
-static constexpr int64_t kILP = 4;
-static constexpr int64_t kChunkSize = 65536;
-static constexpr int64_t kBlockSize = 1024;
+static CONSTEXPR_EXCEPT_WIN_CUDA int64_t kILP = 4;
+static CONSTEXPR_EXCEPT_WIN_CUDA int64_t kChunkSize = 65536;
+static CONSTEXPR_EXCEPT_WIN_CUDA int64_t kBlockSize = 1024;
 
 template<typename T>
 __device__ __forceinline__ bool is_aligned(T* p){
