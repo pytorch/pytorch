@@ -298,11 +298,10 @@ script::Module optimizeForMobile(
 
   if (!optimization_blocklist.count(
       MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
-    TORCH_CHECK(
-      !optimization_blocklist.count(MobileOptimizerType::INSERT_FOLD_PREPACK_OPS),
-      "INSERT_FOLD_PREPACK_OPS must be enabled for HOIST_CONV_PACKED_PARAMS to work");
+    // freeze again in case it was not done in previous optional passes
+    cloned_module = freeze_module(cloned_module, preserved_methods);
     HoistConvPackedParams(cloned_module);
-    // freeze again to remove the empty QuantizedConv modules
+    // and freeze yet again to remove the empty QuantizedConv modules
     cloned_module = freeze_module(cloned_module, preserved_methods);
   }
 
