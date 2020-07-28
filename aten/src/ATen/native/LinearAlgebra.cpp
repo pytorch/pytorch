@@ -976,6 +976,7 @@ Tensor mexp_impl(
     auto a_large_norm = at::index_select(a, 0, idx_large_norm);
     auto large_norm_subset = at::index_select(norm, 0, idx_large_norm);
     auto mexp_out = at::empty_like(a_large_norm);
+
     compute_T18_scale_square(
       mexp_out,
       a_large_norm,
@@ -987,25 +988,11 @@ Tensor mexp_impl(
     return res;
   }
 
-  // Scale
-  const auto s = at::max(
-    at::zeros_like(norm),
-    at::ceil(at::log2(norm / thetas[total_n_degs - 1])))
-    .unsqueeze(-1).unsqueeze(-1).to(at::kLong);
-  const auto pow2s = at::pow(2, s);
-  const auto a_scaled = a / pow2s;
+  compute_T18_scale_square(
+    res, a, norm,
+    thetas[total_n_degs - 1]
+  );
 
-  // Square
-  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
-  const auto s_cpu = s.to(at::kCPU);
-  for (int64_t i = 0; i < a.size(0); ++i) {
-    auto s_val = s_cpu.select(0, i).template item<int>();
-    auto mexp = mexp_scaled.select(0, i);
-    for (int p = 0; p < s_val; ++p) {
-      mexp = at::matmul(mexp, mexp);
-    }
-    res.select(0, i).copy_(mexp);
-  }
   return res;
 }
 
