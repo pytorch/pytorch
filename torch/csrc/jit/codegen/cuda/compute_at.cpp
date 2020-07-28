@@ -220,9 +220,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   }
 
   consumer_entry.setPassPosition(replay.second);
-  if ((consumer_entry.shouldSetComputeAt(replay.second) &&
-       consumer != consumer_) ||
-      (consumer == consumer_ && replay.second >= consumer_position_)) {
+  if (consumer_entry.shouldSetComputeAt(replay.second) &&
+      consumer != consumer_) {
     consumer_entry.setComputeAtDomain(consumer->domain());
   }
 

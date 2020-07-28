@@ -146,7 +146,7 @@ __device__  __inline__ float uniform(unsigned int x) {
 
 // Helper functions for Operations
 static auto code_helper_funcs = R"(
-__device__ int ceilDiv(const int a, const int b) {
+__device__ constexpr int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 __device__ float clamp(const float x, const float minv, const float maxv) {
