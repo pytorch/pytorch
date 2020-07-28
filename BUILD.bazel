@@ -248,7 +248,6 @@ filegroup(
         "aten/src/ATen/*.cpp",
         "aten/src/ATen/detail/*.cpp",
         "aten/src/ATen/cpu/*.cpp",
-        "aten/src/ATen/vulkan/*.cpp",
     ]),
 )
 
