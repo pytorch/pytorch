@@ -517,7 +517,8 @@ void insertGuards(
     std::unordered_map<Value*, Value*> checked_values;
     Value* cond = b->owningGraph()->insertConstant(true);
     for (auto inp : it->inputs()) {
-      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+      //if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+      if (inp->isCompleteTensor()) {
         auto guard = b->owningGraph()->create(prim::TypeCheck, {inp, cond}, 2);
         auto go0 = guard->output(0);
         cond = guard->output(1);
@@ -532,6 +533,7 @@ void insertGuards(
 
     if (!check_result) {
       GRAPH_DEBUG("No checks were needed.\n");
+      it++;
       continue;
     }
     auto fusion_group = *it;

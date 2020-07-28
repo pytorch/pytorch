@@ -108,7 +108,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   GRAPH_DUMP("Before running optimizations:", copy);
   runOptimization(copy, true);
   GRAPH_DUMP("Before removing profiling nodes:", copy);
-  removeProfilingNodes(copy->block());
+  //removeProfilingNodes(copy->block());
   GRAPH_DUMP("After fusion:", copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);

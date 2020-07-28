@@ -403,6 +403,9 @@ struct CAFFE2_API ShapeSymbol {
   bool operator==(const ShapeSymbol& b) const {
     return value_ == b.value_;
   }
+  bool operator!=(const ShapeSymbol& b) const {
+    return !(value_ == b.value_);
+  }
   bool operator<(const ShapeSymbol& b) const {
     return value_ < b.value_;
   }
