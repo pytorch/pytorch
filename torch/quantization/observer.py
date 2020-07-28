@@ -1023,11 +1023,13 @@ class NoopObserver(ObserverBase):
 
     Args:
         dtype: Quantized data type
+        custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
+                        (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16):
-        if dtype != torch.float16:
-            raise ValueError("Only float16 quantization can be used without calibration process")
+    def __init__(self, dtype=torch.float16, custom_op_name=""):
         super(NoopObserver, self).__init__(dtype=dtype)
+        self.dtype = dtype
+        self.custom_op = custom_op_name
 
     def forward(self, x):
         return x
