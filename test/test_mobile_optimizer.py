@@ -266,6 +266,7 @@ class TestOptimizer(unittest.TestCase):
         FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
                    .check_count("_jit_pass_hoist_conv_packed_params", 1, exactly=True) \
                    .run(m_optim.graph)
+        self.assertFalse(hasattr(m_optim, "conv1"))
 
         data = torch.randn(4, 1, 4, 4)
         m_res = m(data)
@@ -278,6 +279,8 @@ class TestOptimizer(unittest.TestCase):
         FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
                    .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
                    .run(m_optim.graph)
+        self.assertFalse(hasattr(m_optim, "conv1"))
+        self.assertFalse(hasattr(m_optim, "child"))
 
         data = torch.randn(4, 1, 4, 4)
         m_res = m(data)

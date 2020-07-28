@@ -36,7 +36,7 @@ namespace jit {
 // %n = prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
 //
 void hoistConvPackedParams(Module& rootModule, Node* getConvPackedParamsNode,
-    const std::string& prefix) {
+    const std::string& prefix, int& nameUniqueCounter) {
 
   auto method = rootModule.get_method("forward");
   auto graph = method.graph();
@@ -54,22 +54,20 @@ void hoistConvPackedParams(Module& rootModule, Node* getConvPackedParamsNode,
   c10::IValue packedParams = convModule.attr("_packed_params");
 
   // create the new name
+
   std::string suffix = "";
   for (const auto& attrName : rootToConvPath) {
     suffix += attrName + ".";
   }
-  std::string newName = prefix + "." + suffix + "_packed_params";
+  std::string newNameBase = prefix + "." + suffix + "_packed_params";
+  nameUniqueCounter++;
+  std::string newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+  while (rootModule.hasattr(newName)) {
+    nameUniqueCounter++;
+    newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+  }
 
   // copy the packed params
-
-  // make sure the attribute does not already exist
-  TORCH_CHECK(
-    !(rootModule.type()->findAttributeSlot(newName)),
-    "Attribute name ",
-    newName,
-    " already exists in module of type ",
-    rootModule.type()->name()->qualifiedName());
-
   rootModule.register_attribute(newName, packedParams.type(), packedParams);
 
   // change target module to rootModule
@@ -86,6 +84,8 @@ void HoistConvPackedParams(script::Module& m) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   std::string attr_name_base = "_jit_pass_hoist_conv_packed_params";
+  // counter to ensure new attribute names are unique
+  int nameUniqueCounter = 0;
 
   while (!blocks_to_visit.empty()) {
 
@@ -107,7 +107,7 @@ void HoistConvPackedParams(script::Module& m) {
 
         if (moduleNameIsQuantizedConv) {
           GRAPH_UPDATE("Hoisting ", *n, " to root module.");
-          hoistConvPackedParams(m, n, attr_name_base);
+          hoistConvPackedParams(m, n, attr_name_base, nameUniqueCounter);
         }
       }
 
