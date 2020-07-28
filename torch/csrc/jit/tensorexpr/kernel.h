@@ -114,16 +114,9 @@ class TORCH_API TensorExprKernel {
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
-  template <typename T>
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
-      const std::vector<T>& axes) {
-    auto ti = tensors_.find(v->unique());
-    if (ti != tensors_.end()) {
-      return broadcast(ti->second, axes);
-    }
-    return constant(v);
-  }
+      const std::vector<ExprHandle>& axes);
 
   Tensor* computeOneOperand(
       const std::string& name,

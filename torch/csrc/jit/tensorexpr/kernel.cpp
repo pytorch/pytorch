@@ -56,6 +56,16 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const torch::jit::Value* v,
+    const std::vector<ExprHandle>& axes) {
+  auto ti = tensors_.find(v->unique());
+  if (ti != tensors_.end()) {
+    return broadcast(ti->second, axes);
+  }
+  return constant(v);
+}
+
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
@@ -396,8 +406,9 @@ Tensor* TensorExprKernel::computeOneOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes)};
+            tensorOrConstant(n->inputs()[0], indices)};
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0]);
@@ -418,9 +429,10 @@ Tensor* TensorExprKernel::computeTwoOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
         };
 
         promoteInputs(inputs);
@@ -442,10 +454,11 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -472,9 +485,10 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -504,10 +518,11 @@ Tensor* TensorExprKernel::computeThreeOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -536,11 +551,12 @@ Tensor* TensorExprKernel::computeFourOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
-            tensorOrConstant(n->inputs()[3], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
+            tensorOrConstant(n->inputs()[3], indices),
         };
 
         promoteInputs(inputs);
