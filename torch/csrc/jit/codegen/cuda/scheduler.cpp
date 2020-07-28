@@ -236,12 +236,12 @@ ReductionParams reductionHeuristic(
   // 2. Initial Definition of Block Dimensions
 
   // Is fastest dimension a reduction dimension?
-  if (rparams.fastest_dim_) {
-    rparams.bdimx_.value_ = red_elems;
-    rparams.bdimy_.value_ = red_outputs;
+  if (rparams.fastest_dim) {
+    rparams.bdimx.value = red_elems;
+    rparams.bdimy.value = red_outputs;
   } else {
-    rparams.bdimx_.value_ = red_outputs;
-    rparams.bdimy_.value_ = red_elems;
+    rparams.bdimx.value = red_outputs;
+    rparams.bdimy.value = red_elems;
   }
 
   // 3. Applying Power of 2 Blocking based on the Maximum Number of threads
@@ -250,24 +250,24 @@ ReductionParams reductionHeuristic(
   int num_threads = kMaxNumThreads;
   int device_warp_size = at::cuda::warp_size();
 
-  if (rparams.bdimx_.value_ < num_threads) {
-    rparams.bdimx_.value_ = lastPow2(rparams.bdimx_.value_);
+  if (rparams.bdimx.value < num_threads) {
+    rparams.bdimx.value = lastPow2(rparams.bdimx.value);
   } else {
-    rparams.bdimx_.value_ = num_threads;
+    rparams.bdimx.value = num_threads;
   }
 
-  if (rparams.bdimy_.value_ < num_threads) {
-    rparams.bdimy_.value_ = lastPow2(rparams.bdimy_.value_);
+  if (rparams.bdimy.value < num_threads) {
+    rparams.bdimy.value = lastPow2(rparams.bdimy.value);
   } else {
-    rparams.bdimy_.value_ = num_threads;
+    rparams.bdimy.value = num_threads;
   }
 
-  int bdimx_prev = rparams.bdimx_.value_;
-  rparams.bdimx_.value_ = std::min(rparams.bdimx_.value_, device_warp_size);
-  rparams.bdimy_.value_ =
-      std::min(rparams.bdimy_.value_, num_threads / rparams.bdimx_.value_);
-  rparams.bdimx_.value_ =
-      std::min(bdimx_prev, num_threads / rparams.bdimy_.value_);
+  int bdimxprev = rparams.bdimx.value;
+  rparams.bdimx.value = std::min(rparams.bdimx.value, device_warp_size);
+  rparams.bdimy.value =
+      std::min(rparams.bdimy.value, num_threads / rparams.bdimx.value);
+  rparams.bdimx.value =
+      std::min(bdimxprev, num_threads / rparams.bdimy.value);
 
   // 4. Distributing work across a block
 
@@ -281,27 +281,27 @@ ReductionParams reductionHeuristic(
   int outputs_produced_per_block_iter = 1;
 
   // Reduction is performed across warp threads (cross-thread reduction)
-  if (rparams.fastest_dim_) {
-    inputs_consumed_per_block_iter *= rparams.bdimx_.value_;
+  if (rparams.fastest_dim) {
+    inputs_consumed_per_block_iter *= rparams.bdimx.value;
     red_elems_per_thread =
         ceilDiv(red_elems_per_thread, inputs_consumed_per_block_iter);
     // Warp threads are applied across the output
   } else {
-    outputs_produced_per_block_iter *= rparams.bdimx_.value_;
+    outputs_produced_per_block_iter *= rparams.bdimx.value;
   }
 
   // Decision to do a cross-warp reduction per block
-  if (red_elems_per_thread >= (rparams.bdimy_.value_ * kMinValuesPerThread) ||
-      red_elems_per_thread >= kMaxValuesPerThread || !rparams.fastest_dim_) {
-    inputs_consumed_per_block_iter *= rparams.bdimy_.value_;
-    red_elems_per_thread = ceilDiv(red_elems_per_thread, rparams.bdimy_.value_);
-    rparams.cross_block_ = true;
-    rparams.mul_reds_per_blk_ = false;
+  if (red_elems_per_thread >= (rparams.bdimy.value * kMinValuesPerThread) ||
+      red_elems_per_thread >= kMaxValuesPerThread || !rparams.fastest_dim) {
+    inputs_consumed_per_block_iter *= rparams.bdimy.value;
+    red_elems_per_thread = ceilDiv(red_elems_per_thread, rparams.bdimy.value);
+    rparams.cross_block = true;
+    rparams.mul_reds_per_blk = false;
     // Do multiple reductions per block
   } else {
-    rparams.cross_block_ = false;
-    rparams.mul_reds_per_blk_ = true;
-    outputs_produced_per_block_iter *= rparams.bdimy_.value_;
+    rparams.cross_block = false;
+    rparams.mul_reds_per_blk = true;
+    outputs_produced_per_block_iter *= rparams.bdimy.value;
   }
 
   // 5. Distributing work across blocks
@@ -313,23 +313,23 @@ ReductionParams reductionHeuristic(
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   int blocks_per_sm = device_max_threads_per_multiprocessor /
-      (rparams.bdimx_.value_ * rparams.bdimy_.value_);
+      (rparams.bdimx.value * rparams.bdimy.value);
   int target_grid_size = device_multiprocessor_count * blocks_per_sm;
 
   // Setting the number of blocks based on the number of outputs
-  rparams.gdimx_.value_ = ceilDiv(red_outputs, outputs_produced_per_block_iter);
-  rparams.gdimx_.mutable_ = true;
+  rparams.gdimx.value = ceilDiv(red_outputs, outputs_produced_per_block_iter);
+  rparams.gdimx.is_mutable = true;
 
   // Cross-block reductions (if necessary)
-  if (rparams.cross_block_ && red_elems_per_thread >= kMaxValuesPerThread &&
-      rparams.gdimx_.value_ <= target_grid_size) {
-    int blks_per_out_1 = ceilDiv(target_grid_size, rparams.gdimx_.value_);
+  if (rparams.cross_block && red_elems_per_thread >= kMaxValuesPerThread &&
+      rparams.gdimx.value <= target_grid_size) {
+    int blks_per_out_1 = ceilDiv(target_grid_size, rparams.gdimx.value);
     int blks_per_out_2 = ceilDiv(red_elems_per_thread, kMinValuesPerThread);
     int blks_per_out_3 = ceilDiv(red_elems_per_thread, kMaxValuesPerThread);
     int blks_per_output =
         std::max(std::min(blks_per_out_1, blks_per_out_2), blks_per_out_3);
 
-    rparams.gdimy_.value_ = std::max(1, blks_per_output);
+    rparams.gdimy.value = std::max(1, blks_per_output);
     // If a cross-block reduction was generated
     if (blks_per_output > 1) {
       rparams.cross_grid = true;
@@ -343,18 +343,18 @@ ReductionParams reductionHeuristic(
               << "\tRed Elems: " << red_elems << " Red Outputs: " << red_outputs
               << " Red On Fastest Dim? " << red_on_fastest_dim << std::endl
               << "Reduction Characteristics:" << std::endl
-              << "\tMultiple Reds Per Block? " << rparams.mul_reds_per_blk_
-              << " Cross Block? " << rparams.cross_block_ << " Cross Grid? "
-              << rparams.cross_grid_ << std::endl
+              << "\tMultiple Reds Per Block? " << rparams.mul_reds_per_blk
+              << " Cross Block? " << rparams.cross_block << " Cross Grid? "
+              << rparams.cross_grid << std::endl
               << "Recommended Blocking:" << std::endl
-              << "\tGridX: " << rparams.gdimx_.value_
-              << (rparams.gdimx_.mutable_ ? " (M)" : "")
-              << " GridY: " << rparams.gdimy_.value_
-              << (rparams.gdimy_.mutable_ ? " (M)" : "")
-              << " BlckX: " << rparams.bdimx_.value_
-              << (rparams.bdimx_.mutable_ ? " (M)" : "")
-              << " BlckY: " << rparams.bdimy_.value_ << std::endl
-              << (rparams.bdimy_.mutable_ ? " (M)" : "")
+              << "\tGridX: " << rparams.gdimx.value
+              << (rparams.gdimx.is_mutable ? " (M)" : "")
+              << " GridY: " << rparams.gdimy.value
+              << (rparams.gdimy.is_mutable ? " (M)" : "")
+              << " BlckX: " << rparams.bdimx.value
+              << (rparams.bdimx.is_mutable ? " (M)" : "")
+              << " BlckY: " << rparams.bdimy.value << std::endl
+              << (rparams.bdimy.is_mutable ? " (M)" : "")
               << "====================================" << std::endl;
   }
 
@@ -423,7 +423,7 @@ c10::optional<ReductionParams> scheduleReduction(
   constexpr int kLoopUnrollSplit = 4;
 
   // Scheduling the Reduction
-  if (rparams.fastest_dim_) {
+  if (rparams.fastest_dim) {
     // Do multiple reductions per block
     if (rparams.mul_reds_per_blk) {
       // Reduction Splits
@@ -431,7 +431,7 @@ c10::optional<ReductionParams> scheduleReduction(
       // Idx:     0     |   1(-1)       2(-2)    3(-1) |
       //                --------------------------------
       //                Reduction Dimensions
-      red_tv->split(1, rparams.bdimx_.value_);
+      red_tv->split(1, rparams.bdimx.value);
       red_tv->split(1, kLoopUnrollSplit);
 
       // Reordering the Unroll dimension eases applying computeAt()
@@ -449,7 +449,7 @@ c10::optional<ReductionParams> scheduleReduction(
       // Idx:  |     0             1      |   2(-2) -- 3(-1)
       //       ----------------------------
       //       Output Dimensions
-      red_tv->split(0, rparams.bdimy_.value_);
+      red_tv->split(0, rparams.bdimy.value);
 
       auto red_tv_rf = red_tv->rFactor({-3, -1});
 
@@ -487,15 +487,15 @@ c10::optional<ReductionParams> scheduleReduction(
       }
       // Do a cross-warp reduction per block
     } else {
-      if (rparams.cross_grid_) {
+      if (rparams.cross_grid) {
         // Reduction Splits
         //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid, X-Warp|]
         // Idx:     0     |   1(-5)       2(-4)     3(-3)   4(-2)   5(-1) |
         //                -------------------------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.bdimx_.value_);
-        red_tv->split(1, rparams.gdimy_.value_);
-        red_tv->split(1, rparams.bdimy_.value_);
+        red_tv->split(1, rparams.bdimx.value);
+        red_tv->split(1, rparams.gdimy.value);
+        red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
@@ -550,8 +550,8 @@ c10::optional<ReductionParams> scheduleReduction(
         // Idx:     0     |   1(-4)       2(-3)     3(-2)   4(-1) |
         //                -----------------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.bdimx_.value_);
-        red_tv->split(1, rparams.bdimy_.value_);
+        red_tv->split(1, rparams.bdimx.value);
+        red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
@@ -601,16 +601,16 @@ c10::optional<ReductionParams> scheduleReduction(
       }
     }
   } else {
-    if (rparams.cross_block_) {
-      if (rparams.cross_grid_) {
+    if (rparams.cross_block) {
+      if (rparams.cross_grid) {
         // Reduction Splits
         //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid|]
         // Idx:     0     |   1(-4)       2(-3)     3(-2)   4(-1) |
         //                -----------------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.bdimy_.value_);
-        red_tv->split(1, rparams.gdimy_.value_);
-        red_tv->split(1, rparams.bdimy_.value_);
+        red_tv->split(1, rparams.bdimy.value);
+        red_tv->split(1, rparams.gdimy.value);
+        red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
@@ -628,7 +628,7 @@ c10::optional<ReductionParams> scheduleReduction(
         // Idx:  |     0             1      |   2(-4) -- 5(-1)
         //       ----------------------------
         //       Output Dimensions
-        red_tv->split(0, rparams.bdimx_.value_);
+        red_tv->split(0, rparams.bdimx.value);
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
@@ -671,7 +671,7 @@ c10::optional<ReductionParams> scheduleReduction(
         // Idx:     0     |   1(-3)       2(-2)     3(-1) |
         //                ---------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.bdimy_.value_);
+        red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
@@ -689,7 +689,7 @@ c10::optional<ReductionParams> scheduleReduction(
         // Idx:  |     0             1      |   2(-3) -- 4(-1)
         //       ----------------------------
         //       Output Dimensions
-        red_tv->split(0, rparams.bdimx_.value_);
+        red_tv->split(0, rparams.bdimx.value);
 
         auto red_tv_rf = red_tv->rFactor({-3, -1});
 
@@ -727,7 +727,7 @@ c10::optional<ReductionParams> scheduleReduction(
         }
       }
     } else {
-      red_tv->split(0, rparams.bdimx_.value_);
+      red_tv->split(0, rparams.bdimx.value);
       red_tv->axis(0)->parallelize(ParallelType::TIDx);
       red_tv->axis(1)->parallelize(ParallelType::BIDx);
     }
