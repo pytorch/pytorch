@@ -1,3 +1,4 @@
+import io
 import torch
 import warnings
 from torch._six import string_classes
@@ -97,7 +98,7 @@ class Backend(object):
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
-        """ 
+        """
         setattr(Backend, name.upper(), func)
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -1156,6 +1157,124 @@ def all_gather_multigpu(output_tensor_lists,
         work.wait()
 
 
+def _object_to_tensor(obj):
+    buffer = io.BytesIO()
+    torch.save(obj, buffer)
+    input_tensor = torch.ByteTensor(list(buffer.getvalue()))
+    local_size = torch.LongTensor([input_tensor.numel()])
+    return input_tensor, local_size
+
+
+def _tensor_to_object(tensor, tensor_size):
+    buf = io.BytesIO(tensor.numpy().tobytes()[:tensor_size])
+    buf.seek(0)
+    out = torch.load(buf)
+    return out
+
+
+def all_gather_object(object_list, obj, group=group.WORLD):
+    """
+    Gathers picklable objects from the whole group into a list. Similar to
+    all_gather, but Python objects can be passed in. Note that the object must
+    be pickable in order to be gathered.
+
+    Arguments:
+        object_list (list[Any]): Output list. It should be correctly sized as the
+        size of the group for this collective and will contain the output.
+        object (Any): Pickable Python object to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on
+
+    Returns:
+        None. If the calling rank is part of this group, the output of the
+        collective will be populated into the input object_list.
+
+    .. note:: Note that this API differs slightly from the all_gather collective
+        since it does not provide an async_op handle and thus will be a blocking
+        call.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    input_tensor, local_size = _object_to_tensor(obj)
+    # Gather all local sizes. This is so that we can find the max size, and index
+    # until the correct size when deserializing the tensors.
+    group_size = get_world_size(group=group)
+    object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+    # Allgather tensor sizes
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = max(object_size_list)
+    # allocate a tensor of max size, and copy byte tensor into it.
+    # TODO: Is there a more efficient way to do this / can we just resize inpt_tensor to max_object_size?
+    local_max_size_tensor = torch.ByteTensor(size=(max_object_size,))
+    local_max_size_tensor[: local_size.item()] = input_tensor
+    output_tensors = [
+        torch.empty(max_object_size, dtype=torch.uint8) for _ in range(group_size)
+    ]
+    all_gather(output_tensors, local_max_size_tensor, group=group)
+    # Deserialize outputs back to object.
+    for i, tensor in enumerate(output_tensors):
+        tensor = tensor.type(torch.ByteTensor)
+        tensor_size = object_size_list[i]
+        object_list[i] = _tensor_to_object(tensor, tensor_size)
+
+
+def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
+    """
+    Gathers picklable objects from the whole group in a single process.
+    Similar to gather, but Python objects can be passed in. Note that the object
+    must be picklable in order to be gathered.
+
+    Arguments:
+        obj (Any): Input object. Must be picklable.
+        object_gather_list (list[Any]): Output list. On the dst rank, it should
+        be correctly sized as the size of teh group for this collective and will
+        contain the output. Must ne None on non-dst ranks. Default=None.
+        dst (int, optional): Destination rank (default is 0)
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        None. On the dst rank, object_gather_list will contain the output of the
+        collective.
+
+    .. note:: Note that this API differs slightly from the gather collective
+        since it does not provide an async_op handle and thus will be a blocking
+        call.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    # Ensure object_gather_list is specified appopriately.
+    my_rank = get_rank()
+    _validate_output_list_for_rank(my_rank, dst, object_gather_list)
+    input_tensor, local_size = _object_to_tensor(obj)
+    # Gather all local sizes. This is so that we can find the max size, and index
+    # until the correct size when deserializing the tensors.
+    group_size = get_world_size(group=group)
+    object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+    # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
+    # since each rank needs to broadcast a tensor of the same (maximal) size.
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = max(object_size_list)
+    local_max_size_tensor = torch.ByteTensor(size=(max_object_size,))
+    local_max_size_tensor[: local_size.item()] = input_tensor
+    output_tensors = [
+        torch.empty(max_object_size, dtype=torch.uint8) for _ in range(group_size)
+    ]
+    # All ranks call gather with equal-sized tensors.
+    gather(
+        local_max_size_tensor,
+        gather_list=output_tensors if my_rank == dst else None,
+        dst=dst,
+        group=group,
+    )
+    if my_rank != dst:
+        return
+    for i, tensor in enumerate(output_tensors):
+        tensor = tensor.type(torch.ByteTensor)
+        tensor_size = object_size_list[i]
+        object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
+
+
 def all_gather(tensor_list,
                tensor,
                group=group.WORLD,
@@ -1258,6 +1377,15 @@ def all_gather_coalesced(output_tensor_lists,
     else:
         work.wait()
 
+def _validate_output_list_for_rank(my_rank, dst, gather_list):
+    if dst == my_rank:
+        if not gather_list:
+            raise ValueError("Argument ``gather_list`` must be specified "
+                            "on destination rank.")
+    elif gather_list:
+        raise ValueError("Argument ``gather_list`` must NOT be specified "
+                        "on non-destination ranks.")
+
 
 def gather(tensor,
            gather_list=None,
@@ -1293,18 +1421,9 @@ def gather(tensor,
         return
 
     my_rank = get_rank()
-    if dst == my_rank:
-        if not gather_list:
-            raise ValueError("Argument ``gather_list`` must be specified "
-                             "on destination rank.")
-        input_tensors = [tensor]
-        output_tensors = [gather_list]
-    else:
-        if gather_list:
-            raise ValueError("Argument ``gather_list`` must NOT be specified "
-                             "on non-destination ranks.")
-        input_tensors = [tensor]
-        output_tensors = []
+    _validate_output_list_for_rank(my_rank, dst, gather_list)
+    output_tensors = [gather_list] if dst == my_rank else []
+    input_tensors = [tensor]
 
     opts = GatherOptions()
     opts.rootRank = dst
@@ -1603,7 +1722,7 @@ def all_to_all(output_tensor_list,
     return gathered list of tensors in output list.
 
     Arguments:
-        output_tensor_list (list[Tensor]): List of tensors to be gathered one 
+        output_tensor_list (list[Tensor]): List of tensors to be gathered one
             per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.

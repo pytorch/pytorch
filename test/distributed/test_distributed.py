@@ -39,6 +39,13 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
+class Foo:
+    def __init__(self, x):
+        self.x = x
+
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__
+
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
@@ -2374,6 +2381,78 @@ class _DistTestBase(object):
         expected = tensor_list[0]
         for tensor in tensor_list[1:]:
             self.assertEqual(tensor, expected)
+
+    def test_allgather_object(self):
+        # Ensure stateful objects can be allgathered
+        f = Foo(10)
+        f.bar = 1
+        gather_objects = [
+            {"key1": 3, "key2": 4, "key3": {"nested": True}},
+            f,
+            "example_string",
+            [1, 2, True, "string", [4, 5, "nested"]],
+        ]
+
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(
+            output_gathered, gather_objects[self.rank % len(gather_objects)]
+        )
+        for i, val in enumerate(output_gathered):
+            expected = gather_objects[i % len(gather_objects)]
+            self.assertEqual(val, expected)
+
+        # Validate errors when objects can't be pickled.
+        class Bar:
+            pass
+
+        b = Bar()
+        gather_objects = [b for _ in range(dist.get_world_size())]
+        with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            dist.all_gather_object(
+                [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
+            )
+
+    def test_gather_object(self):
+        # Ensure stateful objects can be gathered
+        f = Foo(10)
+        f.bar = 1
+        gather_objects = [
+            {"key1": 3, "key2": 4, "key3": {"nested": True}},
+            f,
+            "example_string",
+            [1, 2, True, "string", [4, 5, "nested"]],
+        ]
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        gather_on_rank = 0
+        my_rank = dist.get_rank()
+        dist.gather_object(
+            gather_objects[self.rank % len(gather_objects)],
+            object_gather_list=output_gathered if my_rank == gather_on_rank else None,
+            dst=gather_on_rank,
+        )
+        if my_rank != gather_on_rank:
+            self.assertEqual(
+                output_gathered, [None for _ in range(dist.get_world_size())]
+            )
+        else:
+            for i, val in enumerate(output_gathered):
+                expected = gather_objects[i % len(gather_objects)]
+                self.assertEqual(val, expected)
+
+        # Validate errors when objects can't be pickled.
+        class Bar:
+            pass
+
+        b = Bar()
+        gather_objects = [b for _ in range(dist.get_world_size())]
+        with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            dist.gather_object(
+                gather_objects[0],
+                object_gather_list=gather_objects
+                if my_rank == gather_on_rank
+                else None,
+                dst=gather_on_rank,
+            )
 
 
 if BACKEND == "gloo" or BACKEND == "nccl":
