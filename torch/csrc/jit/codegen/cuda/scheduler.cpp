@@ -266,8 +266,7 @@ ReductionParams reductionHeuristic(
   rparams.bdimx.value = std::min(rparams.bdimx.value, device_warp_size);
   rparams.bdimy.value =
       std::min(rparams.bdimy.value, num_threads / rparams.bdimx.value);
-  rparams.bdimx.value =
-      std::min(bdimxprev, num_threads / rparams.bdimy.value);
+  rparams.bdimx.value = std::min(bdimxprev, num_threads / rparams.bdimy.value);
 
   // 4. Distributing work across a block
 

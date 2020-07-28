@@ -50,8 +50,7 @@ struct ReductionParams {
     bool lp_equal = other.gdimx == gdimx && other.gdimy == gdimy &&
         other.bdimx == bdimx && other.bdimy == bdimy;
     bool attr_equal = other.fastest_dim == fastest_dim &&
-        other.cross_block == cross_block &&
-        other.cross_grid == cross_grid &&
+        other.cross_block == cross_block && other.cross_grid == cross_grid &&
         other.mul_reds_per_blk == mul_reds_per_blk;
     return attr_equal && lp_equal;
   }
