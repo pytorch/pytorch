@@ -11,7 +11,7 @@ class ReconstructScopesPass {
   void run();
 
  private:
-  Module* root_module;
+  const Module* root_module;
   Graph* graph;
   std::string prefix;
 
@@ -21,15 +21,15 @@ class ReconstructScopesPass {
   void visitBlock(Block* b);
   void visitNode(Node* n);
 
-  void constructFunctionToModuleMap(Module& module);
+  void constructFunctionToModuleMap(const Module& module);
   void constructRelativeNamesForModules(
-      Module& module,
+      const Module& module,
       const std::string& prefix);
 
   std::string getScopeString(Function* f) const;
 };
 
-void ReconstructScopesPass::constructFunctionToModuleMap(Module& module) {
+void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
   for (auto& method : module.get_methods()) {
     func_to_module[&method.function()] = module._ivalue();
   }
@@ -39,7 +39,7 @@ void ReconstructScopesPass::constructFunctionToModuleMap(Module& module) {
 }
 
 void ReconstructScopesPass::constructRelativeNamesForModules(
-    Module& module,
+    const Module& module,
     const std::string& prefix) {
   module_names[module._ivalue()] = prefix;
   for (NameModule s : module.named_children()) {
