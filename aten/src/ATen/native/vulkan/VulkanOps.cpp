@@ -22,13 +22,13 @@ void upsample_nearest2d(
     int64_t IW,
     int64_t OH,
     int64_t OW,
-    int64_t _N,
-    int64_t _C,
+    int64_t IN,
+    int64_t IC,
     float scaleH,
     float scaleW) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
-  int64_t C = _N * _C;
+  int64_t C = IN * IC;
   struct ConstBlock {
     int32_t IW;
     int32_t IH;
@@ -37,7 +37,12 @@ void upsample_nearest2d(
     float scaleX;
     float scaleY;
   };
-  ConstBlock cb{IW, IH, OW, OH, scaleW, scaleH};
+  ConstBlock cb{static_cast<int32_t>(IW),
+                static_cast<int32_t>(IH),
+                static_cast<int32_t>(OW),
+                static_cast<int32_t>(OH),
+                scaleW,
+                scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -162,7 +167,10 @@ void add(
     int32_t C;
     float alpha;
   };
-  ConstBlock cb{W, H, C, alpha};
+  ConstBlock cb{static_cast<int32_t>(W),
+                static_cast<int32_t>(H),
+                static_cast<int32_t>(C),
+                alpha};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -286,12 +294,18 @@ void conv2d_depthwise(
     float outputMax;
   };
   ConstBlock cb{
-      {params.PX, params.PY},
-      {params.KW, params.KH},
-      {params.SX, params.SY},
-      {params.DX, params.DY},
-      {params.OW, params.OH, params.OC_4, 0},
-      {params.W, params.H, params.C_4, 0},
+      {static_cast<int32_t>(params.PX), static_cast<int32_t>(params.PY)},
+      {static_cast<int32_t>(params.KW), static_cast<int32_t>(params.KH)},
+      {static_cast<int32_t>(params.SX), static_cast<int32_t>(params.SY)},
+      {static_cast<int32_t>(params.DX), static_cast<int32_t>(params.DY)},
+      {static_cast<int32_t>(params.OW),
+       static_cast<int32_t>(params.OH),
+       static_cast<int32_t>(params.OC_4),
+       0},
+      {static_cast<int32_t>(params.W),
+       static_cast<int32_t>(params.H),
+       static_cast<int32_t>(params.C_4),
+       0},
       output_min ? *output_min : -std::numeric_limits<float>::infinity(),
       output_max ? *output_max : std::numeric_limits<float>::infinity()};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
@@ -379,8 +393,10 @@ ImageSizes conv2d_prepack_weights_image_sizes(
     int64_t C,
     int64_t KH,
     int64_t KW) {
-  return {{ALIGN_UP4(C), UP_DIV(OC, 4), KH * KW},
-          {ALIGN_UP4(C), UP_DIV(OC, 4), KH * KW}};
+  const uint32_t Cup4 = ALIGN_UP4(static_cast<uint32_t>(C));
+  const uint32_t OC_4 = UP_DIV(static_cast<uint32_t>(OC), 4);
+  const uint32_t Z = static_cast<uint32_t>(KH) * static_cast<uint32_t>(KW);
+  return {{Cup4, OC_4, Z}, {Cup4, OC_4, Z}};
 }
 
 void conv2d_prepack_weights_to_image(
@@ -403,7 +419,7 @@ void conv2d_prepack_weights_to_image(
     int32_t KWxKH;
     int32_t C_4;
   };
-  ConstBlock cb{KW * KH, C_4};
+  ConstBlock cb{static_cast<int32_t>(KW * KH), static_cast<int32_t>(C_4)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -500,14 +516,21 @@ void conv2d(
       output_min ? *output_min : -std::numeric_limits<float>::infinity();
   float outputMax =
       output_max ? *output_max : std::numeric_limits<float>::infinity();
-  ConstBlock cb{{params.PX, params.PY},
-                {params.KW, params.KH},
-                {params.SX, params.SY},
-                {params.DX, params.DY},
-                {params.OW, params.OH, params.OC_4, params.OC},
-                {params.W, params.H, params.C_4, params.C},
-                outputMin,
-                outputMax};
+  ConstBlock cb{
+      {static_cast<int32_t>(params.PX), static_cast<int32_t>(params.PY)},
+      {static_cast<int32_t>(params.KW), static_cast<int32_t>(params.KH)},
+      {static_cast<int32_t>(params.SX), static_cast<int32_t>(params.SY)},
+      {static_cast<int32_t>(params.DX), static_cast<int32_t>(params.DY)},
+      {static_cast<int32_t>(params.OW),
+       static_cast<int32_t>(params.OH),
+       static_cast<int32_t>(params.OC_4),
+       static_cast<int32_t>(params.OC)},
+      {static_cast<int32_t>(params.W),
+       static_cast<int32_t>(params.H),
+       static_cast<int32_t>(params.C_4),
+       static_cast<int32_t>(params.C)},
+      outputMin,
+      outputMax};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   auto device = context().device();
@@ -533,7 +556,7 @@ void conv2d(
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
-  WorkGroupSize workGroupSize{1, 1, params.OC_4};
+  WorkGroupSize workGroupSize{1, 1, static_cast<uint32_t>(params.OC_4)};
   auto& computeUnit = context().computeUnitFactory().get(
       GLSL_SPV(conv2d_nogroup_clamp), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
@@ -681,7 +704,12 @@ void clamp(
     float min;
     float max;
   };
-  ConstBlock cb{W, H, C_4, C, min, max};
+  ConstBlock cb{static_cast<int32_t>(W),
+                static_cast<int32_t>(H),
+                static_cast<int32_t>(C_4),
+                static_cast<int32_t>(C),
+                min,
+                max};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -759,7 +787,13 @@ void addmm(
     float alpha;
     int32_t K;
   };
-  ConstBlock cb{OW, OH, C_4, C, beta, alpha, K};
+  ConstBlock cb{static_cast<int32_t>(OW),
+                static_cast<int32_t>(OH),
+                static_cast<int32_t>(C_4),
+                static_cast<int32_t>(C),
+                beta,
+                alpha,
+                static_cast<int32_t>(K)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -829,11 +863,11 @@ void addmm(
 
 void mean(VulkanTensor& output, const VulkanTensor& input) {
   auto isizes = input.sizes();
-  auto N = isizes[0];
-  auto C = isizes[1];
-  auto H = isizes[2];
-  auto W = isizes[3];
-  auto C_4 = UP_DIV(N * C, 4);
+  int32_t N = static_cast<int32_t>(isizes[0]);
+  int32_t C = static_cast<int32_t>(isizes[1]);
+  int32_t H = static_cast<int32_t>(isizes[2]);
+  int32_t W = static_cast<int32_t>(isizes[3]);
+  int32_t C_4 = UP_DIV(N * C, 4);
 
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
