@@ -505,41 +505,41 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::eq: {
       return computeTwoOperand(
           "aten_eq", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs == rhs;
+            return cast<bool>(lhs == rhs);
           });
     } break;
 
     case aten::ne: {
       return computeTwoOperand(
           "aten_ne", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs != rhs;
+            return cast<bool>(lhs != rhs);
           });
     } break;
     case aten::ge: {
       return computeTwoOperand(
           "aten_ge", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs >= rhs;
+            return cast<bool>(lhs >= rhs);
           });
     } break;
 
     case aten::gt: {
       return computeTwoOperand(
           "aten_gt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs > rhs;
+            return cast<bool>(lhs > rhs);
           });
     } break;
 
     case aten::le: {
       return computeTwoOperand(
           "aten_le", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs <= rhs;
+            return cast<bool>(lhs <= rhs);
           });
     } break;
 
     case aten::lt: {
       return computeTwoOperand(
           "aten_lt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs < rhs;
+            return cast<bool>(lhs < rhs);
           });
     } break;
 
