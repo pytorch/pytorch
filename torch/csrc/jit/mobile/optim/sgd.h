@@ -101,7 +101,7 @@ class TORCH_API SGD {
 
   ~SGD() = default;
 
-  torch::Tensor step(LossClosure closure = nullptr);
+  torch::Tensor step(const LossClosure& closure = nullptr);
 
   /// Zeros out the gradients of all parameters.
   void zero_grad();

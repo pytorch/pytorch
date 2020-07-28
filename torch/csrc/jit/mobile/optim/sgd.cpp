@@ -80,7 +80,7 @@ void SGD::zero_grad() {
   }
 }
 
-Tensor SGD::step(LossClosure closure) {
+Tensor SGD::step(const LossClosure& closure) {
   NoGradGuard no_grad;
   Tensor loss = {};
   if (closure != nullptr) {
