@@ -4,6 +4,7 @@ from functools import reduce
 from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
+
 from torch.testing import \
     (make_non_contiguous,
      get_common_float_types,
@@ -15,7 +16,8 @@ from torch.testing import \
      get_common_float_and_complex_types_plus_bfloat16,
      get_all_float_and_complex_types)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA)
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+     expectedAlertNondeterministic)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -129,7 +131,6 @@ op_db = [
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncMeta)]
-
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -795,6 +796,8 @@ def method_tests():
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
+        ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('index_add_cuda_', 'cuda')]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
@@ -998,6 +1001,8 @@ def method_tests():
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
         ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
+        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
         ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
         ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),

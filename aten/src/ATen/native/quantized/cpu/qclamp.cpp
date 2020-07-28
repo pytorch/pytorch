@@ -98,7 +98,7 @@ Tensor quantized_clamp_impl(
 } // namespace
 
 // at::native functions for the native_functions.yaml
-Tensor quantized_clamp(
+Tensor clamp_quantized_cpu(
     const Tensor& qx,
     optional<Scalar> min,
     optional<Scalar> max) {
@@ -110,7 +110,7 @@ Tensor quantized_clamp(
 }
 
 // hardtanh is clamp with default min==-1.0f and default max==1.0f
-Tensor quantized_hardtanh(
+Tensor hardtanh_quantized_cpu(
     const Tensor& qx,
     Scalar min,
     Scalar max) {
@@ -119,7 +119,7 @@ Tensor quantized_hardtanh(
   return qy;
 }
 
-Tensor& quantized_hardtanh_out(
+Tensor& hardtanh_out_quantized_cpu(
     Tensor& result,
     const Tensor& qx,
     Scalar min,
@@ -128,7 +128,7 @@ Tensor& quantized_hardtanh_out(
   return result;
 }
 
-Tensor& quantized_hardtanh_(
+Tensor& hardtanh_quantized_cpu_(
     Tensor& self,
     Scalar min,
     Scalar max) {
@@ -140,7 +140,7 @@ Tensor& quantized_hardtanh_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", TORCH_FN(quantized_clamp));
+  m.impl("clamp", TORCH_FN(clamp_quantized_cpu));
 }
 
 } // namespace native
