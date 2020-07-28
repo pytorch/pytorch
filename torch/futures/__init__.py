@@ -1,16 +1,36 @@
+from typing import cast, Callable, Generic, List, Type, TypeVar
+
 import torch
+from torch._six import PY37
 
+T = TypeVar("T")
+S = TypeVar("S")
 
-class Future(torch._C.Future):
+if not PY37:
+    # Workaround for https://github.com/python/typing/issues/449 in Python 3.6
+    from typing import GenericMeta
+
+    class _PyFutureMeta(type(torch._C.Future), GenericMeta):   # type: ignore[misc]
+        pass
+else:
+    class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
+        pass
+
+class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
-    def __new__(cls):
-        return super(Future, cls).__new__(cls)
 
-    def wait(self):
+    def done(self) -> bool:
+        r"""
+        Return ``True`` if this ``Future`` is done. A ``Future`` is done if it
+        has a result or an exception.
+        """
+        return super().done()
+
+    def wait(self) -> T:
         r"""
         Block until the value of this ``Future`` is ready.
 
@@ -19,9 +39,10 @@ class Future(torch._C.Future):
             creating the value has thrown an error, this ``wait`` method will
             also throw an error.
         """
-        return super(Future, self).wait()
+        return super().wait()
 
-    def then(self, callback):
+    # Have to use string annotations because  PEP-0563 is not available in 3.6
+    def then(self, callback):  # type: (Callable[[Future[T]], S]) -> Future[S]
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
@@ -58,9 +79,9 @@ class Future(torch._C.Future):
             >>> # RPC return value is 5.
             >>> # Chained cb done. None
         """
-        return super(Future, self).then(callback)
+        return cast(Future[S], super().then(callback))
 
-    def set_result(self, result):
+    def set_result(self, result: T) -> None:
         r"""
         Set the result for this ``Future``, which will mark this ``Future`` as
         completed and trigger all attached callbacks. Note that a ``Future``
@@ -88,10 +109,10 @@ class Future(torch._C.Future):
             >>> print(fut.wait())  # tensor([3., 3.])
             >>> t.join()
         """
-        super(Future, self).set_result(result)
+        super().set_result(result)
 
 
-def collect_all(futures):
+def collect_all(futures: List[Future]) -> Future[List[Future]]:
     r"""
     Collects the provided :class:`~torch.futures.Future` objects into a single
     combined :class:`~torch.futures.Future` that is completed when all of the
@@ -122,9 +143,10 @@ def collect_all(futures):
         >>> # fut0 result = 0
         >>> # fut1 result = 1
     """
-    return torch._C._collect_all(futures)
+    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
 
-def wait_all(futures):
+
+def wait_all(futures: List[Future]) -> List:
     r"""
     Waits for all provided futures to be complete, and returns
     the list of completed values.
@@ -137,4 +159,4 @@ def wait_all(futures):
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [fut.wait() for fut in torch._C._collect_all(futures).wait()]
+    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]

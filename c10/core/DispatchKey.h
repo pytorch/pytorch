@@ -107,6 +107,58 @@ enum class DispatchKey : uint8_t {
   PrivateUse2,
   PrivateUse3,
 
+  // The meta function characterizes how an operation affects the metadata of a
+  // tensor (shape, dtype) without doing any of the actual computation.  A
+  // meta tensor can be used to dry run operators without actually doing
+  // any computation, e.g., add on two meta tensors would give you another
+  // meta tensor with the output shape and dtype, but wouldn't actually
+  // add anything.  A meta implementation typically would look something like:
+  //
+  //  Tensor meta::add(const Tensor& self, const Tensor& other) {
+  //    TORCH_CHECK(self.size().equals(other.size()));
+  //    return at::empty_like(self, self.size());
+  //  }
+  //
+  // The meta function would get invoked if you ran an operator passing
+  // in meta tensors.  The call stack in such a case would look something like
+  // this:
+  //
+  //  at::add(x: Meta, y: Meta) {
+  //    return [dispatch] meta::add(x: Meta, y: Meta) {
+  //      output_shape = ...
+  //      [dispatch] meta::empty(output_shape) {
+  //        return ... meta tensor with output_shape but no data allocated ...
+  //      }
+  //    }
+  //  }
+  //
+  // Meta functions have an important secondary function, which is they can
+  // be used as tensor "allocators".  A typical backend implementation should
+  // be implemented in this way:
+  //
+  //  Tensor cpu::add(const Tensor& self, const Tensor& other) {
+  //    Tensor result = meta::add(self, other);
+  //    // ... do the actual computation into result ...
+  //    return result;
+  //  }
+  //
+  // In this case, the internal at::empty_like invocation would dispatch to the
+  // CPU factory function, not the meta factory function.  The call stack in
+  // this case looks like:
+  //
+  //  at::add(x: CPU, y: CPU) {
+  //    return [dispatch] cpu::add(x: CPU, y: CPU) {
+  //      output = [direct] meta::add(x: CPU, y: CPU) {
+  //        output_shape = ...
+  //        [dispatch] cpu::empty(output_shape)
+  //      }
+  //      ... compute on output ...
+  //      return output;
+  //    }
+  //  }
+  //
+  Meta,
+
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
   // have any "tensor" arguments.  In this case, a BackendSelect function

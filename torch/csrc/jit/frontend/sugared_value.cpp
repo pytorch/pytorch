@@ -109,6 +109,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse", "prim"},
            {"is_mkldnn", "prim"},
            {"is_quantized", "prim"},
+           {"is_meta", "prim"},
            {"is_leaf", "aten"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
@@ -160,6 +161,19 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
+    }
+  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+    // Handle access to Enum's `name` and `value` attribute.
+    auto& g = *m.graph();
+
+    if (field == "name") {
+      auto n = g.insertNode(g.createEnumName(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
+
+    if (field == "value") {
+      auto n = g.insertNode(g.createEnumValue(value_));
+      return std::make_shared<SimpleValue>(n->output());
     }
   }
 

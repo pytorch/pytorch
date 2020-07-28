@@ -74,8 +74,12 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyListType::Kind:
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
+      case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case EnumType::Kind:
+        // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
+        AT_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -636,7 +640,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx++).toBool();
+    bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());

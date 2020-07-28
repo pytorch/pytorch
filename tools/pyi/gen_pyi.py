@@ -1,6 +1,8 @@
 from __future__ import print_function
 import os
 import collections
+from pprint import pformat
+
 import yaml
 import re
 import argparse
@@ -48,7 +50,7 @@ FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
-blacklist = [
+blocklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
@@ -88,6 +90,9 @@ blacklist = [
     'norm',
     'split',
     'unique_consecutive',
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -246,7 +251,7 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     This function currently encodes quite a bit about the semantics of
     the translation C++ -> Python.
     """
-    if fname in blacklist:
+    if fname in blocklist:
         return []
 
     type_hints = []
@@ -273,11 +278,15 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
                     print("Error while processing function {}".format(fname))
                     raise
 
-        if is_tensor:
-            if 'self: Tensor' in python_args:
-                python_args.remove('self: Tensor')
+        if 'self: Tensor' in python_args:
+            self_index = python_args.index('self: Tensor')
+            python_args.remove('self: Tensor')
+            if is_tensor:
                 python_args = ['self'] + python_args
             else:
+                python_args.insert(self_index, 'input: Tensor')
+        else:
+            if is_tensor:
                 raise Exception("method without self is unexpected")
 
         if has_out:
@@ -454,9 +463,11 @@ def gen_pyi(declarations_path, out):
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
-        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+        'randint': ['def randint(low: _int, high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
-                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    'def randint(high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
                  ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
@@ -554,6 +565,7 @@ def gen_pyi(declarations_path, out):
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_quantized': ['is_quantized: _bool'],
+        'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
@@ -639,6 +651,16 @@ def gen_pyi(declarations_path, out):
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
                           'quint8', 'qint8', 'qint32', 'bool']]
 
+    # Generate __all__ directive
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Include only the functions that contain hints, to prevent undefined
+    # symbols to be included in the `__all__` directive.
+    hinted_function_names = [name for name, hint in unsorted_function_hints.items() if hint]
+    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_directive = pformat(all_symbols, width=100, compact=True).split('\n')
+    all_directive[0] = '__all__ = {}'.format(all_directive[0])
+
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
@@ -649,6 +671,7 @@ def gen_pyi(declarations_path, out):
         'legacy_class_hints': legacy_class_hints,
         'legacy_storage_base_hints': legacy_storage_base_hints,
         'dtype_class_hints': dtype_class_hints,
+        'all_directive': all_directive
     }
     TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
     TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \

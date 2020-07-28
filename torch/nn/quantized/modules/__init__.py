@@ -2,7 +2,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6, Hardswish
+from .activation import ReLU, ReLU6, Hardswish, ELU
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
@@ -91,6 +91,7 @@ __all__ = [
     'ReLU',
     'ReLU6',
     'Hardswish',
+    'ELU',
     'LayerNorm',
     'GroupNorm',
     'InstanceNorm1d',

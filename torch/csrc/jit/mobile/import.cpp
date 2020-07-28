@@ -2,33 +2,32 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
+#include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-//  (('__torch__.m.add_it',
-//    (('instructions',
-//      (('STOREN', 1, 2),
-//       ('MOVE', 1, 0),
-//       ('GET_ATTR', 0, 0),
-//       ('MOVE', 2, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 0, 0),
-//       ('LOADC', 1, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 1, 0),
-//       ('RET', 0, 0))),
-//     ('operators', (('_aten::add', 'Tensor'), ('_aten::add', 'Scalar'))),
-//     ('constants', (1, 4)),
-//     ('register_size', 2))),)
+// (3,
+//   ('__torch__.m.forward',
+//     (('instructions',
+//       (('STOREN', 1, 2),
+//        ('DROPR', 1, 0),
+//        ('MOVE', 2, 0),
+//        ('OP', 0, 0),
+//        ('RET', 0, 0))),
+//      ('operators', (('aten::Int', 'Tensor'),)),
+//      ('constants', ()),
+//      ('types', ()),
+//      ('register_size', 2))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
@@ -85,7 +84,26 @@ void print_unsupported_ops_and_throw(
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
-  for (const auto& element : vals) {
+  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
+  // Initialized with the version number when kProducedBytecodeVersion was
+  // introduced. The old models (some of them already in production) without
+  // version number don't have to be re-generated.
+  int64_t model_version = 0x3L;
+  size_t method_i_start = 0;
+  if (vals[0].isInt()) {
+    model_version = vals[0].toInt();
+    method_i_start = 1;
+  }
+  TORCH_CHECK(
+      model_version == caffe2::serialize::kProducedBytecodeVersion,
+      "Lite Interpreter verson number does not match. ",
+      "The code version is ",
+      caffe2::serialize::kProducedBytecodeVersion,
+      " but the model version is ",
+      model_version);
+
+  for (size_t i = method_i_start; i < vals.size(); ++i) {
+    const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
     IValue table = m_tuple[1];
@@ -113,7 +131,8 @@ void parseMethods(
       auto ins_item = ins.toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
-          "There should be three parts in an instruction.");
+          "There should be three parts in an instruction. The function name is ",
+          function_name);
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
@@ -133,7 +152,6 @@ void parseMethods(
             op_item[0].toString()->string(), op_item[1].toString()->string()));
       }
     }
-
     if (!unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
@@ -254,6 +272,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
       for (size_t i = 0; i < ndict; ++i) {
+        std::stringstream name;
+        name << it->key();
+        cls->addOrCheckAttribute(name.str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
       }
@@ -297,9 +318,31 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  return deserializer.deserialize(device);
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnterLoadModel();
+  }
+  try {
+    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+    BytecodeDeserializer deserializer(std::move(reader));
+    mobile::Module result = deserializer.deserialize(std::move(device));
+    std::string name = result.name();
+    if (observer) {
+      observer->onExitLoadModel(name);
+    }
+    return result;
+  } catch (const std::exception& ex) {
+    if (observer) {
+      observer->onFailLoadModel(
+          "Error occured during loading model: " + (std::string)ex.what());
+    }
+    TORCH_CHECK(false, ex.what());
+  } catch (...) {
+    if (observer) {
+      observer->onFailLoadModel("unknown exception");
+    }
+    TORCH_CHECK(false, "unknown exception");
+  }
 }
 
 } // namespace jit
