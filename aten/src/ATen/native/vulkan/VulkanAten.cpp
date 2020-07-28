@@ -294,6 +294,25 @@ Tensor vulkan_addmm(
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
+Tensor vulkan_mm(const Tensor& self, const Tensor& mat2) {
+  TORCH_INTERNAL_ASSERT(
+      self.dim() == 2 && mat2.dim() == 2,
+      "vulkan_mm expects 2-dimensional tensors");
+  const auto m1Sizes = self.sizes();
+  const auto m2Sizes = mat2.sizes();
+  TORCH_INTERNAL_ASSERT(
+      m1Sizes[1] == m2Sizes[0],
+      "vulkan_mm expects self.sizes[1] equal mat2.sizes[0]");
+
+  const auto& m1 = vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  const auto& m2 = vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
+
+  VulkanTensor output{{m1Sizes[0], m2Sizes[1]}};
+  output.allocate_storage();
+  vulkan::detail::addmm(output, c10::nullopt, m1, m2, 0.f, 1.f);
+  return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
 Tensor vulkan_clamp(
     const Tensor& self,
     c10::optional<Scalar> min,

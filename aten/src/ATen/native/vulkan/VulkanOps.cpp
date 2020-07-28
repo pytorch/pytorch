@@ -703,11 +703,12 @@ void clamp(
 
 void addmm(
     VulkanTensor& output,
-    const VulkanTensor& t,
+    c10::optional<const VulkanTensor> t,
     const VulkanTensor& m1,
     const VulkanTensor& m2,
     float beta,
     float alpha) {
+  bool hasT = t.has_value();
   auto m1Sizes = m1.sizes();
   auto m2Sizes = m2.sizes();
   TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
@@ -732,13 +733,7 @@ void addmm(
   uint32_t C_4 = UP_DIV(C, 4);
   uint32_t K = m1W;
 
-  auto tSizes = t.sizes();
-  uint32_t TH = tSizes[0];
-  uint32_t TW = tSizes[1];
-  uint32_t TC = 1;
-
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
 
   struct ConstBlock {
     int32_t OW;
@@ -755,12 +750,24 @@ void addmm(
   VkDescriptorSetLayout descriptorSetLayout{};
   VkDescriptorPool descriptorPool{};
   VkDescriptorSet descriptorSet{};
-  std::vector<VkDescriptorType> descriptorTypes{
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  std::vector<VkDescriptorType> descriptorTypes{};
+  if (hasT) {
+    descriptorTypes = {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    };
+  } else {
+    descriptorTypes = {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    };
+  }
+
   createDescriptorSetLayoutSinglePool(
       device,
       descriptorTypes,
@@ -771,21 +778,36 @@ void addmm(
   output.image()->bindStorageImage(descriptorSet, 0);
   m1.image()->bindShaderRead(descriptorSet, 1);
   m2.image()->bindShaderRead(descriptorSet, 2);
-  t.image()->bindShaderRead(descriptorSet, 3);
-  constBuffer.bind(descriptorSet, 4);
+  constBuffer.bind(descriptorSet, 3);
+  if (hasT) {
+    (*t).image()->bindShaderRead(descriptorSet, 4);
+  }
 
   WorkGroupSize workGroupSize{8, 8, 1};
-  auto& computeUnit = context().computeUnitFactory().get(
-      GLSL_SPV(addmm), descriptorSetLayout, workGroupSize);
-  computeUnit.createCommandBuffer(descriptorSet);
-  auto commandBuffer = computeUnit.commandBuffer();
-  output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
-  m1.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  m2.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  t.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  computeUnit.dispatchCommandBuffer(OW, OH, C_4, workGroupSize);
-  computeUnit.endCommandBuffer();
-  computeUnit.submitAndWaitCommandBuffer();
+  if (hasT) {
+    auto& computeUnit = context().computeUnitFactory().get(
+        GLSL_SPV(addmm), descriptorSetLayout, workGroupSize);
+    computeUnit.createCommandBuffer(descriptorSet);
+    auto commandBuffer = computeUnit.commandBuffer();
+    output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
+    m1.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+    m2.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+    (*t).image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+    computeUnit.dispatchCommandBuffer(OW, OH, C_4, workGroupSize);
+    computeUnit.endCommandBuffer();
+    computeUnit.submitAndWaitCommandBuffer();
+  } else {
+    auto& computeUnit = context().computeUnitFactory().get(
+        GLSL_SPV(mm), descriptorSetLayout, workGroupSize);
+    computeUnit.createCommandBuffer(descriptorSet);
+    auto commandBuffer = computeUnit.commandBuffer();
+    output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
+    m1.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+    m2.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+    computeUnit.dispatchCommandBuffer(OW, OH, C_4, workGroupSize);
+    computeUnit.endCommandBuffer();
+    computeUnit.submitAndWaitCommandBuffer();
+  }
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
