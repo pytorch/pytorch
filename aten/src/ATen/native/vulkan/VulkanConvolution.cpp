@@ -69,7 +69,7 @@ ContextConv2D create(
   Tensor weight_nchw = weight.contiguous();
   auto ws = weight_nchw.sizes();
   return ContextConv2D{
-      groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
+      groups == 1 ? at::native::vulkan::convolution_prepack_weights(weight_nchw)
                   : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
       {{ws[0], ws[1], ws[2], ws[3]}},
@@ -82,7 +82,7 @@ ContextConv2D create(
 }
 
 Tensor run(const ContextConv2D& context, const Tensor& input) {
-  return at::native::vulkan_convolution_prepacked(
+  return at::native::vulkan::convolution_prepacked(
       input,
       context.weight_size_,
       context.weight_prepacked_vulkan_,
