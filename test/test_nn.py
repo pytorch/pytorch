@@ -8326,6 +8326,15 @@ class TestNN(NNTestCase):
             torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
         self.assertEqual(len(w), 1)
 
+    def test_flatten(self):
+        tensor_input = torch.randn(2, 1, 2, 3)
+
+        # Flatten Tensor
+
+        flatten = nn.Flatten(start_dim=1, end_dim=-1)
+        tensor_output = flatten(tensor_input)
+        self.assertEqual(tensor_output.size(), torch.Size([2, 6]))
+
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
@@ -11166,6 +11175,21 @@ class TestNNDeviceType(NNTestCase):
             res2 = fn(x2)
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
+
+    @onlyOnCPUAndCUDA  # TODO: RuntimeError message different on XLA
+    def test_pooling_zero_stride(self, device):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
+                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                                       lambda: fn(x, kernel_size=2, stride=0))
+
+                fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
+                fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
+                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                                       lambda: fn_module(x))
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)

@@ -5418,6 +5418,41 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    @onlyOnCPUAndCUDA
+    def test_tensor_ctor_device_inference(self, device):
+        torch_device = torch.device(device)
+        values = torch.tensor((1, 2, 3), device=device)
+
+        # Tests tensor and as_tensor
+        # Note: warnings are suppressed (suppresses warnings)
+        for op in (torch.tensor, torch.as_tensor):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.assertEqual(op(values).device, torch_device)
+                self.assertEqual(op(values, dtype=torch.float64).device, torch_device)
+
+                if self.device_type == 'cuda':
+                    with torch.cuda.device(device):
+                        self.assertEqual(op(values.cpu()).device, torch.device('cpu'))
+
+        # Tests sparse ctor
+        indices = torch.tensor([[0, 1, 1],
+                                [2, 0, 1],
+                                [2, 1, 0]], device=device)
+        sparse_size = (3, 3, 3)
+
+        sparse_default = torch.sparse_coo_tensor(indices, values, sparse_size)
+        self.assertEqual(sparse_default.device, torch_device)
+
+        sparse_with_dtype = torch.sparse_coo_tensor(indices, values, sparse_size, dtype=torch.float64)
+        self.assertEqual(sparse_with_dtype.device, torch_device)
+
+        if self.device_type == 'cuda':
+            with torch.cuda.device(device):
+                sparse_with_dtype = torch.sparse_coo_tensor(indices.cpu(), values.cpu(),
+                                                            sparse_size, dtype=torch.float64)
+                self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
@@ -11945,6 +11980,40 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+    def _test_large_cum_fn_helper(self, x, fn):
+        x_cpu = x.cpu().float()
+        expected = fn(x_cpu)
+        actual = fn(x).cpu().float()
+        self.assertEqual(expected, actual.cpu().float())
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumsum(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = -3
+        x[1::3] = 2
+        x[2::3] = 1
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    def test_large_cumprod(self, device, dtype):
+        # initialization to avoid overflow and half caveats
+        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        x[::3] = 8
+        x[1::3] = .25
+        x[2::3] = .5
+        self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+
+    def test_discontiguous_out_cumsum(self, device):
+        x = torch.randn(4, 8, device=device)
+        y = torch.empty(4, 16, device=device)[:, ::2]
+        out = torch.cumsum(x, 0)
+        torch.cumsum(x, 0, out=y)
+        self.assertFalse(y.is_contiguous())
+        self.assertEqual(out, y, atol=0., rtol=0.)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -16906,16 +16975,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(y, z)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
         res1 = m1.clone()
-        q = 2.1
+        q = 3
         res1[:, 3].fmod_(q)
         res2 = m1.clone()
         for i in range(m1.size(1)):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
+
+        zero = torch.zeros_like(m1)
+        if dtype in torch.testing.get_all_int_dtypes():
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(0)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(zero)
+        else:
+            self.assertTrue(torch.all(m1.fmod(0).isnan()))
+            self.assertTrue(torch.all(m1.fmod(zero).isnan()))
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
@@ -17684,13 +17763,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
             a // b
-
-    @onlyCPU
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_fmod_zero(self, device, dtype):
-        a = torch.tensor([1, 0], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.fmod(a)
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
