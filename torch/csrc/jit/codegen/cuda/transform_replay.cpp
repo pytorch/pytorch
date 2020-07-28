@@ -206,7 +206,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   // Map of consumer_CA_root_ids to related producer_CA_ids
   auto replay_root_map =
-      TensorDomain::mapRootCtoP(consumer, producer, true, consumer_CA_root_ids);
+      TensorDomain::mapRootCtoP(consumer, producer, consumer_CA_root_ids);
 
   // Track which root axes in producer we will send to replay
   std::unordered_set<IterDomain*> producer_roots4replay;
@@ -391,7 +391,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   }
 
   auto replay_root_map =
-      TensorDomain::mapRootPtoC(producer, consumer, true, producer_CA_root_ids);
+      TensorDomain::mapRootPtoC(producer, consumer, producer_CA_root_ids);
 
   // Track which root axes in producer we will send to replay
   std::unordered_set<IterDomain*> consumer_roots4replay;
