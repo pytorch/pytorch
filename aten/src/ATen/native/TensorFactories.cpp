@@ -123,7 +123,7 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-TensorIterator complex_op(
+inline TensorIterator complex_op(
     Tensor& out,
     const Tensor& a,
     const Tensor& b,
