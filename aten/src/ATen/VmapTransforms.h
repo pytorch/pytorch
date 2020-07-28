@@ -101,6 +101,7 @@ struct TORCH_API VmapPhysicalView {
   }
 
   Tensor& tensor() { return tensor_; }
+  const Tensor& tensor() const { return tensor_; }
 
   // Maps logical dim indices to physical dim indices. Also does dim wrapping.
   //
@@ -111,23 +112,23 @@ struct TORCH_API VmapPhysicalView {
   // This is because the size of levels tell us that the first two dimensions
   // of `tensor_` are batch dimensions, so a logical dim of `n` is actually
   // a physical dim of `n + 2`.
-  VmapDimVector getPhysicalDims(IntArrayRef logical_dims);
-  int64_t getPhysicalDim(int64_t logical_dim);
+  VmapDimVector getPhysicalDims(IntArrayRef logical_dims) const;
+  int64_t getPhysicalDim(int64_t logical_dim) const;
 
   // Maps a logical shape to a physical shape by pre-pending the batch
   // sizes to the logical shape.
-  VmapDimVector getPhysicalShape(IntArrayRef logical_shape);
+  VmapDimVector getPhysicalShape(IntArrayRef logical_shape) const;
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor),
   // using the mapping info stored in this VmapPhysicalView.
   // Assumes that all of the "batch dimensions" are at the front
   // of the physical tensor.
-  Tensor newLogicalFromPhysical(const Tensor& physical);
+  Tensor newLogicalFromPhysical(const Tensor& physical) const;
 
-  int64_t numBatchDims();
+  int64_t numBatchDims() const;
 
  private:
-  int64_t numLogicalDims();
+  int64_t numLogicalDims() const;
 
   std::bitset<kVmapNumLevels> levels_;
   Tensor tensor_;
