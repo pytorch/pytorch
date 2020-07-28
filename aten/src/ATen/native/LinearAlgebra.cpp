@@ -840,7 +840,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
-  ).to(A.device().type(), /*non_blocking=*/true);
+  ).pin_memory().to(A.device().type(), /*non_blocking=*/true);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -901,7 +901,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
-  ).to(A.device().type(), /*non_blocking=*/true);
+  ).pin_memory().to(A.device().type(), /*non_blocking=*/true);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
