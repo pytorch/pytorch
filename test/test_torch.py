@@ -6436,11 +6436,13 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(torch.int32, torch.int64, torch.complex64, torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.int32, torch.int64, torch.half, torch.float, torch.double)
     @dtypes(torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
-        x = ([[float('nan'), 1.23], [2.06, float('nan')]], [[float('nan'), float('nan')], [float('nan'), float('nan')]])
-
+        x = (torch.randn(3, 3))
+        if dtype in [torch.half, torch.float, torch.double]:
+            x[x < 0.2] = float('nan')
+ 
         torch_fn_with_axis = partial(torch.nanprod, axis=0)
         np_fn_with_axis = partial(np.nanprod, axis=0)
 
