@@ -15,14 +15,14 @@ class LintCode(Enum):
 
 def optimize_for_mobile(
         script_module,
-        optimization_blacklist: Set[MobileOptimizerType] = None,
+        optimization_blocklist: Set[MobileOptimizerType] = None,
         preserved_methods: List[AnyStr] = None):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
-        optimization_blacklist: A set with type of MobileOptimizerType. When set is not passed, 
+        optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
             optimization method will run all the optimizer pass; otherwise, optimizer
-            method will run the optimization pass that is not included inside optimization_blacklist.
+            method will run the optimization pass that is not included inside optimization_blocklist.
         perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked.
     Returns:
         A new optimized torch script module
@@ -31,13 +31,13 @@ def optimize_for_mobile(
         raise TypeError(
             'Got {}, but ScriptModule is expected.'.format(type(script_module)))
 
-    if optimization_blacklist is None:
-        optimization_blacklist = set()
+    if optimization_blocklist is None:
+        optimization_blocklist = set()
 
     if preserved_methods is None:
         preserved_methods = []
 
-    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blacklist, preserved_methods)
+    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
 
 
@@ -69,7 +69,8 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     for op_name in op_names:
         if "dropout" in op_name:
             lint_list.append({"name": LintCode.DROPOUT.name, "message": "Operator {} exists, remember to call eval() before "
-                              "saving the module.".format(op_name)})
+                              "saving the module.and call torch.utils.mobile_optimizer.optimize_for_mobile to drop dropout "
+                              "operator.".format(op_name)})
         if "batch_norm" in op_name:
             lint_list.append({"name": LintCode.BATCHNORM.name, "message": "Operator {} exists, remember to call eval() before "
                               "saving the module and call torch.utils.mobile_optimizer.optimize_for_mobile to drop batch_norm "
