@@ -299,6 +299,8 @@ script::Module optimizeForMobile(
   if (!optimization_blocklist.count(
       MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
     HoistConvPackedParams(cloned_module);
+    // run freezing again in case it was disabled in previous passes
+    cloned_module = freeze_module(cloned_module, preserved_methods);
   }
 
   // Run canonical optimizations post freezing

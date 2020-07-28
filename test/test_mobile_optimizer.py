@@ -251,20 +251,18 @@ class TestOptimizer(unittest.TestCase):
                 x = self.dequant(x)
                 return x
 
-        def _static_quant(model):
+        def _quant_script_and_optimize(model):
             model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
             torch.quantization.prepare(model, inplace=True)
             model(torch.randn(4, 1, 4, 4))
             torch.quantization.convert(model, inplace=True)
-            return model
+            model = torch.jit.script(model)
+            model_optim = optimize_for_mobile(model)
+            return model, model_optim
 
         # basic case
 
-        m = Standalone()
-        m = _static_quant(m)
-        m = torch.jit.script(m)
-        m_optim = optimize_for_mobile(m)
-
+        m, m_optim = _quant_script_and_optimize(Standalone())
         FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
                    .check_count("_jit_pass_hoist_conv_packed_params", 1, exactly=True) \
                    .run(m_optim.graph)
@@ -276,11 +274,7 @@ class TestOptimizer(unittest.TestCase):
 
         # generic case
 
-        m = Parent()
-        m = _static_quant(m)
-        m = torch.jit.script(m)
-        m_optim = optimize_for_mobile(m)
-
+        m, m_optim = _quant_script_and_optimize(Parent())
         FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
                    .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
                    .run(m_optim.graph)

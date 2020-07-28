@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 
 namespace torch {
 namespace jit {
@@ -32,46 +33,34 @@ namespace jit {
 //
 // After (generic case):
 //
-// %2 = prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
+// %n = prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
 //
 void hoistConvPackedParams(Module& rootModule, Node* getConvPackedParamsNode,
     const std::string& prefix) {
 
   auto method = rootModule.get_method("forward");
   auto graph = method.graph();
+  Value* rootModuleAsValue = graph->inputs()[0];
 
-  // create a vector of the getAttr nodes
-  //   idx 0 is the node from root to child 1
-  //   idx n-1 is the node from child n-1 to conv
-  std::vector<Node*> getAttrNodes;
-  Node* curNode = getConvPackedParamsNode->inputs()[0]->node();
-  while (!(curNode->outputs()[0]->type() == graph->inputs()[0]->type())) {
-    TORCH_CHECK(
-      curNode->kind() == prim::GetAttr,
-      "Attempted to add a non-prim::GetAttr node to a chain of prim::getAttr nodes.");
-    getAttrNodes.insert(getAttrNodes.begin(), curNode);
-    curNode = curNode->inputs()[0]->node();
-  }
-  TORCH_CHECK(getAttrNodes.size() > 0, "Did not find a chain of prim::getAttr nodes");
+  // get a path from root module to conv module
+  Value* convModuleAsValue = getConvPackedParamsNode->inputs()[0];
+  std::vector<std::string> rootToConvPath = getModuleAccessPath(
+    convModuleAsValue, rootModuleAsValue);
 
-  // create a name suffix
+  // get a module object representing the conv
+  Module convModule = findChildModule(rootModule, rootToConvPath);
+
+  // get the packed params value
+  c10::IValue packedParams = convModule.attr("_packed_params");
+
+  // create the new name
   std::string suffix = "";
-  for (const auto& n : getAttrNodes) {
-    suffix += n->s(attr::name) + ".";
+  for (const auto& attrName : rootToConvPath) {
+    suffix += attrName + ".";
   }
-
-  // traverse the chain to get packed params value
-  std::string curName = getAttrNodes[0]->s(attr::name);
-  Module curConvModule = rootModule.attr(curName).toModule();
-  for (int idx = 1; idx < getAttrNodes.size(); idx++) {
-    curName = getAttrNodes[idx]->s(attr::name);
-    curConvModule = curConvModule.attr(curName).toModule();
-  }
-  c10::IValue packedParams = curConvModule.attr("_packed_params");
+  std::string newName = prefix + "." + suffix + "_packed_params";
 
   // copy the packed params
-
-  std::string newName = prefix + "." + suffix + "_packed_params";
 
   // make sure the attribute does not already exist
   TORCH_CHECK(
@@ -84,7 +73,6 @@ void hoistConvPackedParams(Module& rootModule, Node* getConvPackedParamsNode,
   rootModule.register_attribute(newName, packedParams.type(), packedParams);
 
   // change target module to rootModule
-  Value* rootModuleAsValue = getAttrNodes[0]->inputs()[0];
   getConvPackedParamsNode->replaceInput(0, rootModuleAsValue);
 
   // change attribute name to new name
@@ -105,14 +93,22 @@ void HoistConvPackedParams(script::Module& m) {
     blocks_to_visit.pop();
 
     for (Node* n : b->nodes()) {
+      // make sure this node is fetching {foo}.{_packed_params}
+      bool isGetPackedParamsNode = n->kind() == prim::GetAttr &&
+        n->s(attr::name) == "_packed_params";
+      if (isGetPackedParamsNode) {
 
-      // TODO before land: also check for n->inputs()[0]->node()->kind() == {ConvNd}
-      //   need to figure out how
-      bool isGetConvPackedParamsNode = n->kind() == prim::GetAttr &&
-          n->s(attr::name).find("_packed_params") != std::string::npos;
-      if (isGetConvPackedParamsNode) {
-        GRAPH_UPDATE("Hoisting ", *n, " to root module.");
-        hoistConvPackedParams(m, n, attr_name_base);
+        // make sure the foo in {foo}.{_packed_params} is a quantized conv
+        c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
+        bool moduleNameIsQuantizedConv = moduleName.has_value() && (
+          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+          moduleName.value() == "__torch__.torch.nn.quantized.modules.conv.Conv3d");
+
+        if (moduleNameIsQuantizedConv) {
+          GRAPH_UPDATE("Hoisting ", *n, " to root module.");
+          hoistConvPackedParams(m, n, attr_name_base);
+        }
       }
 
       for (Block* subblock : n->blocks()) {
