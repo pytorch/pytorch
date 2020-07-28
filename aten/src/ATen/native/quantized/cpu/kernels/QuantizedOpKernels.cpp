@@ -2493,8 +2493,6 @@ void quantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(), "Float tensor should be contiguous");
         const float* const rdata = rtensor.data_ptr<float>();
         quantize_tensor_arm<scalar_t>(
             rdata, qtensor, rtensor.numel(), scale, zero_point);
@@ -2539,6 +2537,7 @@ void quantize_tensor_per_channel_affine_cpu(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
+// TODO: channels last kernel can be made faster.
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
