@@ -942,7 +942,6 @@ Tensor mexp_impl(
       if (idx_curr_norm_interval.numel() > 0) {
         auto sub_a = at::index_select(a, 0, idx_curr_norm_interval);
         res.index_put_({idx_curr_norm_interval}, compute_Ts[i](sub_a));
-        return res;
       }
     }
 
