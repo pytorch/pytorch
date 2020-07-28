@@ -125,19 +125,34 @@ void add(
     const VulkanTensor& input0,
     const VulkanTensor& input1,
     float alpha) {
+  auto odim = output.dim();
   TORCH_INTERNAL_ASSERT(
-      output.dim() == 4,
-      "Vulkan add is implemented for 4-dim tensors, output is not 4-dim");
+      odim <= 4, "Vulkan add is implemented for dim <= 4, output dim > 4");
+  auto i0dim = input0.dim();
   TORCH_INTERNAL_ASSERT(
-      input0.dim() == 4,
-      "Vulkan add is implemented for 4-dim tensors, input0 is not 4-dim");
+      i0dim <= 4, "Vulkan add is implemented for dim <= 4, input0 dim > 4");
+  auto i1dim = input1.dim();
   TORCH_INTERNAL_ASSERT(
-      input1.dim() == 4,
-      "Vulkan add is implemented for 4-dim tensors, input1 is not 4-dim");
-  auto sizes = output.sizes();
-  auto C = sizes[0] * sizes[1];
-  auto H = sizes[2];
-  auto W = sizes[3];
+      i1dim <= 4, "Vulkan add is implemented for dim <= 4, input1 dim > 4");
+
+  auto os = output.sizes();
+  auto i0s = input0.sizes();
+  auto i1s = input1.sizes();
+
+  std::array<int64_t, 4> os4 = {1, 1, 1, 1};
+  std::copy(os.begin(), os.end(), os4.end() - odim);
+  std::array<int64_t, 4> i0s4 = {1, 1, 1, 1};
+  std::copy(i0s.cbegin(), i0s.cend(), i0s4.end() - i0dim);
+  std::array<int64_t, 4> i1s4 = {1, 1, 1, 1};
+  std::copy(i1s.cbegin(), i1s.cend(), i1s4.end() - i1dim);
+
+  TORCH_INTERNAL_ASSERT(
+      (os4 == i0s4) && (i0s4 == i1s4),
+      "Vulkan add expects the same dimensions for all operands");
+
+  auto C = os4[0] * os4[1];
+  auto H = os4[2];
+  auto W = os4[3];
 
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
