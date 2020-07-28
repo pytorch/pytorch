@@ -18,7 +18,13 @@ load_tests = load_tests
 
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
-    print('CUDA not available, skipping tests')
+    import logging
+    import sys
+
+    logger = logging.getLogger('test_nccl')
+    logger.setLevel(logging.INFO)
+    log_handler.setStream(sys.stderr)
+    logger.info('CUDA not available, skipping tests')
     TestCase = object  # noqa: F811
 
 
