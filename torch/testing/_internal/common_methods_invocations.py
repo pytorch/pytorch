@@ -6,7 +6,11 @@ import collections
 from torch.autograd import Variable
 from torch.testing import \
     (make_non_contiguous,
-     get_common_float_types, get_all_float_types,
+     get_common_float_types,
+     get_common_float_types_plus_half,
+     get_common_float_types_plus_bfloat16,
+     get_all_float_types,
+     get_common_float_and_complex_types,
      get_common_float_and_complex_types_plus_half,
      get_common_float_and_complex_types_plus_bfloat16,
      get_all_float_and_complex_types)
@@ -116,6 +120,11 @@ class UnaryUfuncMeta(OpMeta):
 op_db = [
     UnaryUfuncMeta('cos',
                    dtypesIfCUDA=get_all_float_and_complex_types()),
+    UnaryUfuncMeta('cosh',
+                   dtypesIfCPU=get_common_float_and_complex_types()),
+    UnaryUfuncMeta('floor',
+                   dtypesIfCPU=get_common_float_types_plus_bfloat16(),
+                   dtypesIfCUDA=get_common_float_types_plus_half()),
 ]
 
 # Common operator groupings

@@ -266,7 +266,7 @@ class DeviceTypeTestBase(TestCase):
                         return result
 
                     setattr(cls, test_name, instantiated_test)
-                return
+            return
 
         # Handles tests that don't use the ops decorator
         test_name = name + "_" + cls.device_type

@@ -256,8 +256,9 @@ _common_float_types_plus_half = _common_float_types + (torch.float16,)
 _common_float_types_plus_bfloat16 = _common_float_types + (torch.bfloat16,)
 _all_float_types = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_types = (torch.complex64, torch.complex128)
-_common_float_and_complex_types_plus_bfloat16 = _common_float_types_plus_bfloat16 + _complex_types
+_common_float_and_complex_types = _common_float_types + _complex_types
 _common_float_and_complex_types_plus_half = _common_float_types_plus_half + _complex_types
+_common_float_and_complex_types_plus_bfloat16 = _common_float_types_plus_bfloat16 + _complex_types
 _all_float_and_complex_types = _all_float_types + _complex_types
 
 def get_common_float_types():
@@ -265,6 +266,15 @@ def get_common_float_types():
 
 def get_all_float_types():
     return _all_float_types
+
+def get_common_float_types_plus_half():
+    return _common_float_types_plus_half
+
+def get_common_float_types_plus_bfloat16():
+    return _common_float_types_plus_bfloat16
+
+def get_common_float_and_complex_types():
+    return _common_float_and_complex_types
 
 def get_common_float_and_complex_types_plus_bfloat16():
     return _common_float_and_complex_types_plus_bfloat16
