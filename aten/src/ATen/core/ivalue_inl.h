@@ -1022,6 +1022,15 @@ inline const std::string& IValue::toStringRef() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string();
 }
+inline c10::optional<std::reference_wrapper<const std::string>> IValue::toOptionalStringRef() const {
+  if (isNone()) {
+    return c10::nullopt;
+  }
+  AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  return c10::optional<std::reference_wrapper<const std::string>>(
+    std::reference_wrapper(static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string())
+  );
+}
 
 inline PyObject* IValue::toPyObject() const {
   return toPyObjectHolder()->getPyObject();
