@@ -216,7 +216,7 @@ Module Module::clone_impl(
       // In the case it's an interface type, the type will be shared by the new
       // cloned instance in the same compilation unit bc it only contains a list
       // of functionSchema
-      r.type()->addAttribute(
+      r.type()->addOrCheckAttribute(
           attr_name, attr_type->cast<ClassType>() ? cloned.type() : attr_type);
       r._ivalue()->setAttr(attr_name, cloned._ivalue());
     } else {
