@@ -94,7 +94,7 @@ TESTS = [
     'distributed/test_ddp_under_dist_autograd',
 ]
 
-WINDOWS_BLACKLIST = [
+WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -112,7 +112,7 @@ WINDOWS_BLACKLIST = [
     'distributed/test_ddp_under_dist_autograd',
 ]
 
-ROCM_BLACKLIST = [
+ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -135,7 +135,7 @@ ROCM_BLACKLIST = [
     'test_openmp',
 ]
 
-RUN_PARALLEL_BLACKLIST = [
+RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
     'test_expecttest',
     'test_jit_disabled',
@@ -232,7 +232,7 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
-    if test_module in RUN_PARALLEL_BLACKLIST:
+    if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -433,9 +433,9 @@ def parse_args():
              ' where you want to run all tests, but care more about some set, '
              'e.g. after making a change to a specific component')
     parser.add_argument(
-        '--ignore-win-blacklist',
+        '--ignore-win-blocklist',
         action='store_true',
-        help='always run blacklisted windows tests')
+        help='always run blocklisted windows tests')
     parser.add_argument(
         '--determine-from',
         help='File of affected source filenames to determine which tests to run.')
@@ -527,19 +527,19 @@ def get_selected_tests(options):
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
-    if sys.platform == 'win32' and not options.ignore_win_blacklist:
+    if sys.platform == 'win32' and not options.ignore_win_blocklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
-            WINDOWS_BLACKLIST.append('cpp_extensions_aot_no_ninja')
-            WINDOWS_BLACKLIST.append('cpp_extensions_aot_ninja')
-            WINDOWS_BLACKLIST.append('cpp_extensions_jit')
-            WINDOWS_BLACKLIST.append('jit')
-            WINDOWS_BLACKLIST.append('jit_fuser')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_aot_no_ninja')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_aot_ninja')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_jit')
+            WINDOWS_BLOCKLIST.append('jit')
+            WINDOWS_BLOCKLIST.append('jit_fuser')
 
-        selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
+        selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, 'on Windows')
 
     elif TEST_WITH_ROCM:
-        selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
+        selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
 
