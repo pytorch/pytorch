@@ -613,27 +613,28 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
-        if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid)) {
-          grid_sampler_2d_kernel<scalar_t>
-            <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-              static_cast<int>(count),
-              getTensorInfo<scalar_t, int>(input),
-              getTensorInfo<scalar_t, int>(grid),
-              getTensorInfo<scalar_t, int>(output),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners);
-        } else {
-          grid_sampler_2d_kernel<scalar_t>
-            <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              getTensorInfo<scalar_t, int64_t>(input),
-              getTensorInfo<scalar_t, int64_t>(grid),
-              getTensorInfo<scalar_t, int64_t>(output),
-              static_cast<GridSamplerInterpolation>(interpolation_mode),
-              static_cast<GridSamplerPadding>(padding_mode),
-              align_corners);
-        }
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(output)) {
+        grid_sampler_2d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<scalar_t, int>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      } else {
+        grid_sampler_2d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<scalar_t, int64_t>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      }
     });
   }
   return output;
@@ -671,7 +672,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
           align_corners);
-    }});
+      }
+    });
   }
   return output;
 }
@@ -691,7 +693,8 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
-      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid)) {
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(grad_output)) {
         grid_sampler_2d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
