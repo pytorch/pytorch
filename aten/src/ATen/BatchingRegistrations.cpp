@@ -143,6 +143,28 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().select(dim_physical, index);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().slice(dim_physical, start, end, step);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim1_physical = self_physical.getPhysicalDim(dim1);
+  auto dim2_physical = self_physical.getPhysicalDim(dim2);
+  auto result = at::diagonal(self_physical.tensor(), offset, dim1_physical, dim2_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -158,11 +180,18 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
+
+  // view operations
+  m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("expand_as", native::expand_as); // composite wrt autograd
+  m.impl("permute", permute_batching_rule);
+  m.impl("select.int", select_batching_rule);
+  m.impl("slice.Tensor", slice_batching_rule);
+  m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
-  m.impl("squeeze.dim", squeeze_dim_batching_rule);
-  m.impl("permute", permute_batching_rule);
 }
 
 } // namespace at
