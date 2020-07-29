@@ -128,7 +128,7 @@ struct BoxedKernelWrapper {
   static_assert(sizeof(FuncType) == -1,
     "Function signature contains one or more unsupported parameter and/or return types. "
     "Look for a nearby error like "
-    "\"‘call’ is not a member of ‘c10::impl::BoxedKernelWrapper<(your function type), void>’\" "
+    "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
     "- (your function type) is the unsupported signature.");
 };
 
