@@ -172,7 +172,8 @@ inline void HandleWeightsSaturation(int64_t N, float* weight) {
   const float kFp16Max = RawUint16ToFp16(0x7BFF);
   bool found_out_of_range = false;
   for (int64_t i = 0; i < N; ++i) {
-    if (CheckAndSaturate<float>(kFp16Max, weight + i)) {
+    bool saturate = CheckAndSaturate<float>(kFp16Max, weight + i);
+    if (saturate) {
       found_out_of_range = true;
     }
   }

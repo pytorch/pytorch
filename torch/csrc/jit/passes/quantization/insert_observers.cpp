@@ -1164,7 +1164,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     // Check the dtype of the observer module.
     Module observer_module = getObserverModuleFor(v, qconfig);
     auto scalar_type = observer_module.attr("dtype");
-    // For inputs with Fp16 type that are not-weights we don't observer them for dynamic quantization.
+    // For inputs with Fp16 type that are not-weights we don't observer them for
+    // dynamic quantization.
     if (scalar_type == at::ScalarType::Half && !isWeight(v)) {
       return false;
     }
