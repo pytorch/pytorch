@@ -354,17 +354,18 @@ TensorOptions infer_full_options(
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
-    if (fill_value.isBoolean()) {
-      return options.dtype(at::kBool);
-    } else if (fill_value.isIntegral(false)) {
-      return options.dtype(at::kLong);
+    if (fill_value.isIntegral(true)) {
+      TORCH_CHECK(false,
+        "Providing a bool or integral fill value without setting the optional ",
+        "`dtype` or `out` arguments is currently unsupported. In PyTorch 1.7, ",
+        "when `dtype` and `out` are not set a bool fill value will ",
+        "return a tensor of torch.bool dtype, and an integral fill value ",
+        "will return a tensor of torch.long dtype.");
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
                             ScalarType::ComplexDouble :
                             ScalarType::ComplexFloat;
       return options.dtype(scalar_type);
-    } else {
-      return options.dtype(get_default_dtype());
     }
   }
 

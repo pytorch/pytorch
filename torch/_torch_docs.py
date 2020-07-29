@@ -7216,18 +7216,23 @@ Example::
     torch.Size([2, 3])
 """.format(**factory_common_args))
 
-add_docstr(torch.full, r"""
-full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+add_docstr(torch.full,
+           r"""
+full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Creates a tensor of size :attr:`size` filled with :attr:`fill_value`. The
-tensor's dtype is inferred from :attr:`fill_value`.
+Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
+
+.. warning::
+    Providing a bool or integral :attr:`fill_value` without setting
+    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
+    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
+    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
+    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-    fill_value (Scalar): the value to fill the output tensor with.
-
-Keyword args:
+    fill_value: the number to fill the output tensor with.
     {out}
     {dtype}
     {layout}
