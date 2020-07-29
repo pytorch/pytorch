@@ -1019,7 +1019,8 @@ inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
   payload.as_intrusive_ptr = v.release();
 }
 inline const std::string& IValue::toStringRef() const {
-  return toString()->string();
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  return static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string();
 }
 
 inline PyObject* IValue::toPyObject() const {

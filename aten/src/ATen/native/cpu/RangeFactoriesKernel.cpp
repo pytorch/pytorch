@@ -24,10 +24,10 @@ static void arange_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scal
       TensorIterator it(iter);
       cpu_serial_kernel_vec(
           it,
-          [start, step, steps, &idx]() -> scalar_t {
+          [start, step, &idx]() -> scalar_t {
             return start + step * (idx++);
           },
-          [start, step, steps, &idx]() -> Vec256<scalar_t> {
+          [start, step, &idx]() -> Vec256<scalar_t> {
             Vec256<scalar_t> res;
             res = Vec256<scalar_t>::arange(start + step * idx, step);
             idx += Vec256<scalar_t>::size();

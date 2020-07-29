@@ -59,7 +59,7 @@ def warmup_forward(f, *args):
     return results
 
 
-class TestFuser(JitTestCase):
+class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
