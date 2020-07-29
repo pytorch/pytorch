@@ -781,17 +781,18 @@ class TestUtilityFuns(TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
     def test_onnx_function_substitution_pass(self):
+
+        @torch.jit.script
+        def f(x : torch.Tensor, y : torch.Tensor):
+            z = x - y
+            return x + z
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()
 
-            @torch.jit.script
-            def f(x : torch.Tensor, y : torch.Tensor):
-                z = x - y
-                return x + z
-
             def forward(self, x, y):
-                return self.f(x, y)
+                return f(x, y)
 
         model = MyModule()
         input_1 = torch.tensor(11)
@@ -799,7 +800,7 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = utils._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
-                                            operator_export_type=OperatorExportTypes.ONNX)
+                                             operator_export_type=OperatorExportTypes.ONNX)
         # Check that the prim::Constant node in the graph for representing the
         # scripted function `f` is removed and the following prim::CallFunction
         # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
