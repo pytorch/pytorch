@@ -1693,4 +1693,89 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
+Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
+              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+
+  size_t self_dim = self.dim();
+  DimVector normalized_src(src.size());
+  DimVector normalized_dst(dst.size());
+
+  auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
+    for (int i = 0; i < vec.size(); i++) {
+      normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
+    }
+  };
+
+  wrap_dims(src, normalized_src);
+  wrap_dims(dst, normalized_dst);
+
+  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
+  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `source` (", src, ")");
+  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
+  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `destination` (", dst, ")");
+
+  // TODO: The algorithm below can probably be optimized.
+  // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
+
+  // Algorithm Walkthrough
+  // Example Input
+  // Variable State:
+  //     normalized_src = 0, 1
+  //     normalized_dst = 2, 4
+  //     self_dim = 5
+  DimVector order(self_dim);
+  DimVector source_dims(self_dim);
+  DimVector destination_dims(self_dim);
+
+  // We initialize two vectors to track update to the dims
+  // `order` contains the final order of the dim positions.
+  // Variable State:
+  //     order = NA, NA, NA, NA, NA
+  //     source_dims = 0, 1, 2, 3, 4
+  //     destination_dims = 0, 1, 2, 3, 4
+  std::iota(source_dims.begin(), source_dims.end(), 0);
+  std::iota(destination_dims.begin(), destination_dims.end(), 0);
+
+  // We mark and update position for the dim provided by user
+  // i.e. `normalized_src` and `normalized_dims`
+  // Variable State:
+  //     order = NA, NA, 0, NA, 1
+  //     source_dims = -1, -1, 2, 3, 4
+  //     destination_dims = 0, 1, -1, 3, -1
+  for (int64_t i = 0; i < src.size(); ++i) {
+      order[normalized_dst[i]] = normalized_src[i];
+      source_dims[normalized_src[i]] = -1;
+      destination_dims[normalized_dst[i]] = -1;
+  }
+
+  // Remove the dims whose position we already know,
+  // the ones marked with -1 in previous step
+  // Variable State:
+  //     source_dims = 2, 3, 4
+  //     destination_dims = 0, 1, 3
+  auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
+  auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
+
+  int64_t rest_dim = self.dim() - src.size();
+  TORCH_INTERNAL_ASSERT(std::distance(source_dims.begin(), source_iter)  == rest_dim);
+  TORCH_INTERNAL_ASSERT(std::distance(destination_dims.begin(), destination_iter)  == rest_dim);
+
+  // Update the position of the remaining dimensions.
+  // `source_dims` now contains the original position
+  // `destination_dims` contains the new position it will shifted to
+  // after considering the user inputs.
+  // Variable State:
+  //     order = 2, 3, 0, 4, 1
+  for (int64_t i = 0; i < rest_dim; ++i) {
+      order[destination_dims[i]] = source_dims[i];
+  }
+
+  return self.permute(order);
+}
+
+Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
+}
+
 }} // at::native

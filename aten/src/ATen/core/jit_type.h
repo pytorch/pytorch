@@ -1145,7 +1145,7 @@ struct CAFFE2_API EnumType : public NamedType {
         AT_ERROR(
             "Cannot create Enum with value type '",
             value->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float and string are supported");
     }
   }
 
