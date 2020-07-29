@@ -10534,8 +10534,12 @@ class TestNNDeviceType(NNTestCase):
         trainable_scale = (True, False)
         include_last_offset = (True, False)
         modes = (('sum', False), ('sum', True), ('max', False), ('mean', False))
-        for dtype, (mode, has_weight), trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
-            test_per_sample_weights_new_offsets(mode, dtype, trainable, include_last_offset, has_weight)
+        for dtype, (mode, has_weight), trainable, include_last_offset in itertools.product(
+            dtypes, modes, trainable_scale, include_last_offset
+        ):
+            test_per_sample_weights_new_offsets(
+                mode, dtype, trainable, include_last_offset, has_weight
+            )
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
