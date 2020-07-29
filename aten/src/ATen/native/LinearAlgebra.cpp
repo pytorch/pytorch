@@ -767,14 +767,21 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
+// I + A
 Tensor compute_T1(const Tensor& A) {
-  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
-  return I + A;
+  // 2 for {I, A}
+  auto As = _allocate_buffer(A, 2);
+  _fill_matrix_powers(As, A, 2);
+  return As.sum(0);
 }
 
+// I + A + A^2 / 2
 Tensor compute_T2(const Tensor& A) {
-  const auto& A2 = at::matmul(A, A);
-  return compute_T1(A) + A2 / fact[2];
+  // 3 for {I, A, A^2}
+  auto As = _allocate_buffer(A, 3);
+  _fill_matrix_powers(As, A, 3);
+  As.select(0, 2).div_(2.0);
+  return As.sum(0);
 }
 
 Tensor compute_T4(const Tensor& A) {
