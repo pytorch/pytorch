@@ -18,7 +18,7 @@ DeviceIndex current_device();
 
 void set_device(DeviceIndex device);
 
-// Returns are pair of an int containing the version and a string containing an error description,
+// Returns a pair of an int containing the version number and a string containing an error description,
 // if the string is not empty then the function has failed and the integer value should be discarded
 std::pair<int32_t, std::string> driver_version();
 
