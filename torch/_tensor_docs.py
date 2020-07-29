@@ -1637,6 +1637,20 @@ isinf() -> Tensor
 See :func:`torch.isinf`
 """)
 
+add_docstr_all('isposinf',
+               r"""
+isposinf() -> Tensor
+
+See :func:`torch.isposinf`
+""")
+
+add_docstr_all('isneginf',
+               r"""
+isneginf() -> Tensor
+
+See :func:`torch.isneginf`
+""")
+
 add_docstr_all('isfinite',
                r"""
 isfinite() -> Tensor
@@ -3668,6 +3682,20 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
+""")
+
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
 """)
 
 add_docstr_all('stft',

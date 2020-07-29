@@ -5,7 +5,7 @@ $ python -m examples.simple_timeit
 
 import torch
 
-import utils as benchmark_utils
+import torch.utils._benchmark as benchmark_utils
 
 
 def main():
