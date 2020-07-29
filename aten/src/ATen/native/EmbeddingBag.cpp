@@ -452,6 +452,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
 
   at::Tensor bag_size;
   if (include_last_offset) {
+    // TODO: make_bag_size can be optimized to do less temporary tensors (with
+    // include_last_offset).
     bag_size = make_bag_size(offsets.slice(0, 0, offsets.size(0) - 1, 1), indices, mode, requires_grad);
   } else {
     bag_size = make_bag_size(offsets, indices, mode, requires_grad);
