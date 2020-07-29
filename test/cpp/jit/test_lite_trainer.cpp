@@ -2,7 +2,9 @@
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/mobile/export.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/optim/sgd.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -107,15 +109,15 @@ void testMobileSaveLoadData() {
   child.register_parameter("bar", 3 * torch::ones({}), false);
   m.register_module("child1", child);
   m.register_module("child2", child);
+  auto full_params = m.named_parameters();
 
   std::stringstream ss;
   std::stringstream ss_data;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
-  auto full_params = m.named_parameters();
-  bc.save_data(ss_data);
-  auto mobile_params = _load_mobile_data(ss_data);
+  _save_parameters(bc, ss_data);
+  auto mobile_params = _load_parameters(ss_data);
   AT_ASSERT(full_params.size() == mobile_params.size());
   for (const auto& e : full_params) {
     AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
@@ -137,11 +139,10 @@ void testLiteSGD() {
   std::vector<std::pair<Tensor, Tensor>> trainData{
       {1 * torch::ones({1}), 3 * torch::ones({1})},
   };
-  // Reference: Full jit
+  // Reference: Full jit and torch::optim::SGD
   std::stringstream ms;
   m.save(ms);
   auto mm = load(ms);
-  //  mm.train();
   std::vector<::at::Tensor> parameters;
   for (auto parameter : mm.parameters()) {
     parameters.emplace_back(parameter);
@@ -159,6 +160,7 @@ void testLiteSGD() {
       optimizer.step();
     }
   }
+  // Test: lite interpreter and torch::jit::mobile::SGD
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);

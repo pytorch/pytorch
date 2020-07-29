@@ -92,15 +92,16 @@ class TORCH_API SGD {
         "Nesterov momentum requires a momentum and zero dampening");
   }
 
-  using LossClosure = std::function<Tensor()>;
-
   explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
       : SGD({std::move(SGDParamGroup(params))}, defaults) {}
 
+  /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const SGDParamGroup& param_group);
 
   ~SGD() = default;
 
+  using LossClosure = std::function<Tensor()>;
+  /// A loss function closure, which is expected to return the loss value.
   torch::Tensor step(const LossClosure& closure = nullptr);
 
   /// Zeros out the gradients of all parameters.
