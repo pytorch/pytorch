@@ -2842,9 +2842,11 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
 
         from torch.quantization import QConfigDynamic, NoopObserver
-        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float, custom_op_name="embedding_bag_4bit"),
+        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
+                                                                                custom_op_name="embedding_bag_4bit"),
                                               weight=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"))
-        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float, custom_op_name="embedding_bag_byte"),
+        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
+                                                                                custom_op_name="embedding_bag_byte"),
                                               weight=NoopObserver.with_args(custom_op_name="embedding_bag_byte"))
         m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
         FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
