@@ -475,7 +475,7 @@ void listSetItem(Stack* stack);
 
 #define DEFINE_INT_OP(aten_op, op)                          \
   Operator(                                                 \
-      #aten_op "(int a, int b) -> int",                     \
+      #aten_op ".int(int a, int b) -> int",                 \
       [](Stack* stack) {                                    \
         int64_t a, b;                                       \
         pop(stack, a, b);                                   \
