@@ -546,7 +546,6 @@ def get_class_name_lineno(method):
     # one for the get_class_name call, one for _overload_method call
     for i in range(2):
         assert current_frame is not None  # assert current frame is not an Optional[FrameType]
-                                          # but rather a FrameType
         current_frame = current_frame.f_back
 
     assert current_frame is not None  # same here
