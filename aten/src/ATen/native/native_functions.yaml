@@ -1182,7 +1182,7 @@
   dispatch:
     CPU: resize_
     CUDA: resize_cuda_
-    #SparseCPU, SparseCUDA: sparse_resize_
+    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   variants: function
@@ -1992,6 +1992,7 @@
     CPU: mm_cpu
     CUDA: mm_cuda
     SparseCPU, SparseCUDA: _sparse_mm
+    Vulkan: vulkan_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6761,6 +6762,22 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: isposinf(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: isposinf_out
+
+- func: isneginf(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: isneginf_out
 
 # NOTE [_add_batch_dim and _remove_batch_dim]
 # _add_batch_dim and _remove_batch_dim are meant to be used in the implementation
