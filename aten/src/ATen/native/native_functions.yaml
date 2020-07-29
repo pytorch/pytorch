@@ -4969,7 +4969,7 @@
   dispatch:
     CPU, CUDA: sign_out
 
-- func: signbit(Tensor self, *) -> Tensor
+- func: signbit(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 

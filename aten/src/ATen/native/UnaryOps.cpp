@@ -367,7 +367,8 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor& signbit_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
   if (self.dtype() == at::kBool) {
@@ -378,8 +379,6 @@ Tensor& signbit_out(Tensor& result, const Tensor& self) {
       .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
       .build();
     signbit_stub(iter.device_type(), iter);
   }

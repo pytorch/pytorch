@@ -11389,9 +11389,9 @@ class TestTorchDeviceType(TestCase):
         t = torch.tensor(vals, device=device, dtype=dtype)
         out = torch.empty_like(t).real.bool()
 
-        with self.assertRaisesRegex(RuntimeError, 'clamp is not yet implemented for complex tensors.'):
+        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
             torch.signbit(t)
-        with self.assertRaisesRegex(RuntimeError, 'clamp is not yet implemented for complex tensors.'):
+        with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
             torch.signbit(t, out=out)
 
     def test_logical_any(self, device):

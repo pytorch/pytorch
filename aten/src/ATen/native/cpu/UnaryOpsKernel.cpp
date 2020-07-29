@@ -294,7 +294,7 @@ static void sign_kernel(TensorIterator& iter){
 
 static void signbit_kernel(TensorIterator& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a < 0; });
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
   });
 }
 

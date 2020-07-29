@@ -5710,10 +5710,6 @@ signbit(input, *, out=None) -> Tensor
 
 Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
 
-.. math::
-    \text{out}_{i} = \operatorname{sgn}(\text{input}_{i})
-""" + r"""
-
 Args:
   {input}
 
