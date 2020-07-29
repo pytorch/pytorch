@@ -1063,7 +1063,8 @@ def atleast_3d(*tensors):
     Returns:
         output (Tensor or tuple of Tensors)
 
-    Example::
+    Example:
+
         >>> x = torch.tensor(0.5)
         >>> x
         tensor(0.5000)
@@ -1076,7 +1077,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d(y)
         tensor([[[-0.8079],
                 [ 0.7460]],
-
+                <BLANKLINE>
                 [[-1.1647],
                 [ 1.4734]]])
         >>> x = torch.randn(1,1,1)

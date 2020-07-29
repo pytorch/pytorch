@@ -2875,6 +2875,40 @@ Tests if each element of :attr:`input` is infinite
         tensor([False,  True,  False,  True,  False])
 """)
 
+add_docstr(torch.isposinf,
+           r"""
+isposinf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is positive infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isposinf(a)
+    tensor([False,  True, False])
+""".format(**common_args))
+
+add_docstr(torch.isneginf,
+           r"""
+isneginf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is negative infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isneginf(a)
+    tensor([ True, False, False])
+""".format(**common_args))
+
 add_docstr(torch.isclose, r"""
 isclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
@@ -4403,6 +4437,51 @@ Example::
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
 """)
+
+add_docstr(torch.movedim,
+           r"""
+movedim(input, source, destination) -> Tensor
+
+Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
+to the position(s) in :attr:`destination`.
+
+Other dimensions of :attr:`input` that are not explicitly moved remain in
+their original order and appear at the positions not specified in :attr:`destination`.
+
+Args:
+    {input}
+    source (int or tuple of ints): Original positions of the dims to move. These must be unique.
+    destination (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
+
+Examples::
+
+    >>> t = torch.randn(3,2,1)
+    >>> t
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.movedim(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.movedim(t, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.movedim(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.movedim(t, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""".format(**common_args))
 
 add_docstr(torch.narrow,
            r"""
