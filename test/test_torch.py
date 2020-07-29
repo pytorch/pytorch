@@ -6453,6 +6453,72 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_isposinf_isneginf_float(self, device, dtype):
+        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+
+        for torch_op, numpy_op in ops:
+            if torch_op == torch.isposinf:
+                target_vals = (0, 1, 0, 0, 0, 0)
+            else:
+                target_vals = (1, 0, 0, 0, 0, 0)
+
+            t = torch.tensor(vals, device=device, dtype=dtype)
+            # Manual check here as numpy does not support bfloat16
+            if dtype == torch.bfloat16:
+                self.assertEqual(torch_op(t),
+                                 torch.tensor(target_vals, device=device, dtype=torch.bool))
+            else:
+                self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
+
+            # test the boolean tensor as the `out=` parameter
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.tensor(target_vals, device=device, dtype=torch.bool)
+            torch_op(t, out=out)
+            self.assertEqual(out, t_target)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_isposinf_isneginf_int_and_bool(self, device, dtype):
+        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
+        vals = (-1, 0, 1)
+
+        for torch_op, numpy_op in ops:
+            self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
+
+            # test the boolean tensor as the `out=` parameter
+            t = torch.tensor(vals, device=device, dtype=dtype)
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.zeros_like(t, dtype=torch.bool)
+            torch_op(t, out=out)
+            self.assertEqual(out, t_target)
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_isposinf_isneginf_complex(self, device, dtype):
+        torch_ops = (torch.isposinf, torch.isneginf)
+        vals = (complex(0, float('inf')), complex(1, -float('inf')))
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        out = torch.empty_like(t)
+
+        for torch_op in torch_ops:
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(t)
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(t, out=out)
+
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
+        # test non-boolean tensors as the `out=` parameters
+        # boolean outputs are tested in the above testcases
+        vals = (float('inf'), -float('inf'), 1.2)
+        t = torch.tensor(vals, device=device)
+        for torch_op in (torch.isposinf, torch.isneginf):
+            out = torch.empty_like(t, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
+                torch_op(t, out=out)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
@@ -17250,16 +17316,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(y, z)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
         res1 = m1.clone()
-        q = 2.1
+        q = 3
         res1[:, 3].fmod_(q)
         res2 = m1.clone()
         for i in range(m1.size(1)):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
+
+        zero = torch.zeros_like(m1)
+        if dtype in torch.testing.get_all_int_dtypes():
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(0)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                m1.fmod(zero)
+        else:
+            self.assertTrue(torch.all(m1.fmod(0).isnan()))
+            self.assertTrue(torch.all(m1.fmod(zero).isnan()))
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
@@ -18030,13 +18106,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a // b
 
     @onlyCPU
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_fmod_zero(self, device, dtype):
-        a = torch.tensor([1, 0], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a.fmod(a)
-
-    @onlyCPU
     def test_cat_bad_input_sizes(self, device):
         x = torch.randn(2, 1, device=device)
         y = torch.randn(2, 1, 1, device=device)
@@ -18078,35 +18147,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    # NOTE: inferring the dtype from bool or integer fill values is
-    #   disabled because the behavior is changing from PyTorch 1.5,
-    #   where the default scalar type would be inferred, to PyTorch 1.7,
-    #   where bool or long, respectively, will be inferred.
-    def test_full_unsupported_integer_inference(self, device):
-        size = (2, 2)
-        # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1).dtype, torch.float)
-
-        # Explicitly setting the dtype doesn't warn
-        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
-
-        # Performs same tests with named tensor
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
-
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, True, names=('a', 'b'), dtype=torch.bool).dtype
-            self.assertEqual(dt, torch.bool)
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
-            self.assertEqual(dt, torch.long)
-
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_full_inference(self, device, dtype):
@@ -18115,17 +18155,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.bool dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, True)
-            self.assertEqual(t.dtype, dtype)
+        # Tests bool fill value inference
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, torch.bool)
 
-        # Tests integer fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.long dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, 1)
-            self.assertEqual(t.dtype, dtype)
+        # Tests integer fill value inference
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, torch.long)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
