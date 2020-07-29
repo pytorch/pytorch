@@ -71,7 +71,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   pip_install --user "hypothesis==4.53.2"
   # Pin MyPy version because new errors are likely to appear with each release
-  pip_install --user "mypy==0.770"
+  pip_install --user "mypy==0.782"
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
     pip_install -U scikit-learn
