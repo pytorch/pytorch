@@ -129,7 +129,7 @@ void SchemaMatcher::doMatch() {
       return;
     }
 
-    // Fill the appropriate
+    // Fill the appropriate parameter slot.
     parameterSlots[*slot] = argType;
     kwargToInputs_[argName] = *slot;
   }
@@ -167,14 +167,12 @@ void SchemaMatcher::doMatch() {
     }
   }
 
-  // Now, perform type checking. For each slot, we should check that the type
-  // can
+  // Now, perform type checking for each slot
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     const auto& formalArg = schema_.arguments()[i];
     const auto& actualType = parameterSlots[i];
     if (!isMatchingArgument(formalArg, actualType)) {
-      // err_ populated by `isMatchingArgument`
-      // TODO this flow is not that clear
+      // err_ populated by `isMatchingArgument` in this case.
       isMatch_ = false;
       return;
     }
