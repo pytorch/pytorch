@@ -996,7 +996,7 @@ def create_generic(top_env, declarations):
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
             elif use_optional_tensor and argument.get('is_nullable') and argument['type'] == 'Tensor':
-                argument['type'] = "c10::optional<{}>".format(argument['type'])
+                argument['type'] = "const c10::optional<Tensor>&"
 
 
             # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.

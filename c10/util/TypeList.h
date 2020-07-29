@@ -166,7 +166,7 @@ struct true_for_each_type<Condition, typelist<Types...>> final
 };
 
 /**
- * Returns true iff the type trait is true for all types in the type list
+ * Returns true iff the type trait is true for any type in the type list
  * Examples:
  *   true   ==  true_for_any_type<std::is_reference, typelist<int, const float&&, const MyClass>>::value
  *   false  ==  true_for_any_type<std::is_reference, typelist<int, const float, MyClass>>::value
