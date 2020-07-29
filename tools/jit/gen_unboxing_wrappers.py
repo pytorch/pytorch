@@ -20,11 +20,10 @@ torch/csrc/jit/generated/
 
 import argparse
 import re
-import yaml
 from itertools import groupby
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
-from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_without_overload, YamlLoader
+from ..autograd.utils import CodeTemplate, write, is_out_variant, signature_without_args
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
