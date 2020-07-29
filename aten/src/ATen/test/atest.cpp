@@ -170,6 +170,20 @@ TEST_F(atest, add_operators) {
   run_binary_ops_test(add_out, x_tensor, y_tensor, exp_tensor, INTBOOL, 2);
 }
 
+TEST_F(atest, max_operators) {
+  auto exp_tensor = tensor({10, 1, 0, 1, 10});
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      max_out, x_tensor, y_tensor, exp_tensor, INTBOOLFLOAT);
+}
+
+TEST_F(atest, min_operators) {
+  auto exp_tensor = tensor({-10, -1, 0, -1, -10});
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
+      min_out, x_tensor, y_tensor, exp_tensor, INTBOOLFLOAT);
+}
+
 // TEST_CASE( "atest", "[]" ) {
 TEST_F(atest, atest) {
   manual_seed(123);
