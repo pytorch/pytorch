@@ -486,15 +486,17 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def unsafe_chunk(g, self, chunks, dim):
+@parse_args('v', 'i', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
+    if _outputs is None:
+        return sym_help._onnx_opset_unsupported_detailed('unsafe_chunk', 9, 11, 'Dynamic number of outputs not supported')
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
 @parse_args('v', 'v', 'v', 'i')
