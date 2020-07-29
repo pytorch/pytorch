@@ -2156,6 +2156,14 @@ class AbstractTestCases:
             torch.manual_seed(2)
             y = torch.randn(100)
             self.assertEqual(x, y)
+            largest_signed_long = 0x7fffffffffffffff
+            torch.manual_seed(largest_signed_long)
+            self.assertEqual(largest_signed_long, torch.initial_seed())
+            largest_unsigned_long = 0xffffffffffffffff
+            torch.manual_seed(largest_unsigned_long)
+            self.assertEqual(largest_unsigned_long, torch.initial_seed())
+            with self.assertRaisesRegex(OverflowError, r'int too big to convert'):
+                torch.manual_seed(largest_unsigned_long+1)
             torch.set_rng_state(rng_state)
 
         def test_numel(self):

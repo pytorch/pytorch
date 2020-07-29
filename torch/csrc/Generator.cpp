@@ -125,7 +125,7 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
-  generator.set_current_seed(THPUtils_unpackLong(seed));
+  generator.set_current_seed(THPUtils_unpackUInt64(seed));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
