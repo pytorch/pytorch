@@ -56,6 +56,57 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
+static std::vector<ExprHandle> computeIndicesToBroadcast(
+    const std::vector<ExprHandle>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes) {
+  if (outputAxes.size() < inputSizes.size()) {
+    throw malformed_input("Cannot broadcast to a lower rank tensor");
+  }
+  std::vector<ExprHandle> bcast;
+  auto axisIt = outputAxes.rbegin();
+  auto sizeIt = inputSizes.rbegin();
+  while (sizeIt != inputSizes.rend()) {
+    auto const& size = sizeIt->AsNode<IntImm>();
+    if (size && size->value() == 1) {
+      bcast.push_back(0);
+    } else {
+      bcast.push_back(*axisIt);
+    }
+    ++axisIt;
+    ++sizeIt;
+  }
+  std::reverse(bcast.begin(), bcast.end());
+  return bcast;
+}
+
+ExprHandle TensorExprKernel::broadcast(
+    Tensor* t,
+    const std::vector<ExprHandle>& axes) {
+  return t->call(computeIndicesToBroadcast(
+      axes, ExprVectorToExprHandleVector(t->buf()->dims())));
+}
+
+ExprHandle TensorExprKernel::chunk(
+    Tensor* t,
+    size_t chunkIdx,
+    size_t dim,
+    size_t chunks,
+    const std::vector<ExprHandle>& axes) {
+  auto sizes = bufferSizes(t);
+  size_t step = sizes[dim] / chunks;
+
+  std::vector<ExprHandle> indices;
+  for (size_t i = 0; i < axes.size(); ++i) {
+    if (i == dim) {
+      indices.push_back(axes[i] + IntImm::make(chunkIdx * step));
+    } else {
+      indices.push_back(axes[i]);
+    }
+  }
+
+  return t->call(indices);
+}
+
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
     const std::vector<ExprHandle>& axes) {
@@ -1029,12 +1080,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             auto const& n = v->node();
             int64_t dim = n->i(attr::dim);
             int64_t chunks = n->i(attr::chunks);
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return chunk(
                 tensors_.at(n->inputs()[0]->unique()),
                 v->offset(),
                 dim,
                 chunks,
-                axes);
+                indices);
           });
     }
 
