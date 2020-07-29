@@ -1,6 +1,5 @@
-#include <torch/csrc/jit/passes/onnx/preprocess.h>
+#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
@@ -83,10 +82,10 @@ void FuseWithListUnpack(Node* n) {
   listUnpack_node->replaceAllUsesWith(n);
 }
 
-static void PreprocessForONNX(Block* b) {
+static void FuseWithListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      PreprocessForONNX(child_block);
+      FuseWithListUnpack(child_block);
     }
 
     auto n_kind = it->kind();
@@ -107,7 +106,7 @@ static void PreprocessForONNX(Block* b) {
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
-  PreprocessForONNX(graph->block());
+  FuseWithListUnpack(graph->block());
 }
 
 } // namespace jit
