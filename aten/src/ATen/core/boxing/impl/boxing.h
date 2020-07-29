@@ -108,7 +108,7 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 //
 // For a given function type FT, BoxedKernelWrapper<FT> implements
 // a `call` method that
-// - takes a boxed kernel and unboxed arguments as specified by FT
+// - takes a boxed kernel and unboxed arguments as specified by FT¸
 // - boxes the arguments
 // - calls the boxed kernel
 // - unboxes and returns the result
@@ -128,7 +128,7 @@ struct BoxedKernelWrapper {
   static_assert(sizeof(FuncType) == -1,
     "Function signature contains one or more unsupported parameter and/or return types. "
     "Look for a nearby error like "
-    "\"‘call’ is not a member of ‘c10::impl::BoxedKernelWrapper<(your function type), void>’\" "
+    "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
     "- (your function type) is the unsupported signature.");
 };
 
