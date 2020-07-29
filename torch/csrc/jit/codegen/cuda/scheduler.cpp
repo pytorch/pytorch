@@ -488,20 +488,20 @@ c10::optional<ReductionParams> scheduleReduction(
     } else {
       if (rparams.cross_grid) {
         // Reduction Splits
-        //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid, X-Warp|]
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Grid, X-Block, X-Warp|]
         // Idx:     0     |   1(-5)       2(-4)     3(-3)   4(-2)   5(-1) |
         //                -------------------------------------------------
         //                Reduction Dimensions
         red_tv->split(1, rparams.bdimx.value);
-        red_tv->split(1, rparams.gdimy.value);
         red_tv->split(1, rparams.bdimy.value);
+        red_tv->split(1, rparams.gdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
         // for preceeding operations and the rFactored Tensor.
         //                                 |------ Reordered --------|
         //                                 V                         V
-        //      [outputs, |rF-Leftover, X-Warp, X-Block, X-Grid, rf-Unroll|]
+        //      [outputs, |rF-Leftover, X-Warp, X-Grid, X-Block, rf-Unroll|]
         // Idx:     0     |   1(-5)     2(-4)    3(-3)    4(-2)    5(-1)  |
         //                -------------------------------------------------
         //                Reduction Dimensions
@@ -512,7 +512,7 @@ c10::optional<ReductionParams> scheduleReduction(
 
         // WARNING: computeAt will coalesce the rFactored dimensions
         // rFactored Reduction Tensor after computeAt():
-        //      [Outputs, |X-Warp, X-Block, X-Grid, rF-Leftover, rF-Unroll|]
+        //      [Outputs, |X-Warp, X-Grid, X-Block, rF-Leftover, rF-Unroll|]
         // Idx:     0     | 1(-5)   2(-4)   3(-3)      4(-2)       5(-1)  |
         //                -------------------------------------------------
         //                Reduction Dimensions
@@ -520,15 +520,15 @@ c10::optional<ReductionParams> scheduleReduction(
 
         // After the Reduction Tensor has rFactoring applied
         // Reduction Output Tensor:
-        //      [Outputs, X-Warp, X-Block, X-Grid]
+        //      [Outputs, X-Warp, X-Grid, X-Block]
         // Idx:     0     1(-3)    2(-2)    3(-1)
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
         red_tv->axis(-3)->parallelize(ParallelType::TIDx);
-        red_tv->axis(-2)->parallelize(ParallelType::TIDy);
-        red_tv->axis(-1)->parallelize(ParallelType::BIDy);
+        red_tv->axis(-2)->parallelize(ParallelType::BIDy);
+        red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
         // The computeAt is not to the inner most dimension of the rFactored
@@ -536,7 +536,7 @@ c10::optional<ReductionParams> scheduleReduction(
         // Inputs to be separately read in their own loop.
         //                                  computeAt(-2)------|
         //                                                     V
-        //      [Outputs, X-Warp, X-Block, X-Grid, rF-Leftover,| rF-Unroll]
+        //      [Outputs, X-Warp, X-Grid, X-Block, rF-Leftover,| rF-Unroll]
         // Idx:     0     1(-5)    2(-4)   3(-3)      4(-2)        5(-1)
         Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
         if (!fusion->hasInput(input)) {
@@ -603,20 +603,19 @@ c10::optional<ReductionParams> scheduleReduction(
     if (rparams.cross_block) {
       if (rparams.cross_grid) {
         // Reduction Splits
-        //      [outputs, |rF-Leftover, rf-Unroll, X-Block, X-Grid|]
+        //      [outputs, |rF-Leftover, rf-Unroll, X-Grid, X-Block|]
         // Idx:     0     |   1(-4)       2(-3)     3(-2)   4(-1) |
         //                -----------------------------------------
         //                Reduction Dimensions
         red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, rparams.gdimy.value);
-        red_tv->split(1, rparams.bdimy.value);
         red_tv->split(1, kLoopUnrollSplit);
 
         // Reordering the Unroll dimension eases applying computeAt()
         // for preceeding operations and the rFactored Tensor.
         //                                 |--- Reordered ----|
         //                                 V                  V
-        //      [outputs, |rF-Leftover, X-Grid, X-Block, rF-Unroll|]
+        //      [outputs, |rF-Leftover, X-Block, X-Grid, rF-Unroll|]
         // Idx:     0     |   1(-4)      2(-3)   3(-2)     4(-1)  |
         //                -----------------------------------------
         //                Reduction Dimensions
@@ -633,7 +632,7 @@ c10::optional<ReductionParams> scheduleReduction(
 
         // WARNING: computeAt will coalesce the rFactored dimensions
         // rFactored Reduction Tensor after computeAt():
-        //      [<output dims>, |X-Grid, X-Block, rF-Leftover, rF-Unroll|]
+        //      [<output dims>, |X-Block, X-Grid, rF-Leftover, rF-Unroll|]
         // Idx:      0 -- 1     | 2(-4)   3(-3)      4(-2)       5(-1)  |
         //                      -----------------------------------------
         //                      Reduction Dimensions
@@ -641,15 +640,15 @@ c10::optional<ReductionParams> scheduleReduction(
 
         // After the Reduction Tensor has rFactoring applied
         // Reduction Output Tensor:
-        //      [Out-Leftover, Out-PerBlock, X-Grid, X-Block]
+        //      [Out-Leftover, Out-PerBlock, X-Block, X-Grid]
         // Idx:       0              1        2(-2)   3(-1)
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
         red_tv->axis(1)->parallelize(ParallelType::TIDx);
-        red_tv->axis(-2)->parallelize(ParallelType::BIDy);
-        red_tv->axis(-1)->parallelize(ParallelType::TIDy);
+        red_tv->axis(-2)->parallelize(ParallelType::TIDy);
+        red_tv->axis(-1)->parallelize(ParallelType::BIDy);
 
         // Bind Inputs to Reduction
         // The computeAt is not to the inner most dimension of the rFactored
