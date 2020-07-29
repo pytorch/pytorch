@@ -108,7 +108,7 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 //
 // For a given function type FT, BoxedKernelWrapper<FT> implements
 // a `call` method that
-// - takes a boxed kernel and unboxed arguments as specified by FT
+// - takes a boxed kernel and unboxed arguments as specified by FT¸
 // - boxes the arguments
 // - calls the boxed kernel
 // - unboxes and returns the result
