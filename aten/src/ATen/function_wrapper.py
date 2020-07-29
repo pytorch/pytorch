@@ -771,6 +771,23 @@ def gen_device_init(option, backend_type_env):
             return ['globalContext().lazyInit{}();'.format(device_type)]
     return []
 
+# TODO The maybe_unwrap_optional_tensors is only needed because our at::native::xxx functions
+# still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+# to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+# and use the use_optional_tensor=True behavior always.
+def maybe_unwrap_optional_tensors(option, formals, args):
+    assert len(formals) == len(args), "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
+    if option['use_c10_dispatcher'] == 'full':
+        def maybe_unwrap_optional_tensor(formal, arg):
+            if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
+                return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
+            else:
+                return arg
+        return [maybe_unwrap_optional_tensor(formal, arg) for (formal, arg) in zip(formals, args)]
+    else:
+        assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        return args
+
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
     # translates defaults from cwrap types to C++ values
@@ -1114,15 +1131,7 @@ def create_generic(top_env, declarations):
             dispatch_key_var_name = '_dk'
             dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, [swizzle_self(f) for f in formals])
 
-            if option['use_c10_dispatcher'] == 'full':
-                # TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
-                # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
-                # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
-                # and use the use_optional_tensor=True behavior always.
-                method_actuals = ["c10::impl::maybe_unwrap_optional_tensor({})".format(arg) for arg in option['method_actuals']]
-            else:
-                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                method_actuals = option['method_actuals']
+            method_actuals = maybe_unwrap_optional_tensors(option, formals, option['method_actuals'])
 
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
@@ -1190,15 +1199,7 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
-            if option['use_c10_dispatcher'] == 'full':
-                # TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
-                # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
-                # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
-                # and use the use_optional_tensor=True behavior always.
-                actuals = ["c10::impl::maybe_unwrap_optional_tensor({})".format(arg) for arg in option['actuals']]
-            else:
-                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                actuals = option['actuals']
+            actuals = maybe_unwrap_optional_tensors(option, formals, option['actuals'])
 
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
