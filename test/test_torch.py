@@ -11394,6 +11394,15 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
             torch.signbit(t, out=out)
 
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_signbit_non_boolean_output(self, device, dtype):
+        # test non-boolean tensors as the `out=` parameters
+        # boolean outputs are tested in the above testcases
+        t = torch.randn(5, 5)
+        out = torch.empty_like(t, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
+            torch.signbit(t, out=out)
+
     def test_logical_any(self, device):
         x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
 
