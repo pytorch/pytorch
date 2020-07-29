@@ -646,6 +646,7 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
       const auto div = divisor.to<scalar_t>();
+      TORCH_CHECK(div != 0, "ZeroDivisionError");
       cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
         return x % div;
       });

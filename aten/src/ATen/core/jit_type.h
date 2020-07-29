@@ -1540,6 +1540,16 @@ private:
   : Type(TypeKind::PyObjectType) {}
 };
 
+enum class TypeVerbosity {
+  None,
+  Type,
+  TypeAndStride,
+  Full,
+  Default = Full,
+};
+
+CAFFE2_API TypeVerbosity type_verbosity();
+
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 template <typename T>
 CAFFE2_API std::ostream& operator<<(
