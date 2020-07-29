@@ -208,7 +208,11 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
-        return_type = build_expr(ctx, py_def.returns)
+        ret = py_def.returns
+        if getattr(ret, 'id', None) is not None and ret.id == 'Any':
+            raise FrontendError(ctx.make_range(ret.lineno, ret.col_offset, ret.col_offset +
+                                               len(ret.id)), 'Return type annotation of Any is not permitted')
+        return_type = build_expr(ctx, ret)
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:

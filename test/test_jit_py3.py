@@ -11,6 +11,7 @@ import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
 import types
+import inspect
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -532,6 +533,28 @@ class TestScriptPy3(JitTestCase):
 
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
+
+    def test_any_return_type_disallowed(self):
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inp: torch.Tensor) -> Any:
+                return inp * inp
+
+        def any_function(inp: torch.Tensor) -> Any:
+            return inp * inp
+
+
+        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+            torch.jit.script(Mod())
+
+        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+            torch.jit.script(any_function)
+
+        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+            cu = torch.jit.CompilationUnit(inspect.getsource(any_function))
+
 
     def test_export_opnames_interface(self):
         global OneTwoModule
