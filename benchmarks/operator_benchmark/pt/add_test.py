@@ -50,7 +50,7 @@ add_short_fuzzed_configs = make_fuzzed_config(
         'device': ['cpu', 'cuda'],
     },
     tags=["short"],
-    checksum=2767,
+    checksum=1381,
 )
 
 add_long_fuzzed_configs = make_fuzzed_config(
@@ -59,7 +59,7 @@ add_long_fuzzed_configs = make_fuzzed_config(
         'device': ['cpu', 'cuda'],
     },
     tags=["long"],
-    checksum=10168,
+    checksum=9198,
 )
 
 

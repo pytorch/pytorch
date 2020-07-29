@@ -28,7 +28,7 @@ _MIN_ELEMENTS = {
 
 
 class BinaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False, requires_grad=False, scale=LARGE):
+    def __init__(self, seed, dtype=torch.float32, cuda=False, scale=LARGE):
         super().__init__(
             parameters=[
                 # Dimensionality of x and y. (e.g. 1D, 2D, or 3D.)
@@ -105,7 +105,6 @@ class BinaryOpFuzzer(Fuzzer):
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
-                    requires_grad=requires_grad,
                 ),
                 FuzzedTensor(
                     name="y",
@@ -116,7 +115,6 @@ class BinaryOpFuzzer(Fuzzer):
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
-                    requires_grad=requires_grad,
                 ),
             ],
             seed=seed,
