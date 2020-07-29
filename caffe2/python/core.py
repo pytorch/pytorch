@@ -728,17 +728,37 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         return input_name + '_grad'
 
     IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
+    ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG = "only_keep_is_auto_gen_sum_ops_tag"
 
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
-        # we already checked that device options are consistent so we can just
-        # use the first one we find
+        only_keep_is_auto_gen_sum_ops_tag = False
         for generator in generators:
+            # we already checked that device options are consistent so we can just
+            # break after finding the first clear_info request
+            for extra_info in generator.device_option.extra_info:
+                if extra_info == "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG):
+                    only_keep_is_auto_gen_sum_ops_tag = True
+                    break
+
+        if only_keep_is_auto_gen_sum_ops_tag:
+            # if we find that device_option in the generator that
+            # requires clear the extra info for the auto gen sum
+            # Then we will try to clear them and only leave the
+            # IS_AUTO_GEN_SUM_OPS_TAG
             for op in sum_ops:
-                op.device_option.CopyFrom(generator.device_option)
                 op.device_option.extra_info.extend([
                     "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
                 ])
-            break
+        else:
+            # we already checked that device options are consistent so we can just
+            # use the first one we find
+            for generator in generators:
+                for op in sum_ops:
+                    op.device_option.CopyFrom(generator.device_option)
+                    op.device_option.extra_info.extend([
+                        "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                    ])
+                break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
         new_grad_output = (
