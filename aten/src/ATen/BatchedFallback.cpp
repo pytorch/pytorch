@@ -33,6 +33,19 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
       [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
 }
 
+// The general flow of the algorithm is as follows.
+// - First, we figure out which arguments are BatchedTensors and save them
+//   to a vector. We also store a vector of which index of the arguments list
+//   each BatchedTensor appears in. This will be useful for bookkeeping later.
+// - Next, we apply the MultiBatchVmapTransform to all of the BatchedTensors.
+//   This returns a vector of VmapPhysicalView that hold tensors that contain
+//   all of the collective batch dimensions at the front of the tensors.
+// - Then, we attempt to call `op` once per slice of the inputs. To do this,
+//   we repeatedly we slice the input arguments (if they are BatchedTensors),
+//   put the sliced (or a not-sliced) version of the input onto the stack, invoke
+//   the operator, and then pop the results off the stack.
+// - Each result obtained from the previous step is a slice of the total result,
+//   so we stack those tensors together to form the final result.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
@@ -89,9 +102,8 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       std::multiplies<int64_t>());
 
   // Strategy: For each batch, we are going to push slices (where applicable)
-  // of the arguments onto `working_stack`, call `op`, and store the result in
+  // of the arguments onto `stack`, call `op`, and store the result in
   // `output_shards`.
-  torch::jit::Stack working_stack;
   std::vector<Tensor> output_shards;
   output_shards.reserve(num_batches);
 
@@ -99,26 +111,31 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
-    for (int64_t arg_idx = 0; arg_idx < arguments.size(); ++arg_idx) {
-      const auto& ivalue = arguments[arg_idx];
+    for (int64_t arg_idx = 0; arg_idx < num_arguments; ++arg_idx) {
+      // The accounting for this is tricky. Assume `op` has 4 args, A, B, C, D.
+      // and `arg_idx = 2`. Every iteration of this loop pushes one element
+      // onto the stack, so we've already pushed two things (call them A' and B').
+      // At this point, the stack should look like the following:
+      // [..., A, B, C, D, A', B'] (top of stack here)
+      // To get at C (argument number 2), we have to peek `num_arguments`
+      // into the stack from the top
+      const auto& argument = torch::jit::peek(stack, 0, num_arguments);
       if (arg_idx != *batched_tensor_inputs_pos_iter) {
-        // ivalue isn't a BatchedTensor
-        torch::jit::push(&working_stack, ivalue);
+        // argument isn't a BatchedTensor
+        torch::jit::push(stack, argument);
         continue;
       }
-      // ivalue is a BatchedTensor
-      const auto& physical_view_for_ivalue = *input_physical_views_iter;
-      torch::jit::push(
-          &working_stack,
-          physical_view_for_ivalue.tensor().index(index));
+      // argument is a BatchedTensor
+      const auto& physical_view_for_argument = *input_physical_views_iter;
+      torch::jit::push(stack, physical_view_for_argument.tensor().index(index));
       batched_tensor_inputs_pos_iter++;
       input_physical_views_iter++;
     }
 
-    op.callBoxed(&working_stack);
+    op.callBoxed(stack);
 
     // We assume there is a single tensor return
-    output_shards.emplace_back(torch::jit::pop(&working_stack).toTensor());
+    output_shards.emplace_back(torch::jit::pop(stack).toTensor());
   }
 
   // Stack the tensors together to form the result.
