@@ -265,11 +265,11 @@ if(CAFFE2_USE_CUDNN)
       ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
     set_property(
-        TARGET caffe2::cudnn PROPERTY APPEND INTERFACE_LINK_LIBRARIES
+        TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a";dl)
     set_property(
-        TARGET caffe2::cudnn PROPERTY APPEND LINK_OPTIONS
-        "--exclude-libs libcudnn_static")
+        TARGET caffe2::cudnn PROPERTY LINK_OPTIONS
+        "-Wl,--exclude-libs,libcudnn_static.a")
   endif()
 endif()
 
