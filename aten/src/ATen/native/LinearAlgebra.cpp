@@ -784,10 +784,27 @@ Tensor compute_T2(const Tensor& A) {
   return As.sum(0);
 }
 
+// I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
 Tensor compute_T4(const Tensor& A) {
-  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto& A2 = at::matmul(A, A);
-  return I + A + at::matmul(A2, I / fact[2] + A / fact[3] + A2 / fact[4]);
+  // 3 for {I, A, A^2}
+  auto As = _allocate_buffer(A, 3);
+  _fill_matrix_powers(As, A, 3);
+
+  auto As_clone = As.clone(at::MemoryFormat::Preserve);
+  As_clone.select(0, 0).div_(2.0);
+  As_clone.select(0, 1).div_(6.0);
+  As_clone.select(0, 2).div_(24.0);
+  // As_clone.select(0, 1) = I / 2 + A / 6 + A^2 / 24
+  As_clone.select(0, 1).copy_(As_clone.sum(0));
+  // As_clone.select(0, 2) = A^2
+  As_clone.select(0, 2).mul_(24.0);
+  at::native::matmul(
+    As.select(0, 2),
+    As_clone.select(0, 1),
+    As_clone.select(0, 2)
+  );
+
+  return As.sum(0);
 }
 
 template <typename scalar_t>
