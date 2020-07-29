@@ -39,6 +39,17 @@ if(USE_MPI)
   endif()
 endif()
 
+if (USE_UCX)
+  find_package(UCX)
+  if(UCX_FOUND)
+    message(STATUS "UCX_INCLUDE_PATH: ${UCX_INCLUDE_DIR}")
+    message(STATUS "UCX_LIBRARIES: ${UCX_LIBRARIES}")
+    option(USE_C10D_UCX "USE C10D UCX" ON)
+  else()
+    message(STATUS "Not able to find UCX, will compile c10d without UCX support")
+  endif()
+endif()
+
 function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
@@ -72,6 +83,14 @@ if(USE_C10D_GLOO)
   if(USE_CUDA)
     list(APPEND C10D_LIBS gloo_cuda)
   endif()
+endif()
+
+if(USE_C10D_UCX)
+  list(APPEND C10D_SRCS ProcessGroupUCX.cpp
+                        UCXSendRecv.cpp
+                        UCXColl.cpp
+                        UCXAllToAll.cpp)
+  list(APPEND C10D_LIBS ${UCX_LIBRARIES})
 endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
@@ -117,6 +136,10 @@ if(USE_C10D_GLOO)
   target_compile_definitions(c10d INTERFACE USE_C10D_GLOO)
 endif()
 
+if (USE_C10D_UCX)
+  target_compile_definitions(c10d INTERFACE USE_C10D_UCX)
+endif()
+
 copy_header(FileStore.hpp)
 copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
@@ -138,6 +161,12 @@ endif()
 if(USE_C10D_MPI)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
+endif()
+
+if (USE_C10D_UCX)
+	target_include_directories(c10d PUBLIC ${UCX_INCLUDE_DIR})
+  copy_header(ProcessGroupUCX.hpp)
+  copy_header(UCXSendRecv.hpp)
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
