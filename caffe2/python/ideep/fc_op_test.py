@@ -261,7 +261,7 @@ class FcTest(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0])
 
     @given(n=st.integers(2, 5), m=st.integers(2, 5),
-           k=st.integers(2, 5), **mu.gcs)
+           k=st.integers(2, 5), **mu.gcs_cpu_ideep)
     def test_int8_fc_4_dims(self, n, m, k, gc, dc):
         X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
         w = np.random.rand(n, k, m, m).astype(np.float32) - 0.5

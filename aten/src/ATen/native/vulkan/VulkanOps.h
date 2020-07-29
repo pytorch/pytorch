@@ -78,7 +78,7 @@ void clamp(
 
 void addmm(
     VulkanTensor& output,
-    const VulkanTensor& t,
+    c10::optional<const VulkanTensor> t,
     const VulkanTensor& m1,
     const VulkanTensor& m2,
     float beta,
