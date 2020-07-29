@@ -237,6 +237,7 @@ test_distributed() {
     build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
 
     build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
   fi
 }
