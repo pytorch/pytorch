@@ -48,10 +48,9 @@ std::pair<int32_t, std::string> driver_version() {
   return {driver_version, {}};
 }
 
-void device_synchronize() 
-{
+void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-}
+} // namespace cuda
 } // namespace c10
