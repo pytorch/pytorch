@@ -5,48 +5,83 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/Dimname.h>
+
 #include <ATen/core/boxing/KernelFunction.h>
 
-namespace at {
-struct Dimname;
-}
+#include <c10/util/Metaprogramming.h>
 
 namespace c10 {
 namespace impl {
 
-// Assume T is decayed
+//
+// utils
+//
+
+// is_mutable_tensor_ref
+template<class T> struct is_mutable_tensor_ref : std::false_type {};
+template <> struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
+
+// is_tuple_of_mutable_tensor_refs
+//
+template<class T, class Enable = void>
+struct is_tuple_of_mutable_tensor_refs : std::false_type {};
+
+template<class T>
+struct is_tuple_of_mutable_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
+: guts::typelist::all<is_mutable_tensor_ref, guts::typelist::from_tuple_t<T>>
+{};
+
+// has_ivalue_to<T> tests the presence/absence of instance method IValue::to<T>()
+//
+template<class T, class Enable = void>
+struct has_ivalue_to : std::false_type {};
+
+template<class T>
+struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
+: std::true_type
+{};
+
+//
+// boxing predicates
+//
+
+// A boxable arg type is one that IValue has a constructor for.
 template <typename T>
-using ok_to_box = guts::disjunction<
-    std::is_constructible<IValue, T>,
+using can_box =
+  guts::disjunction<
+    std::is_constructible<IValue, std::decay_t<T>>,
     // TensorOptions are not directly constructible into IValue,
     // but torch::jit::push knows how to handle them
-    std::is_same<TensorOptions, T>,
-    // void returns are ok
-    std::is_same<void, T>>;
-
-// TODO boxing should be ok for all kernels. Then remove ok_to_box and supports_boxing.
-
-template <typename Result>
-using supports_boxing_result =
-  guts::negation<guts::disjunction<
-    std::is_lvalue_reference<Result>,
-    guts::negation<ok_to_box<Result>>,
-    std::is_same<IntArrayRef, Result>
-  >>;
-
-template <class Result, class... Args>
-using supports_boxing =
-  guts::conjunction<
-    supports_boxing_result<Result>,
-    ok_to_box<std::decay_t<Args>>...
+    std::is_same<TensorOptions, std::decay_t<T>>
   >;
 
-template <typename T, std::enable_if_t<!c10::impl::ok_to_box<T>::value>* = nullptr>
+template <typename... Ts>
+using can_box_all = guts::conjunction<can_box<Ts>...>;
+
+// an unboxable result is one that can be extracted from an IValue
+template <typename T>
+using can_unbox =
+  guts::conjunction<
+    guts::disjunction<
+      has_ivalue_to<T>,
+      // void returns are ok
+      std::is_same<void, T>
+    >,
+    guts::negation<std::is_lvalue_reference<T>>
+  >;
+
+//
+// profiling support: until boxing support is complete, we push placeholder
+// "cannot box" values for unboxable args
+//
+
+template <typename T, std::enable_if_t<!c10::impl::can_box<T>::value>* = nullptr>
 inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
   torch::jit::push(stack, "cannot box");
   return false;
 }
-template <typename T, std::enable_if_t<c10::impl::ok_to_box<T>::value>* = nullptr>
+template <typename T, std::enable_if_t<c10::impl::can_box<T>::value>* = nullptr>
 inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
   torch::jit::push(stack, v);
   return true;
@@ -68,61 +103,195 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
   return boxArgumentsOrCannotBoxIntoStack(stack, other_items...) && res;
 }
 
-template<class Result>
-std::enable_if_t<!supports_boxing_result<Result>::value, Result>
-callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
-  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxedFunc() but return result cannot be boxed");
-}
+//
+// BoxedKernelWrapper
+//
+// For a given function type FT, BoxedKernelWrapper<FT> implements
+// a `call` method that
+// - takes a boxed kernel and unboxed arguments as specified by FT,
+// - boxes the arguments
+// - calls the boxed kernel
+// - unboxes and returns the result
+//
+// The partial specializations below handle various cases: in
+// particular, not all types appearing in op signatures are supported,
+// and ops returning references have nonstandard wrapper implementations.
+//
 
-template<class Result>
-std::enable_if_t<supports_boxing_result<Result>::value && !std::is_same<void, Result>::value, Result>
-callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
-  (*boxed_kernel_func)(functor, opHandle, &stack);
-  TORCH_INTERNAL_ASSERT(stack.size() == 1, "A boxed kernel should only push one return to the stack");
-  return std::move(stack[0]).to<Result>();
-}
+// base definition should never be instantiated.
+// A "no call method defined on BoxedKernelWrapper" compile error means that
+// an op signature has failed to trigger any of the partial specializations
+// that follow.
+//
+template<class FuncType, class Enable = void>
+struct BoxedKernelWrapper {
+  static_assert(sizeof(FuncType) == -1,
+    "Function signature contains one or more unsupported parameter and/or return types. "
+    "Look for a nearby error like "
+    "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
+    "- (your function type) is the unsupported signature.");
+};
 
-template<class Result>
-std::enable_if_t<supports_boxing_result<Result>::value && std::is_same<void, Result>::value, Result>
-callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
-  (*boxed_kernel_func)(functor, opHandle, &stack);
-  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callBoxedFunc(), we expected it to return void.");
-}
+// 1. Unsupported type traps.
+//
+// These specializations capture the remaining gaps in boxing support.
+// Rather than triggering compile errors, we generate boxed kernels that
+// raise runtime errors. As support for these types is added, the
+// specializations can be removed.
+//
+
+// at::Dimname
+template <class... Args>
+using has_dimname_arg =
+  guts::disjunction<
+    std::is_same<at::Dimname, std::decay_t<Args>>...,
+    std::is_same<c10::ArrayRef<at::Dimname>, std::decay_t<Args>>...,
+    std::is_same<c10::optional<c10::ArrayRef<at::Dimname>>, std::decay_t<Args>>...
+  >;
 
 template<class Result, class... Args>
-Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, std::enable_if_t<!supports_boxing<Result, Args...>::value, int> = 0) {
-  // Some kernels don't need to actually box, and don't return.  If that's the
-  // case, just call them anyway without a stack.  These special cases can be
-  // removed once we support boxing everything.
-  // See Note [named_not_supported_kernel]
-  if (boxed_kernel_func == &named_not_supported_kernel) {
-    named_not_supported_kernel(functor, opHandle, nullptr);  // does not return
+struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_dimname_arg<Args...>::value, void>> {
+  static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
+    TORCH_INTERNAL_ASSERT(false, "Call to a boxed kernel with unboxable parameter type at::Dimname.");
   }
+};
 
-  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::call() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
-}
+// at::Quantizer
+template <class... Args>
+using has_quantizer_arg =
+  guts::disjunction<
+    std::is_same<at::Quantizer, std::decay_t<Args>>...,
+    std::is_same<c10::intrusive_ptr<at::Quantizer>, std::decay_t<Args>>...
+  >;
 
-// SFINAE version for ops with returns
 template<class Result, class... Args>
-std::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, Result>
-boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
-  // TODO Reuse stack vector instead of allocating?
-  torch::jit::Stack stack;
-  torch::jit::push(stack, std::forward<Args>(args)...);
+struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_quantizer_arg<Args...>::value, void>> {
+  static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
+    TORCH_INTERNAL_ASSERT(false, "Unboxed call to a boxed kernel with unboxable parameter type at::Quantizer.");
+  }
+};
 
-  return callBoxedFunc<Result>(boxed_kernel_func, functor, opHandle, stack);
-}
+// 2. Supported signatures, other than ref-passing.
+//
 
-// SFINAE version for ops without returns
 template<class Result, class... Args>
-std::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, Result>
-boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
-  // TODO Reuse stack vector instead of allocating?
-  torch::jit::Stack stack;
-  torch::jit::push(stack, std::forward<Args>(args)...);
+struct BoxedKernelWrapper<
+  Result(Args...),
+  std::enable_if_t<
+    can_box_all<Args...>::value && can_unbox<Result>::value && !is_tuple_of_mutable_tensor_refs<Result>::value,
+    void
+  >
+> {
+  static Result call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    Args... args
+  ) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
+    torch::jit::push(stack, std::forward<Args>(args)...);
 
-  callBoxedFunc<Result>(boxed_kernel_func, functor, opHandle, stack);
-}
+    (*boxed_kernel_func)(functor, opHandle, &stack);
 
-}
-}
+    return guts::if_constexpr<!std::is_same<void, Result>::value>(
+      [&] (auto delay_check) {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          stack.size() == 1,
+          "Boxed kernel was expected to push exactly one return value to the stack."
+        );
+        return delay_check(std::move(stack[0]).to<Result>());
+      },
+      [&] {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          stack.size() == 0,
+          "Boxed kernel for op with void return type pushed one or more return values to the stack."
+        );
+      }
+    );
+  }
+};
+
+// 3. signatures taking a single Tensor reference as their first argument,
+// and also returning one.
+//
+// Note that the passed kernels are assumed to be for inplace/outplace ops,
+// and the generated BoxedKernelWrapper specializations will simply return
+// the initial argument.
+//
+template<class... OtherArgs>
+struct BoxedKernelWrapper<
+  at::Tensor&(at::Tensor&, OtherArgs...),
+  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
+> {
+  static at::Tensor& call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    at::Tensor& outArg,
+    OtherArgs... otherArgs
+  ) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(1 + sizeof...(OtherArgs));
+    torch::jit::push_one(stack, outArg);
+    torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
+
+    (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+    );
+
+    return outArg;
+  }
+};
+
+// 4. signatures returning a tuple of Tensor references, and taking the same
+// number of Tensor refs as their initial arguments.
+//
+// Note that the passed kernels are assumed to be for inplace/outplace ops,
+// and the generated BoxedKernelWrapper specializations will return a tuple
+// of those initial arguments.
+//
+template<class Result, class... Args>
+struct BoxedKernelWrapper<
+  Result(Args...),
+  std::enable_if_t<
+    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value,
+    void
+  >
+> {
+  static Result call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    Args... args
+  ) {
+    using ArgTuple = std::tuple<Args...>;
+    constexpr int RetCount = std::tuple_size<Result>();
+
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
+    torch::jit::push(stack, std::forward<Args>(args)...);
+
+    (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+    );
+
+    auto result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
+    static_assert(
+        std::is_same<Result, decltype(result)>::value,
+        "The parameter list of an op returning a tuple of Tensor references "
+            "must begin with an equal number of Tensor reference parameters."
+    );
+    return result;
+  }
+};
+
+} // impl
+} // c10
