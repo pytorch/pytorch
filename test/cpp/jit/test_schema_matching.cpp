@@ -4,7 +4,7 @@
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/frontend/function_schema_parser.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
-#include <ATen/core/OverloadResolution.h>
+#include <ATen/core/SchemaMatcher.h>
 
 #include <sstream>
 #include <string>
@@ -86,9 +86,6 @@ void testSchemaMatching() {
     TORCH_INTERNAL_ASSERT(
         err.find("previously matched to type") != std::string::npos);
   }
-}
-
-void testOverloadResolution() {
   {
     // Basic test
     const auto schema =
