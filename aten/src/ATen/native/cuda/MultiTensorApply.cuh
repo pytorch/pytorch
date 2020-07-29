@@ -1,4 +1,3 @@
-#include <torch/cuda.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/Utils.cuh>
