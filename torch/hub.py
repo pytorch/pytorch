@@ -477,9 +477,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = None
         if check_hash:
-            r = HASH_REGEX.search(filename)
+            r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
             hash_prefix = r.group(1) if r else None
-        # hash_prefix = HASH_REGEX.search(filename).group(1) if check_hash else None
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
