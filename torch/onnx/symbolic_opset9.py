@@ -2425,14 +2425,14 @@ def take(g, self, index):
     return out
 
 
-def _kl_div_log_target(g, input, target):
+def _kl_div_log_target_impl(g, input, target):
     diff_ = sub(g, target, input)
     exp_ = exp(g, target)
     output = mul(g, exp_, diff_)
     return output
 
 
-def _kl_div_non_log_target(g, input, target):
+def _kl_div_non_log_target_impl(g, input, target):
     log_ = log(g, target)
     diff_ = sub(g, log_, input)
     output_pos = mul(g, target, diff_)
@@ -2445,9 +2445,9 @@ def _kl_div_non_log_target(g, input, target):
 @parse_args('v', 'v', 'i', 'b')
 def kl_div(g, input, target, reduction, log_target):
     if log_target:
-        output = _kl_div_log_target(g, input, target)
+        output = _kl_div_log_target_impl(g, input, target)
     else:
-        output = _kl_div_non_log_target(g, input, target)
+        output = _kl_div_non_log_target_impl(g, input, target)
 
     if reduction == 0:
         return output
@@ -2456,4 +2456,5 @@ def kl_div(g, input, target, reduction, log_target):
     elif reduction == 2:
         return g.op("ReduceSum", output, keepdims_i=0)
     else:
-        return _unimplemented("kl_div", "reduction other than none, mean, or sum.")
+        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
+                                          "request ONNX export support for the missing reduction type.")
