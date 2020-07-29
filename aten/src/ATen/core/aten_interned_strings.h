@@ -403,7 +403,10 @@ _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
 _(aten, isclose) \
+_(aten, isreal) \
 _(aten, istft) \
+_(aten, isposinf) \
+_(aten, isneginf) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -547,6 +550,7 @@ _(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
+_(aten, movedim) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
@@ -558,7 +562,6 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
-_(aten, quantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \

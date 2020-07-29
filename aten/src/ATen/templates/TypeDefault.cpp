@@ -16,13 +16,6 @@
 #include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <torch/library.h>
 
-namespace {
-static const char* named_tensors_unsupported_error =
-  " is not yet supported with named tensors. Please drop names via "
-  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
-  "and set names on the result of the operation.";
-}
-
 namespace at {
 namespace TypeDefault {
 

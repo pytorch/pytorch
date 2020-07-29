@@ -113,6 +113,20 @@ class TestLazyDynDepError(unittest.TestCase):
             lazy_dyndep.RegisterOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
             core.RefreshRegisteredOperators()
 
+    def test_workspacecreatenet(self):
+        from caffe2.python import workspace, lazy_dyndep
+        import tempfile
+
+        with tempfile.NamedTemporaryFile() as f:
+            lazy_dyndep.RegisterOpsLibrary(f.name)
+            called = False
+
+            def handler(e):
+                raise ValueError("test")
+            lazy_dyndep.SetErrorHandler(handler)
+            with self.assertRaises(ValueError, msg="test"):
+                workspace.CreateNet("fake")
+
 
 if __name__ == "__main__":
     unittest.main()
