@@ -9,12 +9,14 @@ namespace at { namespace native {
 void resize_output(Tensor& output, IntArrayRef shape) {
   // Tests for resizing of tensors with one more elements
   if (output.numel() != 0 && !output.sizes().equals(shape)) {
-    TORCH_WARN(
+    TORCH_CHECK(false,
       "An output with one or more elements was resized, since it had ",
       "shape ", output.sizes(), ", which does not match the required ",
       "output shape ", shape, ".",
       "This behavior is deprecated, and in a future PyTorch release outputs ",
-      "will not be resized unless they have zero elements.");
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
   }
 
   output.resize_(shape);
