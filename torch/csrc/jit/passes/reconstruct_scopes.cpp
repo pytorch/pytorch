@@ -1,20 +1,21 @@
 #include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/jit_log.h>
 
-#include <iostream>
-
 namespace torch {
 namespace jit {
 
 class ReconstructScopesPass {
  public:
   ReconstructScopesPass(const Module& m, Graph& g, std::string p)
-      : root_module(&m), graph(&g), prefix(std::move(p)), has_duplicated_function(false) {};
+      : root_module(m),
+        graph(g),
+        prefix(std::move(p)),
+        has_duplicated_function(false){};
   void run();
 
  private:
-  const Module* root_module;
-  Graph* graph;
+  const Module& root_module;
+  Graph& graph;
   std::string prefix;
   bool has_duplicated_function;
 
@@ -34,7 +35,7 @@ class ReconstructScopesPass {
 };
 
 void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
-  for (auto& method : module.get_methods()) {
+  for (const auto& method : module.get_methods()) {
     Function* func_ptr = &method.function();
     if (!has_duplicated_function &&
         func_to_module.find(func_ptr) != func_to_module.end()) {
@@ -42,7 +43,7 @@ void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
     }
     func_to_module[func_ptr] = module._ivalue();
   }
-  for (Module m : module.children()) {
+  for (const Module& m : module.children()) {
     constructFunctionToModuleMap(m);
   }
 }
@@ -62,14 +63,16 @@ void ReconstructScopesPass::constructRelativeNamesForModules(
     const Module& module,
     const std::string& prefix) {
   module_names[module._ivalue()] = getSubModuleName(module, prefix);
-  for (NameModule s : module.named_children()) {
-    std::string newPrefix = (!has_duplicated_function) ?
-        module_names[module._ivalue()] + "." + s.name : module_names[module._ivalue()] + ".";
+  for (const NameModule& s : module.named_children()) {
+    std::string newPrefix = (!has_duplicated_function)
+        ? module_names[module._ivalue()] + "." + s.name
+        : module_names[module._ivalue()] + ".";
     constructRelativeNamesForModules(s.value, newPrefix);
   }
 }
 
-std::string ReconstructScopesPass::getScopeString(const InlinedCallStackEntry& frame) const {
+std::string ReconstructScopesPass::getScopeString(
+    const InlinedCallStackEntry& frame) const {
   Function* f = frame.first;
   if (!func_to_module.count(f)) {
     return "<null (no func in the map)>";
@@ -91,7 +94,8 @@ std::string ReconstructScopesPass::getScopeString(const InlinedCallStackEntry& f
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
-      scopeString += "(" + filename + ":" + c10::to_string(line) + ":" + c10::to_string(col) + ")";
+      scopeString += "(" + filename + ":" + c10::to_string(line) + ":" +
+          c10::to_string(col) + ")";
     }
   }
   return scopeString;
@@ -100,7 +104,7 @@ std::string ReconstructScopesPass::getScopeString(const InlinedCallStackEntry& f
 void ReconstructScopesPass::visitNode(
     Node* n,
     const std::string& root_scope_string) {
-  for (auto b : n->blocks()) {
+  for (Block* b : n->blocks()) {
     visitBlock(b, root_scope_string);
   }
   ScopePtr sc = c10::make_intrusive<Scope>();
@@ -120,27 +124,29 @@ void ReconstructScopesPass::visitNode(
 void ReconstructScopesPass::visitBlock(
     Block* b,
     const std::string& root_scope_string) {
-  for (auto n : b->nodes()) {
+  for (Node* n : b->nodes()) {
     visitNode(n, root_scope_string);
   }
 }
 
 void ReconstructScopesPass::run() {
-  GRAPH_DUMP("Graph before reconstructing scope", graph);
+  GRAPH_DUMP("Graph before reconstructing scope", &graph);
   func_to_module.clear();
   module_names.clear();
 
-  constructFunctionToModuleMap(*root_module);
-  constructRelativeNamesForModules(*root_module, prefix);
+  constructFunctionToModuleMap(root_module);
+  constructRelativeNamesForModules(root_module, prefix);
 
   if (has_duplicated_function) {
-    std::cout << "WARNING: There are some duplicated module instances." << std::endl;
-    std::cout << "Displaying only the class names of submodules." << std::endl;
+    TORCH_WARN(
+        "There are some duplicated module instances.\n",
+        "Displaying only the class names of submodules.");
   }
 
-  std::string root_scope_string = getSubModuleName(*root_module, prefix) + ".forward";
-  visitBlock(graph->block(), root_scope_string);
-  GRAPH_DUMP("Graph after reconstructing scope", graph);
+  std::string root_scope_string =
+      getSubModuleName(root_module, prefix) + ".forward";
+  visitBlock(graph.block(), root_scope_string);
+  GRAPH_DUMP("Graph after reconstructing scope", &graph);
 }
 
 void ReconstructScopes(
