@@ -10416,7 +10416,9 @@ class TestNNDeviceType(NNTestCase):
         assert mode == 'sum' or per_sample_weights is None
         assert offsets is not None
         if per_sample_weights is None:
-            per_sample_weights = torch.ones(input.size()).to(weight.dtype)
+            per_sample_weights = torch.ones(input.size()).to(
+                dtype=weight.dtype, device=weight.device
+            )
         assert input.numel() == per_sample_weights.numel()
 
         bags = []
@@ -10427,7 +10429,11 @@ class TestNNDeviceType(NNTestCase):
                 next_offset = offsets[index + 1]
                 length = next_offset - offset
                 if length == 0:
-                    bags.append(torch.Tensor([0] * weight.size(1)).to(embeddings.dtype))
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
                 else:
                     if mode == 'sum':
                         bags.append(embeddings.narrow(0, offset, length).sum(0))
@@ -10444,7 +10450,11 @@ class TestNNDeviceType(NNTestCase):
                     next_offset = len(input)
                 length = next_offset - offset
                 if length == 0:
-                    bags.append(torch.Tensor([0] * weight.size(1)).to(embeddings.dtype))
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
                 else:
                     if mode == 'sum':
                         bags.append(embeddings.narrow(0, offset, length).sum(0))
