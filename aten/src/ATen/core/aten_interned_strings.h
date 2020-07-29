@@ -405,6 +405,8 @@ _(aten, is_sparse) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
+_(aten, isposinf) \
+_(aten, isneginf) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
