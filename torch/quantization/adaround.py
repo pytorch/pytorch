@@ -6,6 +6,8 @@ from torch.quantization.qconfig import *
 from torch.quantization.fake_quantize import *
 import torch.nn.qat.modules as nnqat
 import torch.quantization._numeric_suite as ns
+from torch.quantization import QuantStub, DeQuantStub
+
 
 import copy
 
@@ -13,13 +15,7 @@ import copy
 def clipped_sigmoid(continous_V):
     sigmoid_applied = torch.sigmoid(continous_V)
 
-    #sigmoid_applied vs continues_V
-    scale_n_add = (sigmoid_applied * 1.2) - 0.1  # broadcast should work?
-    # TODO: dtypes
-    # if continous_V.dtype == torch.int8:
-    #     clip = torch.clamp(scale_n_add, -128, 127)
-    # else:  # add other dtypes
-    #     clip = torch.clamp(scale_n_add, -128, 127)
+    scale_n_add = (sigmoid_applied * 1.2) - 0.1
     clip = torch.clamp(scale_n_add, 0, 1)
     return clip
 
@@ -28,34 +24,32 @@ def modified_quantized(model, x):
     continous_V = model.continous_V
     scale = model.scale
 
-    # W_over_s = torch.floor_divide(weight, scale)
     W_over_S = torch.div(weight, scale)
     W_over_S = torch.floor(W_over_S)
     W_plus_H = W_over_S + clipped_sigmoid(continous_V)
 
-
-    # # TODO: dtypes
-    # if weight.dtype == torch.int8:
-    #     soft_quantized_weights = scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
-    # else:  # add dtype conditional for clambing range
-    #     soft_quantized_weights = scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
-    # return soft_quantized_weights
-    return scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
+    soft_quantized_weights = scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
+    return soft_quantized_weights
 
 def loss_function_leaf(model):
+    # hyper params
     beta = 2
     _lambda = .01
 
+    # logged outputs
     float_output = model.float_output
     quantized_output = model.quantized_output
 
+    # model variables
     scale = model.wrapped_module.weight_fake_quant.scale
     continous_V = model.wrapped_module.weight_fake_quant.continous_V
 
+    # regularization
     spreading_range = 2 * continous_V - 1
     one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
     regulization = torch.sum(one_minus_beta)
 
+    # norm
     Frobenius_norm = torch.norm(float_output - quantized_output)
 
     # out_of_bounds penalty
@@ -108,7 +102,8 @@ def get_parent_module(model, name):
 
 class adaround(FakeQuantize):
     def __init__(self):
-        super(adaround, self).__init__()
+        super(adaround, self).__init__(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
+                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
         self.continous_V = None
 
     def forward(self, X):
@@ -119,8 +114,8 @@ class adaround(FakeQuantize):
             self.scale = _scale
             self.zero_point = _zero_point
 
-        if self.fake_quant_enabled[0] == 1:
-            X = modified_quantized(self, X)
+        # if self.fake_quant_enabled[0] == 1:
+        #     X = modified_quantized(self, X)
 
         if self.fake_quant_enabled[0] == 1:
             if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
@@ -130,8 +125,8 @@ class adaround(FakeQuantize):
                 X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
                                                           int(self.zero_point), self.quant_min,
                                                           self.quant_max)
-        # if self.fake_quant_enabled[0] == 1:
-        #     X = modified_quantized(self, X)
+        if self.fake_quant_enabled[0] == 1:
+            X = modified_quantized(self, X)
         return X
 
 
@@ -154,19 +149,27 @@ class OuputWrapper(nn.Module):
         self.wrapped_module = model
         self.float_output = None
         self.quantized_output = None
+        self.training = True
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x):
-        self.wrapped_module.activation_post_process.disable_fake_quant()
-        self.wrapped_module.weight_fake_quant.disable_fake_quant()
-        self.float_output = self.wrapped_module(x)
+        if self.training:
+            self.wrapped_module.activation_post_process.disable_fake_quant()
+            self.wrapped_module.weight_fake_quant.disable_fake_quant()
+            self.float_output = self.wrapped_module(x)
 
-        self.wrapped_module.activation_post_process.enable_fake_quant()
-        self.wrapped_module.weight_fake_quant.enable_fake_quant()
-        self.quantized_output = self.wrapped_module(x)
+            self.wrapped_module.activation_post_process.enable_fake_quant()
+            self.wrapped_module.weight_fake_quant.enable_fake_quant()
+            self.quantized_output = self.wrapped_module(x)
 
-        print(computeSqnr(self.float_output, self.quantized_output))
+            print(computeSqnr(self.float_output, self.quantized_output))
 
-        return self.quantized_output
+            return self.dequant(self.quantized_output)
+        else:
+            print(x.is_quantized)
+            print(self.wrapped_module.weight().is_quantized)
+            return self.dequant(self.wrapped_module(self.quant(x)))
 
 def add_wrapper_class(model, white_list):
     V_s = []
@@ -203,6 +206,7 @@ def quick_function(float_model, quantized_model, data_loader_test):
             yield V.wrapped_module.weight_fake_quant.continous_V
         optimizer = torch.optim.Adam(dummy_generator(), lr=0.01)
         count = 0
+        print(quantized_model)
         for image, target in data_loader_test:
             with torch.autograd.set_detect_anomaly(True):
                 optimizer.zero_grad()
@@ -213,11 +217,14 @@ def quick_function(float_model, quantized_model, data_loader_test):
                 loss.backward()
                 optimizer.step()
                 count += 1
-                if count > 50:
+                if count > 500:
                     break
 
     # torch.quantization.convert(quantized_model, inplace=True)
-
+    # for name, submodule in quantized_model.named_modules():
+    #     if isinstance(submodule, OuputWrapper):
+    #         submodule.training = False
+    print(quantized_model)
     for image, target in data_loader_test:
         float_output = float_model(image)
         quantized_output = quantized_model(image)
