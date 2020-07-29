@@ -228,25 +228,45 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def run_test(executable, test_module, test_directory, options, *extra_unittest_args):
+def get_executable_command(options, allow_pytest):
+    if options.coverage:
+        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
+    else:
+        executable = [sys.executable]
+    if options.pytest:
+        if allow_pytest:
+            executable += ['-m', 'pytest']
+        else:
+            print_to_stderr('Pytest cannot be used for this test. Falling back to unittest.')
+    return executable
+
+
+def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
+    if extra_unittest_args:
+        assert isinstance(extra_unittest_args, list)
+        unittest_args.extend(extra_unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
+    argv = [test_module + '.py'] + unittest_args
 
-    command = executable + argv
+    # Extra arguments are not supported with pytest
+    executable = get_executable_command(options, allow_pytest=not extra_unittest_args)
+
+    command = (launcher_cmd or []) + executable + argv
+    print_to_stderr('Executing {} ... [{}]'.format(command, datetime.now()))
     return shell(command, test_directory)
 
 
-def test_cuda_primary_ctx(executable, test_module, test_directory, options):
-    return run_test(executable, test_module, test_directory, options, '--subprocess')
+def test_cuda_primary_ctx(test_module, test_directory, options):
+    return run_test(test_module, test_directory, options, extra_unittest_args=['--subprocess'])
 
 
-def _test_cpp_extensions_aot(executable, test_module, test_directory, options, use_ninja):
+def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
     if use_ninja:
         try:
             cpp_extension.verify_ninja_availability()
@@ -287,22 +307,22 @@ def _test_cpp_extensions_aot(executable, test_module, test_directory, options, u
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
-        return run_test(executable, test_module, test_directory, options)
+        return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_cpp_extensions_aot_ninja(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot', test_directory,
+def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
+    return _test_cpp_extensions_aot('test_cpp_extensions_aot', test_directory,
                                     options, use_ninja=True)
 
 
-def test_cpp_extensions_aot_no_ninja(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot',
+def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
+    return _test_cpp_extensions_aot('test_cpp_extensions_aot',
                                     test_directory, options, use_ninja=False)
 
 
-def test_distributed(executable, test_module, test_directory, options):
+def test_distributed(test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(
@@ -338,13 +358,12 @@ def test_distributed(executable, test_module, test_directory, options):
                             'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt]
 
-                    return_code = run_test(mpiexec, test_module,
-                                           test_directory, options)
+                    return_code = run_test(test_module, test_directory, options,
+                                           launcher_cmd=mpiexec)
                 else:
-                    return_code = run_test(executable, test_module, test_directory,
-                                           options)
+                    return_code = run_test(test_module, test_directory, options)
                 if return_code != 0:
                     return return_code
             finally:
@@ -449,16 +468,6 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
-
-
-def get_executable_command(options):
-    if options.coverage:
-        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
-    else:
-        executable = [sys.executable]
-    if options.pytest:
-        executable += ['-m', 'pytest']
-    return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
@@ -677,8 +686,6 @@ def determine_target(test, touched_files, options):
 
 def main():
     options = parse_args()
-    executable = get_executable_command(options)  # this is a list
-    print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -714,7 +721,7 @@ def main():
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test, run_test)
-        return_code = handler(executable, test_module, test_directory, options)
+        return_code = handler(test_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
