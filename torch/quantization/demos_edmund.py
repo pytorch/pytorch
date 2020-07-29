@@ -23,7 +23,8 @@ import requests
 import copy
 
 import _equalize
-import _correct_bias
+# import _correct_bias
+import adaround
 
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
@@ -34,12 +35,12 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
     nn.LSTM,
 }
 
-from  mobilenet_classes import (
-    ConvBNReLU,
-    InvertedResidual,
-    MobileNetV2,
-    ChainModule
-)
+# from  mobilenet_classes import (
+#     ConvBNReLU,
+#     InvertedResidual,
+#     MobileNetV2,
+#     ChainModule
+# )
 
 # Specify random seed for repeatable results
 torch.manual_seed(191009)
@@ -112,7 +113,7 @@ def load_model(model_file):
 
 def prepare_data_loaders(data_path):
     train_batch_size = 30
-    eval_batch_size = 30
+    eval_batch_size = 300
 
     traindir = os.path.join(data_path, 'train')
     valdir = os.path.join(data_path, 'val')
@@ -209,8 +210,9 @@ def imagenet_download():
     return model, data_loader, data_loader_test
 
 def quantize_model(model, data_loader, per_tensor=True):
-    criterion = nn.CrossEntropyLoss()
-    num_calibration_batches = 10
+    print("starting quantization")
+    # criterion = nn.CrossEntropyLoss()
+    num_calibration_batches = 30
 
     model = copy.deepcopy(model)
     if per_tensor:
@@ -221,10 +223,56 @@ def quantize_model(model, data_loader, per_tensor=True):
     # unquantized_model = copy.deepcopy(model)
 
     model = torch.quantization.prepare(model, inplace=False)
-    evaluate(model,criterion, data_loader, num_calibration_batches)
+    # evaluate(model,criterion, data_loader, num_calibration_batches)
+    count = 0
+    for image, target in data_loader:
+        with torch.no_grad():
+            output = model(image)
+            print(count)
+            count += 1
+            if count >= num_calibration_batches:
+                break
+
     model = torch.quantization.convert(model, inplace=False)
 
+    print("ending quantization")
     return model
+
+def adaround_demo(input_model, data_loader, data_loader_test):
+    print("starting adaround")
+    train_batch_size = 30
+    eval_batch_size = 300
+    num_eval_batches = 1
+    criterion = nn.CrossEntropyLoss()
+    model = copy.deepcopy(input_model)
+
+    # throwing on the equalization
+    model.eval()
+    # model.fuse_model()
+
+    quantized_tensor_model = quantize_model(model, data_loader, True)
+    results = []
+    print("starting initial evaluation")
+
+    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per tensor quantization accuracy results, no bias correction')
+    results.append('Per tensor quantization accuracy results, no bias correction')
+
+    print("starting adaround quick function")
+    # _correct_bias.sequential_bias_correction(quantized_tensor_model, model, data_loader_test)
+    adaround.quick_function(model, quantized_tensor_model, data_loader_test)
+
+    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
+    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    print('Per tensor quantization accuracy results, with bias correction')
+    results.append('Per tensor quantization accuracy results, with bias correction')
+
+
+    for result in results:
+        print(result)
 
 def correct_bias_demo(input_model, data_loader, data_loader_test):
     eval_batch_size = 30
@@ -234,7 +282,7 @@ def correct_bias_demo(input_model, data_loader, data_loader_test):
     model = copy.deepcopy(input_model)
 
     count = 0
-    for data in data_loader:
+    for data in data_loader_test:
         with torch.no_grad():
             print(data[0].size())
             print(count)
@@ -341,7 +389,8 @@ if __name__ == "__main__":
     # equalize_accuracy_demo(*mobilenet_download())
     # imagenet_download()
     # equalize_accuracy_demo(*imagenet_download())
-    correct_bias_demo(*imagenet_download())
+    # correct_bias_demo(*imagenet_download())
+    adaround_demo(*imagenet_download())
     # prepare_data_loaders('/mnt/fair/imagenet_full_size/')
     # bias_correction_demo()
     # main()

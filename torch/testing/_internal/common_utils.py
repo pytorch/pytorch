@@ -1123,13 +1123,6 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
-        prec = delta
-        if places:
-            prec = 10**(-places)
-        rtol = None if prec is None else 0
-        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
-
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
@@ -1234,7 +1227,10 @@ class TestCase(expecttest.TestCase):
         def accept_output(update_type):
             print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
-                f.write(s)
+                # Adjust for producer_version, leave s unmodified
+                s_tag = re.sub(r'(producer_version): "[0-9.]*"',
+                               r'\1producer_version: "CURRENT_VERSION"', s)
+                f.write(s_tag)
 
         try:
             with open(expected_file) as f:
@@ -1257,7 +1253,7 @@ class TestCase(expecttest.TestCase):
 
         # Adjust for producer_version
         expected = expected.replace(
-            'producer_version: "XXX"',
+            'producer_version: "CURRENT_VERSION"',
             'producer_version: "{}"'.format(torch.onnx.producer_version)
         )
         if expecttest.ACCEPT:

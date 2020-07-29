@@ -74,8 +74,11 @@ def _observer_forward_hook(self, input, output):
     return self.activation_post_process(output)
 
 def _observer_forward_pre_hook(self, input):
-    self.activation_pre_process(input[0])
-    return None
+    ''' Forward pre hook that calls observer on the input (can be a tuple of values)
+    '''
+    self.activation_pre_process(*input)
+    # Returning nothing is Ok, Module._call_impl will intrepret this
+    # as the pre_hook making no changes to the input, as desired
 
 def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
     r"""Add observer for the leaf child of the module.
@@ -111,6 +114,8 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
                 child.register_forward_hook(_observer_forward_hook)
+
+                # Attaching prehook
                 if prehook is not None:
                     child.add_module('activation_pre_process', prehook())
                     child.register_forward_pre_hook(_observer_forward_pre_hook)
@@ -130,6 +135,11 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
         # All post forward hooks are preserved and will be executed after the observer before convert
         handle = module.register_forward_hook(_observer_forward_hook)
         module._forward_hooks.move_to_end(handle.id, last=False)
+        if prehook is not None:
+            module.add_module('activation_pre_process', prehook())
+            module.register_forward_pre_hook(_observer_forward_pre_hook)
+
+        # Attaching prehook
         if prehook is not None:
             module.add_module('activation_pre_process', prehook())
             module.register_forward_pre_hook(_observer_forward_pre_hook)
@@ -160,7 +170,8 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST, observer_non_leaf_module_list=None, prehook=None):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+            observer_non_leaf_module_list=None, prehook=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -174,6 +185,7 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
         inplace: carry out model transformations in-place, the original module is mutated
         white_list: list of quantizable modules
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
+        prehook: observer we want to add to forward_pre_hook
     """
     if not inplace:
         model = copy.deepcopy(model)
@@ -226,7 +238,6 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     prepare(model, inplace=True)
     run_fn(model, run_args)
     convert(model, mapping, inplace=True)
-    _remove_qconfig(model)
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
@@ -298,7 +309,6 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     model.eval()
     propagate_qconfig_(model, qconfig_spec)
     convert(model, mapping, inplace=True)
-    _remove_qconfig(model)
     return model
 
 def prepare_qat(model, mapping=None, inplace=False):
@@ -319,7 +329,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
     model = prepare(model, inplace=inplace)
-    convert(model, mapping, inplace=True)
+    _convert(model, mapping, inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
@@ -343,7 +353,28 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     convert(model, inplace=True)
     return model
 
-def convert(module, mapping=None, inplace=False):
+def convert(module, mapping=None, inplace=False, remove_qconfig=True):
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module. And remove qconfig at the end if remove_qconfig
+    is set to True.
+
+    Args:
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
+                 module type, can be overwritten to allow swapping user defined
+                 Modules
+        inplace: carry out model transformations in-place, the original module
+                 is mutated
+        remove_qconfig: whether to remove qconfig after convert
+    """
+    if not inplace:
+        module = copy.deepcopy(module)
+    _convert(module, mapping, inplace=True)
+    if remove_qconfig:
+        _remove_qconfig(module)
+    return module
+
+def _convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
 
@@ -377,7 +408,7 @@ def convert(module, mapping=None, inplace=False):
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
-            convert(mod, mapping, inplace=True)
+            _convert(mod, mapping, inplace=True)
         reassign[name] = swap_module(mod, mapping)
 
     for key, value in reassign.items():
