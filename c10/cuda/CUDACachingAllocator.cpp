@@ -949,7 +949,7 @@ std::mutex* getFreeMutex()
 }
 
 static inline void assertValidDevice(int device) {
-  int device_num = device_count();
+  int device_num = cuda_device_count();
   AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
 }
 

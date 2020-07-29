@@ -9,7 +9,7 @@
 namespace c10 {
 namespace cuda {
 
-DeviceIndex device_count() noexcept {
+DeviceIndex cuda_device_count() noexcept {
   int count;
   // NB: In the past, we were inconsistent about whether or not this reported
   // an error if there were driver problems are not.  Based on experience

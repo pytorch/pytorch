@@ -73,7 +73,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
   DeviceIndex deviceCount() const noexcept override {
-    return device_count();
+    return cuda_device_count();
   }
 
   // Event-related functions
