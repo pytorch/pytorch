@@ -2086,7 +2086,10 @@ class Net(object):
             set(self._output_record.field_blobs())), (
             'Output schema cannot be reset')
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined in net {}".format(
+                blob,
+                self.Proto()
+            )
         for blob in record.field_blobs():
             if blob not in self.external_outputs:
                 self.AddExternalOutput(blob)
