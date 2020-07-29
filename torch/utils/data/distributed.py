@@ -29,6 +29,10 @@ class DistributedSampler(Sampler):
         seed (int, optional): random seed used to shuffle the sampler if
             :attr:`shuffle=True`. This number should be identical across all
             processes in the distributed group. Default: ``0``.
+        drop_last (bool, optional): if ``True``, then the sampler will drop the
+            tail of the data to make it evenly divisible across the number of
+            replicas. If ``False``, the sampler will add extra indices to make
+            the data evenly divisible across the replicas. Default: ``False``.
 
     .. warning::
         In distributed mode, calling the :meth:`set_epoch` method at
@@ -47,7 +51,7 @@ class DistributedSampler(Sampler):
         ...     train(loader)
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0, drop_last=False):
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -60,7 +64,18 @@ class DistributedSampler(Sampler):
         self.num_replicas = num_replicas
         self.rank = rank
         self.epoch = 0
-        self.num_samples = int(math.ceil(len(self.dataset) * 1.0 / self.num_replicas))
+        self.drop_last = drop_last
+        # If the dataset length is evenly divisible by # of replicas, then there
+        # is no need to drop any data, since the dataset will be split equally.
+        if self.drop_last and len(self.dataset) % self.num_replicas != 0:
+            # Split to nearest available length that is evenly divisible.
+            # This is to ensure each rank receives the same amount of data when
+            # using this Sampler.
+            self.num_samples = math.ceil(
+                (len(self.dataset) - self.num_replicas) / self.num_replicas
+            )
+        else:
+            self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
@@ -75,8 +90,12 @@ class DistributedSampler(Sampler):
             indices = list(range(len(self.dataset)))
 
 
-        # add extra samples to make it evenly divisible
-        indices += indices[:(self.total_size - len(indices))]
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            indices += indices[:(self.total_size - len(indices))]
+        else:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[:self.total_size]
         assert len(indices) == self.total_size
 
         # subsample

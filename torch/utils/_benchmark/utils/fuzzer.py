@@ -106,9 +106,10 @@ class FuzzedParameter(object):
             low=np.log2(self._minval),
             high=np.log2(self._maxval)
         ))
-        if output < self._minval:
+        # `or 0` is to appease MyPy
+        if output < (self._minval or 0.0):
             return self._minval
-        if output > self._maxval:
+        if output > (self._maxval or 0.0):
             return self._maxval
         return output
 
@@ -180,8 +181,8 @@ class FuzzedTensor(object):
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int]],
-        steps: Optional[Tuple[Union[str, int]]] = None,
+        size: Tuple[Union[str, int], ...],
+        steps: Optional[Tuple[Union[str, int], ...]] = None,
         probability_contiguous: float = 0.5,
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
@@ -410,9 +411,9 @@ class Fuzzer(object):
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params = {}
+        strict_params: Dict[str, Union[float, int, ParameterAlias]] = {}
         for _ in range(1000):
-            candidate_params = {}
+            candidate_params: Dict[str, Union[float, int, ParameterAlias]] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:

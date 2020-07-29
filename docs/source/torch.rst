@@ -327,7 +327,6 @@ Reduction Ops
     mode
     norm
     prod
-    quantile
     std
     std_mean
     sum
@@ -352,7 +351,10 @@ Comparison Ops
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
     lt
