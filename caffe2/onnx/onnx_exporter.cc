@@ -148,6 +148,16 @@ void rewriteSubnet(
       }
     }
   }
+  for (auto& external_input : *(net->mutable_external_input())) {
+    if (oldname_to_newname.find(external_input) != oldname_to_newname.end()) {
+      external_input = oldname_to_newname[external_input];
+    }
+  }
+  for (auto& external_output : *(net->mutable_external_output())) {
+    if (oldname_to_newname.find(external_output) != oldname_to_newname.end()) {
+      external_output = oldname_to_newname[external_output];
+    }
+  }
 }
 
 Argument* getArgumentFromName(OperatorDef* op, const std::string& name) {
@@ -247,6 +257,8 @@ void revertRenamedExternalOutputForIfOp(
         renamed_external_outputs) {
   ArgumentHelper helper(*if_op);
   Argument *then_arg = nullptr, *else_arg = nullptr;
+
+  revertRenamedExternalOutput(if_op, renamed_external_outputs);
 
   if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
     then_arg = getArgumentFromName(if_op, "then_net");
