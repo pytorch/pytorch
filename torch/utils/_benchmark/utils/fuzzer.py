@@ -341,6 +341,21 @@ class FuzzedTensor(object):
         ))
 
 
+class ParamsIndexer(object):
+    """Convenience class for indexing params (without allocating Tensors)
+    e.g.
+      fuzzer = Fuzzer(...)
+      fuzzer[i]         # tensors, tensor_properties, params
+      fuzzer.params[i]  # params only
+    """
+    def __init__(self, fuzzer):
+        self._fuzzer = fuzzer
+
+    def __getitem__(self, index: int):
+        params, _  = self._fuzzer._generate(index)
+        return params
+
+
 class Fuzzer(object):
     def __init__(
         self,
@@ -391,18 +406,23 @@ class Fuzzer(object):
             *[[i] if isinstance(i, cls) else i for i in values]
         ))
 
+    def __getitem__(self, index: int):
+        params, state = self._generate(index)
+        tensors = {}
+        tensor_properties = {}
+        for t in self._tensors:
+            tensor, properties = t._make_tensor(params, state)
+            tensors[t.name] = tensor
+            tensor_properties[t.name] = properties
+        return tensors, tensor_properties, params
+
+    @property
+    def params(self):
+        return ParamsIndexer(self)
+
     def take(self, n):
-        state = np.random.RandomState(self._seed)
-        torch.manual_seed(state.randint(low=0, high=2 ** 63))
-        for _ in range(n):
-            params = self._generate(state)
-            tensors = {}
-            tensor_properties = {}
-            for t in self._tensors:
-                tensor, properties = t._make_tensor(params, state)
-                tensors[t.name] = tensor
-                tensor_properties[t.name] = properties
-            yield tensors, tensor_properties, params
+        for i in range(n):
+            yield self[i]
 
     @property
     def rejection_rate(self):
@@ -410,7 +430,10 @@ class Fuzzer(object):
             return 0.
         return self._rejections / self._total_generated
 
-    def _generate(self, state):
+    def _generate(self, index: int):
+        state = np.random.RandomState([self._seed, index])
+        torch.manual_seed(state.randint(low=0, high=2 ** 63))
+
         strict_params: Dict[str, Union[float, int, ParameterAlias]] = {}
         for _ in range(1000):
             candidate_params: Dict[str, Union[float, int, ParameterAlias]] = {}
@@ -435,7 +458,7 @@ class Fuzzer(object):
                 self._rejections += 1
                 continue
 
-            return candidate_params
+            return candidate_params, state
         raise ValueError("Failed to generate a set of valid parameters.")
 
     @staticmethod

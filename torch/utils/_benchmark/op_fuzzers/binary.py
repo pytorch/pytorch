@@ -3,17 +3,32 @@ import torch
 
 from torch.utils._benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
 
+SMALL = "small"
+MEDIUM = "medium"
+LARGE = "large"
 
-_MIN_DIM_SIZE = 16
-_MAX_DIM_SIZE = 16 * 1024 ** 2
-_POW_TWO_SIZES = tuple(2 ** i for i in range(
-    int(np.log2(_MIN_DIM_SIZE)),
-    int(np.log2(_MAX_DIM_SIZE)) + 1,
-))
+_MIN_DIM_SIZE = 8
+_MAX_DIM_SIZE = {
+    SMALL: 128,
+    MEDIUM: 1024,
+    LARGE: 16 * 1024 ** 2,
+}
+_POW_TWO_SIZES = {
+    scale : tuple(2 ** i for i in range(
+        int(np.log2(_MIN_DIM_SIZE)),
+        int(np.log2(max_size)) + 1,
+    ))
+    for scale, max_size in _MAX_DIM_SIZE.items()
+}
+_MIN_ELEMENTS = {
+    SMALL: 0,
+    MEDIUM: 128,
+    LARGE: 4 * 1024,
+}
 
 
 class BinaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False):
+    def __init__(self, seed, dtype=torch.float32, cuda=False, requires_grad=False, scale=LARGE):
         super().__init__(
             parameters=[
                 # Dimensionality of x and y. (e.g. 1D, 2D, or 3D.)
@@ -33,14 +48,14 @@ class BinaryOpFuzzer(Fuzzer):
                     FuzzedParameter(
                         name=f"k_any_{i}",
                         minval=_MIN_DIM_SIZE,
-                        maxval=_MAX_DIM_SIZE,
+                        maxval=_MAX_DIM_SIZE[scale],
                         distribution="loguniform",
                     ) for i in range(3)
                 ],
                 [
                     FuzzedParameter(
                         name=f"k_pow2_{i}",
-                        distribution={size: 1. / len(_POW_TWO_SIZES) for size in _POW_TWO_SIZES}
+                        distribution={size: 1. / len(_POW_TWO_SIZES[scale]) for size in _POW_TWO_SIZES[scale]}
                     ) for i in range(3)
                 ],
                 [
@@ -84,23 +99,39 @@ class BinaryOpFuzzer(Fuzzer):
                     size=("k0", "k1", "k2"),
                     steps=("x_step_0", "x_step_1", "x_step_2"),
                     probability_contiguous=0.75,
-                    min_elements=4 * 1024,
+                    min_elements=_MIN_ELEMENTS[scale],
                     max_elements=32 * 1024 ** 2,
                     max_allocation_bytes=2 * 1024**3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
+                    requires_grad=requires_grad,
                 ),
                 FuzzedTensor(
                     name="y",
                     size=("y_k0", "y_k1", "y_k2"),
-                    steps=("x_step_0", "x_step_1", "x_step_2"),
+                    steps=("y_step_0", "y_step_1", "y_step_2"),
                     probability_contiguous=0.75,
                     max_allocation_bytes=2 * 1024**3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
+                    requires_grad=requires_grad,
                 ),
             ],
             seed=seed,
         )
+
+    @staticmethod
+    def structure_params(params: dict):
+        params = params.copy()
+        params.pop("random_value")
+        for k in list(params.keys()):
+            if k.startswith("k_any") or k.startswith("k_pow2"):
+                params.pop(k)
+        dim = params.pop("dim")
+        params["x_size"] = tuple(params.pop(i) for i in ("k0", "k1", "k2"))[:dim]
+        params["x_steps"] = tuple(params.pop(i) for i in ("x_step_0", "x_step_1", "x_step_2"))[:dim]
+        params["y_size"] = tuple(params.pop(i) for i in ("y_k0", "y_k1", "y_k2"))[:dim]
+        params["y_steps"] = tuple(params.pop(i) for i in ("y_step_0", "y_step_1", "y_step_2"))[:dim]
+        return params

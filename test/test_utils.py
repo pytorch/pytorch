@@ -619,8 +619,8 @@ class TestBenchmarkUtils(TestCase):
         )
 
         expected_results = [
-            (0.7821, 0.0536, 0.9888, 0.1949, 0.5242, 0.1987, 0.5094),
-            (0.7166, 0.5961, 0.8303, 0.005),
+            (0.587,),
+            (0.2690, 0.4937, 0.366),
         ]
 
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):

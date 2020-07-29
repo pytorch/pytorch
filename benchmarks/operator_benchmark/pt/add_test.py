@@ -6,7 +6,83 @@ from __future__ import unicode_literals
 import operator_benchmark as op_bench
 import torch
 
+from torch.utils._benchmark.op_fuzzers import binary
+
 """Microbenchmarks for add_ operator. Supports both Caffe2/PyTorch."""
+
+
+def make_fuzzed_config(
+    scale=binary.SMALL,
+    n: int = 10,
+    seed: int = 0,
+    cross_product_configs=None,
+    tags=None,
+    checksum=None):
+
+    fuzzer = binary.BinaryOpFuzzer(seed=seed, scale=scale)
+    attr_names=["x_size", "y_size"]
+    attrs = []
+    for i in range(n):
+        params = fuzzer.structure_params(fuzzer.params[i])
+        attrs.append([params[a] for a in attr_names])
+
+    # Because the generated tests depend on Fuzzer for random numbers,
+    # it is advisable to use a checksum to ensure that the configurations
+    # being benchmarked do not silently change.
+    if checksum is not None:
+        total = 0
+        for a in attrs:
+            total += sum(sum(i) for i in a)
+        if total != checksum:
+            raise ValueError(f"Checksum failed: Total {total} != {checksum}")
+
+    return op_bench.config_list(
+        attr_names=[a.upper() for a in attr_names],
+        attrs=attrs,
+        cross_product_configs=cross_product_configs or {},
+        tags=tags or [],
+    )
+
+
+add_short_fuzzed_configs = make_fuzzed_config(
+    binary.SMALL, n=10, seed=0,
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
+    tags=["short"],
+    checksum=2767,
+)
+
+add_long_fuzzed_configs = make_fuzzed_config(
+    binary.MEDIUM, n=10, seed=0,
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
+    tags=["long"],
+    checksum=10168,
+)
+
+
+class AddBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, X_SIZE, Y_SIZE, device):
+        self.input_one = torch.rand(*X_SIZE, device=device, requires_grad=self.auto_set())
+        self.input_two = torch.rand(*Y_SIZE, device=device, requires_grad=self.auto_set())
+        self.set_module_name("add")
+
+    def forward(self):
+        return torch.add(self.input_one, self.input_two)
+
+# The generated test names based on add_short_fuzzed_configs will be in the following pattern:
+# add_X_SIZE(128,)_Y_SIZE(1,)_cpu
+# add_X_SIZE(128,)_Y_SIZE(1,)_cpu_bwdall
+# add_X_SIZE(128,)_Y_SIZE(1,)_cpu_bwd1
+# add_X_SIZE(128,)_Y_SIZE(1,)_cpu_bwd2
+# ...
+# Those names can be used to filter tests.
+
+op_bench.generate_pt_test(add_short_fuzzed_configs + add_long_fuzzed_configs, AddBenchmark)
+op_bench.generate_pt_gradient_test(add_short_fuzzed_configs + add_long_fuzzed_configs, AddBenchmark)
+
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
@@ -30,28 +106,6 @@ add_short_configs = op_bench.config_list(
     },
     tags=["short"],
 )
-
-
-class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device):
-        self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.input_two = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.set_module_name("add")
-
-    def forward(self):
-        return torch.add(self.input_one, self.input_two)
-
-# The generated test names based on add_short_configs will be in the following pattern:
-# add_M8_N16_K32_devicecpu
-# add_M8_N16_K32_devicecpu_bwdall
-# add_M8_N16_K32_devicecpu_bwd1
-# add_M8_N16_K32_devicecpu_bwd2
-# ...
-# Those names can be used to filter tests.
-
-op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
-op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenchmark)
-
 
 """Mircobenchmark for addmm operator."""
 
