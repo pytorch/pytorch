@@ -480,6 +480,78 @@ class TestSaveLoad(JitTestCase):
 
         _helper(v3_module, current_module)
 
+    # NOTE: the JIT was incapable of handling boolean fill values when
+    #   PyTorch produced file format versions 0-4
+    def test_versioned_full_integer_value(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, int_fill: int):
+                size = torch.Size(2, 2)
+                a = torch.full(size, int_fill)
+                b = torch.full(size, 1)
+                return (a, b)
+
+        try:
+            v4_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_full_integer_value_v4.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
+        self._verify_count("aten::full", v4_module, 2)
+
+        current_module = self._save_load_module(MyModule)
+        self._verify_count("aten::full", current_module, 2)
+
+        # Verifies historic integer type inference is float
+        # NOTE: only verifies floating point, not exact dtype, due to
+        #   https://github.com/pytorch/pytorch/issues/40470
+        results = v4_module(2)
+        for result in results:
+            self.assertTrue(result.is_floating_point())
+
+        # Verifies values are correct
+        a, b = results
+        self.assertTrue((a == 2.).all())
+        self.assertTrue((b == 1.).all())
+
+        with self.assertRaisesRegex(RuntimeError, ".+is currently unsupported.+"):
+            current_module(2)
+
+    # Tests that torch.full behavior which is the same from prior versions
+    #   to version 5 is preserved.
+    # NOTE: while torch.full in eager PyTorch accepts a requires_grad argument,
+    #   it does not in Torchscript (see https://github.com/pytorch/pytorch/issues/40363)
+    def test_versioned_full_preserved(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, float_fill: float):
+                size = (2, 2)
+                a = torch.full(size, 1.)
+                b = torch.full(size, float_fill)
+                c = torch.full(size, float_fill, dtype=torch.long)
+
+                out = torch.empty(size, dtype=torch.long)
+                d = torch.full(size, float_fill, out=out)
+
+                e = torch.full(size, float_fill, dtype=torch.float16, pin_memory=None,
+                               layout=torch.strided, device='cpu')
+                return (a, b, c, d, e)
+
+        try:
+            v4_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_full_preserved_v4.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
+        self._verify_count("aten::full", v4_module, 5)
+
+        current_module = self._save_load_module(MyModule)
+        self._verify_count("aten::full", current_module, 5)
+
+        self.assertEqual(v4_module(2.), current_module(2.))
+
     def test_versioned_symbols_reserialization(self):
         """
         Tests that loading and saving serialized Torchscript with a versioned

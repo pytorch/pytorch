@@ -57,6 +57,7 @@ class SpatialBNOp : public Operator<Context> {
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+    CAFFE_ENFORCE_NE(C, 0);
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /

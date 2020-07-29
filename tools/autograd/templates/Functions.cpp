@@ -155,6 +155,18 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
   return norm_backward(grad, self, p_, norm);
 }
 
+Tensor sgn_backward(Tensor grad, Tensor self) {
+  // [y^2 * gx - x^2 * gy + xy * 1j * (x + yj)]/(x^2 + y^2)^3/2
+  auto real = at::real(self);
+  auto imag = at::imag(self);
+  auto grad_real = at::real(grad);
+  auto grad_imag = at::imag(grad);
+  auto abs = at::abs(self);
+
+  return (at::pow(imag, 2) * grad_real - at::pow(real, 2) * grad_imag +
+          c10::complex<float>(0, 1) * (grad_real - grad_imag));
+}
+
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
   double exponent = exponent_.toDouble();
   if (exponent == 0.0) {
@@ -935,6 +947,26 @@ Tensor infinitely_differentiable_gelu_backward(
   Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
   Tensor pdf = (-0.5 * self * self).exp_();
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+}
+
+Tensor infinitely_differentiable_logit_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    c10::optional<double> eps) {
+  if (eps) {
+    const double lo = eps.value();
+    const double hi = 1.0 - lo;
+    return at::where(
+        at::logical_and(self >= lo, self <= hi),
+        grad / (self * (1.0 - self)),
+        at::zeros({}, self.options()));
+  } else {
+    return at::where(
+        at::logical_and(self >= 0.0, self <= 1.0),
+        grad / (self * (1.0 - self)),
+        at::empty({}, self.options())
+            .fill_(std::numeric_limits<double>::quiet_NaN()));
+  }
 }
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {

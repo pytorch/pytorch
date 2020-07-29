@@ -415,6 +415,7 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(offset)
       .VS(uses)
       .VS(replaceAllUsesWith)
+      .VS(replaceAllUsesAfterNodeWith)
       .def("node", [](Value& v) { return v.node(); })
       .def(
           "setTypeAs",
@@ -425,6 +426,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(copyMetadata)
       .VS(isCompleteTensor)
       .VS(requires_grad)
+      .def(
+          "requiresGrad",
+          [](Value& n) { n.type()->expect<TensorType>()->requiresGrad(); })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -658,6 +662,14 @@ void initPythonIRBindings(PyObject* module_) {
                                  : py::cast<py::none>(Py_None);
           })
       .def(
+          "undefined",
+          [](Type& t) {
+            auto undef =
+                t.shared_from_this()->expect<TensorType>()->undefined();
+            return undef.has_value() ? py::cast(*undef)
+                                     : py::cast<py::none>(Py_None);
+          })
+      .def(
           "sizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
@@ -780,6 +792,12 @@ void initPythonIRBindings(PyObject* module_) {
         return get_python_cu()->get_interface(
             c10::QualifiedName(qualified_name));
       }))
+      .def(
+          "getMethod",
+          [](InterfaceType& self, const std::string& name) {
+            return self.getMethod(name);
+          },
+          py::return_value_policy::reference)
       .def("getMethodNames", [](InterfaceType& self) {
         std::vector<std::string> names;
         for (const FunctionSchema& fn : self.methods()) {

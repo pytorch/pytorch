@@ -25,44 +25,17 @@ namespace at { namespace native {
 // left off in native functions.
 namespace cppmap { namespace detail {
 
-// See [NOTE: Complex Operator Unification]
-// CPPTypeAndStdComplexToScalarType is equivalent to CPPTypeToScalarType, but also includes mappings
-// from all the complex types.
 template <typename>
-struct CPPTypeAndStdComplexToScalarType {
+struct CPPTypeToScalarType {
 };
 
-#define SPECIALIZE_CPPTypeAndStdComplexToScalarType(cpp_type, scalar_type)                  \
+#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
   template <>                                                                               \
-  struct CPPTypeAndStdComplexToScalarType<cpp_type> {                                       \
+  struct CPPTypeToScalarType<cpp_type> {                                       \
     constexpr static c10::ScalarType value() { return c10::ScalarType::scalar_type; }       \
   };
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeAndStdComplexToScalarType)
-
-#undef SPECIALIZE_CPPTypeeAndStdComplexToScalarType
-
-template<>
-struct CPPTypeAndStdComplexToScalarType<std::complex<float>> {
-    constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexFloat; }
-};
-
-template<>
-struct CPPTypeAndStdComplexToScalarType<std::complex<double>> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexDouble; }
-};
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template<>
-struct CPPTypeAndStdComplexToScalarType<thrust::complex<float>> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexFloat; }
-};
-
-template<>
-struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexDouble; }
-};
-#endif
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
 
 }} //namespace cppmap::detail
 
@@ -74,7 +47,7 @@ struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::template arg<nargs - 1>::type;
-    using cpp_map = cppmap::detail::CPPTypeAndStdComplexToScalarType<cpp_type>;
+    using cpp_map = cppmap::detail::CPPTypeToScalarType<cpp_type>;
 
     if (iter.input_dtype(nargs-1) != cpp_map::value()) {
       return true;
@@ -88,7 +61,7 @@ struct needs_dynamic_casting<func_t, 0> {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::result_type;
-    using cpp_map = cppmap::detail::CPPTypeAndStdComplexToScalarType<cpp_type>;
+    using cpp_map = cppmap::detail::CPPTypeToScalarType<cpp_type>;
 
     // we could assert output numbers are correct here, but checks
     // (including arity) are currently pushed outside of this struct.

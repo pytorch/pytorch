@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
@@ -135,14 +135,14 @@ public:
     return _mm256_and_pd(angle, real_mask);         // angle    0
   }
   Vec256<c10::complex<double>> sgn() const {
-    const __m256d imag_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
-                                                                     0x0000000000000000, 0xFFFFFFFFFFFFFFFF));
-    auto angle = _mm256_and_pd(angle_(), imag_mask); // 0 angle
+    auto abs = abs_();
+    auto zero = _mm256_setzero_pd();
+    auto mask = _mm256_cmp_pd(abs, zero, _CMP_EQ_OQ);
+    auto abs_val = Vec256(abs);
 
-    auto sin_cos = Sleef_sincosd4_u10(angle);                        //[sin(0), cos(0)] [sin(angle), cos(angle)]
-    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
-                                   sin_cos.x, 0x0A);                  //cos(angle)           sin(angle)
-    return cos_sin;
+    auto div = values / abs_val.values;       // x / abs(x)
+
+    return blendv(div, zero, mask);
   }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,

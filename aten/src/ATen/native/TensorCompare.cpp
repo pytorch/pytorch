@@ -121,7 +121,7 @@ bool is_nonzero(const Tensor& self) {
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
   } else if (localScalar.isComplex()) {
-     return localScalar.to<std::complex<double>>() != std::complex<double>(0.0, 0.0);
+     return localScalar.to<c10::complex<double>>() != c10::complex<double>(0.0, 0.0);
   } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
   } else if (localScalar.isBoolean()) {
@@ -150,14 +150,14 @@ std::vector<Tensor> where(const Tensor& condition) {
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
-  auto iter = at::TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.set_check_mem_overlap(true);
-  iter.add_output(ret);
-  iter.add_input(condition);
-  iter.add_input(self);
-  iter.add_input(other);
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(ret)
+    .add_input(condition)
+    .add_input(self)
+    .add_input(other)
+    .build();
   where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;
 }

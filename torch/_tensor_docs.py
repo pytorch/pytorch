@@ -883,6 +883,13 @@ Args:
 
 """.format(**common_args))
 
+add_docstr_all('count_nonzero',
+               r"""
+count_nonzero(dim=None) -> Tensor
+
+See :func:`torch.count_nonzero`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -1313,6 +1320,20 @@ gather(dim, index) -> Tensor
 See :func:`torch.gather`
 """)
 
+add_docstr_all('gcd',
+               r"""
+gcd(other) -> Tensor
+
+See :func:`torch.gcd`
+""")
+
+add_docstr_all('gcd_',
+               r"""
+gcd_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.gcd`
+""")
+
 add_docstr_all('ge',
                r"""
 ge(other) -> Tensor
@@ -1697,6 +1718,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('lcm',
+               r"""
+lcm(other) -> Tensor
+
+See :func:`torch.lcm`
+""")
+
+add_docstr_all('lcm_',
+               r"""
+lcm_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.lcm`
 """)
 
 add_docstr_all('le',
@@ -2568,7 +2603,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src) -> Tensor
+scatter_(dim, index, src, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -2592,6 +2627,27 @@ Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
 along the specified dimension :attr:`dim` must be unique.
 
+Additionally accepts an optional :attr:`reduce` argument that allows
+specification of an optional reduction operation, which is applied to all
+values in the tensor :attr:`src` into :attr:`self` at the indicies
+specified in the :attr:`index`. For each value in :attr:`src`, the reduction
+operation is applied to an index in :attr:`self` which is specified by
+its index in :attr:`src` for ``dimension != dim`` and by the corresponding
+value in :attr:`index` for ``dimension = dim``.
+
+Given a 3-D tensor and reduction using the multiplication operation, :attr:`self`
+is updated as::
+
+    self[index[i][j][k]][j][k] *= src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] *= src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] *= src[i][j][k]  # if dim == 2
+
+Reducing with the addition operation is the same as using
+:meth:`~torch.Tensor.scatter_add_`.
+
+Note:
+    Reduction is not yet implemented for the CUDA backend.
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
@@ -2601,6 +2657,8 @@ Args:
       incase `value` is not specified
     value (float): the source element(s) to scatter,
       incase `src` is not specified
+    reduce (string): reduction operation to apply,
+      can be either 'add', 'subtract', 'multiply' or 'divide'.
 
 Example::
 
@@ -2617,6 +2675,11 @@ Example::
     >>> z
     tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
             [ 0.0000,  0.0000,  0.0000,  1.2300]])
+
+    >>> z = torch.ones(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23, reduce='multiply')
+    >>> z
+    tensor([[1.0000, 1.0000, 1.2300, 1.0000],
+            [1.0000, 1.0000, 1.0000, 1.2300]])
 """)
 
 add_docstr_all('scatter_add_',
@@ -2718,6 +2781,20 @@ add_docstr_all('sigmoid_',
 sigmoid_() -> Tensor
 
 In-place version of :meth:`~Tensor.sigmoid`
+""")
+
+add_docstr_all('logit',
+               r"""
+logit() -> Tensor
+
+See :func:`torch.logit`
+""")
+
+add_docstr_all('logit_',
+               r"""
+logit_() -> Tensor
+
+In-place version of :meth:`~Tensor.logit`
 """)
 
 add_docstr_all('sign',
@@ -3600,6 +3677,20 @@ chunk(chunks, dim=0) -> List of Tensors
 See :func:`torch.chunk`
 """)
 
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
@@ -3822,6 +3913,12 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_quantized',
                r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
 """)
 
 add_docstr_all('device',

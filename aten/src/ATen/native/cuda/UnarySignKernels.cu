@@ -48,8 +48,11 @@ void sign_kernel_cuda(TensorIterator& iter){
 
 template<typename T>
 __host__ __device__ static inline thrust::complex<T> sgn_wrapper(thrust::complex<T> v) {
-  T angle = thrust::arg(v);
-  return thrust::complex<T>(::cos(angle), ::sin(angle));
+  if (v == thrust::complex<T>(0, 0)) {
+    return thrust::complex<T>(0, 0);
+  } else {
+    return z / std::abs(z);
+  }
 }
 
 void sgn_kernel_cuda(TensorIterator& iter){

@@ -5,7 +5,7 @@ from .qconfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
 from .stubs import *
-from .quantize_script import *
+from .quantize_jit import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -18,9 +18,10 @@ def default_eval_fn(model, calib_data):
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
-    'quantize',
-    # Sub functions used by eager mode quantization
-    'prepare', 'convert',
+    'quantize', 'quantize_dynamic', 'quantize_qat',
+    'prepare', 'convert', 'prepare_qat',
+    # Top level API for graph mode quantization
+    'quantize_jit', 'quantize_dynamic_jit',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
@@ -33,6 +34,4 @@ _all__ = [
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations
     'fuse_modules',
-    # Dynamic quantization utilities
-    'quantize_dynamic',
 ]
