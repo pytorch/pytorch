@@ -37,6 +37,7 @@ class OrderedDict {
   // of index_ and items_ being noexcept) but the obvious spelling didn't
   // compile on Windows.
   OrderedDict(OrderedDict&& other) = default;
+  OrderedDict& operator=(OrderedDict&& other) = default;
 
   ~OrderedDict() = default;
 
