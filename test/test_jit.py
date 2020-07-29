@@ -14554,6 +14554,36 @@ a")
         f = Foo()
         torch.jit.script(f)
 
+    def test_object_conversion_override(self):
+        class Stringdict:
+            def __init__(self):
+                self.underlying = {'foo': 3}
+
+            def __getitem__(self, key):
+                return self.underlying[key]
+
+            def __to_ivalue__(self):
+                # NB: Changing value to make sure that this method was called
+                # correctly
+                return {'foo': 4}
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.stringdict = Stringdict()
+
+            def forward(self):
+                return self.stringdict['foo']
+
+        f = Foo()
+        result_ref = f()
+        self.assertEqual(result_ref, 3)
+        self.assertEqual(isinstance(f.stringdict, Stringdict), True)
+
+        scripted = torch.jit.script(f)
+        result_test = scripted()
+        self.assertEqual(result_test, 4)
+        self.assertEqual(isinstance(scripted.stringdict, dict), True)
 
     def test_named_buffers_are_iterable(self):
         class MyMod(torch.nn.Module):

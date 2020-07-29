@@ -229,6 +229,13 @@ def infer_concrete_type_builder(nn_module):
 
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
         attr_type = infer_type(name, value)
+        if attr_type is None and hasattr(value, '__to_ivalue__'):
+            # Manual override of what the JIT conversion should do.
+            #
+            # Kinda a hack: convert the attribute just to get the type. It would
+            # be better if we didnt have to do this, but oh well
+            converted_value = value.__to_ivalue__()
+            attr_type = infer_type(name, converted_value)
         if attr_type is not None:
             concrete_type_builder.add_attribute(name, attr_type, False, False)
         else:

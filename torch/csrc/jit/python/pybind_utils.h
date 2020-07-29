@@ -496,6 +496,10 @@ inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N) {
+  if (py::hasattr(obj, "__to_ivalue__")) {
+    auto method = obj.attr("__to_ivalue__");
+    return toTypeInferredIValue(method());
+  }
   switch (type->kind()) {
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
