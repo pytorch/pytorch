@@ -75,7 +75,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Sc
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
     for (int i = 0; i < tensors.size(); i++) {
-        vec_res.emplace_back(torch::empty_like(tensors[i]));
+        vec_res.emplace_back(at::empty_like(tensors[i]));
     }
 
     tensor_lists.emplace_back(std::move(tensors.vec()));
