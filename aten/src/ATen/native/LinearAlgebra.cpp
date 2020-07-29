@@ -949,6 +949,7 @@ Tensor mexp_impl(
 ) {
   auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
+  const auto norm_cpu = norm.to(at::kCPU);
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
@@ -963,27 +964,36 @@ Tensor mexp_impl(
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+      // We pin memory to make the transfer to CUDA faster and async
       auto idx_curr_norm_interval = (
-        (norm_lower_bound < norm) * (norm <= norm_upper_bound)
-      ).nonzero().squeeze(-1);
+        (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
+      ).nonzero().squeeze(-1).pin_memory();
 
-      auto sub_a = at::index_select(a, 0, idx_curr_norm_interval);
-      res.index_put_({idx_curr_norm_interval}, compute_Ts[i](sub_a));
+      if (idx_curr_norm_interval.numel()) {
+        auto idx_to_device = idx_curr_norm_interval
+          .to(a.device().type(), /*non_blocking=*/true);
+        auto sub_a = at::index_select(a, 0, idx_to_device);
+        res.index_put_({idx_to_device}, compute_Ts[i](sub_a));
+      }
     }
 
-    auto idx_large_norm = (norm >= thetas[total_n_degs - 2])
-      .nonzero().squeeze(-1);
-    auto a_large_norm = at::index_select(a, 0, idx_large_norm);
-    auto large_norm_subset = at::index_select(norm, 0, idx_large_norm);
-    auto mexp_out = at::empty_like(a_large_norm);
+    auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
+      .nonzero().squeeze(-1).pin_memory();
+    if (idx_large_norm.numel()) {
+      auto idx_to_device = idx_large_norm
+        .to(a.device().type(), /*non_blocking=*/true);
+      auto a_large_norm = at::index_select(a, 0, idx_to_device);
+      auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
+      auto mexp_out = at::empty_like(a_large_norm);
 
-    compute_T18_scale_square(
-      mexp_out,
-      a_large_norm,
-      large_norm_subset,
-      thetas[total_n_degs - 1]
-    );
-    res.index_put_({idx_large_norm}, mexp_out);
+      compute_T18_scale_square(
+        mexp_out,
+        a_large_norm,
+        large_norm_subset,
+        thetas[total_n_degs - 1]
+      );
+      res.index_put_({idx_large_norm}, mexp_out);
+    }
 
     return res;
   }
@@ -1080,17 +1090,7 @@ Tensor matrix_exp(const Tensor& a) {
     return a.exp();
   }
 
-  if (a.dim() <= 2) {
-    return mexp(a);
-  }
-  else {
-    if (a.device().type() == at::kCPU) {
-      return mexp(a, false);
-    }
-    else { // if CUDA
-      return mexp(a, true);
-    }
-  }
+  return mexp(a);
 }
 
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
