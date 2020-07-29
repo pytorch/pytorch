@@ -1,4 +1,4 @@
-#include "CUDAFunctions.h"
+#include <c10/cuda/CUDAFunctions.h>
 
 #include <cuda_runtime_api.h>
 
