@@ -1068,24 +1068,15 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 
   // Semantics:
   // 1. Immutable primitive values of the same type (Int, Double, None, Bool, Str) return value equality
-  // 2. If it is a tensor type, we need to take undefined tensor into account
-  // 3. Undefined_tensor is None and vice versa should be true
-  // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
-  // 5. False for all other comparisons.
+  // 2. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
+  // 3. False for all other comparisons.
   if (this->isNone() && rhs.isNone()) {
     return true;
   } else if (this->isBool() && rhs.isBool()) {
     // for bool type, do equality check
     return this->toBool() == rhs.toBool();
   } else if (this->isTensor() && rhs.isTensor()) {
-    // for tensor type, just check the as_intrusive_ptr since is_intrusive_ptr is false for undefined tensor
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
-  } else if (this->isTensor() && rhs.isNone()) {
-    // special case: undefined tensor and None are the same identity
-    return !this->is_intrusive_ptr;
-  } else if (this->isNone() && rhs.isTensor()) {
-    // special case: undefined tensor and None are the same identity
-    return !rhs.is_intrusive_ptr;
   } else if (this->isInt() && rhs.isInt()) {
     return this->toInt() == rhs.toInt();
   } else if (this->isDouble() && rhs.isDouble()) {

@@ -30,22 +30,6 @@ inline c10::optional<MemoryFormat> check_tensor_options_and_extract_memory_forma
     }
 }
 
-// TODO The maybe_unwrap_optional_tensor is only needed because our at::native::xxx functions
-// still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
-// to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
-// and use the use_optional_tensor=True behavior always.
-template<class T, std::enable_if_t<!std::is_same<c10::optional<at::Tensor>, std::decay_t<T>>::value, int> = 0>
-inline decltype(auto) maybe_unwrap_optional_tensor(T&& arg) {
-    return std::forward<T>(arg);
-}
-inline at::Tensor maybe_unwrap_optional_tensor(const c10::optional<at::Tensor>& arg) {
-    if (arg.has_value()) {
-        return *arg;
-    } else {
-        return at::Tensor();
-    }
-}
-
 namespace detail {
 
 // with_scattered_tensor_options takes a function pointer that potentially takes a TensorOptions argument.
@@ -71,20 +55,20 @@ static_assert(has_tensoroptions_arg<int (int64_t, const TensorOptions&)>(), "");
 static_assert(has_tensoroptions_arg<int (int64_t, TensorOptions)>(), "");
 static_assert(!has_tensoroptions_arg<int (int64_t, std::string)>(), "");
 
-template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct with_scattered_tensor_options__;
+template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct with_scattered_tensor_options_impl_;
 
 template<class FuncPtr, class Enable = void>
-struct with_scattered_tensor_options_ final {};
+struct with_scattered_tensor_options_impl final {};
 
 template<class UnderlyingFuncPtr>
-struct with_scattered_tensor_options_<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options_impl<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
     // FuncType does not have TensorOptions arguments.
     // Don't wrap anything but just return the base pointer.
     using FuncPtr = UnderlyingFuncPtr;
 };
 
 template<class UnderlyingFuncPtr>
-struct with_scattered_tensor_options_<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options_impl<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
 private:
     // FuncType has TensorOptions arguments.
     // Return a function pointer to a wrapper function that replaces those with expanded arguments.
@@ -100,13 +84,17 @@ private:
     using parameters_after_tensoroptions =
         guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
-    using wrapper = with_scattered_tensor_options__<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
+    using wrapper = with_scattered_tensor_options_impl_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
 public:
     using FuncPtr = TORCH_FN_TYPE(&wrapper::wrapper);
 };
 
+// This template generates the actual wrapper. It is only invoked when we
+// already know that we have an op with a TensorOptions argument and the
+// argument list is already parsed and passed in to this template separately
+// using argument packs ParametersBeforeTensorOptions and ParametersAfterTensorOptions.
 template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
-struct with_scattered_tensor_options__<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
+struct with_scattered_tensor_options_impl_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
     static decltype(auto) wrapper(
                 ParametersBeforeTensorOptions... parameters_before,
                 optional<ScalarType> scalar_type,
@@ -131,26 +119,41 @@ struct with_scattered_tensor_options__<FuncPtr, guts::typelist::typelist<Paramet
  */
 template<class FuncPtr>
 constexpr auto with_scattered_tensor_options(FuncPtr) {
-    return typename with_scattered_tensor_options_<FuncPtr>::FuncPtr();
+    return typename with_scattered_tensor_options_impl<FuncPtr>::FuncPtr();
 }
 
+// make_optional_tensor_explicit takes an argument of any type T and
+// a KernelType.
+//  - T: The type the op gets called with
+//  - KernelType: The type the kernel function expects
+// Those types are usually the same but they are allowed to differ when
+// KernelType == `Tensor` and T == `optional<Tensor>` because that just
+// means the kernel is written in the legacy way and we want to wrap it.
+// In this case, make_optional_tensor_explicit maps any `optional<Tensor>`
+// to a `Tensor` (mapping `nullopt` to undefined tensor).
+// Everything else is passed through unmodified.
 template<class KernelType>
 struct make_optional_tensor_explicit final {
+    // SFINAE for KernelType != `Tensor`
     template<class T>
     static decltype(auto) call(T&& arg) {
+        // pass through everything unmodified
         return std::forward<T>(arg);
     }
 };
 
 template<>
 struct make_optional_tensor_explicit<at::Tensor> final {
+    // SFINAE for KernelType == `Tensor`
     template<class _Tensor, std::enable_if_t<std::is_same<std::remove_cv_t<std::remove_reference_t<_Tensor>>, at::Tensor>::value, int> = 0>
     static decltype(auto) call(_Tensor&& arg) {
+        // pass through arguments that already are `Tensor` unmodified
         return std::forward<_Tensor>(arg);
     }
 
     template<class _OptTensor, std::enable_if_t<std::is_same<std::remove_cv_t<std::remove_reference_t<_OptTensor>>, optional<at::Tensor>>::value, int> = 0>
     static at::Tensor call(_OptTensor&& arg) {
+        // map `optional<Tensor>` to `Tensor`
         if (arg.has_value()) {
             return *std::forward<_OptTensor>(arg);
         } else {
@@ -159,6 +162,9 @@ struct make_optional_tensor_explicit<at::Tensor> final {
     }
 };
 
+// This template generates the actual wrapper. It is only invoked when we
+// already know that we have an op with an optional<Tensor> argument and
+// we need to wrap it.
 template<class TargetSignature, class KernelSignature, class KernelFunc>
 struct with_explicit_optional_tensors_ final {};
 
@@ -185,14 +191,16 @@ template<class T> using is_optional_tensor_arg = guts::bool_constant<_is_optiona
  * in those locations, unwraps them to `Tensor` (potentially undefined tensor)
  * and calls the original kernel function.
  */
-template<class TargetSignature, class KernelFunc, std::enable_if_t<guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
+template<class TargetSignature, class KernelFunc, std::enable_if_t<
+    guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
 constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
     // SFINAE case for kernels that have optional tensor arguments.
     // Wrap them to unpack the optionals before calling the kernel
     return TORCH_FN((&with_explicit_optional_tensors_<TargetSignature, typename KernelFunc::FuncType, KernelFunc>::wrapper));
 }
 
-template<class TargetSignature, class KernelFunc, std::enable_if_t<!guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
+template<class TargetSignature, class KernelFunc, std::enable_if_t<
+    !guts::typelist::true_for_any_type<is_optional_tensor_arg, typename guts::infer_function_traits_t<TargetSignature>::parameter_types>::value, int> = 0>
 constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
     // SFINAE case for kernels that don't have optional tensor arguments.
     // Don't wrap them but just use the kernel directly.

@@ -252,11 +252,6 @@ struct CAFFE2_API IValue final {
     if (t.defined()) {
       tag = Tag::Tensor;
       is_intrusive_ptr = true;
-      // Note: the undefined tensor is not refcounted, so while it
-      // is tagged as a tensor, is_intrusive_ptr is set to false.
-      // This is not an optional optimization: our incref call
-      // *will not* do the right thing when called on an
-      // undefined tensor.
       payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
     } else {
       // If the tensor was undefined, set the IValue to None instead
