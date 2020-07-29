@@ -47,6 +47,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             return "file://{file_name}".format(file_name=self.file_name)
         # Needed since MultiProcessTestCase assumes a world_size of 4, but we
         # run these tests under other various world_sizes.
+
         @property
         def world_size(self):
             return os.environ["WORLD_SIZE"]

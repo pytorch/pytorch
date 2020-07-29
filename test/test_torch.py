@@ -6453,6 +6453,72 @@ class TestTorchDeviceType(TestCase):
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_isposinf_isneginf_float(self, device, dtype):
+        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
+        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
+
+        for torch_op, numpy_op in ops:
+            if torch_op == torch.isposinf:
+                target_vals = (0, 1, 0, 0, 0, 0)
+            else:
+                target_vals = (1, 0, 0, 0, 0, 0)
+
+            t = torch.tensor(vals, device=device, dtype=dtype)
+            # Manual check here as numpy does not support bfloat16
+            if dtype == torch.bfloat16:
+                self.assertEqual(torch_op(t),
+                                 torch.tensor(target_vals, device=device, dtype=torch.bool))
+            else:
+                self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
+
+            # test the boolean tensor as the `out=` parameter
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.tensor(target_vals, device=device, dtype=torch.bool)
+            torch_op(t, out=out)
+            self.assertEqual(out, t_target)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_isposinf_isneginf_int_and_bool(self, device, dtype):
+        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
+        vals = (-1, 0, 1)
+
+        for torch_op, numpy_op in ops:
+            self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
+
+            # test the boolean tensor as the `out=` parameter
+            t = torch.tensor(vals, device=device, dtype=dtype)
+            out = torch.empty_like(t, dtype=torch.bool)
+            t_target = torch.zeros_like(t, dtype=torch.bool)
+            torch_op(t, out=out)
+            self.assertEqual(out, t_target)
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_isposinf_isneginf_complex(self, device, dtype):
+        torch_ops = (torch.isposinf, torch.isneginf)
+        vals = (complex(0, float('inf')), complex(1, -float('inf')))
+        t = torch.tensor(vals, device=device, dtype=dtype)
+        out = torch.empty_like(t)
+
+        for torch_op in torch_ops:
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(t)
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(t, out=out)
+
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
+        # test non-boolean tensors as the `out=` parameters
+        # boolean outputs are tested in the above testcases
+        vals = (float('inf'), -float('inf'), 1.2)
+        t = torch.tensor(vals, device=device)
+        for torch_op in (torch.isposinf, torch.isneginf):
+            out = torch.empty_like(t, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
+                torch_op(t, out=out)
+
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
