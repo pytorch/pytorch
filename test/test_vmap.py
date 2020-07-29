@@ -535,6 +535,16 @@ class TestVmapOperators(TestCase):
                          inputs[0].data_ptr(),
                          msg="result was not a view of the first input!")
 
+        # Assuming input[0] is a floating-point tensor. Check if the vmap
+        # operation propagates the requires_grad flag. Some vmap operators are
+        # implemented in a way that assumes that they are composite with respect
+        # to autograd. If the operator ever is changed to not be composite with
+        # respect to autograd, then the following check should fail.
+        inputs_clone = list(inputs)
+        inputs_clone[0] = inputs[0].clone().requires_grad_()
+        result = vmap(op, in_dims, out_dims)(*inputs_clone)
+        self.assertTrue(result.requires_grad)
+
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
         test = self._vmap_view_test
