@@ -167,10 +167,10 @@ void IndexLowering::handle(ReductionOp* rop) {
   in = Index::getProducerIndex(
       ir_utils::asTV(in), ir_utils::asTV(rop->out()), loops);
 
-  ReductionOp* block_reduction = nullptr;
+  kir::ReductionOp* block_reduction = nullptr;
   if (is_block_reduce) {
     block_reduction =
-        new ReductionOp(rop->getReductionOpType(), rop->init(), out, in);
+        new kir::ReductionOp(rop->getReductionOpType(), rop->init(), out, in);
     pushBack(block_reduction);
   }
 
@@ -222,7 +222,8 @@ void IndexLowering::handle(ReductionOp* rop) {
     pushBack(sync_buffer);
     pushBack(new kir::GridReduction(
         block_reduction == nullptr
-            ? new ReductionOp(rop->getReductionOpType(), rop->init(), out, in)
+            ? new kir::ReductionOp(
+                  rop->getReductionOpType(), rop->init(), out, in)
             : block_reduction,
         reduce_buffer,
         sync_buffer));
@@ -247,7 +248,11 @@ void IndexLowering::handle(BroadcastOp* bop) {
         ir_utils::asTV(in),
         ir_utils::asTV(bop->out()),
         scope_utils::getLoops(active_scope_expr));
-  pushBack(new BroadcastOp(out, in));
+  pushBack(new kir::BroadcastOp(out, in));
+}
+
+void IndexLowering::handle(kir::Allocate* allocate) {
+  pushBack(allocate);
 }
 
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {

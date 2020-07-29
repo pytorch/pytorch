@@ -584,9 +584,8 @@ ParallelTypeBitmap operator^(
 }
 
 ParallelTypeBitmap getParallelBroadcastDomains(
-    const BroadcastOp* const bop,
+    const Val* bop_out,
     const ThreadPredicateMap& preds) {
-  const Val* bop_out = bop->out();
   if (bop_out->getValType().value() == ValType::TensorIndex) {
     bop_out = bop_out->as<kir::TensorIndex>()->view();
   }

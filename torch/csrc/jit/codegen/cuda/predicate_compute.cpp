@@ -16,12 +16,12 @@ bool PredicateCompute::hasPredicates(const kir::TensorIndex* ti) {
   return false;
 }
 
-std::vector<Bool*> PredicateCompute::computePredicates(
+std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const kir::TensorIndex* ti) {
   const TensorView* tv = ti->view();
   const std::vector<IterDomain*>& root = tv->getRootDomain();
 
-  std::vector<Bool*> preds;
+  std::vector<kir::Bool*> preds;
 
   bool no_pred_needed = true;
   for (auto id : tv->domain()->domain())
@@ -42,9 +42,9 @@ std::vector<Bool*> PredicateCompute::computePredicates(
     bool simple_ind = ti->index(i)->getOrigin() == nullptr;
 
     if (root[i]->isBroadcast()) {
-      preds.push_back(new Bool(true));
+      preds.push_back(new kir::Bool(true));
     } else if (simple_ind && !zero_ind) {
-      preds.push_back(new Bool(true));
+      preds.push_back(new kir::Bool(true));
     } else if (zero_ind) {
       if (extent == nullptr) {
         extent = root[i]->extent();
@@ -56,12 +56,12 @@ std::vector<Bool*> PredicateCompute::computePredicates(
       if (extent != nullptr) {
         local_extent = mul(extent, local_extent);
       }
-      Val* pred = lt(ti->index(i), local_extent);
+      auto pred = kir::ltExpr(ti->index(i), local_extent);
       extent = nullptr;
       TORCH_INTERNAL_ASSERT(
-          pred->getValType().value() == ValType::Scalar &&
+          pred->getValType().value() == ValType::KirScalar &&
           pred->getDataType().value() == DataType::Bool);
-      preds.push_back(pred->as<Bool>());
+      preds.push_back(pred->as<kir::Bool>());
     }
   }
   return preds;

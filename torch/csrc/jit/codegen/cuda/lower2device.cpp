@@ -75,30 +75,30 @@ void GPULower::lower() {
   // Validate and make some minor modifications in preparation to generate code.
   PrepareForLowering(fusion_);
 
+  // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
   // Run our passes keeping the lowered expressions and forwarding them.
-  auto loop_nests =
+  const auto loop_nests =
       LoopNestGenerator::getLoopNest(fusion_, fusion_->exprs(true), preds);
+  const auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests, preds);
+  const auto indexed_loops =
+      IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 
-  auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests, preds);
-  auto indexed_loops = IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
+  // Store the final lowered IR
   lowered_exprs_ = indexed_loops;
 
-  // Get allocations:
+  // Get allocations
   global_allocations_ = GridReductionBuffers::getGlobalAllocs(lowered_exprs_);
   sync_allocations_ = GridReductionBuffers::getSyncAllocs(lowered_exprs_);
 }
 
 // Traverse through the fusion and print CUDA code associated with it
-std::vector<Expr*> GPULower::lowered_exprs() {
-  return lowered_exprs_;
-}
-
 std::ostream& GPULower::printKernel(
     std::ostream& os,
     const std::string& kernel_name) {
   FusionGuard fg(fusion_);
+
   std::vector<kir::Allocate*> allocs;
   allocs.insert(
       allocs.end(), global_allocations_.begin(), global_allocations_.end());

@@ -122,7 +122,7 @@ ParallelTypeBitmap operator^(
 // Even when a domain is broadcast and parallelized, it does not need
 // blockBroadcast unless it is predicated.
 ParallelTypeBitmap getParallelBroadcastDomains(
-    const BroadcastOp* const,
+    const Val* bop_out,
     const ThreadPredicateMap& preds);
 
 } // namespace ir_utils

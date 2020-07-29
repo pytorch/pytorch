@@ -69,12 +69,36 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::TensorView:
       ptr(handler)->handle(val->as<TensorView>());
       return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(val->as<kir::TensorIndex>());
-      return;
     case ValType::NamedScalar:
       ptr(handler)->handle(val->as<NamedScalar>());
       return;
+
+    // TODO: remove once the Kernel IR has its own visitor
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
+      return;
+    case ValType::KirScalar:
+      switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<kir::Bool>());
+          return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<kir::Float>());
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(val->as<kir::Half>());
+          return;
+        case DataType::Int:
+          ptr(handler)->handle(val->as<kir::Int>());
+          return;
+        default:
+          break;
+      }
+      break;
+    case ValType::KirNamedScalar:
+      ptr(handler)->handle(val->as<kir::NamedScalar>());
+      return;
+
     default:
       break;
   }
@@ -102,11 +126,28 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
-    case ExprType::GridReduction:
-      ptr(handler)->handle(expr->as<kir::GridReduction>());
-      return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+
+    case ExprType::KirUnaryOp:
+      ptr(handler)->handle(expr->as<kir::UnaryOp>());
+      return;
+    case ExprType::KirBinaryOp:
+      ptr(handler)->handle(expr->as<kir::BinaryOp>());
+      return;
+    case ExprType::KirTernaryOp:
+      ptr(handler)->handle(expr->as<kir::TernaryOp>());
+      return;
+    case ExprType::KirReductionOp:
+      ptr(handler)->handle(expr->as<kir::ReductionOp>());
+      return;
+    case ExprType::KirBroadcastOp:
+      ptr(handler)->handle(expr->as<kir::BroadcastOp>());
+      return;
+
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
       return;
     case ExprType::ForLoop:
       ptr(handler)->handle(expr->as<kir::ForLoop>());
@@ -117,6 +158,7 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -162,12 +204,36 @@ void Val::constDispatch(T handler, const Val* val) {
     case ValType::TensorView:
       ptr(handler)->handle(val->as<TensorView>());
       return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(val->as<kir::TensorIndex>());
-      return;
     case ValType::NamedScalar:
       ptr(handler)->handle(val->as<NamedScalar>());
       return;
+
+    // TODO: remove once the Kernel IR has its own visitor
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
+      return;
+    case ValType::KirScalar:
+      switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<kir::Bool>());
+          return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<kir::Float>());
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(val->as<kir::Half>());
+          return;
+        case DataType::Int:
+          ptr(handler)->handle(val->as<kir::Int>());
+          return;
+        default:
+          break;
+      }
+      break;
+    case ValType::KirNamedScalar:
+      ptr(handler)->handle(val->as<kir::NamedScalar>());
+      return;
+
     default:
       break;
   }
@@ -195,11 +261,28 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
-    case ExprType::GridReduction:
-      ptr(handler)->handle(expr->as<kir::GridReduction>());
-      return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+
+    case ExprType::KirUnaryOp:
+      ptr(handler)->handle(expr->as<kir::UnaryOp>());
+      return;
+    case ExprType::KirBinaryOp:
+      ptr(handler)->handle(expr->as<kir::BinaryOp>());
+      return;
+    case ExprType::KirTernaryOp:
+      ptr(handler)->handle(expr->as<kir::TernaryOp>());
+      return;
+    case ExprType::KirReductionOp:
+      ptr(handler)->handle(expr->as<kir::ReductionOp>());
+      return;
+    case ExprType::KirBroadcastOp:
+      ptr(handler)->handle(expr->as<kir::BroadcastOp>());
+      return;
+
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
       return;
     case ExprType::ForLoop:
       ptr(handler)->handle(expr->as<kir::ForLoop>());
@@ -210,6 +293,7 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }

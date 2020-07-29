@@ -19,17 +19,17 @@ Val* getPredicatePerParallelType(
     TORCH_INTERNAL_ASSERT(sources.size() == 1, "Multiple sources detected");
     auto src = *sources.begin();
     auto flag_name = kir::getPredicateFlagName(src);
-    return new NamedScalar(flag_name, DataType::Bool);
+    return new kir::NamedScalar(flag_name, DataType::Bool);
   } else {
-    return eq(NamedScalar::getParallelIndex(pt), new Int(0));
+    return kir::eqExpr(kir::NamedScalar::getParallelIndex(pt), new kir::Int(0));
   }
 }
 
-Bool* getPredicate(
+kir::Bool* getPredicate(
     const ir_utils::ParallelTypeBitmap& bits,
     const ThreadPredicateMap::SourceMapType& sources) {
   if (bits.none()) {
-    return new Bool(true);
+    return new kir::Bool(true);
   }
 
   Val* pred = nullptr;
@@ -38,7 +38,7 @@ Bool* getPredicate(
     if (pt_bool.second) {
       auto tp =
           getPredicatePerParallelType(pt_bool.first, sources.at(pt_bool.first));
-      pred = pred == nullptr ? tp : andOp(pred, tp);
+      pred = (pred == nullptr) ? tp : kir::andExpr(pred, tp);
     }
   }
 
@@ -49,7 +49,7 @@ Bool* getPredicate(
       pred->getDataType().value() == DataType::Bool,
       "Tried to return a predicate that is not a bool val.");
 
-  return pred->as<Bool>();
+  return pred->as<kir::Bool>();
 }
 
 void mergeSourceMap(
@@ -243,7 +243,7 @@ void ThreadPredicateMap::duplicate(
   }
 }
 
-Bool* ThreadPredicateMap::getExpr(const TensorView* tv) const {
+kir::Bool* ThreadPredicateMap::getExpr(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   return getPredicate(at(tv).first, at(tv).second);
 }

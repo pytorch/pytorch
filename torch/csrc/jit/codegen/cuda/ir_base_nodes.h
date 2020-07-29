@@ -218,7 +218,8 @@ class TORCH_CUDA_API Val : public Statement {
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
-    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
+    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar ||
+        vtype_ == ValType::KirScalar || vtype_ == ValType::KirNamedScalar;
   }
 
   bool isConstScalar() const;

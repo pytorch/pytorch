@@ -175,11 +175,6 @@ class TORCH_CUDA_API ReductionOp : public Expr {
 
   bool sameAs(const ReductionOp* const other) const;
 
-  std::vector<IterDomain*> getReductionDomains() const;
-
-  std::unordered_map<ParallelType, IterDomain*, TypeHash>
-  getParallelReductionDomains() const;
-
  private:
   const BinaryOpType reduction_op_type_;
   Val* const init_ = nullptr;

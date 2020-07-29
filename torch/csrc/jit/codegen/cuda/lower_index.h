@@ -38,9 +38,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   void handle(TernaryOp*) final;
   void handle(ReductionOp*) final;
   void handle(BroadcastOp*) final;
-  void handle(kir::Allocate* expr) final {
-    pushBack(expr);
-  }
+  void handle(kir::Allocate*) final;
 
   void generate(const std::vector<Expr*>& exprs);
 

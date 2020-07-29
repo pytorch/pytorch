@@ -51,7 +51,7 @@ namespace fuser {
 class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
  private:
   // Wrapper to access thread_predicates_
-  Bool* getThreadPredicate(TensorView*);
+  kir::Bool* getThreadPredicate(TensorView*);
 
   // We will track which loops in the incomming IR will be replaced and by what
   std::unordered_map<Expr*, Expr*> loop_replacement_map;

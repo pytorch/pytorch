@@ -268,6 +268,80 @@ void IRPrinter::handle(const NamedScalar* i) {
   os << i->name();
 }
 
+void IRPrinter::handle(const kir::Bool* b) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(b));
+    os << " )";
+    return;
+  }
+
+  if (b->isSymbolic()) {
+    os << "b" << b->name();
+  } else {
+    os << "bool(" << *(b->value()) << ")";
+  }
+}
+
+void IRPrinter::handle(const kir::Float* f) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(f));
+    os << " )";
+    return;
+  }
+
+  if (f->isSymbolic()) {
+    os << "f" << f->name();
+  } else {
+    os << "float("
+       << std::setprecision(
+              std::numeric_limits<Float::ScalarType>::max_digits10)
+       << *(f->value()) << ")";
+  }
+}
+
+void IRPrinter::handle(const kir::Half* h) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
+    os << "( ";
+    handle(FusionGuard::getCurFusion()->origin(h));
+    os << " )";
+    return;
+  }
+
+  if (h->isSymbolic()) {
+    os << "h" << h->name();
+  } else {
+    os << "__float2half(" << *(h->value()) << ")";
+  }
+}
+
+void IRPrinter::handle(const kir::Int* i) {
+  // Make sure we didn't bypass the value mapping
+  // (for example calling IRPrinter::handle() with a Int*)
+  TORCH_CHECK(
+      !follow_val_map || i == FusionGuard::getCurFusion()->loweredVal(i));
+
+  if (print_inline_) {
+    if (auto def = FusionGuard::getCurFusion()->origin(i)) {
+      os << "( ";
+      handle(def);
+      os << " )";
+      return;
+    }
+  }
+
+  if (i->isSymbolic()) {
+    os << "i" << i->name();
+  } else {
+    os << *(i->value());
+  }
+}
+
+void IRPrinter::handle(const kir::NamedScalar* i) {
+  os << i->name();
+}
+
 static bool isTV(const Val* val) {
   return val->getValType().value() == ValType::TensorView ||
       val->getValType().value() == ValType::TensorIndex;
@@ -406,17 +480,143 @@ void IRPrinter::handle(const TernaryOp* top) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const ReductionOp* rop) {
-  // Check if we've lowered yet.
-
-  bool lowered = rop->out()->getValType() == ValType::TensorIndex;
-
-  if (!lowered) {
-    os << rop->out() << " = reduction( " << rop->in()
-       << ", op = " << rop->getReductionOpType()
-       << ", initial value = " << rop->init() << " )\n";
-    return;
+void IRPrinter::handle(const kir::UnaryOp* uop) {
+  bool istvop = isTVOp(uop);
+  if (!print_inline_) {
+    indent();
+    os << uop->out();
+    if (istvop) {
+      os << "\n";
+      indent_size++;
+      indent();
+    }
+    os << " = ";
+  } else {
+    checkInlineable(uop);
   }
+
+  if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
+    os << inline_uop.value();
+    handle(uop->in());
+  } else {
+    if (uop->getUnaryOpType() == UnaryOpType::Cast) {
+      c10::optional<std::string> cast_str = cast_func_str(std::make_pair(
+          uop->in()->getDataType().value(), uop->out()->getDataType().value()));
+      TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
+      os << cast_str.value();
+    } else {
+      os << uop->getUnaryOpType();
+    }
+    os << "(";
+    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
+      os << "rnd";
+    else
+      handle(uop->in());
+    os << ")";
+  }
+
+  if (istvop)
+    indent_size--;
+
+  if (!print_inline_)
+    os << ";\n";
+}
+
+void IRPrinter::handle(const kir::BinaryOp* bop) {
+  bool istvop = isTVOp(bop);
+  if (!print_inline_) {
+    indent();
+    os << bop->out();
+
+    // tensor operations tend to be long, break them up into multiple lines
+    if (istvop) {
+      os << "\n";
+      indent_size++;
+      indent();
+    }
+
+    os << " = ";
+  } else {
+    checkInlineable(bop);
+  }
+
+  if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
+    handle(bop->lhs());
+    if (istvop) {
+      os << "\n";
+      indent();
+    }
+    os << " " << inline_bop.value() << " ";
+    handle(bop->rhs());
+  } else {
+    os << bop->getBinaryOpType() << "(";
+    handle(bop->lhs());
+    if (istvop) {
+      os << "\n";
+      indent();
+    }
+    os << ", ";
+    handle(bop->rhs());
+    os << ")";
+  }
+
+  if (istvop)
+    indent_size--;
+
+  if (!print_inline_)
+    os << ";\n";
+}
+
+void IRPrinter::handle(const kir::TernaryOp* top) {
+  bool istvop = isTVOp(top);
+  if (!print_inline_) {
+    indent();
+    os << top->out();
+
+    // tensor operations tend to be long, break them up into multiple lines
+    if (istvop) {
+      os << "\n";
+      indent_size++;
+      indent();
+    }
+
+    os << " = ";
+  } else {
+    checkInlineable(top);
+  }
+
+  os << top->getTernaryOpType() << "(";
+  handle(top->in1());
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  os << ", ";
+  handle(top->in2());
+  if (istvop) {
+    os << "\n";
+    indent();
+  }
+  os << ", ";
+  handle(top->in3());
+  os << ")";
+
+  if (istvop)
+    indent_size--;
+
+  if (!print_inline_)
+    os << ";\n";
+}
+
+void IRPrinter::handle(const ReductionOp* rop) {
+  TORCH_CHECK(rop->out()->getValType() != ValType::TensorIndex);
+  os << rop->out() << " = reduction( " << rop->in()
+     << ", op = " << rop->getReductionOpType()
+     << ", initial value = " << rop->init() << " )\n";
+}
+
+void IRPrinter::handle(const kir::ReductionOp* rop) {
+  TORCH_CHECK(rop->out()->getValType() == ValType::TensorIndex);
 
   auto out = rop->out()->as<kir::TensorIndex>();
   auto vec_domain = out->view()->domain()->domain();
@@ -520,15 +720,16 @@ void IRPrinter::handle(const kir::GridReduction* gr) {
 }
 
 void IRPrinter::handle(const BroadcastOp* bop) {
-  // Check if we've lowered yet.
-  bool lowered = bop->out()->getValType() == ValType::TensorIndex;
-  if (!lowered) {
-    os << bop->out() << " = broadcast( " << bop->in() << " )\n";
-    return;
-  }
+  TORCH_CHECK(bop->out()->getValType() != ValType::TensorIndex);
+  os << bop->out() << " = broadcast( " << bop->in() << " )\n";
+}
+
+void IRPrinter::handle(const kir::BroadcastOp* bop) {
+  TORCH_CHECK(bop->out()->getValType() == ValType::TensorIndex);
 
   const ir_utils::ParallelTypeBitmap domains =
-      ir_utils::getParallelBroadcastDomains(bop, getThreadPredicateMap());
+      ir_utils::getParallelBroadcastDomains(
+          bop->out(), getThreadPredicateMap());
   const bool thread_x = domains.get(ParallelType::TIDx);
   const bool thread_y = domains.get(ParallelType::TIDy);
   const bool thread_z = domains.get(ParallelType::TIDz);

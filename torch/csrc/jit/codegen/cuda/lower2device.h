@@ -13,8 +13,7 @@ namespace fuser {
 
 class TORCH_CUDA_API GPULower {
  public:
-  // Init printer on ostream
-  explicit GPULower(Fusion* _fusion) : fusion_(_fusion) {
+  explicit GPULower(Fusion* fusion) : fusion_(fusion) {
     lower();
   }
 
@@ -22,9 +21,11 @@ class TORCH_CUDA_API GPULower {
   GPULower(const GPULower& lower) = default;
   GPULower& operator=(const GPULower& other) = default;
 
-  // print generated code to ostream
-  std::vector<Expr*> lowered_exprs();
+  const std::vector<Expr*>& lowered_exprs() const {
+    return lowered_exprs_;
+  }
 
+  // print generated code to ostream
   std::ostream& printKernel(
       std::ostream& _os,
       const std::string& kernel_name = "CUDAGeneratedKernel");
@@ -42,6 +43,7 @@ class TORCH_CUDA_API GPULower {
  private:
   void lower();
 
+ private:
   // List of global buffers (not including buffers for grid syncronization)
   std::vector<kir::Allocate*> global_allocations_;
 
@@ -49,7 +51,9 @@ class TORCH_CUDA_API GPULower {
   // the fusion
   std::vector<kir::Allocate*> sync_allocations_;
 
+  // Lowered IR
   std::vector<Expr*> lowered_exprs_;
+
   Fusion* fusion_ = nullptr;
 };
 

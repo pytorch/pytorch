@@ -8,6 +8,7 @@ namespace jit {
 namespace fuser {
 
 namespace {
+
 // Will return a new value of type val with the DataType dtype.
 Val* newScalar(ValType vtype, DataType dtype) {
   switch (vtype) {

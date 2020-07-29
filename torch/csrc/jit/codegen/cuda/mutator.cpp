@@ -213,17 +213,7 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
 }
 
 Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
-  ReductionOp* reduction_op = mutate(gr->reduction_op())->as<ReductionOp>();
-  kir::Allocate* reduction_buffer =
-      mutate(gr->reduction_buffer())->as<kir::Allocate>();
-  kir::Allocate* sync_buffer = mutate(gr->sync_buffer())->as<kir::Allocate>();
-
-  if (reduction_op->sameAs(gr->reduction_op()) &&
-      reduction_buffer->sameAs(gr->reduction_buffer()) &&
-      sync_buffer->sameAs(gr->sync_buffer()))
-    return gr;
-
-  return new kir::GridReduction(reduction_op, reduction_buffer, sync_buffer);
+  return gr;
 }
 
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
@@ -269,44 +259,6 @@ Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
 }
 
 Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
-  Val* val_cond = mutateAsVal(ite->cond())->asVal();
-  TORCH_INTERNAL_ASSERT(
-      val_cond->getValType().value() == ValType::Scalar &&
-      val_cond->getDataType().value() == DataType::Bool);
-  Bool* cond = val_cond->as<Bool>();
-
-  bool is_mutated = !cond->sameAs(ite->cond());
-
-  std::vector<Expr*> mutated_exprs;
-  for (auto expr : ite->body().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = mutated_stmt->as<Expr>();
-    mutated_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  std::vector<Expr*> mutated_else_exprs;
-  for (auto expr : ite->elseBody().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = mutated_stmt->as<Expr>();
-    mutated_else_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  if (is_mutated) {
-    auto newITE = new kir::IfThenElse(
-        cond, ite->body().exprs(), ite->elseBody().exprs(), ite->parentScope());
-    return newITE;
-  }
-
   return ite;
 }
 

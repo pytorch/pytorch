@@ -112,6 +112,46 @@ void IrCloner::handle(const Merge* merge) {
   clone_ = new Merge(merge, this);
 }
 
+void IrCloner::handle(const kir::Bool* node) {
+  clone_ = new kir::Bool(node, this);
+}
+
+void IrCloner::handle(const kir::Float* node) {
+  clone_ = new kir::Float(node, this);
+}
+
+void IrCloner::handle(const kir::Half* node) {
+  clone_ = new kir::Half(node, this);
+}
+
+void IrCloner::handle(const kir::Int* node) {
+  clone_ = new kir::Int(node, this);
+}
+
+void IrCloner::handle(const kir::NamedScalar* node) {
+  clone_ = new kir::NamedScalar(node, this);
+}
+
+void IrCloner::handle(const kir::UnaryOp* node) {
+  clone_ = new kir::UnaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::BinaryOp* node) {
+  clone_ = new kir::BinaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::TernaryOp* node) {
+  clone_ = new kir::TernaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::ReductionOp* node) {
+  clone_ = new kir::ReductionOp(node, this);
+}
+
+void IrCloner::handle(const kir::BroadcastOp* node) {
+  clone_ = new kir::BroadcastOp(node, this);
+}
+
 void IrCloner::handle(const kir::TensorIndex* node) {
   clone_ = new kir::TensorIndex(node, this);
 }

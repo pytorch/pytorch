@@ -67,6 +67,18 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const Split*) override;
   void handle(const Merge*) override;
 
+  void handle(const kir::Bool*) override;
+  void handle(const kir::Float*) override;
+  void handle(const kir::Half*) override;
+  void handle(const kir::Int*) override;
+  void handle(const kir::NamedScalar*) override;
+
+  void handle(const kir::UnaryOp*) override;
+  void handle(const kir::BinaryOp*) override;
+  void handle(const kir::TernaryOp*) override;
+  void handle(const kir::ReductionOp*) override;
+  void handle(const kir::BroadcastOp*) override;
+
   void handle(const kir::TensorIndex*) override;
   void handle(const kir::Allocate*) override;
   void handle(const kir::ForLoop*) override;

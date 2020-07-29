@@ -108,7 +108,7 @@ UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
     : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
   addOutput(_out);
   addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
@@ -118,9 +118,9 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)) {}
 
 bool UnaryOp::sameAs(const UnaryOp* const other) const {
-  if (this->type() != other->type())
+  if (type() != other->type())
     return false;
-  return this->as<Expr>()->sameAs(other);
+  return as<Expr>()->sameAs(other);
 }
 
 BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
@@ -132,7 +132,7 @@ BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
   addOutput(_out);
   addInput(_lhs);
   addInput(_rhs);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
@@ -166,7 +166,7 @@ TernaryOp::TernaryOp(
   addInput(_in1);
   addInput(_in2);
   addInput(_in3);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
@@ -188,41 +188,31 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
 
 BroadcastOp::BroadcastOp(Val* _out, Val* _in)
     : Expr(ExprType::BroadcastOp), out_(_out), in_(_in) {
-  auto out_type = _out->getValType().value();
-  auto in_type = _in->getValType().value();
-  if (out_type == ValType::TensorView) {
-    TORCH_INTERNAL_ASSERT(
-        in_type == ValType::TensorView,
-        "Cannot braodcast a non-tensor object.");
+  TORCH_CHECK(_out->getValType().value() == ValType::TensorView);
+  TORCH_CHECK(_in->getValType().value() == ValType::TensorView);
 
-    int ndims = 0;
-    for (auto dom : out()->as<TensorView>()->getRootDomain())
-      if (!dom->isBroadcast())
-        ndims++;
-
-    for (auto dom : in()->as<TensorView>()->getRootDomain())
-      if (dom->isBroadcast())
-        ndims++;
-
-    TORCH_INTERNAL_ASSERT(
-        ndims ==
-            (int)TensorDomain::noReductions(
-                in_->as<TensorView>()->getRootDomain())
-                .size(),
-        "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        in_type == ValType::TensorIndex && out_type == ValType::TensorIndex,
-        "Invalid types provided for broadcast op, ",
-        in_type,
-        " ",
-        out_type,
-        ".");
+  int ndims = 0;
+  for (auto dom : out()->as<TensorView>()->getRootDomain()) {
+    if (!dom->isBroadcast()) {
+      ndims++;
+    }
   }
+  for (auto dom : in()->as<TensorView>()->getRootDomain()) {
+    if (dom->isBroadcast()) {
+      ndims++;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      ndims ==
+          (int)TensorDomain::noReductions(
+              in_->as<TensorView>()->getRootDomain())
+              .size(),
+      "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
 
   addOutput(_out);
   addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
@@ -270,7 +260,7 @@ ReductionOp::ReductionOp(
 
   addOutput(_out);
   addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
@@ -282,42 +272,9 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
 
 bool ReductionOp::sameAs(const ReductionOp* other) const {
   return (
-      this->in()->sameAs(other->in()) &&
-      this->getReductionOpType() == other->getReductionOpType() &&
-      this->init()->sameAs(other->init()));
-}
-
-std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
-  const Val* out_val = out();
-  TORCH_INTERNAL_ASSERT(
-      out_val->getValType() == ValType::TensorView ||
-          out_val->getValType() == ValType::TensorIndex,
-      "Output of reduction must be TensorView or TensorIndex");
-
-  // out is a TensorIndex after lowering
-  if (out_val->getValType() == ValType::TensorIndex) {
-    out_val = out_val->as<kir::TensorIndex>()->view();
-  }
-
-  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
-  vec_domain.erase(
-      std::remove_if(
-          vec_domain.begin(),
-          vec_domain.end(),
-          [](IterDomain* id) { return !id->isReduction(); }),
-      vec_domain.end());
-  return vec_domain;
-}
-
-std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
-    getParallelReductionDomains() const {
-  std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
-  for (auto d : getReductionDomains()) {
-    if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->getParallelType(), d));
-    }
-  }
-  return parallel_domains;
+      in()->sameAs(other->in()) &&
+      getReductionOpType() == other->getReductionOpType() &&
+      init()->sameAs(other->init()));
 }
 
 IterDomain::IterDomain(
@@ -348,7 +305,7 @@ IterDomain::IterDomain(
       _extent,
       " .");
 
-  this->name_ = fusion_->registerVal(this);
+  name_ = fusion_->registerVal(this);
 }
 
 IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
@@ -525,7 +482,7 @@ TensorDomain::TensorDomain(
 
   resetDomains();
 
-  this->name_ = fusion_->registerVal(this);
+  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(
@@ -573,7 +530,7 @@ TensorDomain::TensorDomain(
   });
 
   resetDomains();
-  this->name_ = fusion_->registerVal(this);
+  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
@@ -1022,7 +979,7 @@ Split::Split(
   addOutput(_outer);
   addOutput(_inner);
   addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Split::Split(const Split* src, IrCloner* ir_cloner)
@@ -1043,7 +1000,7 @@ Merge::Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner)
   addOutput(_out);
   addInput(_outer);
   addInput(_inner);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Merge::Merge(const Merge* src, IrCloner* ir_cloner)
