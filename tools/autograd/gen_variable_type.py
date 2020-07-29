@@ -377,7 +377,8 @@ FACTORY_FUNCTION_NAMES = None
 # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
 # and use the use_optional_tensor=True behavior always.
 def maybe_unwrap_optional_tensors(option, formals, args):
-    assert len(formals) == len(args), "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
+    assert len(formals) == len(args), \
+        "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
     if option['use_c10_dispatcher'] == 'full':
         def maybe_unwrap_optional_tensor(formal, arg):
             if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
