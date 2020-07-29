@@ -3413,6 +3413,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # aborting nccl communicators before throwing Operation timed out
             a = torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
+            # Clean up structures (ex: files for FileStore before going down)
+            del process_group
             func()
         else:
             # Wait for timeout
@@ -3494,7 +3496,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     return
                 else:
                     raise e
-            time.sleep(1)
+            time.sleep(0.1)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
