@@ -3,6 +3,67 @@
 
 namespace at { namespace native {
 
+// TODO: REFACTOR 
+std::vector<Tensor> foreach_sub_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors.size(); i++) {
+    auto temp = tensors[i].sub(scalar);
+    result.emplace_back(temp);
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_sub_scalar__kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i].sub_(scalar);
+  }
+
+  return tensors.vec();
+}
+
+std::vector<Tensor> foreach_div_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors.size(); i++) {
+    auto temp = tensors[i].div(scalar);
+    result.emplace_back(temp);
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_div_scalar__kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i].div_(scalar);
+  }
+
+  return tensors.vec();
+}
+
+std::vector<Tensor> foreach_mul_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors.size(); i++) {
+    auto temp = tensors[i].mul(scalar);
+    result.emplace_back(temp);
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_mul_scalar__kernel_cpu(TensorList tensors, Scalar scalar) {
+  // checks
+
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i].mul_(scalar);
+  }
+
+  return tensors.vec();
+}
+
 std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(std::all_of(tensors.begin(), tensors.end(), [] (const Tensor& t) {
     return t.layout() == at::kStrided;
