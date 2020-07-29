@@ -480,7 +480,7 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
         promoteInputs(inputs);
         // First expr is the condition, which we don't promote
         inputs.emplace(
-            inputs.begin(), tensorOrConstant(n->inputs()[0], indices));
+            inputs.begin(), tensorOrConstant(n->inputs()[0], axes));
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
