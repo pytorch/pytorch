@@ -789,6 +789,28 @@ Tensor min(const Tensor& self, const Tensor& other) {
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
+Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  std::cout << "[maximum_out]" << std::endl;
+  return result;
+}
+
+Tensor maximum(const Tensor& self, const Tensor& other) {
+  std::cout << "[maximum]" << std::endl;
+  Tensor result = at::empty(0, self.options());
+  return result;
+}
+
+Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  std::cout << "[minimum_out]" << std::endl;
+  return result;
+}
+
+Tensor minimum(const Tensor& self, const Tensor& other) {
+  std::cout << "[minimum]" << std::endl;
+  Tensor result = at::empty(0, self.options());
+  return result;
+}
+
 Tensor floor_divide(const Tensor& self, Scalar other) {
   return at::floor_divide(self, wrapped_scalar_tensor(other));
 }
