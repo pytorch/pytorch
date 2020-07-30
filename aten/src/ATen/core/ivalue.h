@@ -95,6 +95,7 @@ struct OptionalArray {
   _(Uninitialized)           \
   _(Capsule)                 \
   _(RRef)                    \
+  _(Quantizer)               \
   _(Generator)               \
   _(Enum)                    \
 
@@ -347,6 +348,12 @@ struct CAFFE2_API IValue final {
   bool isRRef() const { return Tag::RRef == tag; }
   c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
   c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
+
+  // Quantizer
+  IValue(c10::intrusive_ptr<at::Quantizer> v);
+  bool isQuantizer() const { return Tag::Quantizer == tag; }
+  c10::intrusive_ptr<at::Quantizer> toQuantizer() &&;
+  c10::intrusive_ptr<at::Quantizer> toQuantizer() const &;
 
   // Int
   IValue(int64_t i)
