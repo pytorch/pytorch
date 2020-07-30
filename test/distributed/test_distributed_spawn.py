@@ -13,6 +13,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
     initialize_temp_directories,
+    cleanup_temp_dir,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import Barrier, _DistTestBase
@@ -56,6 +57,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             self._spawn_processes()
 
         def tearDown(self):
+            cleanup_temp_dir()
             super(MultiProcessTestCase, self).tearDown()
             super(TestDistBackendWithSpawn, self).tearDown()
 

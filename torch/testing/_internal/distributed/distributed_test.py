@@ -37,12 +37,6 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-CPP_EXTENSIONS_WARNING = """
-Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
-but it could not be found. Install ninja with `pip install ninja`
-or `conda install ninja`.
-"""
-
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 

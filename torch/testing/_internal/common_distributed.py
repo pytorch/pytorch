@@ -197,6 +197,10 @@ def initialize_temp_directories(init_method=None):
             init_dir_path, "shared_init_file"
         )
 
+def cleanup_temp_dir():
+    if tmp_dir is not None:
+        tmp_dir.cleanup()
+
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
 # default `world_size()` returns 4. Let's take `test_rpc_spawn.py` as an

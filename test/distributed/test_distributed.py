@@ -14,9 +14,15 @@ from torch.testing._internal.distributed.distributed_test import _DistTestBase, 
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
-    initialize_temp_directories
+    initialize_temp_directories,
+    cleanup_temp_dir,
 )
 
+CPP_EXTENSIONS_WARNING = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`.
+"""
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -67,6 +73,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             self._fork_processes()
 
         def tearDown(self):
+            cleanup_temp_dir()
             super(MultiProcessTestCase, self).tearDown()
             super(TestDistBackend, self).tearDown()
 
