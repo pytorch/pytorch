@@ -234,7 +234,8 @@ struct SchemaParser {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
       case TypeKind::TensorType:
-      case TypeKind::GeneratorType: {
+      case TypeKind::GeneratorType:
+      case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:

@@ -16,6 +16,7 @@ using c10::DictType;
 using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
+using c10::QuantizerType;
 using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
@@ -41,6 +42,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
       {"QScheme", QSchemeType::get()},
+      {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
        IntType::get()}, // TODO This type should be removed from the schema
                         // parser, it should use the custom class mechanism
