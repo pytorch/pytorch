@@ -30,8 +30,8 @@ void LayerNormKernelImplInternal(
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
   T* X_data = X.data_ptr<T>();
-  T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T* mean_data = mean->data_ptr<T>();
   T* rstd_data = rstd->data_ptr<T>();
