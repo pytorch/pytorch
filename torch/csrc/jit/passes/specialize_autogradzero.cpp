@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include "ATen/core/interned_strings.h"
 #include "ATen/core/jit_type.h"
+#include "c10/util/Exception.h"
 #include "jit/frontend/tree_views.h"
 #include "jit/ir/constants.h"
 #include "jit/ir/ir.h"
@@ -89,6 +90,8 @@ static bool isBackwardGraph(Graph& g) {
   return std::any_of(g.nodes().begin(), g.nodes().end(), [](Node* n){return n->kind() == prim::AutogradAnyNonZero; });
 }
 
+
+
 static void replaceBlockInputsWithGraph(Graph* g, Block* b) {
   TORCH_INTERNAL_ASSERT(g->inputs().size() == b->inputs().size());
   for (int i = g->inputs().size() - 1; i >= 0; i--) {
@@ -101,9 +104,12 @@ struct AutogradZeroSpecializer {
 
   AutogradZeroSpecializer(Graph& graph): g(graph) {
     if (getProfilingMode() && isBackwardGraph(g)) {
-      removeProfilingNodes(g.block());
+      //removeProfilingNodes(g.block());
       GRAPH_DUMP("After removing profiling nodes", &g);
-      auto vif = versionGraph();
+      auto vif = versionGraph2();
+      if (!vif) {
+        return;
+      }
       GRAPH_DUMP("After versioning graph", &g);
       specializeAutogradOps(vif->blocks()[0]);
       GRAPH_DUMP("After specializeAutogradOps graph", &g);
@@ -158,6 +164,99 @@ private:
         }
       }
     }
+  }
+
+  std::vector<Node*> collectAutogradAnyNonZeros(Block* b) {
+
+    std::vector<Node*> aanznodes;
+
+    for (auto n : b->nodes()) {
+      if (n->kind() == prim::AutogradAnyNonZero) {
+        aanznodes.push_back(n);
+      }
+    }
+
+    return aanznodes;
+  }
+
+  Node* versionGraph2() {
+
+
+    //AutogradAnyNonZero
+
+
+    auto should_version = true;
+    WithInsertPoint wip{*g.nodes().begin()};
+
+    auto vif = g.create(prim::If, {}, g.outputs().size());
+    auto value_map = [](Value* v) { return v; };
+    auto true_block = vif->addBlock();
+    auto false_block = vif->addBlock();
+    true_block->cloneFrom(g.block(), value_map);
+    replaceBlockInputsWithGraph(&g, true_block);
+    // block for specialize_autogradzero to optimize
+    false_block->cloneFrom(g.block(), value_map);
+    replaceBlockInputsWithGraph(&g, false_block);
+    
+    std::vector<Node*> checks;
+    std::set<Value*> checked;
+    // auto orig_checks = collectAutogradAnyNonZeros(true_block);
+    // for (auto orig_check: orig_checks) {
+      for (auto inp: g.inputs()) {
+          if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {
+            continue;
+          }
+
+          auto pout = inp->uses()[0].user->output();
+          if (pout->node()->kind() != prim::profile) {
+            GRAPH_DUMP("versionGraph2: ", &g);
+            GRAPH_DEBUG("puse= ", getHeader(pout->node()));
+          }
+          TORCH_INTERNAL_ASSERT(pout->node()->kind() == prim::profile);
+          auto pttp = pout->type()->cast<TensorType>();
+          if (!pttp->undefined().has_value()) {
+            GRAPH_DEBUG("%", inp->debugName(), " shouldn't be versioned");
+            should_version = false;
+            break;
+          }
+          state[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
+          auto check = g.insert(prim::AutogradAnyNonZero, {inp});
+          if (!*pttp->undefined()) {
+            check = g.insert(aten::__not__, {check});
+          }
+          checks.push_back(check->node());
+      }
+    //}
+
+    if (!should_version) {
+      return nullptr;
+    }
+
+    TORCH_INTERNAL_ASSERT(checks.size() > 0);
+    auto conjunction = checks[0]->output();
+    if (checks.size() > 1) {
+      for (size_t i = 1; i < checks.size(); i++) {
+        conjunction = g.insert(aten::__and__, {checks[i]->output(), conjunction});
+      }
+    }
+
+    vif->addInput(conjunction);
+    g.insertNode(vif);
+
+    auto ret = g.return_node();
+    for (size_t i = 0; i < ret->inputs().size(); i++) {
+      auto ogo = ret->input(i);
+      auto ngo = vif->output(i);
+      ngo->copyMetadata(ogo);
+      ret->replaceInput(i, ngo);
+    }
+
+    GRAPH_DUMP("specialize_autogradzero ", &g);
+
+    ClearUndefinedness(g.inputs());
+    ClearUndefinedness(vif->blocks()[1]);
+
+    return vif;
   }
 
   Node* versionGraph() {
@@ -276,20 +375,28 @@ private:
           state[n->output()] = State::Zero;
         } break;
         case prim::profile: {
+          if (n->inputs().size() > 0) {
+            if (!state.count(n->input())) {
+              state[n->output()] = State::Unknown;
+            }
+            else {
+              state[n->output()] = state[n->input()];
+            }
+          }
           // if prim::profile doesn't have an input
           // it's a counter to keep track how many times
           // a graph was profiled
-          if (n->inputs().size() > 0) {
-            state[n->output()] = State::Unknown;
-            // state[n->input()];
-          }
-          else {
-            if (auto ptt = n->output()->type()->expect<TensorType>()) {
-              state[n->output()] = ptt->undefined()
-                  ? *ptt->undefined() ? State::Zero : State::Nonzero
-                  : State::Unknown;
-            }
-          }
+          // if (n->inputs().size() > 0) {
+          //   state[n->output()] = State::Unknown;
+          //   // state[n->input()];
+          // }
+          // else {
+          //   if (auto ptt = n->output()->type()->expect<TensorType>()) {
+          //     state[n->output()] = ptt->undefined()
+          //         ? *ptt->undefined() ? State::Zero : State::Nonzero
+          //         : State::Unknown;
+          //   }
+          // }
           break;
         }
         case prim::BailOut: {
