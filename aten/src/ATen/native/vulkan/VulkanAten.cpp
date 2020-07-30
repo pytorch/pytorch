@@ -142,12 +142,36 @@ at::Tensor upsample_nearest2d_vulkan(
   return output;
 }
 
+at::Tensor vulkan_adaptive_avg_pool2d(
+    const at::Tensor& input,
+    IntArrayRef outputSize) {
+  TORCH_INTERNAL_ASSERT(
+      input.dim() == 4,
+      "vulkan_adaptive_avg_pool2d expects 4-dimensional input");
+  auto& x = vtensor_from_vulkan(input);
+  auto inputSize = input.sizes();
+  auto in = inputSize[0];
+  auto ic = inputSize[1];
+  auto ih = inputSize[2];
+  auto iw = inputSize[3];
+
+  auto oh = outputSize[0];
+  auto ow = outputSize[1];
+  Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
+  VulkanTensor& y = vtensor_from_vulkan(output);
+  y.allocate_storage();
+  vulkan::detail::adaptive_avg_pool2d(y, x, ih, iw, oh, ow, in, ic);
+  return output;
+}
+
 Tensor vulkan_add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  VulkanTensor& x = vtensor_from_vulkan(self);
-  VulkanTensor& y = vtensor_from_vulkan(other);
+  auto xt = self.is_vulkan() ? self : self.vulkan();
+  const auto& x = vtensor_from_vulkan(xt);
+  auto yt = other.is_vulkan() ? other : other.vulkan();
+  const auto& y = vtensor_from_vulkan(yt);
   float a = alpha.to<float>();
 
-  VulkanTensor output = VulkanTensor{self.sizes().vec()};
+  VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::add(output, x, y, a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
@@ -269,6 +293,25 @@ Tensor vulkan_addmm(
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
   output.allocate_storage();
   vulkan::detail::addmm(output, t, m1, m2, b, a);
+  return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
+Tensor vulkan_mm(const Tensor& self, const Tensor& mat2) {
+  TORCH_INTERNAL_ASSERT(
+      self.dim() == 2 && mat2.dim() == 2,
+      "vulkan_mm expects 2-dimensional tensors");
+  const auto m1Sizes = self.sizes();
+  const auto m2Sizes = mat2.sizes();
+  TORCH_INTERNAL_ASSERT(
+      m1Sizes[1] == m2Sizes[0],
+      "vulkan_mm expects self.sizes[1] equal mat2.sizes[0]");
+
+  const auto& m1 = vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  const auto& m2 = vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
+
+  VulkanTensor output{{m1Sizes[0], m2Sizes[1]}};
+  output.allocate_storage();
+  vulkan::detail::addmm(output, c10::nullopt, m1, m2, 0.f, 1.f);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 

@@ -165,6 +165,14 @@ class QuantizationTestCase(TestCase):
         self.assertFalse(hasattr(module, 'quant'))
         self.assertFalse(hasattr(module, 'dequant'))
 
+    def checkNoQconfig(self, module):
+        r"""Checks the module does not contain qconfig
+        """
+        self.assertFalse(hasattr(module, 'qconfig'))
+
+        for child in module.children():
+            self.checkNoQconfig(child)
+
     def checkHasPrepModules(self, module):
         r"""Checks the module contains child
             modules for quantization prepration, e.g.
