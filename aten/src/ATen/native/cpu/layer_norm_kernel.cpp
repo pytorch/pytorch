@@ -113,11 +113,11 @@ void LayerNormBackwardKernelImplInternal(
   DCHECK_EQ(mean.numel(), M);
   DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
-  T* dY_data = dY.template data_ptr<T>();
-  T* X_data = X.template data_ptr<T>();
-  T* mean_data = mean.template data_ptr<T>();
-  T* rstd_data = rstd.template data_ptr<T>();
-  T* gamma_data = gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+  const T* dY_data = dY.template data_ptr<T>();
+  const T* X_data = X.template data_ptr<T>();
+  const T* mean_data = mean.template data_ptr<T>();
+  const T* rstd_data = rstd.template data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
   T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
@@ -139,6 +139,7 @@ void LayerNormBackwardKernelImplInternal(
   Tensor buffer = at::empty({0}, X.options());
   T* buffer_data = nullptr;
   if (!dgamma_null || !dbeta_null) {
+    // zero the immediate buffer and skip zero dgamma and dbeta
     buffer.resize_({2, num_threads, N}).zero_();
     buffer_data = buffer.template data_ptr<T>();
   }
@@ -149,8 +150,8 @@ void LayerNormBackwardKernelImplInternal(
     T* dgamma_buffer_ptr = dgamma_null ? nullptr : buffer_data + tid * N;
     T* dbeta_buffer_ptr = dbeta_null ? nullptr : buffer_data + num_threads * N + tid * N;
     for (int64_t i = start; i < end; ++i) {
-      T* dY_ptr = dY_data + i * N;
-      T* X_ptr = X_data + i * N;
+      const T* dY_ptr = dY_data + i * N;
+      const T* X_ptr = X_data + i * N;
       if (!dgamma_null) {
         const T a = rstd_data[i];
         const T b = -a * mean_data[i];

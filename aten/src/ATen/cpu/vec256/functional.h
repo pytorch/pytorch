@@ -27,7 +27,7 @@ inline scalar_t vec_reduce_all(
 }
 
 template <typename scalar_t, typename Op>
-inline scalar_t reduce_all(const Op& vec_fun, scalar_t* data, int64_t size) {
+inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   if (size < Vec::size())
     return vec_reduce_all(vec_fun, Vec::loadu(data, size), size);
@@ -47,7 +47,7 @@ inline scalar_t reduce_all(const Op& vec_fun, scalar_t* data, int64_t size) {
 // similar to reduce_all, but reduces into two outputs
 template <typename scalar_t, typename Op1, typename Op2>
 inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
-    scalar_t* data, int64_t size) {
+    const scalar_t* data, int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   if (size < Vec::size()) {
     auto loaded_data = Vec::loadu(data, size);
@@ -186,8 +186,8 @@ template <typename scalar_t, typename Op>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
-    scalar_t* input_data,
-    scalar_t* input_data2,
+    const scalar_t* input_data,
+    const scalar_t* input_data2,
     int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
@@ -209,9 +209,9 @@ template <typename scalar_t, typename Op>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
-    scalar_t* input_data1,
-    scalar_t* input_data2,
-    scalar_t* input_data3,
+    const scalar_t* input_data1,
+    const scalar_t* input_data2,
+    const scalar_t* input_data3,
     int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
