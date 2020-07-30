@@ -7501,6 +7501,11 @@ class TestTorchDeviceType(TestCase):
             torch._compute_linear_combination(x, coeffs, out=res4)
             self.assertEqual(res1, res4 - 1.0, atol=1e-5, rtol=0.0)
 
+            res5 = torch.ones(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            res5_clone = res5.clone()
+            torch._compute_linear_combination(x, coeffs, out=res5)
+            self.assertEqual(res1, res5 - res5_clone, atol=1e-5, rtol=0.0)
+
         run_test([5, 3], [2, 2])
         run_test([5, 3], [100, 100])
         run_test([3, 4], [3, 3, 3])
