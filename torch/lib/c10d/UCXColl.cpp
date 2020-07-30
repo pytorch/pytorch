@@ -17,15 +17,15 @@ static void torch_ucx_get_coll_config(torch_ucx_coll_config_t *config)
     config->reverse   = 0;
     config->max_polls = 10;
  
-    env = std::getenv("TORCH_UCX_CHUNK");
+    env = std::getenv("TORCH_PGUCX_CHUNK");
     if (env) {
         config->chunk = std::atoi(env);
     }
-    env = std::getenv("TORCH_UCX_REVERSE");
+    env = std::getenv("TORCH_PGUCX_REVERSE");
     if (env) {
         config->reverse = std::atoi(env);
     }
-    env = std::getenv("TORCH_UCX_MAX_POLLS");
+    env = std::getenv("TORCH_PGUCX_MAX_POLLS");
     if (env) {
         config->max_polls = std::atoi(env);
     }

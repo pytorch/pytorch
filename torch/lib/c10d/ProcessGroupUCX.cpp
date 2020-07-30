@@ -66,7 +66,7 @@ void ProcessGroupUCX::read_config()
     char *env;
 
     config.enable_progress_thread = true;
-    env = std::getenv("TORCH_UCX_THREAD_ENABLE"); 
+    env = std::getenv("TORCH_PGUCX_THREAD_ENABLE"); 
     if (env) {
         config.enable_progress_thread = std::atoi(env);
     }
@@ -282,7 +282,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupUCX::alltoall_base(
   }
 
   if (config.enable_progress_thread) {
-    fprintf(stderr, "using progress thread\n");
     enqueue_request(request->req);
     request->no_progress = true;
   }

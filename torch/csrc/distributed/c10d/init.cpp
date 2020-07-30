@@ -706,13 +706,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
      .def(
           py::init<
               const std::shared_ptr<::c10d::Store>&,
-	      int,
-	      int,
-	      const std::chrono::milliseconds&>(),
+              int,
+              int,
+              const std::chrono::milliseconds&>(),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-	  py::arg("timeout"));
+          py::arg("timeout"));
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
