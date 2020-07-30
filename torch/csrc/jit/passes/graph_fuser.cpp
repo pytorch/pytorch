@@ -57,6 +57,7 @@ bool isSimpleMap(Node* node) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::logit(Tensor self, float? eps=None) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::max(Tensor self, Tensor other) -> Tensor",
@@ -130,13 +131,13 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 }
 
 struct GraphFuser {
-  using FusionCallback = std::function<bool(Node*)>;
+  using FusionCallback = std::function<bool(GraphFuser*, Node*)>;
 
   Block* block_;
   AliasDb* aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) {
-    return isFusableDefault(n, this->strict_fuser_check_);
+  FusionCallback callback_ = [](GraphFuser* gf, Node* n) {
+    return gf->isFusableDefault(n, gf->strict_fuser_check_);
   };
   Symbol kind_ = prim::FusionGroup;
   bool strict_fuser_check_;
@@ -176,7 +177,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node);
+    return callback_(this, node);
   }
 
   bool isFusableDevice(Value* v, bool strict_fuser_check) {
@@ -1265,7 +1266,7 @@ void CustomFuseGraph(
   auto g = GraphFuser(
       &db,
       graph->block(),
-      [=](Node* n) { return fn(n) || n->kind() == kind; },
+      [=](GraphFuser* gf, Node* n) { return fn(n) || n->kind() == kind; },
       kind);
   g.setInputArgLimit(arg_limit);
   g.run();

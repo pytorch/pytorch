@@ -125,6 +125,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.CELU
     nn.GELU
     nn.Sigmoid
+    nn.SiLU
     nn.Softplus
     nn.Softshrink
     nn.Softsign
@@ -354,6 +355,7 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
 
     nn.Flatten
+    nn.Unflatten
 
 Quantized Functions
 --------------------

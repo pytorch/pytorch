@@ -3,7 +3,7 @@
 import torch
 from torch import Tensor
 from typing import (Any, BinaryIO, Callable, ContextManager, Iterator, List, NamedTuple,
-        Optional, overload, Sequence, Tuple, TypeVar, Type, Union)
+                    Optional, overload, Sequence, Tuple, TypeVar, Type, Union)
 from torch._six import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
@@ -59,6 +59,7 @@ class iinfo:
     bits: _int
     min: _int
     max: _int
+    dtype: str
 
     def __init__(self, dtype: _dtype) -> None: ...
 
@@ -68,6 +69,8 @@ class finfo:
     max: _float
     eps: _float
     tiny: _float
+    resolution: _float
+    dtype: str
 
     @overload
     def __init__(self, dtype: _dtype) -> None: ...
@@ -115,6 +118,15 @@ class _LegacyVariableBase(object):
     ) -> None: ...
 
 # Defined in torch/csrc/jit/python/init.cpp
+class Future(object):
+  def __init__(self) -> None: ...
+  def done(self) -> _bool: ...
+  def wait(self) -> Any: ...
+  def then(self, callback: Callable) -> Future: ...
+  def set_result(self, result: Any) -> None: ...
+
+
+def _collect_all(futures: List[Future]) -> Future: ...
 def _jit_get_operation(op_name: str) -> Callable: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule') -> 'torch.jit.ScriptModule': ...
 
@@ -243,7 +255,7 @@ class _TensorBase(object):
     real: Tensor
     imag: Tensor
     T: Tensor
-    _version: _bool
+    _version: _int
     _base: Optional[Tensor]
     grad_fn: Any
     ${tensor_method_hints}

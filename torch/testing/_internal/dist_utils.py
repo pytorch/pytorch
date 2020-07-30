@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 from functools import partial, wraps
 import re
+import sys
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -10,7 +11,7 @@ from torch.distributed.rpc import _rref_context_get_debug_info
 
 
 if not dist.is_available():
-    print("c10d not available, skipping tests")
+    print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -258,8 +259,8 @@ def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20)
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                "Timed out waiting for {} owners and {} forks on rank, had {} owners and {} forks".format(
-                    num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
+                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
+                    timeout, num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
                 )
             )
 

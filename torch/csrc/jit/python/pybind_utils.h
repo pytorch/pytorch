@@ -74,6 +74,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
+  bool done() {
+    return fut->completed();
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
@@ -177,7 +181,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 // locations in libtorch code rather than user code.
 
 inline std::shared_ptr<CompilationUnit> get_python_cu() {
-  return py::module::import("torch.jit")
+  return py::module::import("torch.jit._state")
       .attr("_python_cu")
       .cast<std::shared_ptr<CompilationUnit>>();
 }
@@ -285,9 +289,9 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    py::str qualifiedName = py::module::import("torch.jit")
+    py::str qualifiedName = py::module::import("torch._jit_internal")
                                 .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit")
+    auto pyClass = py::module::import("torch.jit._state")
                        .attr("_get_script_class")(qualifiedName);
     if (!pyClass.is_none()) {
       auto cu = get_python_cu();
@@ -648,7 +652,7 @@ inline IValue toIValue(
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch.jit")
+        py::str qualified_name = py::module::import("torch._jit_internal")
                                      .attr("_qualified_name")(obj.get_type());
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
@@ -723,7 +727,20 @@ inline IValue toIValue(
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
+    case TypeKind::AnyEnumType:
       break;
+    case TypeKind::EnumType:
+      py::object py_obj = py::reinterpret_borrow<py::object>(obj);
+      std::string qualified_class_name_str =
+          py::cast<std::string>(py::module::import("torch._jit_internal")
+                                    .attr("_qualified_name")(py_obj));
+      c10::QualifiedName qualified_class_name(qualified_class_name_str);
+      std::string name = py::cast<std::string>(obj.attr("name"));
+      IValue value = toIValue(
+          obj.attr("value"), type->cast<EnumType>()->getValueType(), {});
+      auto enum_holder = c10::make_intrusive<c10::ivalue::EnumHolder>(
+          qualified_class_name, name, value);
+      return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(
       "toIValue() cannot handle converting to type: ", type->repr_str()));
@@ -839,7 +856,7 @@ inline py::object toPyObject(IValue ivalue) {
       auto fieldNames = fmap(
           tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
-      return py::module::import("torch.jit")
+      return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
@@ -875,8 +892,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass =
-        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    auto pyClass = py::module::import("torch.jit._state")
+                       .attr("_get_script_class")(obj->name());
     if (pyClass.is_none()) {
       std::stringstream err;
       err << "Unknown reference to ScriptClass ";

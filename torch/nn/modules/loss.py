@@ -157,11 +157,12 @@ class NLLLoss(_WeightedLoss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the sum of the output will be divided by the number of
-            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
+            be applied, ``'mean'``: the weighted mean of the output is taken,
+            ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in
+            the meantime, specifying either of those two args will override
+            :attr:`reduction`. Default: ``'mean'``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
@@ -295,11 +296,11 @@ class PoissonNLLLoss(_Loss):
 
 
 class KLDivLoss(_Loss):
-    r"""The `Kullback-Leibler divergence`_ Loss
+    r"""The Kullback-Leibler divergence loss measure
 
-    KL divergence is a useful distance measure for continuous distributions
-    and is often useful when performing direct regression over the space of
-    (discretely sampled) continuous output distributions.
+    `Kullback-Leibler divergence`_ is a useful distance measure for continuous
+    distributions and is often useful when performing direct regression over
+    the space of (discretely sampled) continuous output distributions.
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
@@ -329,8 +330,7 @@ class KLDivLoss(_Loss):
     are averaged over batch dimension only. ``'mean'`` mode's behavior will be changed to the same as
     ``'batchmean'`` in the next major release.
 
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    .. _`kullback-leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -760,7 +760,10 @@ class SmoothL1Loss(_Loss):
     element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
-    Also known as the Huber loss:
+    SmoothL1Loss is based on a Huber loss with a delta term equal to 1. Other
+    variants of the Huber loss can also be used (i.e. with different deltas).
+    Deltas close to 0 aproach Mean Absolute Error (MAE/L1) while deltas close
+    to infinity approach Mean Square Error (MSE/L2).
 
     .. math::
         \text{loss}(x, y) = \frac{1}{n} \sum_{i} z_{i}
@@ -770,12 +773,13 @@ class SmoothL1Loss(_Loss):
     .. math::
         z_{i} =
         \begin{cases}
-        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
-        |x_i - y_i| - 0.5, & \text{otherwise }
+        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < \delta \\
+        \delta * |x_i - y_i| - 0.5 * \delta ** 2, & \text{otherwise }
         \end{cases}
 
     :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
     the sum operation still operates over all the elements, and divides by :math:`n`.
+    For Smooth L1 loss, `\delta=1`.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -795,6 +799,9 @@ class SmoothL1Loss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        delta (float, optional): Specifies the hyperparameter delta to be used. The value determines
+            how large the errors need to be to use L1. Errors smaller than delta are minimized with
+            L2. Parameter is ignored for negative/zero values. Default = 1.
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means, any number of additional
@@ -806,11 +813,12 @@ class SmoothL1Loss(_Loss):
     """
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
+    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', delta=1.) -> None:
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
+        self.delta = delta if delta > 0 else 1.
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.smooth_l1_loss(input, target, reduction=self.reduction)
+        return F.smooth_l1_loss(input, target, reduction=self.reduction, delta=self.delta)
 
 
 class SoftMarginLoss(_Loss):
@@ -884,7 +892,11 @@ class CrossEntropyLoss(_WeightedLoss):
     .. math::
         \text{loss}(x, class) = weight[class] \left(-x[class] + \log\left(\sum_j \exp(x[j])\right)\right)
 
-    The losses are averaged across observations for each minibatch.
+    The losses are averaged across observations for each minibatch. If the
+    :attr:`weight` argument is specified then this is a weighted average:
+
+    .. math::
+        \text{loss} = \frac{\sum^{N}_{i=1} loss(i, class[i])}{\sum^{N}_{i=1} weight[class[i]]}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
     an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`,
@@ -908,11 +920,12 @@ class CrossEntropyLoss(_WeightedLoss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the sum of the output will be divided by the number of
-            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
+            be applied, ``'mean'``: the weighted mean of the output is taken,
+            ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in
+            the meantime, specifying either of those two args will override
+            :attr:`reduction`. Default: ``'mean'``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
