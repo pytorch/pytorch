@@ -162,81 +162,94 @@ void unpackQuantizedWeightsHelper(
     }
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
-    const int64_t params1_idx = 2;
-    const int64_t params2_idx = 3;
-    const int64_t params3_idx = 4;
-    const int64_t scalars_idx = 5;
-    c10::optional<torch::List<int64_t>> stride, padding, dilation;
+    c10::optional<torch::List<int64_t>> stride, padding, dilation, output_padding;
     c10::optional<int64_t> groups;
-    c10::optional<uint8_t> transpose;
+    c10::optional<int64_t> transpose;
+
+    constexpr int64_t stride_idx = 2;
+    constexpr int64_t padding_idx = 3;
+    constexpr int64_t dilation_idx = 4;
+    constexpr int64_t groups_idx = 5;
+    // legacy version doesn't have output_padding and transpose;
+
+    torch::List<int64_t> stride_int, padding_int, dilation_int, output_padding_int;
+    int64_t groups_int;
+    int64_t transpose_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
-      unpacked_weight = ser_tup->elements()[0].toTensor();
-      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
-      // conv only parameters
-      if (ser_tup->elements().size() > 2) {
-        auto params1_ivalue = ser_tup->elements()[params1_idx].toListRef();
-        auto params2_ivalue = ser_tup->elements()[params2_idx].toListRef();
-        auto params3_ivalue = ser_tup->elements()[params3_idx].toListRef();
-        auto scalars_tensor = ser_tup->elements()[scalars_idx].toTensor();
+      if (ser_tup->elements()[0].isString()) {
+        // SerializationType as defined in
+        // aten/src/ATen/native/quantized/cpu/serialization_versions.h
+        auto name = ser_tup->elements()[0].toString()->string();
+        auto version = ser_tup->elements()[1].toInt();
+        auto non_optional = ser_tup->elements()[2].toTensorVector();
+        auto optional = ser_tup->elements()[3].toTensorVector();
+        auto doubles = ser_tup->elements()[4].toDoubleVector();
+        auto longs = ser_tup->elements()[5].toIntVector();
 
-        torch::List<int64_t> stride_int, padding_int, dilation_int,
-            output_padding_int;
-        int64_t groups_int;
-        uint8_t transpose = 0;
+        // Versions below 2 should not be here -- should be in the legacy path.
+        TORCH_CHECK(version >= 2, "Incorrect version");
+        if (name == "conv") {
+          if (version == 2) {
+            unpacked_weight = non_optional[0];
+            bias = optional[0];
 
-        if (scalars_tensor.numel() == 1) { // Version 1
-          for (const auto& s : params1_ivalue) {
+            const int64_t kSpatialDim = longs[0];
+            int idx = 0;
+            for (; idx < kSpatialDim; ++idx) {
+              stride_int.emplace_back(longs[idx]);
+            }
+            for (; idx < 2 * kSpatialDim; ++idx) {
+              padding_int.emplace_back(longs[idx]);
+            }
+            for (; idx < 3 * kSpatialDim; ++idx) {
+              dilation_int.emplace_back(longs[idx]);
+            }
+            for (; idx < 4 * kSpatialDim; ++idx) {
+              output_padding_int.emplace_back(longs[idx]);
+            }
+            groups_int = longs[idx];
+            transpose = longs[++idx];
+
+            stride = stride_int;
+            padding = padding_int;
+            dilation = dilation_int;
+            output_padding = output_padding_int;
+            groups = groups_int;
+          } else {
+            TORCH_CHECK(false, "Unsupported serialization version ", version);
+          }
+        } else {
+          TORCH_CHECK(false, "Unsupported serialization type ", name);
+        }
+      } else {  // Legacy
+        unpacked_weight = ser_tup->elements()[0].toTensor();
+        bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+        // conv only parameters
+        if (ser_tup->elements().size() > 2) {
+          auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
+          auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
+          auto dilation_ivalue = ser_tup->elements()[dilation_idx].toListRef();
+          auto groups_ivalue = ser_tup->elements()[groups_idx];
+
+          for (const auto& s : stride_ivalue) {
             stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
           }
-          for (const auto& p : params2_ivalue) {
+          for (const auto& p : padding_ivalue) {
             padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
           }
-          for (const auto& d : params3_ivalue) {
+          for (const auto& d : dilation_ivalue) {
             dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
           }
-          groups_int = scalars_tensor[0].item<int64_t>();
-        } else {
-          int64_t version = scalars_tensor[0].item<int64_t>();
-          int64_t spatial_dims = params1_ivalue.size() / 3;
-          int64_t idx = 0;
-          for (; idx < spatial_dims; ++idx) {
-            at::Tensor s = params1_ivalue[idx].toTensor();
-            stride_int.emplace_back(s[0].item<int64_t>());
-          }
-          for (; idx < 2 * spatial_dims; ++idx) {
-            at::Tensor p = params1_ivalue[idx].toTensor();
-            padding_int.emplace_back(p[0].item<int64_t>());
-          }
-          for (; idx < 3 * spatial_dims; ++idx) {
-            at::Tensor d = params1_ivalue[idx].toTensor();
-            dilation_int.emplace_back(d[0].item<int64_t>());
-          }
-          groups_int = scalars_tensor[1].item<int64_t>();
-          switch (version) {
-            case 2:
-              break;
-            case 3: {
-              for (; idx < 4 * spatial_dims; ++idx) {
-                at::Tensor p = params1_ivalue[idx].toTensor();
-                output_padding_int.emplace_back(p[0].item<int64_t>());
-              }
-              transpose = scalars_tensor[2].item<uint8_t>();
-              break;
-            }
-            default: {
-              TORCH_CHECK(false, "Unsupported version ", version);
-            }
-          }
+          groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+          stride = stride_int;
+          padding = padding_int;
+          dilation = dilation_int;
+          groups = groups_int;
         }
-
-        stride = stride_int;
-        padding = padding_int;
-        dilation = dilation_int;
-        groups = groups_int;
       }
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
@@ -326,13 +339,16 @@ void unpackQuantizedWeightsHelper(
     c2_bias->insertBefore(qlinear_node);
     qlinear_node->insertInput(2, c2_bias->output());
 
-    // add conv arguemnts: stride, padding, dilation, groups
+    // add conv arguments: stride, padding, dilation, groups
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
         groups.has_value()) {
       std::vector<c10::optional<torch::List<int64_t>>> conv_ints_args;
       conv_ints_args.push_back(stride);
       conv_ints_args.push_back(padding);
       conv_ints_args.push_back(dilation);
+      if (output_padding.has_value()) {
+        conv_ints_args.push_back(output_padding);
+      }
       const size_t arg_offset = 3;
       for (size_t i = 0; i < conv_ints_args.size(); ++i) {
         Node* ints_node =
@@ -342,7 +358,7 @@ void unpackQuantizedWeightsHelper(
       }
       Node* groups_node = createInt(groups.value(), graph);
       groups_node->insertBefore(qlinear_node);
-      qlinear_node->insertInput(scalars_idx + 1, groups_node->output());
+      qlinear_node->insertInput(groups_idx + 1, groups_node->output());
     }
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
