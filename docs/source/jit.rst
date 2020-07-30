@@ -50,7 +50,6 @@ Creating TorchScript Code
     wait
     ScriptModule
     ScriptFunction
-    freeze
     save
     load
     ignore

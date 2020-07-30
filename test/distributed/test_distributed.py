@@ -123,7 +123,7 @@ def get_timeout(test_id):
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests")
+    print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
