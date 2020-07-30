@@ -4124,14 +4124,26 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if key_padding_mask is not None:
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        key_padding_mask = key_padding_mask.view(bsz, 1, 1, src_len)
         attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),
+            key_padding_mask,
             float('-inf'),
         )
         attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
 
     attn_output_weights = softmax(
         attn_output_weights, dim=-1)
+
+    # mask NaNs with zero
+    if attn_mask is not None and key_padding_mask is not None and attn_mask.dtype == torch.bool:
+        # NaNs will only occur with bucketing
+        # Check for masked first src index (limited context) and masked last src index (padding)
+        if attn_mask[0, 0, :].any() and key_padding_mask[:, 0, 0, -1].any():
+            attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+            attn_mask = attn_mask.view(1, 1, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.masked_fill(key_padding_mask + attn_mask, 0)
+            attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
     attn_output = torch.bmm(attn_output_weights, v)
