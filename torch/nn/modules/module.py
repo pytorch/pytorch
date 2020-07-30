@@ -1321,7 +1321,10 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                p.grad.detach_()
+                if p.grad.grad_fn is not None:
+                    p.grad.detach_()
+                else:
+                    p.grad.requires_grad_(False)
                 p.grad.zero_()
 
     def share_memory(self: T) -> T:
