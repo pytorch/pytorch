@@ -74,12 +74,6 @@ class Conf(object):
         else:
             if phase in ["upload"]:
                 filter_branch = "nightly"
-            else:
-                filter_branch = r"/.*/"
-            job_def["filters"] = branch_filters.gen_filter_dict(
-                branches_list=[filter_branch],
-                tags_list=[branch_filters.RC_PATTERN],
-            )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":

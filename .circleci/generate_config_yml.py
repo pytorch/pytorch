@@ -102,7 +102,6 @@ def gen_build_workflows_tree():
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
-        binary_build_definitions.get_nightly_uploads,
     ]
 
     docker_builder_functions = [
@@ -112,23 +111,8 @@ def gen_build_workflows_tree():
     return {
         "workflows": {
             "binary_builds": {
-                "when": r"<< pipeline.parameters.run_binary_tests >>",
                 "jobs": [f() for f in binary_build_functions],
             },
-            "docker_build": OrderedDict(
-                {
-                    "triggers": [
-                        {
-                            "schedule": {
-                                "cron": miniutils.quote("0 15 * * 0"),
-                                "filters": {"branches": {"only": ["master"]}},
-                            }
-                        }
-                    ],
-                    "jobs": [f() for f in docker_builder_functions],
-                }
-            ),
-            "build": {"jobs": [f() for f in build_workflows_functions]},
         }
     }
 
@@ -154,8 +138,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-ecr-gc.yml"),
-    File("workflows/workflows-promote.yml"),
 ]
 
 
