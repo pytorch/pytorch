@@ -33,6 +33,22 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
       [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
 }
 
+static bool areAnyArgumentsGenerators(const FunctionSchema& schema) {
+  return std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [] (const Argument& arg) {
+        // Check for Generator or Optional<Generator>.
+        if (arg.type()->isSubtypeOf(GeneratorType::get())) {
+          return true;
+        }
+        if (arg.type()->kind() != OptionalType::Kind) {
+          return false;
+        }
+        return arg.type()->cast<OptionalType>()->getElementType() == GeneratorType::get();
+      });
+}
+
 // The general flow of the algorithm is as follows.
 // - First, we figure out which arguments are BatchedTensors and save them
 //   to a vector. We also store a vector of which index of the arguments list
@@ -58,6 +74,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   TORCH_CHECK(num_returns == 1,
               "Batching rule not implemented for ", schema, ". ",
               "We do not yet support operations with multiple returns.");
+  TORCH_CHECK(!areAnyArgumentsGenerators(schema),
+              "Batching rule not implemented for ", schema, ". ",
+              "The fallback path doesn't work for random operations.");
   TORCH_WARN("Batching rule not implemented for ", schema, " falling back "
              "to slow (for loop and stack) implementation");
 

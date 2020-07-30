@@ -165,6 +165,17 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   return self_physical.newLogicalFromPhysical(result);
 }
 
+template <typename... Args> Tensor unsupportedRandomOp(Args... args) {
+  TORCH_CHECK(false, "vmap: We do not yet support random operations. Please ",
+              "perform random operations outside of vmap as a workaround");
+}
+
+template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
+  TORCH_CHECK(false, "vmap: We do not yet support random operations. Please ",
+              "perform random operations outside of vmap as a workaround");
+}
+
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -192,6 +203,34 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
+
+  // random operations (out-of-place)
+  m.impl_UNBOXED("bernoulli", unsupportedRandomOp<const Tensor&, optional<Generator>>);
+  m.impl_UNBOXED("bernoulli.p", unsupportedRandomOp<const Tensor&, double, optional<Generator>>);
+  m.impl_UNBOXED("multinomial", unsupportedRandomOp<const Tensor&, int64_t, bool, optional<Generator>>);
+  m.impl_UNBOXED("normal.Tensor_float", unsupportedRandomOp<const Tensor&, double, optional<Generator>>);
+  m.impl_UNBOXED("normal.float_Tensor", unsupportedRandomOp<double, const Tensor&, optional<Generator>>);
+  m.impl_UNBOXED("normal.Tensor_Tensor", unsupportedRandomOp<const Tensor&, const Tensor&, optional<Generator>>);
+  m.impl_UNBOXED("poisson", unsupportedRandomOp<const Tensor&, optional<Generator>>);
+#define TENSOROPTIONS c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>
+  m.impl_UNBOXED("rand_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
+  m.impl_UNBOXED("randn_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
+  m.impl_UNBOXED("randint_like", unsupportedRandomOp<const Tensor&, int64_t, TENSOROPTIONS, optional<MemoryFormat>>);
+  m.impl_UNBOXED("randint_like.low_dtype", unsupportedRandomOp<const Tensor&, int64_t, int64_t, TENSOROPTIONS, optional<MemoryFormat>>);
+#undef TENSOROPTIONS
+
+  // random operations (in-place)
+  m.impl_UNBOXED("bernoulli_.Tensor", unsupportedRandomOp_<Tensor&, const Tensor&, optional<Generator>>);
+  m.impl_UNBOXED("bernoulli_.float", unsupportedRandomOp_<Tensor&, double, optional<Generator>>);
+  m.impl_UNBOXED("cauchy_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
+  m.impl_UNBOXED("exponential_", unsupportedRandomOp_<Tensor&, double, optional<Generator>>);
+  m.impl_UNBOXED("geometric_", unsupportedRandomOp_<Tensor&, double, optional<Generator>>);
+  m.impl_UNBOXED("log_normal_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
+  m.impl_UNBOXED("normal_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
+  m.impl_UNBOXED("random_.from", unsupportedRandomOp_<Tensor&, int64_t, optional<int64_t>, optional<Generator>>);
+  m.impl_UNBOXED("random_.to", unsupportedRandomOp_<Tensor&, int64_t, optional<Generator>>);
+  m.impl_UNBOXED("random_", unsupportedRandomOp_<Tensor&, optional<Generator>>);
+  m.impl_UNBOXED("uniform_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
 }
 
 } // namespace at
