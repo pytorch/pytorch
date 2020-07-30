@@ -112,11 +112,6 @@ def get_timeout(test_id):
         return DEFAULT_TIMEOUT
 
 
-if not dist.is_available():
-    print("Distributed not available, skipping tests")
-    sys.exit(0)
-
-
 def require_backend(backends):
     if BACKEND not in backends:
         return unittest.skip("Test requires backend to be one of %s" % backends)

@@ -24,8 +24,13 @@ but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`.
 """
 
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
+
 
 def skip_if_no_ninja(func):
 
