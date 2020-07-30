@@ -593,6 +593,16 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
 namespace {
 
+// Check validity of tensor
+void check_gpu_single_tensor(const at::Tensor& tensor) {
+  if (!tensor.is_cuda() || tensor.is_sparse()) {
+    throw std::runtime_error("Tensors must be CUDA and dense");
+  }
+  if (!tensor.is_contiguous()) {
+    throw std::runtime_error("Tensors must be contiguous");
+  }
+}
+
 // Check that all `tensors' have the same type and shape and are distributed
 // across distinct GPUs.
 void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
@@ -611,9 +621,7 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   usedDevices.reserve(tensors.size());
 
   for (const auto& t : tensors) {
-    if (!t.is_cuda() || t.is_sparse()) {
-      throw std::runtime_error("Tensors must be CUDA and dense");
-    }
+    check_gpu_single_tensor(t);
     if (t.scalar_type() != first.scalar_type()) {
       throw std::runtime_error("Tensors must have identical type");
     }
@@ -1001,6 +1009,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   ncclWork->barrierTensors_ = std::move(barrierTensors);
 
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
