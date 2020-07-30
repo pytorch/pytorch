@@ -1,5 +1,6 @@
 from __future__ import division
 
+import re
 import math
 import warnings
 import contextlib
@@ -529,9 +530,15 @@ orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
 
 
-v = torch.__version__.split('.')
-# These can also be used as global flags
-_torch_version = (int(v[0]), int(v[1]), int(v[2][0]))
+def _get_torch_version():
+    """Returns torch.__version__ as Tuple(int,int,int)"""
+    GET_TORCH_VERSION = re.compile(r'\d+\.\d+\.\d+')
+    v = GET_TORCH_VERSION.findall(torch.__version__)
+    assert len(v) == 1, "GET_TORCH_VERSION failed to find torch version"
+    v = v[0].split('.')
+    return (int(v[0]), int(v[1]), int(v[2]))
+
+_torch_version = _get_torch_version()
 # Use "init_version" to handle "_init_version". This value corresponds to the last pytorch version that
 # did not have 'init_version' context manager.
 _init_version = (1, 6, 1)
