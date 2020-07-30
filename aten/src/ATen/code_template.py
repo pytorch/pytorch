@@ -1,14 +1,5 @@
 import re
-from typing import Match, Optional, Sequence, TypeVar, Generic
-from typing_extensions import Protocol
-
-K = TypeVar('K', contravariant=True)
-V = TypeVar('V', covariant=True)
-
-# Impoverished Mapping protocol, so nested_dict can stay simple
-class SupportsGetItem(Generic[K, V], Protocol):
-    def __getitem__(self, x: K) -> V:
-        ...
+from typing import Match, Optional, Sequence, Mapping
 
 # match $identifier or ${identifier} and replace with value in env
 # If this identifier is at the beginning of whitespace on a line
@@ -46,7 +37,7 @@ class CodeTemplate:
         self.pattern = pattern
         self.filename = filename
 
-    def substitute(self, env: Optional[SupportsGetItem[str, object]] = None, **kwargs: object) -> str:
+    def substitute(self, env: Optional[Mapping[str, object]] = None, **kwargs: object) -> str:
         if env is None:
             env = {}
 
