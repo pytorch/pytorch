@@ -767,23 +767,6 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
-inline Tensor _pin_memory_if_cuda_input(
-  const Tensor& mem,
-  const Tensor& in
-) {
-  return (in.device().type() == at::kCUDA)
-    ? mem.pin_memory() : mem;
-}
-
-inline Tensor _move_memory_if_cuda_input(
-  const Tensor& mem,
-  const Tensor& in
-) {
-  return (in.device().type() == at::kCUDA)
-    ? mem.to(at::device_of(in).value(), /*non_blocking=*/true)
-    : mem;
-}
-
 inline Tensor _pin_and_move_memory_if_cuda_input(
   const Tensor& mem,
   const Tensor& in
@@ -1020,12 +1003,9 @@ Tensor mexp_impl(
       auto idx_curr_norm_interval = (
         (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
       ).nonzero().squeeze(-1);
-      idx_curr_norm_interval = _pin_memory_if_cuda_input(
-        idx_curr_norm_interval, a
-      );
 
       if (idx_curr_norm_interval.numel()) {
-        auto idx_to_device = _move_memory_if_cuda_input(
+        auto idx_to_device = _pin_and_move_memory_if_cuda_input(
           idx_curr_norm_interval, a
         );
         auto sub_a = at::index_select(a, 0, idx_to_device);
@@ -1037,12 +1017,9 @@ Tensor mexp_impl(
     // We pin memory to make the transfer to CUDA faster and async
     auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
       .nonzero().squeeze(-1);
-    idx_large_norm = _pin_memory_if_cuda_input(
-      idx_large_norm, a
-    );
 
     if (idx_large_norm.numel()) {
-      auto idx_to_device = _move_memory_if_cuda_input(
+      auto idx_to_device = _pin_and_move_memory_if_cuda_input(
         idx_large_norm, a
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
