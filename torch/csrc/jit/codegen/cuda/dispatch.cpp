@@ -158,6 +158,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
 
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -293,6 +296,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
 
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -378,6 +384,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(expr->as<kir::IfThenElse>());
     case ExprType::Allocate:
       return ptr(mutator)->mutate(expr->as<kir::Allocate>());
+    case ExprType::Sync:
+      return ptr(mutator)->mutate(expr->as<kir::Sync>());
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }

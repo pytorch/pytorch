@@ -335,6 +335,12 @@ Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
       memory_type_(src->memory_type_),
       size_(ir_cloner->clone(src->size_)) {}
 
+Sync::Sync() : Expr(ExprType::Sync) {
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+Sync::Sync(const Sync* src, IrCloner* ir_cloner) : Expr(src, ir_cloner) {}
+
 GridReduction::GridReduction(ReductionOp* reduction_op)
     : Expr(ExprType::GridReduction), reduction_op_(reduction_op) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");

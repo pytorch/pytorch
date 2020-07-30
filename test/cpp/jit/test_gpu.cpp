@@ -4431,6 +4431,7 @@ void testGPU_FusionCacheBefore() {
   // cache_before automatically applies ComputeAt to the cache TensorView
   TensorView* tv3 = tv2->cache_before();
 
+  // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -4471,6 +4472,7 @@ void testGPU_FusionCacheAfter() {
   // cache_after automatically applies ComputeAt to the cache TensorView
   TensorView* tv3 = tv0->cache_after();
 
+  // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -4516,6 +4518,7 @@ void testGPU_FusionCacheIndirect() {
   TensorView* tv7 = tv5->cache_after();
   TensorView* tv8 = tv5->cache_before();
 
+  // Thread and Block binding
   tv6->axis(0)->parallelize(ParallelType::BIDx);
   tv6->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -4542,6 +4545,7 @@ void testGPU_FusionCacheBcast() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
+  // Algorithm
   TensorView* tv0 = makeDummyTensor(1); // (M, 1)
   TensorView* tv1 = broadcast(tv0, {false, true});
   TensorView* tv2 = makeDummyTensor(1); // (1, N)
@@ -4550,7 +4554,6 @@ void testGPU_FusionCacheBcast() {
   fusion.addInput(tv0);
   fusion.addInput(tv2);
   fusion.addOutput(tv4);
-  // Algorithm
 
   constexpr int BSX = 128;
   tv4->split(0, BSX);
@@ -4581,8 +4584,6 @@ void testGPU_FusionCacheBcast() {
   tv8->axis(-1)->parallelize(ParallelType::TIDx);
 
   constexpr int M = 92, N = 500;
-  const int Mr = ceilDiv_(M, BSX);
-  const int Nr = ceilDiv_(N, BSX);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({M}, options);
@@ -4637,7 +4638,6 @@ void testGPU_FusionCacheComplex() {
   tv7->axis(-1)->parallelize(ParallelType::TIDx);
 
   constexpr int N = 800;
-  const int Nr = ceilDiv_(N, BSX);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input1 = at::rand({N, N}, options);
@@ -4674,6 +4674,8 @@ void testGPU_FusionCacheMultiConsumer() {
 
   auto tv5 = tv1->cache_before();
   auto tv6 = tv3->cache_before();
+  tv5->setMemoryType(MemoryType::Shared);
+  tv6->setMemoryType(MemoryType::Shared);
 
   // Fails because tensor must be recomputed twice
   // auto tv7 = tv0->cache_after();
@@ -4696,6 +4698,258 @@ void testGPU_FusionCacheMultiConsumer() {
       aten_output.allclose(outputs[1], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[1]).abs().sum());
+}
+
+void testGPU_FusionSmem() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeDummyTensor(2); // (M, N)
+  TensorView* tv1 = makeDummyTensor(2); // (M, N)
+  TensorView* tv2 = mul(tv0, tv1);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv2);
+
+  // Schedule
+  TensorView* tv3 = tv0->cache_after();
+  TensorView* tv4 = tv1->cache_after();
+  tv3->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Shared);
+
+  constexpr int BSY = 32;
+  constexpr int BSX = 128;
+  tv2->split(0, BSY);
+  tv2->split(2, BSX);
+  // M/BSX, BSX, N/BSX, BSX
+  tv2->reorder({{0, 0}, {1, 2}, {2, 1}, {3, 3}});
+  // M/BSX, N/BSX, BSX, BSX
+
+  tv0->computeAt(tv2, 2);
+  tv1->computeAt(tv2, 2);
+
+  // Thread and Block binding
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  // Manual Binding
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 128, N = 10240;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, N}, options);
+  at::Tensor t1 = at::randn({M, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  at::Tensor aten_output = mul(t0, t1);
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+void testGPU_FusionSmemReduce() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeDummyTensor(3); // M, K, N
+  TensorView* tv1 = sum(tv0, {1}); // M, R, N
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+
+  TensorView* tv2 = tv0->cache_after();
+  tv2->setMemoryType(MemoryType::Shared);
+
+  // Schedule
+  constexpr int BSX = 32;
+  tv1->split(2, BSX);
+  tv1->split(1, 128);
+  tv1->split(0, BSX);
+  // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
+  tv1->reorder({{0, 0}, {1, 2}, {2, 4}, {3, 5}, {4, 1}, {5, 3}});
+  TensorView* tv3 = tv1->rFactor({-2});
+
+  tv0->computeAt(tv1, -2);
+  tv0->computeAt(tv3, -2);
+
+  // Thread and Block binding
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDy);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  // Manual Binding
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 154, K = 45, N = 1524;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  at::Tensor aten_output = sum(t0, {1});
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+void testGPU_FusionSmemBlockGemm() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeDummyTensor(2); // (M, K)
+  TensorView* tv1 = makeDummyTensor(2); // (K, N)
+  TensorView* tv2 = broadcast(tv0, {false, false, true}); // (M, K, B)
+  TensorView* tv3 = broadcast(tv1, {true, false, false}); // (B, K, N)
+  TensorView* tv4 = mul(tv2, tv3); // M, K, N
+  TensorView* tv5 = sum(tv4, {1}); // M, R, N
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv5);
+
+  // Schedule
+  constexpr int BSX = 16;
+  tv5->split(2, BSX);
+  tv5->split(1, BSX);
+  tv5->split(0, BSX);
+  // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
+  tv5->reorder({{0, 0}, {1, 3}, {2, 2}, {3, 5}, {4, 1}, {5, 4}});
+  // M/BSX, N/BSX, K/BSX, MSX, NSX, KSX
+  TensorView* tv6 = tv5->rFactor({-1});
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Shared);
+  tv6->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv5, 3);
+  tv1->computeAt(tv5, 3);
+
+  tv0->computeAt(tv6, 3);
+  tv1->computeAt(tv6, 3);
+
+  // Thread and Block binding
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  // Manual Binding
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv6->axis(-3)->parallelize(ParallelType::TIDy);
+  tv6->axis(-2)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 154, K = 45, N = 1524;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  at::Tensor aten_output = matmul(t0, t1);
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+void testGPU_FusionSmemBlockGemmCache() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeDummyTensor(2); // (M, K)
+  TensorView* tv1 = makeDummyTensor(2); // (K, N)
+  TensorView* tv2 = broadcast(tv0, {false, false, true}); // (M, K, B)
+  TensorView* tv3 = broadcast(tv1, {true, false, false}); // (B, K, N)
+  TensorView* tv4 = mul(tv2, tv3); // M, K, N
+  TensorView* tv5 = sum(tv4, {1}); // M, R, N
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv5);
+
+  // Schedule
+  // Remove reduction axis from tv5
+  // tv6 = (M, R, N)
+  // tv5 = (M, N)
+  TensorView* tv6 = tv5->cache_before();
+
+  constexpr int BSX = 16;
+  tv5->split(1, BSX);
+  tv5->split(0, BSX);
+  // M/BSX, BSX, N/BSX, BSX
+  tv5->reorder({{0, 0}, {1, 2}, {2, 1}, {3, 3}});
+  // tv5 = M/BSX, N/BSX, MSX, NSX
+
+  tv6->computeAt(tv5, 2);
+  tv6->computeAt(tv5, 2);
+
+  tv6->split(-1, BSX);
+  // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
+  tv6->reorder({{0, 0}, {1, 1}, {2, 3}, {3, 4}, {4, 2}, {5, 5}});
+  // M/BSX, N/BSX, K/BSX, MSX, NSX, KSX
+  TensorView* tv7 = tv6->rFactor({-1});
+  // tv7 = M/BSX, N/BSX, K/BSXrf, MSX, NSX, KSXr
+  // tv6 = M/BSX, N/BSX, K/BSXr, MSX, NSX
+
+  tv0->computeAt(tv6, 3);
+  tv1->computeAt(tv6, 3);
+
+  tv0->computeAt(tv7, 3);
+  tv1->computeAt(tv7, 3);
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Shared);
+  tv6->setMemoryType(MemoryType::Shared);
+  tv7->setMemoryType(MemoryType::Shared);
+  // Memory Type
+
+  // Thread and Block binding
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+  tv5->axis(-2)->parallelize(ParallelType::TIDy);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  // Manual Binding
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv7->axis(-3)->parallelize(ParallelType::TIDy);
+  tv7->axis(-2)->parallelize(ParallelType::TIDx);
+
+  tv6->axis(-2)->parallelize(ParallelType::TIDy);
+  tv6->axis(-1)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 154, K = 45, N = 1524;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  at::Tensor aten_output = matmul(t0, t1);
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
 }
 
 void testGPU_FusionConstCheck() {

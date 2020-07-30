@@ -44,6 +44,7 @@ enum class ExprType {
   ForLoop,
   IfThenElse,
   Allocate,
+  Sync,
   KirUnaryOp,
   KirBinaryOp,
   KirTernaryOp,

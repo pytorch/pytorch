@@ -84,6 +84,7 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const kir::ForLoop*) override;
   void handle(const kir::IfThenElse*) override;
   void handle(const kir::Allocate*) override;
+  void handle(const kir::Sync*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;

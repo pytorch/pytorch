@@ -143,6 +143,10 @@ Statement* OptOutMutator::mutate(kir::Allocate* a) {
   }
 }
 
+Statement* OptOutMutator::mutate(kir::Sync* a) {
+  return a;
+}
+
 Statement* OptOutMutator::mutate(Split* s) {
   IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
   IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();

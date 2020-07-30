@@ -326,6 +326,19 @@ class TORCH_CUDA_API TensorView : public Val {
     return memory_type_;
   }
 
+  void setMemoryType(MemoryType mt) {
+    memory_type_ = mt;
+    if (fusion()->hasInput(this) || fusion()->hasOutput(this)) {
+      TORCH_INTERNAL_ASSERT(
+          mt == MemoryType::Global,
+          "Tried to set an input or output to the fusion to a non-global memory type.");
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          mt != MemoryType::Global,
+          "Tried to set an intermediate tensor in the fusion to the global memory type.");
+    }
+  }
+
   friend TORCH_CUDA_API TransformReplay;
   friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API LoopNestGenerator;
@@ -352,16 +365,6 @@ class TORCH_CUDA_API TensorView : public Val {
   // Set all computeAt members without checking any correctness. Useful for
   // computeAt with outputs relative to eachother
   void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
-
-  void setMemoryType(MemoryType mt) {
-    memory_type_ = mt;
-    bool is_inp_or_out =
-        this->fusion()->hasInput(this) || this->fusion()->hasOutput(this);
-    if (is_inp_or_out)
-      TORCH_INTERNAL_ASSERT(
-          mt == MemoryType::Global,
-          "Tried to set an input or output to the fusion to a non-global memory type.");
-  }
 
  private:
   int normalizeAxisPos(int pos) const {

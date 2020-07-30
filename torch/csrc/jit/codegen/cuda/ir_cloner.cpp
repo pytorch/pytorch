@@ -160,6 +160,10 @@ void IrCloner::handle(const kir::Allocate* node) {
   clone_ = new kir::Allocate(node, this);
 }
 
+void IrCloner::handle(const kir::Sync* node) {
+  clone_ = new kir::Sync(node, this);
+}
+
 void IrCloner::handle(const kir::ForLoop* node) {
   clone_ = new kir::ForLoop(node, this);
 }

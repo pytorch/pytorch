@@ -255,6 +255,10 @@ void IndexLowering::handle(kir::Allocate* allocate) {
   pushBack(allocate);
 }
 
+void IndexLowering::handle(kir::Sync* sync) {
+  pushBack(sync);
+}
+
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   // Run through loop nests and further lower the expressions
   for (auto* expr : exprs) {

@@ -94,6 +94,7 @@ class Allocate;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
+class Sync;
 
 } // namespace kir
 
@@ -154,6 +155,7 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const kir::ForLoop*) {}
   virtual void handle(const kir::IfThenElse*) {}
   virtual void handle(const kir::Allocate*) {}
+  virtual void handle(const kir::Sync*) {}
 };
 
 class TORCH_CUDA_API OptOutDispatch {
@@ -209,6 +211,7 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(kir::ForLoop*) {}
   virtual void handle(kir::IfThenElse*) {}
   virtual void handle(kir::Allocate*) {}
+  virtual void handle(kir::Sync*) {}
 };
 
 class TORCH_CUDA_API OptInConstDispatch {
@@ -294,7 +297,7 @@ class TORCH_CUDA_API OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
   virtual void handle(const kir::NamedScalar*) {
-    AT_ERROR("Handle not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
 
   virtual void handle(const kir::UnaryOp*) {
@@ -321,6 +324,9 @@ class TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const kir::Allocate*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
+  }
+  virtual void handle(const kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Sync.");
   }
   virtual void handle(const kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
@@ -370,7 +376,7 @@ class TORCH_CUDA_API OptInDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
   virtual void handle(NamedScalar*) {
-    AT_ERROR("Handle not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -414,10 +420,10 @@ class TORCH_CUDA_API OptInDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
   virtual void handle(kir::NamedScalar*) {
-    AT_ERROR("Handle not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
   virtual void handle(kir::TensorIndex*) {
-    AT_ERROR("Handle not overriden for TensorIndex.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorIndex.");
   }
 
   virtual void handle(kir::UnaryOp*) {
@@ -443,7 +449,10 @@ class TORCH_CUDA_API OptInDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
   }
   virtual void handle(kir::Allocate*) {
-    AT_ERROR("Handle not overriden for Allocate.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
+  }
+  virtual void handle(kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Sync.");
   }
   virtual void handle(kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
@@ -512,6 +521,7 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(kir::ForLoop*);
   virtual Statement* mutate(kir::IfThenElse*);
   virtual Statement* mutate(kir::Allocate*);
+  virtual Statement* mutate(kir::Sync*);
 };
 
 class TORCH_CUDA_API OptInMutator {
@@ -551,7 +561,7 @@ class TORCH_CUDA_API OptInMutator {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
   }
   virtual Statement* mutate(kir::TensorIndex*) {
-    AT_ERROR("Mutate not overriden for TensorIndex.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorIndex.");
   }
   virtual Statement* mutate(Bool*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
@@ -563,7 +573,7 @@ class TORCH_CUDA_API OptInMutator {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
   }
   virtual Statement* mutate(NamedScalar*) {
-    AT_ERROR("Mutate not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -595,7 +605,10 @@ class TORCH_CUDA_API OptInMutator {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
   }
   virtual Statement* mutate(kir::Allocate*) {
-    AT_ERROR("Mutate not overriden for Allocate.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Allocate.");
+  }
+  virtual Statement* mutate(kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Sync.");
   }
   virtual Statement* mutate(kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IfThenElse.");

@@ -872,6 +872,11 @@ void IRPrinter::handle(const kir::Allocate* a) {
   }
 }
 
+void IRPrinter::handle(const kir::Sync* a) {
+  indent();
+  os << "__syncthreads();\n";
+}
+
 void IRPrinter::handle(const Split* s) {
   os << "Split: ";
   handle(s->in());

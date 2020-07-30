@@ -42,6 +42,7 @@ namespace kir {
 
 class TensorIndex;
 class Allocate;
+class Sync;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
@@ -134,6 +135,7 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const kir::ForLoop*) override;
   void handle(const kir::IfThenElse*) override;
   void handle(const kir::Allocate*) override;
+  void handle(const kir::Sync*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;

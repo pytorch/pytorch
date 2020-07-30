@@ -488,6 +488,10 @@ void IrGraphGenerator::handle(const kir::Allocate* allocate) {
   addArc(allocate->buffer(), allocate);
 }
 
+void IrGraphGenerator::handle(const kir::Sync* sync) {
+  printExpr(sync, "SyncThreads");
+}
+
 void IrGraphGenerator::handle(const Split* split) {
   printExpr(split, IrNodeLabel::gen(split));
   addArc(split->in(), split);

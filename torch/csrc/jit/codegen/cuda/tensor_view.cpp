@@ -126,9 +126,8 @@ TensorView* TensorView::unsafeClone() const {
   new_view->compute_at_view_ = compute_at_view_;
   new_view->relative_compute_at_axis_ = relative_compute_at_axis_;
   new_view->this_compute_at_axis_ = this_compute_at_axis_;
-  new_view->setMemoryType(memory_type_);
+  new_view->memory_type_ = memory_type_;
   new_view->name_ = name();
-
   return new_view;
 }
 
@@ -358,34 +357,35 @@ TensorView* TensorView::cache_before() {
       " its origin is a nullptr and we restrict using cache_before on an input.");
 
   TORCH_CHECK(
-      origin_expr != nullptr &&
+      fusion()->hasOutput(this) ||
           origin_expr->getExprType() != ExprType::ReductionOp,
       "Error adding cache_before ",
       this,
-      " its origin is a reduction, instead please use cache_after.");
+      " its origin is a reduction and it is not an output, instead please use cache_after.");
 
   // Create Producer Domain
-  // Keep Broadcast Axis (Permanent)
-  auto root_domain = getRootDomain();
-  std::vector<IterDomain*> new_root_domain;
-  for (auto root : root_domain) {
-    if (!root->isReduction()) {
-      new_root_domain.push_back(new IterDomain(
-          root->start(),
-          root->extent(),
-          root->getParallelType(),
-          root->getIterType()));
-    }
-  }
-
   // This domain will be the consumer, so create the producer
+  auto root_domain = getRootDomain();
   TensorView* producer = new TensorView(
       new TensorDomain(
-          new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+          root_domain, std::vector<bool>(root_domain.size(), true)),
       getDataType().value());
 
   // Set domain of consumer
   TensorView* consumer = this;
+
+  // this TV is an output and its origin is a reduction
+  // remove reduction axis from this tv
+  if (origin_expr->getExprType() == ExprType::ReductionOp) {
+    size_t i = 0;
+    auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+    std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
+    for (auto dom : no_reduction_root_domain) {
+      new_root_domain[i++] = dom->clone();
+    }
+    consumer->setDomain(new TensorDomain(
+        new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
+  }
 
   // Insert producer - Cache_Before (CB) - before this TV.
   // Before: Prev TV -> [Origin Op] -> This TV
@@ -441,16 +441,12 @@ TensorView* TensorView::cache_after() {
 
   // Create Consumer Domain
   // Keep Broadcast Axis (Permanent)
-  auto root_domain = getRootDomain();
-  std::vector<IterDomain*> new_root_domain;
-  for (auto root : root_domain) {
-    if (!root->isReduction()) {
-      new_root_domain.push_back(new IterDomain(
-          root->start(),
-          root->extent(),
-          root->getParallelType(),
-          root->getIterType()));
-    }
+  // Remove Reduction Axis
+  size_t i = 0;
+  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
+  for (auto dom : no_reduction_root_domain) {
+    new_root_domain[i++] = dom->clone();
   }
 
   // This domain will be the producer, so create the consumer
