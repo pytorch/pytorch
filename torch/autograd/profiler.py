@@ -238,7 +238,7 @@ class EventList(list):
         total_stat.key = 'Total'
         return total_stat
 
-    def remove_nested(self):
+    def remove_nested_events(self):
         """Returns a new EventList object where all nested events have been
         deleted. This is useful to avoid clutterring of the results with
         a bunch of nested functions
@@ -376,10 +376,10 @@ class profile(object):
         )
     table.__doc__ = EventList.table.__doc__
 
-    def removed_nested_events(self):
+    def remove_nested_events(self):
         self._check_finish()
-        return self.function_events.removed_nested_events()
-    table.__doc__ = EventList.removed_nested_events.__doc__
+        return self.function_events.remove_nested_events()
+    table.__doc__ = EventList.remove_nested_events.__doc__
 
     def export_chrome_trace(self, path):
         self._check_finish()
