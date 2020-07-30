@@ -68,9 +68,9 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   while (sizeIt != inputSizes.rend()) {
     auto const& size = sizeIt->AsNode<IntImm>();
     if (size && size->value() == 1) {
-      bcast.push_back(0);
+      bcast.emplace_back(0);
     } else {
-      bcast.push_back(*axisIt);
+      bcast.emplace_back(*axisIt);
     }
     ++axisIt;
     ++sizeIt;
@@ -98,7 +98,7 @@ ExprHandle TensorExprKernel::chunk(
   std::vector<ExprHandle> indices;
   for (size_t i = 0; i < axes.size(); ++i) {
     if (i == dim) {
-      indices.push_back(axes[i] + IntImm::make(chunkIdx * step));
+      indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
     } else {
       indices.push_back(axes[i]);
     }
@@ -1153,7 +1153,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t i = 0;
             for (auto a : axes) {
               if (i++ != dim) {
-                indices.push_back(ExprHandle(a.node()));
+                indices.emplace_back(ExprHandle(a.node()));
               }
             }
 
