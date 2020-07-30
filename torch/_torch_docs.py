@@ -5704,6 +5704,25 @@ Example::
     tensor([ 1., -1.,  0.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.signbit,
+           r"""
+signbit(input, *, out=None) -> Tensor
+
+Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
+    >>> torch.signbit(a)
+    tensor([ False, True,  False,  False])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
