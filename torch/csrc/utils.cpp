@@ -64,6 +64,26 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   return false;
 }
 
+std::vector<at::Tensor> THPUtils_unpackTensors(PyObject *arg) {
+  bool tuple = PyTuple_Check(arg);
+  bool list = PyList_Check(arg);
+  if (tuple || list) {
+    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    std::vector<at::Tensor> tensors(nDim);
+    for (int i = 0; i != nDim; ++i) {
+      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
+      if (!THPVariable_Check(item)) {
+        std::ostringstream oss;
+        oss << "expected Tensor at position " << i << ", but got: " << THPUtils_typename(item);
+        throw std::runtime_error(oss.str());
+      }
+      tensors[i] = THPVariable_Unpack(item);
+    }
+    return tensors;
+  }
+  throw std::runtime_error("Expected tuple or list");
+}
+
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);

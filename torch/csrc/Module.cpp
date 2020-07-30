@@ -265,6 +265,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
   return obj;
 }
 
+std::vector<at::Tensor> THPUtils_unpackTensors(PyObject *arg);
+PyObject * THPSize_NewFromSizes(int dim, const at::Tensor *sizes);
 
 PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
 {
@@ -276,10 +278,18 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   PyObject *arg2 = PyTuple_GET_ITEM(args, 1);
   THPUtils_assert(THPSize_Check(arg2), "expected a torch.Size as argument 2");
 
-  auto size1 = THPUtils_unpackLongs(arg1);
-  auto size2 = THPUtils_unpackLongs(arg2);
-  auto sizes = at::infer_size(size1, size2);
-  return THPSize_NewFromSizes(sizes.size(), sizes.data());
+  auto dim0 = PyTuple_GET_ITEM(arg1, 0);
+  if (THPVariable_Check(dim0)){
+    auto size1 = THPUtils_unpackTensors(arg1);
+    auto size2 = THPUtils_unpackTensors(arg2);
+    auto sizes = at::infer_size(size1, size2);
+    return THPSize_NewFromSizes(sizes.size(), sizes.data());
+  } else {
+    auto size1 = THPUtils_unpackLongs(arg1);
+    auto size2 = THPUtils_unpackLongs(arg2);
+    auto sizes = at::infer_size(size1, size2);
+    return THPSize_NewFromSizes(sizes.size(), sizes.data());
+  }
   END_HANDLE_TH_ERRORS
 }
 

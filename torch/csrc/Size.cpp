@@ -30,6 +30,18 @@ PyObject * THPSize_New(const torch::autograd::Variable& var)
   return self.release();
 }
 
+PyObject * THPSize_NewFromSizes(int dim, const at::Tensor *sizes)
+{
+  auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
+  if (!self) throw python_error();
+  for (int64_t i = 0; i < dim; ++i) {
+    PyTuple_SET_ITEM(self.get(), i, THPVariable_Wrap(sizes[i]));
+    // PyTuple_SET_ITEM(self.get(), i, THPVariable_Wrap(std::move(sizes[i])));
+  }
+
+  return self.release();
+}
+
 PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));

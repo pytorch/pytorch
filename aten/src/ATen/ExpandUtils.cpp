@@ -1,6 +1,9 @@
 #include <ATen/ExpandUtils.h>
 
 namespace at {
+std::vector<Tensor> infer_size(std::vector<Tensor> a, std::vector<Tensor> b) {
+  return a;
+}
 
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
 std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {

@@ -303,6 +303,14 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::_infer_size(Tensor[] a, Tensor[] b) -> Tensor[]",
+        [](Stack* stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, at::infer_size(a.toTensorVector(), b.toTensorVector()));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
         [](Stack* stack) {
           at::Tensor weight;
