@@ -115,7 +115,7 @@ namespace {
                 // calculate bilinear weighted pixel value and set output pixel
                 scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
                 scalar_t *inp_ptr_NC = inp_ptr_N;
-                for (int c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
+                for (int64_t c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
                   //   (c, iz_tnw, iy_tnw, ix_tnw) * tnw + (c, iz_tne, iy_tne, ix_tne) * tne
                   // + (c, iz_tsw, iy_tsw, ix_tsw) * tsw + (c, iz_tse, iy_tse, ix_tse) * tse
                   // + (c, iz_bnw, iy_bnw, ix_bnw) * bnw + (c, iz_bne, iy_bne, ix_bne) * bne
@@ -154,7 +154,7 @@ namespace {
                 // assign nearest neighor pixel value to output pixel
                 scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
                 scalar_t *inp_ptr_NC = inp_ptr_N;
-                for (int c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
+                for (int64_t c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
                   if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
                     *out_ptr_NCDHW = inp_ptr_NC[iz_nearest * inp_sD + iy_nearest * inp_sH + ix_nearest * inp_sW];
                   } else {
@@ -291,7 +291,7 @@ namespace {
                 scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
                 scalar_t *inp_ptr_NC = inp_ptr_N;
                 // calculate bilinear weighted pixel value and set output pixel
-                for (int c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
                   scalar_t gOut = *gOut_ptr_NCDHW;
 
                   // calculate and set grad_input
@@ -367,7 +367,7 @@ namespace {
                 // assign nearest neighor pixel value to output pixel
                 scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
                 scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-                for (int c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
+                for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
                   // calculate and set grad_input
                   safe_add_3d(gInp_ptr_NC, iz_nearest, iy_nearest, ix_nearest,
                               gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW);
@@ -424,8 +424,8 @@ namespace {
             iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
 
             if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-              // get corner pixel values from (x, y, z)
-              // for 4d, we used north-east-south-west
+              // get corner pixel values from (x, y)
+              // for 4d, we use north-east-south-west
               int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
               int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
 
@@ -448,7 +448,7 @@ namespace {
               // calculate bilinear weighted pixel value and set output pixel
               scalar_t *inp_ptr_NC = inp_ptr_N;
               scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
-              for (int c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+              for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
                 auto res = static_cast<scalar_t>(0);
                 if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
                   res += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
@@ -471,7 +471,7 @@ namespace {
               // assign nearest neighor pixel value to output pixel
               scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
               scalar_t *inp_ptr_NC = inp_ptr_N;
-              for (int c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+              for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
                 if (within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W)) {
                   *out_ptr_NCHW = inp_ptr_NC[iy_nearest * inp_sH + ix_nearest * inp_sW];
                 } else {
@@ -548,9 +548,8 @@ namespace {
             iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
 
             if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-              // get corner pixel values from (x, y, z)
-              // for 4d, we used north-east-south-west
-              // for 5d, we add top-bottom
+              // get corner pixel values from (x, y)
+              // for 4d, we use north-east-south-west
               int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
               int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
 
@@ -574,7 +573,7 @@ namespace {
               scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
               scalar_t *inp_ptr_NC = inp_ptr_N;
               // calculate bilinear weighted pixel value and set output pixel
-              for (int c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+              for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
                 scalar_t gOut = *gOut_ptr_NCHW;
 
                 // calculate and set grad_input
@@ -616,7 +615,7 @@ namespace {
               // assign nearest neighor pixel value to output pixel
               scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
               scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-              for (int c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
+              for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
                 // calculate and set grad_input
                 safe_add_2d(gInp_ptr_NC, iy_nearest, ix_nearest, gInp_sH, gInp_sW,
                             inp_H, inp_W, *gOut_ptr_NCHW);
@@ -642,9 +641,12 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                 "grid_sampler_2d_cpu not implemented for ", input.scalar_type());
     auto sizes = input.sizes();
     auto strides = input.strides();
-    // NOTE: Gather offsets are only used for the height and width dimensions
-    auto max_gather_offset =
-      (sizes[2] - 1) * strides[2] + (sizes[3] - 1) * strides[3];
+    const auto grid_sW = grid.strides()[2];
+    // NOTE: Gather offsets are only used for the input H, W dimensions
+    //       or only for strided access to the grid tensor
+    auto max_gather_offset = std::max(
+      (sizes[2] - 1) * strides[2] + (sizes[3] - 1) * strides[3],
+      grid_sW * (vec256::Vec256<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return grid_sampler_2d_cpu_impl<float>(
@@ -684,10 +686,13 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     auto istrides = input.strides();
     auto gsizes = grad_output.sizes();
     auto gstrides = grad_output.strides();
+    const auto grid_sW = grid.strides()[2];
     // NOTE: Gather offsets are only used for the height and width dimensions
     auto max_gather_offset = std::max(
-      (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
-      (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]);
+      std::max(
+        (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
+        (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
+      grid_sW * (vec256::Vec256<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return grid_sampler_2d_backward_cpu_impl<float>(
