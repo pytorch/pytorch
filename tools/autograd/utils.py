@@ -82,7 +82,7 @@ def op_name_without_overload(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     return 'aten::{}'.format(name)
 
-def load_op_list(op_list, op_list_path):
+def load_op_list_and_strip_overload(op_list, op_list_path):
     if op_list is None and op_list_path is None:
         return None
     if op_list is None:
