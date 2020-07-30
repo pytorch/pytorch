@@ -213,23 +213,20 @@ void LoopNestGenerator::initReduction(
     inner_fl->body().push_back(init_stmt);
   }
 
+  init_exprs_.insert(init_stmt);
+
   // Place the allocation
   if (alloc_pos == 0) {
     // If we allocate at the root, look for the provided allocatoin if it
     // exists, and place after it.
     if (alloc_expr != nullptr) {
-      bool found = false;
-      for (auto it = lowered_exprs.begin(); it != lowered_exprs.end(); it++) {
-        if ((*it) == alloc_expr) {
-          lowered_exprs.insert(it + 1, init_loop_nest);
-          found = true;
-          break;
-        }
-      }
+      auto it =
+          std::find(lowered_exprs.begin(), lowered_exprs.end(), alloc_expr);
       TORCH_INTERNAL_ASSERT(
-          found,
+          it != lowered_exprs.end(),
           "Could not figure out where to initialize the buffer for ",
           tv);
+      lowered_exprs.insert(it + 1, init_loop_nest);
     } else {
       lowered_exprs.insert(lowered_exprs.begin(), init_loop_nest);
     }

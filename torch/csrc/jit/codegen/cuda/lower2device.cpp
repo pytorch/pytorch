@@ -78,10 +78,11 @@ void GPULower::lower() {
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
-  // Run our passes keeping the lowered expressions and forwarding them.
-  const auto loop_nests =
-      LoopNestGenerator::getLoopNest(fusion_, fusion_->exprs(true), preds);
-  const auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests, preds);
+  // Run our passes keeping the lowered expressions and forwarding
+  // them.
+  LoopNestGenerator lng(fusion_, preds, fusion_->exprs(true));
+  const auto unrolled_loops =
+      UnrollPass::runPass(fusion_, lng.loweredExprs(), lng.initExprs(), preds);
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 

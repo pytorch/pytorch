@@ -2707,7 +2707,7 @@ void testGPU_FusionReduction5() {
 
   int numel_x = 650;
   int numel_y = 1000;
-  int numel_z = 1000;
+  int numel_z = 4;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::rand({numel_x, numel_y, numel_z}, options);

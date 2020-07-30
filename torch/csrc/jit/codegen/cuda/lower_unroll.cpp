@@ -32,81 +32,87 @@ void UnrollPass::handle(Expr* expr) {
 namespace {
 
 kir::Bool* getPredicate(
-    std::vector<Expr*> tv_ops,
-    std::vector<Val*> inds_,
-    kir::Bool* thread_pred) {
+    const std::vector<Expr*>& tv_ops,
+    const std::vector<Val*>& inds_,
+    kir::Bool* thread_pred,
+    const std::unordered_set<Expr*>& init_exprs) {
   TORCH_INTERNAL_ASSERT(
       !tv_ops.empty() && !inds_.empty(),
       "Provided empty values to getPredicate.");
 
-  // Need to start with an output to (effectively) grab its root domain size
-  std::vector<bool> overall_contiguity =
-      ir_utils::getTVOutput(tv_ops[0])->domain()->contiguity();
+  std::vector<kir::Bool*> all_preds;
 
-  // We want to get all the contiguity information from all TensorViews in the
-  // exprs provided we need to support checking the predicate with the worst
-  // case contiguity information across these TVs.
-  for (auto tv_op : tv_ops) {
-    TensorView* consumer_tv = nullptr;
+  if (init_exprs.find(tv_ops[0]) == init_exprs.end()) {
+    // Need to start with an output to (effectively) grab its root domain size
+    std::vector<bool> overall_contiguity =
+        ir_utils::getTVOutput(tv_ops[0])->domain()->contiguity();
 
-    for (auto out : tv_op->outputs()) {
-      if (!ir_utils::isTV(out))
-        continue;
-      consumer_tv = out->as<TensorView>();
+    // We want to get all the contiguity information from all TensorViews in the
+    // exprs provided we need to support checking the predicate with the worst
+    // case contiguity information across these TVs.
+    for (auto tv_op : tv_ops) {
+      TensorView* consumer_tv = nullptr;
 
-      TORCH_INTERNAL_ASSERT(
-          inds_.size() == consumer_tv->nDims() ||
-              inds_.size() == consumer_tv->domain()->noReductions().size(),
-          "Invalid indices vector provided for getPredicate");
+      for (auto out : tv_op->outputs()) {
+        if (!ir_utils::isTV(out))
+          continue;
+        consumer_tv = out->as<TensorView>();
 
-      TORCH_INTERNAL_ASSERT(
-          consumer_tv->domain()->contiguity().size() ==
-              overall_contiguity.size(),
-          "Invalid expressions in getPredicate, their out domains don't match up,",
-          " they shouldn't be in the same loop nest together.");
-
-      overall_contiguity = IndexCompute::contiguityAnd(
-          overall_contiguity, consumer_tv->domain()->contiguity());
-    }
-
-    for (auto inp : tv_op->inputs()) {
-      if (!ir_utils::isTV(inp))
-        continue;
-      overall_contiguity = IndexCompute::contiguityAnd(
-          overall_contiguity,
-          IndexCompute::contiguityPasC(
-              inp->as<TensorView>()->domain(), consumer_tv->domain()));
-    }
-  }
-
-  // Need a tv to base the indexing on, just grab the first.
-  auto consumer_tv = ir_utils::getTVOutput(tv_ops[0]);
-
-  // Do we need to adjust for reduction axes?
-  const bool reductions = inds_.size() != consumer_tv->nDims();
-
-  // Sanitize the indices
-  std::vector<Val*> inds;
-  if (reductions) {
-    for (size_t ind_i = 0, consumer_tv_i = 0;
-         consumer_tv_i < consumer_tv->nDims();) {
-      if (consumer_tv->axis(consumer_tv_i++)->isReduction()) {
-        inds.push_back(new Int(0));
-      } else {
         TORCH_INTERNAL_ASSERT(
-            ind_i < inds_.size(), "Ran out of indices to generate predicate.");
-        inds.push_back(inds_[ind_i++]);
+            inds_.size() == consumer_tv->nDims() ||
+                inds_.size() == consumer_tv->domain()->noReductions().size(),
+            "Invalid indices vector provided for getPredicate");
+
+        TORCH_INTERNAL_ASSERT(
+            consumer_tv->domain()->contiguity().size() ==
+                overall_contiguity.size(),
+            "Invalid expressions in getPredicate, their out domains don't match up,",
+            " they shouldn't be in the same loop nest together.");
+
+        overall_contiguity = IndexCompute::contiguityAnd(
+            overall_contiguity, consumer_tv->domain()->contiguity());
+      }
+
+      for (auto inp : tv_op->inputs()) {
+        if (!ir_utils::isTV(inp))
+          continue;
+        overall_contiguity = IndexCompute::contiguityAnd(
+            overall_contiguity,
+            IndexCompute::contiguityPasC(
+                inp->as<TensorView>()->domain(), consumer_tv->domain()));
       }
     }
-  } else {
-    inds = inds_;
-  }
 
-  // Compute indices based on consumer_tv and all contiguity information
-  // combined
-  auto all_preds = PredicateCompute::computePredicates(new kir::TensorIndex(
-      consumer_tv,
-      IndexCompute::get(consumer_tv->domain(), inds, overall_contiguity)));
+    // Need a tv to base the indexing on, just grab the first.
+    auto consumer_tv = ir_utils::getTVOutput(tv_ops[0]);
+
+    // Do we need to adjust for reduction axes?
+    const bool reductions = inds_.size() != consumer_tv->nDims();
+
+    // Sanitize the indices
+    std::vector<Val*> inds;
+    if (reductions) {
+      for (size_t ind_i = 0, consumer_tv_i = 0;
+           consumer_tv_i < consumer_tv->nDims();) {
+        if (consumer_tv->axis(consumer_tv_i++)->isReduction()) {
+          inds.push_back(new Int(0));
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              ind_i < inds_.size(),
+              "Ran out of indices to generate predicate.");
+          inds.push_back(inds_[ind_i++]);
+        }
+      }
+    } else {
+      inds = inds_;
+    }
+
+    // Compute indices based on consumer_tv and all contiguity information
+    // combined
+    all_preds = PredicateCompute::computePredicates(new kir::TensorIndex(
+        consumer_tv,
+        IndexCompute::get(consumer_tv->domain(), inds, overall_contiguity)));
+  }
 
   // If we have thread predicates, add those
   if (thread_pred != nullptr) {
@@ -119,8 +125,9 @@ kir::Bool* getPredicate(
     if (!(pred->isConst()) || !(pred->isConst() && pred->value().value()))
       preds.push_back(pred);
 
-  if (preds.size() == 0)
+  if (preds.empty()) {
     return new kir::Bool(true);
+  }
 
   Val* cond = preds[0];
 
@@ -198,7 +205,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     kir::Bool* unroll_predicate = getPredicate(
         tv_ops,
         unroll_pred_inds,
-        getThreadPredicate(ir_utils::getTVOutput(tv_ops[0])));
+        getThreadPredicate(ir_utils::getTVOutput(tv_ops[0])),
+        incoming_init_exprs_);
 
     // Make the IfThenElse controlling the unrolling
     kir::IfThenElse* unroll_ite = new kir::IfThenElse(
@@ -228,7 +236,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
       auto inline_predicate = getPredicate(
           {expr},
           ir_utils::indices(for_loops),
-          getThreadPredicate(ir_utils::getTVOutput(expr)));
+          getThreadPredicate(ir_utils::getTVOutput(expr)),
+          incoming_init_exprs_);
 
       kir::IfThenElse* inline_ite = new kir::IfThenElse(
           inline_predicate, {expr}, {}, inner_most_inlined_loop);
@@ -251,7 +260,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
       auto pred = getPredicate(
           {expr},
           ir_utils::indices(for_loops),
-          getThreadPredicate(ir_utils::getTVOutput(expr)));
+          getThreadPredicate(ir_utils::getTVOutput(expr)),
+          incoming_init_exprs_);
 
       // If we need a predicate, put expr inside an if then else
       if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
@@ -280,9 +290,10 @@ void UnrollPass::computeMap() {
 std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<Expr*>& exprs,
+    const std::unordered_set<Expr*>& init_exprs,
     const ThreadPredicateMap& thread_predicates) {
   FusionGuard fg(fusion);
-  UnrollPass up(fusion, exprs, thread_predicates);
+  UnrollPass up(fusion, exprs, init_exprs, thread_predicates);
   up.computeMap();
   std::vector<Expr*> mutated_exprs;
   for (Expr* expr : exprs) {
