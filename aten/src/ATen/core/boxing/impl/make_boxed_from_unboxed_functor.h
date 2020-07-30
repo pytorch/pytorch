@@ -45,7 +45,8 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     c10::ScalarType,
     c10::Device,
     c10::Layout,
-    c10::MemoryFormat
+    c10::MemoryFormat,
+    at::Dimname
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
