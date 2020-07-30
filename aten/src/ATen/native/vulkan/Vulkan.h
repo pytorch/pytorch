@@ -26,12 +26,7 @@ namespace native {
 namespace vulkan {
 namespace detail {
 
-#ifdef DEBUG
 static constexpr bool kEnableValidationLayers = true;
-#else
-static constexpr bool kEnableValidationLayers = false;
-#endif
-
 bool is_available();
 
 class VContext;
@@ -39,13 +34,13 @@ const VContext& context();
 
 // VulkanTensor is a handle that holds shared pointer to VulkanTensor:Impl,
 // that owns Tensor representation on GPU.
-// VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
+//  VulkanTensor is copyable and moveable (copying and moving pointer to Impl).
 //
 // VulkanTensor::Impl is moveable only, owns Vulkan device memory for Tensor
 // data. Tensor can be represented in several formats.
 //
 // 0. VBuffer - (wrapper on  vulkan VkBuffer), supports all tensor dimensions,
-// data is in Contiguous format (NCHW), in plan to preserve at::Tensor memory
+// data is in  Contiguous format (NCHW), in plan to preserve at::Tensor memory
 // format (3d or 4d tensors can be in NHWC ChannelsLast format). It is located
 // in host visible memory that can be memory mapped to CPU memory.
 //
@@ -61,13 +56,14 @@ const VContext& context();
 // For dim==3: image.x - W sizes[2]; image.y - H sizes[1]; image.z - (C
 // sizes[0]) / 4
 //
-// For dim==2: image.x - W sizes[1]; image.y - H sizes[0]; image.z : 1
+// For dim==2: image.x - W sizes[1];  image.y - H sizes[0]; image.z : 1
 //
 // For dim==1: image.x - W sizes[0]; image.y : 1; image.z : 1
 //
 //
 // 2. VImage (other format) - Currently not added, but for some operations
-// another texture packing format can be beneficial for performance.
+// another texture
+//  packing format can be beneficial for performance.
 //
 // Contract about synchronization between representations:
 // 1.VImage(TexC4) representation is allocated lazily with calling image(),
@@ -95,7 +91,7 @@ class VulkanTensor final {
   class Impl;
 
  public:
-  VulkanTensor() = default;
+  VulkanTensor(){};
   explicit VulkanTensor(std::vector<int64_t> sizes);
   ~VulkanTensor() = default;
 
@@ -117,7 +113,7 @@ class VulkanTensor final {
   bool has_storage() const;
   void allocate_storage();
   void set_data_from_host(const float* inputData);
-  void copy_data_to_host(float* outputData) const;
+  void copy_data_to_host(float* outputData);
 
   bool has_buffer() const;
   VBuffer* buffer();
@@ -147,7 +143,7 @@ class VulkanTensor final {
 class ComputeUnitFactory;
 class VContext final {
  public:
-  explicit VContext(bool enableValidationLayers);
+  VContext(bool enableValidationLayers);
   ~VContext();
   VContext(const VContext&) = delete;
   VContext& operator=(const VContext&) = delete;
@@ -197,10 +193,10 @@ class VBuffer final {
   class MapMemory final {
    public:
     MapMemory(
-        const VkDevice device,
-        const VkDeviceMemory deviceMemory,
-        const VkDeviceSize offset,
-        const VkDeviceSize size)
+        VkDevice device,
+        VkDeviceMemory deviceMemory,
+        VkDeviceSize offset,
+        VkDeviceSize size)
         : device_(device),
           deviceMemory_(deviceMemory),
           offset_(offset),
@@ -214,9 +210,6 @@ class VBuffer final {
     MapMemory& operator=(const MapMemory&) = delete;
     MapMemory(MapMemory&&) = default;
     MapMemory& operator=(MapMemory&&) = default;
-    inline const void* ptr() const {
-      return mappedMemory_;
-    }
     inline void* ptr() {
       return mappedMemory_;
     }
@@ -244,7 +237,7 @@ class VBuffer final {
   VBuffer(VBuffer&&) = default;
   VBuffer& operator=(VBuffer&&) = default;
 
-  static inline VBuffer makeUniformBuffer(const VkDeviceSize bufferSize) {
+  static inline VBuffer makeUniformBuffer(VkDeviceSize bufferSize) {
     return VBuffer{bufferSize,
                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
@@ -282,7 +275,7 @@ class VBuffer final {
   VkDeviceMemory bufferMemory_;
 };
 
-VBuffer makeUniformConstBuffer(const void* ptr, VkDeviceSize size);
+VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size);
 
 class VImage final {
  public:
@@ -385,7 +378,7 @@ void allocateDescriptorSet(
 
 void createDescriptorSetLayoutSinglePool(
     VkDevice device,
-    const std::vector<VkDescriptorType>& descrTypes,
+    std::vector<VkDescriptorType> descrTypes,
     VkDescriptorSetLayout* descrSetLayout,
     VkDescriptorPool* descrPool,
     VkDescriptorSet* descrSet);
@@ -401,20 +394,20 @@ class ComputeUnit final {
   static constexpr uint64_t kFenceTimeoutNanos = 100000000000;
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   ComputeUnit(
-      const char* const glslSrc,
-      const VkPipelineCache pipelineCache,
-      const VkDescriptorSetLayout descrSetLayout,
-      const WorkGroupSize workGroupSize) {
+      const char* glslSrc,
+      VkPipelineCache pipelineCache,
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize workGroupSize) {
     createComputePipelineCompile(
         glslSrc, pipelineCache, descrSetLayout, workGroupSize);
   }
 #else
   ComputeUnit(
-      const uint32_t* const spvCode,
+      const uint32_t* spvCode,
       const unsigned int spvCodeSize,
-      const VkPipelineCache pipelineCache,
+      VkPipelineCache pipelineCache,
       const VkDescriptorSetLayout& descrSetLayout,
-      const WorkGroupSize workGroupSize) {
+      WorkGroupSize workGroupSize) {
     const auto codeSize = spvCodeSize;
     createComputePipeline(
         spvCode, codeSize, pipelineCache, descrSetLayout, workGroupSize);
@@ -431,14 +424,14 @@ class ComputeUnit final {
       const uint32_t* code,
       const uint32_t codeSize,
       VkPipelineCache pipelineCache,
-      VkDescriptorSetLayout descrSetLayout,
+      const VkDescriptorSetLayout& descrSetLayout,
       WorkGroupSize workGroupSize);
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   void createComputePipelineCompile(
-      const std::string& glslSrc,
+      std::string glslSrc,
       VkPipelineCache pipelineCache,
-      VkDescriptorSetLayout descrSetLayout,
+      const VkDescriptorSetLayout& descrSetLayout,
       WorkGroupSize workGroupSize);
 #endif
 
@@ -483,18 +476,18 @@ class ComputeUnitFactory {
   ComputeUnit& get(
       const char* key,
       const char* glslSrc,
-      VkDescriptorSetLayout descrSetLayout,
+      const VkDescriptorSetLayout& descrSetLayout,
       WorkGroupSize workGroupSize);
 #else
   ComputeUnit& get(
       const char* key,
       const uint32_t* code,
       const uint32_t codeSize,
-      VkDescriptorSetLayout descrSetLayout,
-      WorkGroupSize workGroupSize);
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize& workGroupSize);
 #endif
  private:
-  std::string getCacheKey(const char* key, WorkGroupSize workGroupSize);
+  std::string getCacheKey(const char* key, WorkGroupSize& workGroupSize);
   ComputeUnit& get(
       const std::string& cacheKey,
       std::function<std::shared_ptr<ComputeUnit>()> factoryFn);

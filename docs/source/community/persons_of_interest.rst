@@ -138,8 +138,6 @@ Windows
 ~~~~~~~
 
 -  Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
--  Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
--  Teng Gao (`smartcat2010 <https://github.com/smartcat2010>`__)
 
 PowerPC
 ~~~~~~~
