@@ -100,6 +100,6 @@ REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
-REGISTER_DISPATCH(hypot_stub, &lcm_kernel_cuda);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 
 }} // namespace at::native
