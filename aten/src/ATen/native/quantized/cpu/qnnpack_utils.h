@@ -284,9 +284,11 @@ std::vector<float> generate_requantization_scales(
 }
 
 std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
-    const at::Tensor& weight_contig
-    ) {
-  auto num_output_channels = weight_contig.size(0);
+    const at::Tensor& weight_contig,
+    bool transpose = false
+  ) {
+  const int out_ch_idx = transpose ? 1 : 0;
+  auto num_output_channels = weight_contig.size(out_ch_idx);
   // Add 8 to account for bufferring needed by QNNPACK.
   auto num_output_channels_padded = weight_contig.size(0) + 8;
   const auto qtype = weight_contig.qscheme();
