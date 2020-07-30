@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 namespace cudnn_rnn {
 
-std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
+TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
     TensorList weight_arr,
     int64_t weight_stride0,
     int64_t input_size,
@@ -19,7 +19,8 @@ std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
     bool bidirectional,
     const cudnnDataType_t flat_buf_datatype,
     const TensorOptions& flat_buf_options,
-    bool set_orig_weights_to_flat_buf);
+    bool set_orig_weights_to_flat_buf,
+    bool allow_type_change=false);
 
 } // namespace cudnn_rnn
 } // namespace native

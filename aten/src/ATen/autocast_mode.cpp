@@ -9,7 +9,10 @@
 #include <iostream>
 #include <exception>
 
-#ifdef AT_CUDNN_ENABLED()
+// pulls in AT_CUDNN_ENABLED() as defined by cmake
+#include <ATen/cuda/CUDAConfig.h>
+
+#if AT_CUDNN_ENABLED()
 #include <ATen/native/cudnn/RNNUtils.h>
 #endif
 
@@ -336,18 +339,18 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
                           const Tensor & dropout_state) {
-#ifdef AT_CUDNN_ENABLED()
+#if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 
   for (const auto& t : weight) {
-    TORCH_CHECK(weight[0].scalar_type == t.scalar_type(), "Weight scalar types do not match.");
+    TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");
   }
 
   Tensor redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
   bool needs_cast_and_flatten = (weight_buf.defined() ?
-                                 is_eligible(weight_buf) && (weight_buf.scalar_type != at:kHalf) :
-                                 is_eligible(weight[0]) && (weight[0].scalar_type != at::kHalf));
+                                 is_eligible(weight_buf) && (weight_buf.scalar_type() != at::kHalf) :
+                                 is_eligible(weight[0]) && (weight[0].scalar_type() != at::kHalf));
   if (needs_cast_and_flatten) {
     // this is (and should be) autograd-exposed.
     std::tie(redispatch_weight_buf, redispatch_weight) =
@@ -360,12 +363,13 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             num_layers,
             batch_first,
             bidirectional,
-            /*flat_buf_datatype=*/getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
-            /*flat_buf_options=*/weight[0].options.dtype(at::kHalf),
-            /*set_orig_weights_to_flat_buf=*/false);
+            /*flat_buf_datatype=*/at::native::getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
+            /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
+            /*set_orig_weights_to_flat_buf=*/false,
+            /*allow_type_change=*/true);
   }
 
-  return at:_cudnn_rnn(
+  return at::_cudnn_rnn(
       cached_cast(at::kHalf, input),
       needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,
       weight_stride0,
@@ -381,10 +385,10 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
       bidirectional,
       batch_sizes,
       dropout_state);
-#else
+#else // AT_CUDNN_ENABLED()
   AT_ERROR("autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
   return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // never reached, placates the compiler
-#endif
+#endif // AT_CUDNN_ENABLED()
 }
 
 
@@ -469,6 +473,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL_UNBOXED_ONLY(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
+  m.impl_UNBOXED("_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)

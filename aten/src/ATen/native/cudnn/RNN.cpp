@@ -523,7 +523,8 @@ namespace {
     return data_ptrs;
   }
 
-  void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
+  void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
+                         bool copy, bool allow_type_change=false) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
@@ -535,7 +536,12 @@ namespace {
            a != layer_params_from.end() && b != layer_params_to.end();
            ++a, ++b) {
         auto param_from = *a, param_to = *b;
-        AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
+        // if copying, allow_type_change may be true or false.
+        // if viewing, allow_type_change must be false.
+        AT_ASSERTM(copy || !allow_type_change,
+                   "if viewing, type change is not allowed.");
+        AT_ASSERTM(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
+                   "parameter types mismatch");
         if (copy) {
             param_to.copy_(param_from.view_as(param_to));
         } else {
@@ -607,7 +613,7 @@ namespace {
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
 
-  std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
+  TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
       TensorList weight_arr,
       int64_t weight_stride0,
       int64_t input_size,
@@ -618,7 +624,8 @@ namespace cudnn_rnn {
       bool bidirectional,
       const cudnnDataType_t flat_buf_datatype,
       const TensorOptions& flat_buf_options,
-      bool set_orig_weights_to_flat_buf) {
+      bool set_orig_weights_to_flat_buf,
+      bool allow_type_change/*=false*/) {
     // flat_buf_datatype is accepted as a separate argument (rather than extracted from flat_buf_options)
     // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
     // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
@@ -638,9 +645,9 @@ namespace cudnn_rnn {
     // Why do we pad to 5 dims here (and elsewhere)?
     // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
     // expects descriptors padded to 3 dimensions.
-    x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
+    x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
 
-    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
+    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
     auto weight_buf = at::zeros(num_weights, flat_buf_options);
 
     FilterDescriptor w_desc;
@@ -655,7 +662,7 @@ namespace cudnn_rnn {
                       params{params_arr, params_stride0};
 
     // Copy weights
-    _copyParams(weight, params);
+    _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
 
     if (set_orig_weights_to_flat_buf) {
       // Update the storage
@@ -674,6 +681,8 @@ namespace cudnn_rnn {
 
 } // namespace cudnn_rnn
 
+using namespace cudnn_rnn;
+
 // NB: does inplace update into TensorList
 // It would be a relatively simple matter to refactor this into multiple
 // functions, only one of which does an inplace update, but we leave this
@@ -690,15 +699,20 @@ Tensor _cudnn_rnn_flatten_weight(
       weight_arr,
       weight_stride0,
       input_size,
-      mode,
-      hidden_size,
-      num_layers,
+      fn_mode,
+      fn_hidden_size,
+      fn_num_layers,
       batch_first,
-      bidirectional,
+      fn_bidirectional,
       /*flat_buf_datatype=*/getCudnnDataType(weight_arr[0]),
       /*flat_buf_options=*/weight_arr[0].options(),
       /*set_orig_weights_to_flat_buf=*/true));
 }
+
+const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
+                                  "chunk of memory. This means they need to be compacted "
+                                  "at every call, possibly greatly increasing memory usage. "
+                                  "To compact weights again call flatten_parameters().";
 
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -714,6 +728,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;
+  if (!weight_buf.defined()) {
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
+  }
   if (fn_dropout_state.defined()) {
       auto input_arg = TensorArg(input, "input", 1);
       auto dropout_state_arg = TensorArg(fn_dropout_state, "dropout_states", 15);
@@ -1207,6 +1224,12 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
       cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
+  for (const auto& p : parameters) {
+    if (p.scalar_type() != input.scalar_type()) {
+      return {};
+    }
+  }
+
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
   auto datatype = getCudnnDataType(input);
@@ -1249,11 +1272,6 @@ Tensor try_get_weight_buf(
   return weight_buf;
 }
 
-const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
-                                  "chunk of memory. This means they need to be compacted "
-                                  "at every call, possibly greatly increasing memory usage. "
-                                  "To compact weights again call flatten_parameters().";
-
 template<typename hidden_type>
 std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
@@ -1263,11 +1281,10 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
+  // TODO:  This can go in _cudnn_rnn, but if so, we should remove weight_buf from _cudnn_rnn's
+  // arglist, and schema changes are unpleasant
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
-  if (!weight_buf.defined()) {
-    TORCH_WARN(WEIGHT_FORMAT_WARN);
-  }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
@@ -1295,9 +1312,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
-  if (!weight_buf.defined()) {
-    TORCH_WARN(WEIGHT_FORMAT_WARN);
-  }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
