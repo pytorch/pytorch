@@ -530,18 +530,21 @@ orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
 
 
-def _get_torch_version():
-    """Returns torch.__version__ as Tuple(int,int,int)"""
-    GET_TORCH_VERSION = re.compile(r'\d+\.\d+\.\d+')
-    v = GET_TORCH_VERSION.findall(torch.__version__)
-    assert len(v) == 1, "GET_TORCH_VERSION failed to find torch version"
+GET_SEMANTIC_VERSION = re.compile(r'\d+\.\d+\.\d+')
+
+def _get_semantic_version_from_string(version: str) -> Tuple[int, int, int]:
+    v = GET_SEMANTIC_VERSION.findall(version)
+
+    if len(v) != 1:
+        raise TypeError("Invalid version, not a valid semantic version (e.g. of correct input 1.7.1)")
+
     v = v[0].split('.')
     return (int(v[0]), int(v[1]), int(v[2]))
 
-_torch_version = _get_torch_version()
 # Use "init_version" to handle "_init_version". This value corresponds to the last pytorch version that
 # did not have 'init_version' context manager.
 _init_version = (1, 6, 1)
+_torch_version = _get_semantic_version_from_string(torch.__version__)
 
 def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master: bool = False) -> Tuple[int, int, int]:
     if use_master:
@@ -555,16 +558,7 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None, use_master:
             if not isinstance(x, int):
                 raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
     elif isinstance(version, str):
-        if version.count('.') != 2:
-            raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
-        v = version.split('.')
-        v = [v[0], v[1], v[2][0]]
-        for version_type in v:
-            for char in version_type:
-                if not ((str(char) >= '0' and str(char) <= '9') or str(char) == '.'):
-                    raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
-        v = version.split('.')
-        version = (int(v[0]), int(v[1]), int(v[2][0]))
+        version = _get_semantic_version_from_string(version)
     else:
         raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
 
@@ -581,7 +575,7 @@ def init_version(version=None, use_master=False):
 
     Args:
         version : Union[Tuple[int, int, int], str], which pytorch version to use for initializing nn.modules.
-            The format should bea version string (major,minor,micro) or a tuple of integers. Examples of valid
+            The format should be a version string (major,minor,micro) or a tuple of integers. Examples of valid
             version are (1,7,0), '1.7.1'.
         use_master : bool, If True, then the latest initialization scheme is used ignoring the value of `version`
             (default=False)
