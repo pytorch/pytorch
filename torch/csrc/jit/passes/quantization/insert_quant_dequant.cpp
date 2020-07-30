@@ -232,14 +232,14 @@ bool isNoopObserver(Value* observer) {
   return false;
 }
 
-c10::optional<at::ScalarType> getObserverDtype(Module& module, Value* v) {
+at::ScalarType getObserverDtype(Module& module, Value* v) {
   auto observer_name = findObserverName(v);
   if (observer_name.has_value()) {
     auto observer_module = module.attr(observer_name.value()).toModule();
     at::ScalarType scalar_type = observer_module.attr("dtype").toScalarType();
     return scalar_type;
   }
-  return c10::nullopt;
+  return at::ScalarType::Undefined;
 }
 
 c10::optional<std::string> getEmbeddingBagObsName(
@@ -394,9 +394,7 @@ void insertQuantizationOps(
     return;
   }
   if (quant_type == QuantType::DYNAMIC) {
-    if (getObserverDtype(module, observer_out).has_value() &&
-        getObserverDtype(module, observer_out).value() ==
-            at::ScalarType::Half) {
+    if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       // For activation tensors we insert choose_qparams, quant, dequant ops.
