@@ -25,7 +25,7 @@ class VContext final {
     return physical_device_;
   }
 
-  inline const VkPhysicalDeviceLimits & physical_device_limits() const {
+  inline const VkPhysicalDeviceLimits& physical_device_limits() const {
     return physical_device_limits_;
   }
 
