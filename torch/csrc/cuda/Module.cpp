@@ -162,7 +162,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
   int driverVersion = -1;
   std::string error;
   std::tie(driverVersion, error) = c10::cuda::driver_version();
-  
+
   if (!error.empty()) {
     PyErr_Format(PyExc_RuntimeError, "Error calling cudaDriverGetVersion: %s", error.c_str());
     return nullptr;
