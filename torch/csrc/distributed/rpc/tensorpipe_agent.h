@@ -161,10 +161,6 @@ class TensorPipeAgent : public RpcAgent {
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
-  static std::string createUniqueShmAddr();
-#endif
-
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
