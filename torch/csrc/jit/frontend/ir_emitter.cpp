@@ -956,7 +956,7 @@ struct to_ir {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
     // result type is annotated, every return must convert to that type
-    if (result_type) {
+    if (result_type && result_type != AnyType::get()) {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.

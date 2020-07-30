@@ -660,15 +660,7 @@ struct ParserImpl {
     if (L.nextIf(TK_ARROW)) {
       // Exactly one expression for return type annotation
       auto return_type_range = L.cur().range;
-      auto expr = parseExp();
-      if (expr.kind() == TK_VAR) {
-        auto type = Var(expr);
-        if (type.name().name() == "Any") {
-          throw ErrorReport(expr.range())
-              << "Return type annotation of Any is not permitted";
-        }
-      }
-      return Maybe<Expr>::create(return_type_range, expr);
+      return Maybe<Expr>::create(return_type_range, parseExp());
     } else {
       return Maybe<Expr>::create(L.cur().range);
     }

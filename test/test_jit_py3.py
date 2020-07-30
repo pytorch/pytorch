@@ -534,27 +534,37 @@ class TestScriptPy3(JitTestCase):
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
 
-    def test_any_return_type_disallowed(self):
+    def test_do_not_use_any_as_return_supertype(self):
+        """
+        Check that if a function is annotated as returning any,
+        all return paths are checked against each other (to see if
+        they have a common supertype) instead of against the
+        return type.
+        """
         class Mod(nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, inp: torch.Tensor) -> Any:
-                return inp * inp
+                if inp.shape[0] == 1:
+                    return inp * inp
+                else:
+                    return 3
 
         def any_function(inp: torch.Tensor) -> Any:
-            return inp * inp
+            if inp.shape[0] == 1:
+                return inp * inp
+            else:
+                return 3
 
-
-        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+        with self.assertRaisesRegex(RuntimeError, "Previous return statement returned a value of type Tensor but this return statement returns a value of type int"):
             torch.jit.script(Mod())
 
-        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+        with self.assertRaisesRegex(RuntimeError, "Previous return statement returned a value of type Tensor but this return statement returns a value of type int"):
             torch.jit.script(any_function)
 
-        with self.assertRaisesRegex(Exception, "Return type annotation of Any is not permitted"):
+        with self.assertRaisesRegex(RuntimeError, "Previous return statement returned a value of type Tensor but this return statement returns a value of type int"):
             cu = torch.jit.CompilationUnit(inspect.getsource(any_function))
-
 
     def test_export_opnames_interface(self):
         global OneTwoModule
