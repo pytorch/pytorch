@@ -130,6 +130,9 @@ bool isBefore(const Use& a, const Use& b) {
 }
 
 bool isAfter(const Use& a, const Use& b) {
+  if (a.user == b.user && a.offset == b.offset) {
+    return false;
+  }
   return !isBefore(a, b);
 }
 
