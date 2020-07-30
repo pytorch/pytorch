@@ -213,23 +213,21 @@ struct TORCH_API Module : public Object {
 
   void save(
       std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info = false) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   void save(
       const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info = false) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info = false) const;
+      bool save_debug_info_in_bytecode = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info = false) const;
+      bool save_debug_info_in_bytecode = false) const;
 
   Module copy() const;
 

@@ -10,7 +10,6 @@
 #include <torch/custom_class.h>
 
 #include <exception>
-#include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -63,14 +62,10 @@ IValue expect_field(
 
 std::string operator_str(
     const std::string& name,
-    const std::string& overloadname,
-    const std::string& module_info) {
+    const std::string& overloadname) {
   std::string result = name;
   if (!overloadname.empty()) {
     result += "." + overloadname;
-  }
-  if (!module_info.empty()) {
-    result = module_info + "." + result;
   }
   return result;
 }
@@ -130,14 +125,16 @@ void parseMethods(
             ->elements();
     const auto& types_list =
         expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
-    const auto& register_size = expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE).toInt();
+    const auto& register_size =
+        expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
+            .toInt();
 
     std::vector<IValue> module_debug_info_list;
-    bool hasDebugInfo = m_tuple.size() > 2;
+    bool hasDebugInfo =
+        table.toTuple()->elements().size() > BYTECODE_INDEX_MODULE_DEBUG_INFO;
     if (hasDebugInfo) {
-      IValue debug_info = m_tuple[2];
       module_debug_info_list =
-          expect_field(debug_info, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
+          expect_field(table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
               .toTuple()
               ->elements();
       TORCH_CHECK(
@@ -145,8 +142,9 @@ void parseMethods(
           "The numbers of operators and module info strings do not match.");
     }
 
-    for (const auto& ins : ins_list) {
-      auto ins_item = ins.toTuple()->elements();
+    function->set_module_debug_info_list_size(ins_list.size());
+    for (size_t i = 0; i < ins_list.size(); ++i) {
+      auto ins_item = ins_list[i].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -155,6 +153,11 @@ void parseMethods(
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       function->append_instruction(op_code, X, N);
+      if (op_code == OP) {
+        std::string module_debug_info =
+          (hasDebugInfo) ? module_debug_info_list[X].toString()->string() : "";
+        function->append_module_info(module_debug_info, i);
+      }
     }
 
     std::unordered_set<std::string> unsupported_op_names;
@@ -163,14 +166,11 @@ void parseMethods(
       TORCH_CHECK(
           op_item.size() == 2,
           "There should be two parts in an operator name.");
-      const std::string& module_debug_info = (hasDebugInfo) ?
-          module_debug_info_list[i].toString()->string() : "";
       auto op_found = function->append_operator(
           op_item[0].toString()->string(), op_item[1].toString()->string());
-      function->append_module_info(module_debug_info);
       if (!op_found) {
         unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string(), module_debug_info));
+            op_item[0].toString()->string(), op_item[1].toString()->string()));
       }
     }
     if (!unsupported_op_names.empty()) {
