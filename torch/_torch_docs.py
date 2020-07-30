@@ -7217,7 +7217,7 @@ Example::
 """.format(**factory_common_args))
 
 add_docstr(torch.full, r"""
-full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor#
+full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Creates a tensor of size :attr:`size` filled with :attr:`fill_value`. The
 tensor's dtype is inferred from :attr:`fill_value`.
