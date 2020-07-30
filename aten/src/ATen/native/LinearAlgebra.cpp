@@ -775,6 +775,15 @@ inline Tensor _pin_memory_if_cuda_input(
     ? mem.pin_memory() : mem;
 }
 
+inline Tensor _move_memory_if_cuda_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() == at::kCUDA)
+    ? mem.to(at::device_of(in).value(), /*non_blocking=*/true)
+    : mem;
+}
+
 inline Tensor _pin_and_move_memory_if_cuda_input(
   const Tensor& mem,
   const Tensor& in
@@ -1016,8 +1025,9 @@ Tensor mexp_impl(
       );
 
       if (idx_curr_norm_interval.numel()) {
-        auto idx_to_device = idx_curr_norm_interval
-          .to(a.device().type(), /*non_blocking=*/true);
+        auto idx_to_device = _move_memory_if_cuda_input(
+          idx_curr_norm_interval, a
+        );
         auto sub_a = at::index_select(a, 0, idx_to_device);
         res.index_put_({idx_to_device}, compute_Ts[i](sub_a));
       }
@@ -1032,8 +1042,9 @@ Tensor mexp_impl(
     );
 
     if (idx_large_norm.numel()) {
-      auto idx_to_device = idx_large_norm
-        .to(a.device().type(), /*non_blocking=*/true);
+      auto idx_to_device = _move_memory_if_cuda_input(
+        idx_large_norm, a
+      );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
       auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
       auto mexp_out = at::empty_like(a_large_norm);
