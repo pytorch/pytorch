@@ -3247,7 +3247,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_async_class_method(self):
-        print(dir(AsyncExecutionClass.class_async_add))
         self._test_async_function(AsyncExecutionClass.class_async_add)
 
     @dist_init
