@@ -6935,17 +6935,24 @@ class TestTorchDeviceType(TestCase):
             for other_dtype in torch.testing.get_all_dtypes():
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
 
-                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-                if device.startswith('cuda') and torch.bfloat16 in (dtype, other_dtype):
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
                 # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
-                # Skip only if either dtype or other_dtype is bfloat16.
+                # Skip only if either dtype or other_dtype is bfloat16, and promotion is unsupported.
                 if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
+                    non_bfloat16_dtype = dtype if dtype != torch.bfloat16 else other_dtype
+                    if non_bfloat16_dtype.is_complex or non_bfloat16_dtype == torch.float16:
+                        with self.assertRaises(RuntimeError):
+                            getattr(a, op)(b)
+                        continue
+
+                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
+                # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
+                # CUDA as long as the two tensors are promoted to a supported type.
+                # TODO: Remove this once logical operators are improved to take care of bfloat16.
+                if self.device_type == 'cuda' and torch.bfloat16 in (dtype, other_dtype):
+                    if torch.promote_types(dtype, other_dtype) == torch.bfloat16:
+                        with self.assertRaises(RuntimeError):
+                            getattr(a, op)(b)
+                        continue
 
                 if dtype.is_complex or other_dtype.is_complex:
                     with self.assertRaises(RuntimeError):
@@ -6962,10 +6969,11 @@ class TestTorchDeviceType(TestCase):
             # in-place
             b = torch.tensor(b_, dtype=dtype, device=device)
             # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-            if device.startswith('cuda') and dtype == torch.bfloat16:
+            if self.device_type == 'cuda' and dtype == torch.bfloat16:
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
                 continue
+
             if dtype.is_complex:
                 with self.assertRaises(RuntimeError):
                     getattr(a, op + '_')(b)
@@ -11119,31 +11127,12 @@ class TestTorchDeviceType(TestCase):
                     torch.testing.get_all_complex_dtypes()))
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            if dtype == torch.bfloat16:
-                # Currently multiply a bfloat16 type with floating-point causes error:
-                #   RuntimeError: dtype != ScalarType::Undefined INTERNAL ASSERT FAILED at
-                #   "/pytorch/aten/src/ATen/native/TensorIterator.cpp":125, please report a bug to PyTorch.
-                # We skip bfloat16 for now, but we should fix it. https://github.com/pytorch/pytorch/issues/40580
-                if self.device_type == 'cpu' or self.device_type == 'cuda':
-                    with self.assertRaises(RuntimeError):
-                        torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
-                    return
-                elif self.device_type == 'xla':
-                    # Error:
-                    # Traceback (most recent call last):
-                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py",
-                    # line 241, in instantiated_test
-                    #   result = test(self, device_arg, dtype)
-                    # File "/var/lib/jenkins/workspace/xla/test/../../test/test_torch.py", line 11062, in test_exp
-                    #   self.compare_with_numpy(torch.exp, np.exp, a)
-                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 878,
-                    # in compare_with_numpy
-                    #   a = tensor_like.detach().cpu().numpy()
-                    # TypeError: Got unsupported ScalarType BFloat16
-                    return
-
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
             a = a.to(dtype)
+            if dtype == torch.bfloat16:
+                with self.assertRaises(TypeError):  # compare_with_numpy doesn't support bfloat16
+                    self.compare_with_numpy(torch.exp, np.exp, a)
+                return
             self.compare_with_numpy(torch.exp, np.exp, a)
 
             if dtype.is_complex:
