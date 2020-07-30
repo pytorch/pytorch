@@ -459,10 +459,18 @@ class TestONNXRuntime(unittest.TestCase):
         class TensorInputModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                return torch.tensor([input.shape[0], input.shape[1]]) 
+                return torch.tensor([input.shape[0], input.shape[1]], dtype=torch.float) 
 
         x = torch.randn(3, 4)
         self.run_test(TensorInputModel(), x)
+
+        class MixedInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([int(input), input.shape[0]], dtype=torch.long) 
+
+        x = torch.randn(1)
+        self.run_test(MixedInputModel(), x)
 
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
