@@ -10127,10 +10127,9 @@ class TestTorchDeviceType(TestCase):
             return "complex norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
                 input_size, p, keepdim, dim)
 
-        for keepdim in [False, True]:
-            if device == 'cpu':
+        if device == 'cpu':
+            for keepdim in [False, True]:
                 # vector norm
-                # TODO: add complex vector 2-norm test once its works properly
                 x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
                 xn = x.cpu().numpy()
                 for p in [0, 1, 3, inf, -1, -2, -3, -inf]:
@@ -10141,7 +10140,6 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(res, expected, msg=msg)
 
                 # matrix norm
-                # TODO: add complex frobenius test once it works properly
                 x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
                 xn = x.cpu().numpy()
                 for p in ['nuc']:
@@ -10150,10 +10148,18 @@ class TestTorchDeviceType(TestCase):
                     msg = gen_error_message(x.size(), p, keepdim)
                     self.assertEqual(res.shape, expected.shape, msg=msg)
                     self.assertEqual(res, expected, msg=msg)
+            
+            # TODO: remove error test and add functionality test above when 2-norm support is added
+            with self.assertRaisesRegex(RuntimeError, r'norm with p=2 not supported for complex tensors'):
+                x = torch.randn(2, device=device, dtype=torch.complex64).norm(p=2)
 
-            elif device == 'cuda':
-                with self.assertRaisesRegex(RuntimeError, r'"norm_cuda" not implemented for \'ComplexFloat\''):
-                    (1j * torch.randn(25)).norm()
+            # TODO: remove error test and add functionality test above when frobenius support is added
+            with self.assertRaisesRegex(RuntimeError, r'frobenius norm not supported for complex tensors'):
+                x = torch.randn(2, 2, device=device, dtype=torch.complex64).norm(p='fro')
+
+        elif device == 'cuda':
+            with self.assertRaisesRegex(RuntimeError, r'"norm_cuda" not implemented for \'ComplexFloat\''):
+                (1j * torch.randn(25)).norm()
 
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
