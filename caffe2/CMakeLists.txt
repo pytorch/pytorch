@@ -142,12 +142,12 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(transforms)
 endif()
 
-# Advanced: if we have white list specified, we will do intersections for all
+# Advanced: if we have allow list specified, we will do intersections for all
 # main lib srcs.
-if(CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
+if(CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
