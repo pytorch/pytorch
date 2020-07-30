@@ -40,7 +40,7 @@ manage their own state. There is only a single CUDA context/state.
  * DEPRECATED: use device_count() instead
  */
 inline int64_t getNumGPUs() {
-  return c10::cuda::cuda_device_count();
+    return c10::cuda::device_count();
 }
 
 /**
@@ -49,7 +49,7 @@ inline int64_t getNumGPUs() {
  * this function will report CUDA is not available (rather than raise an error.)
  */
 inline bool is_available() {
-  return c10::cuda::cuda_device_count() > 0;
+    return c10::cuda::device_count() > 0;
 }
 
 TORCH_CUDA_API cudaDeviceProp* getCurrentDeviceProperties();

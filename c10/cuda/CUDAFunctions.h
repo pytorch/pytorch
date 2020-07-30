@@ -12,9 +12,7 @@
 namespace c10 {
 namespace cuda {
 
-// The name would naturally be "device_count" but there is name collision
-// To resolve it "cuda_" is added
-DeviceIndex cuda_device_count() noexcept;
+DeviceIndex device_count() noexcept;
 
 DeviceIndex current_device();
 

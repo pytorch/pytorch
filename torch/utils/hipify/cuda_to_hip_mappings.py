@@ -8064,11 +8064,11 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10::cuda", ("c10::hip", API_C10)),
         ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
         ("CUDAStream", ("HIPStream", API_C10)),
-        ("cuda::cuda_device_count", ("hip::cuda_device_count", API_C10)),
+        # This substitution is not permissible, because there's another copy of this
+        # function in torch/cuda.h
+        # ("cuda::device_count", ("hip::device_count", API_C10)),
         ("cuda::current_device", ("hip::current_device", API_C10)),
         ("cuda::set_device", ("hip::set_device", API_C10)),
-        ("cuda::driver_version", ("hip::driver_version", API_C10)),
-        ("cuda::device_synchronize", ("hip::device_synchronize", API_C10)),
         ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
         ("getStreamFromPool", ("getStreamFromPool", API_C10)),
         ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStream", API_C10)),

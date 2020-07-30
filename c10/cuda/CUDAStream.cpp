@@ -197,7 +197,7 @@ static thread_local LeakyStreamInternals** current_streams = nullptr;
 // streams.
 // Warning: this function must only be called once!
 static void initGlobalStreamState() {
-  num_gpus = cuda_device_count();
+  num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   AT_ASSERTM(

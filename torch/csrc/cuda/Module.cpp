@@ -85,7 +85,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
-  return PyLong_FromLong(at::cuda::cuda_device_count());
+  return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -150,7 +150,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 {
-  const auto count = c10::cuda::cuda_device_count();
+  const auto count = c10::cuda::device_count();
   if (count == 0) {
     return PyBool_FromLong(0);
   }
@@ -484,7 +484,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
 
-  auto num_gpus = c10::cuda::cuda_device_count();
+  auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
