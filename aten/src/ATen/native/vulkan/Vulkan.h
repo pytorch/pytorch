@@ -26,7 +26,12 @@ namespace native {
 namespace vulkan {
 namespace detail {
 
+#ifdef DEBUG
 static constexpr bool kEnableValidationLayers = true;
+#else
+static constexpr bool kEnableValidationLayers = false;
+#endif
+
 bool is_available();
 
 class VContext;
