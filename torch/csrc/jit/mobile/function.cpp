@@ -57,9 +57,7 @@ void Function::set_module_debug_info_list_size(size_t size) {
   pc_to_module_debug_info_.resize(size);
 }
 
-void Function::append_module_info(
-    const std::string& module_info,
-    size_t pc) {
+void Function::append_module_info(const std::string& module_info, size_t pc) {
   pc_to_module_debug_info_[pc] = module_info;
 }
 

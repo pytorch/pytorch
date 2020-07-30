@@ -134,7 +134,8 @@ void parseMethods(
         table.toTuple()->elements().size() > BYTECODE_INDEX_MODULE_DEBUG_INFO;
     if (hasDebugInfo) {
       module_debug_info_list =
-          expect_field(table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
+          expect_field(
+              table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
               .toTuple()
               ->elements();
       TORCH_CHECK(
@@ -154,15 +155,16 @@ void parseMethods(
       int N = ins_item[2].toInt();
       function->append_instruction(op_code, X, N);
       if (op_code == OP) {
-        std::string module_debug_info =
-          (hasDebugInfo) ? module_debug_info_list[X].toString()->string() : "";
+        std::string module_debug_info = (hasDebugInfo)
+            ? module_debug_info_list[X].toString()->string()
+            : "";
         function->append_module_info(module_debug_info, i);
       }
     }
 
     std::unordered_set<std::string> unsupported_op_names;
-    for (size_t i = 0; i < ops_list.size(); ++i) {
-      auto op_item = ops_list[i].toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
           op_item.size() == 2,
           "There should be two parts in an operator name.");

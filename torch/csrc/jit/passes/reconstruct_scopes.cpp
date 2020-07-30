@@ -99,8 +99,7 @@ void ReconstructScopesPass::constructRelativeNamesForModules(
   module_names[module._ivalue()] = getModuleName(module, prefix);
   for (const NameModule& s : module.named_children()) {
     constructRelativeNamesForModules(
-        s.value,
-        module_names[module._ivalue()] + "." + s.name);
+        s.value, module_names[module._ivalue()] + "." + s.name);
   }
 }
 

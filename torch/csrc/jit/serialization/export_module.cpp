@@ -153,12 +153,12 @@ c10::IValue getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  std::vector<std::pair<std::string, IValue>> entries =
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
-       {"register_size", register_size}};
+  std::vector<std::pair<std::string, IValue>> entries = {
+      {"instructions", Tup(instructions)},
+      {"operators", Tup(operators)},
+      {"constants", Tup(constants)},
+      {"types", Tup(types)},
+      {"register_size", register_size}};
 
   if (save_debug_info_in_bytecode) {
     // module debug info
@@ -169,7 +169,7 @@ c10::IValue getFunctionTuple(
       module_paths.emplace_back(std::move(path));
     }
 
-    entries.push_back({"module_debug_info", Tup(module_paths)});
+    entries.emplace_back("module_debug_info", Tup(module_paths));
   }
 
   auto table = Table(entries);
@@ -193,7 +193,8 @@ void setstateTuple(
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-      setstateTuple(module, obj->getSlot(i), elements, save_debug_info_in_bytecode);
+      setstateTuple(
+          module, obj->getSlot(i), elements, save_debug_info_in_bytecode);
     }
   }
 }
@@ -206,12 +207,13 @@ void moduleMethodsTuple(
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    elements.push_back(
-        getFunctionTuple(module, method.function(), save_debug_info_in_bytecode));
+    elements.push_back(getFunctionTuple(
+        module, method.function(), save_debug_info_in_bytecode));
   }
 
   // __setstate__ of all components
-  setstateTuple(module, module._ivalue(), elements, save_debug_info_in_bytecode);
+  setstateTuple(
+      module, module._ivalue(), elements, save_debug_info_in_bytecode);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -351,9 +353,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(
-      const Module& module,
-      bool save_debug_info_in_bytecode) {
+  void writeByteCode(const Module& module, bool save_debug_info_in_bytecode) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -414,10 +414,7 @@ void ExportModule(
         return !out ? 0 : nbytes;
       });
   serializer.serialize(
-      module,
-      extra_files,
-      bytecode_format,
-      save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
 }
 
 void ExportModule(
@@ -428,10 +425,7 @@ void ExportModule(
     bool save_debug_info_in_bytecode) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(
-      module,
-      extra_files,
-      bytecode_format,
-      save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
 }
 
 void ExportModule(
@@ -442,10 +436,7 @@ void ExportModule(
     bool save_debug_info_in_bytecode) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
-      module,
-      extra_files,
-      bytecode_format,
-      save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
 }
 
 namespace {
