@@ -65,7 +65,7 @@ class TestForeach(TestCase):
 
         expected = [torch.tensor([2], dtype=torch.float, device=device), 
                     torch.tensor([2], dtype=torch.int, device=device)]
-        
+
         res = torch._foreach_add(tensors, 1)
         self.assertEqual(res, expected)
 
