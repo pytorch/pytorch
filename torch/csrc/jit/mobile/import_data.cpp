@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/import_data.h>
 
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
@@ -154,21 +154,21 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
-std::map<std::string, at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _load_mobile_data(std::move(rai), std::move(device));
+  return _load_parameters(std::move(rai), std::move(device));
 }
 
-std::map<std::string, at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_mobile_data(std::move(rai), std::move(device));
+  return _load_parameters(std::move(rai), std::move(device));
 }
 
-std::map<std::string, at::Tensor> _load_mobile_data(
+std::map<std::string, at::Tensor> _load_parameters(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();

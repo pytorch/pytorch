@@ -219,8 +219,7 @@ class EmbeddingBag(Module):
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
         include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
-                                      is equivalent to the size of `indices`. This matches the CSR format. Note:
-                                      this option is currently only supported when ``mode="sum"``.
+                                      is equivalent to the size of `indices`. This matches the CSR format.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
