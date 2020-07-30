@@ -30,7 +30,7 @@ class InitVersionTest(TestCase):
     def test_init_version_remains_same(self):
         # _init_version should remain same before and after using init_version
         before = _init_version
-        with init_version(use_master=True) as v:
+        with init_version() as v:
             l = nn.Linear(2, 3)
         after = _init_version
 
