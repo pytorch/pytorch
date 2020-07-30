@@ -28,9 +28,9 @@ class atest : public ::testing::Test {
 };
 
 namespace BinaryOpsKernel {
-const int IntMask = 1;
-const int FloatMask = 2;
-const int BoolMask = 4;
+const int IntMask = 1; // test dtype = kInt
+const int FloatMask = 2; // test dtype = kFloat
+const int BoolMask = 4; // test dtype = kBool
 } // namespace BinaryOpsKernel
 
 template <typename T, typename... Args>
@@ -39,14 +39,15 @@ void unit_binary_ops_test(
     const Tensor& x_tensor,
     const Tensor& y_tensor,
     const Tensor& exp,
+    ScalarType dtype,
     Args... args) {
-  auto out_tensor = empty({5}, exp.dtype());
-  func(out_tensor, x_tensor, y_tensor, args...);
-  ASSERT_EQ(out_tensor.dtype(), exp.dtype());
-  if (exp.dtype() == kFloat) {
-    ASSERT_TRUE(exp.allclose(out_tensor));
+  auto out_tensor = empty({5}, dtype);
+  func(out_tensor, x_tensor.to(dtype), y_tensor.to(dtype), args...);
+  ASSERT_EQ(out_tensor.dtype(), dtype);
+  if (dtype == kFloat) {
+    ASSERT_TRUE(exp.to(dtype).allclose(out_tensor));
   } else {
-    ASSERT_TRUE(exp.equal(out_tensor));
+    ASSERT_TRUE(exp.to(dtype).equal(out_tensor));
   }
 }
 
@@ -72,24 +73,17 @@ void run_binary_ops_test(
     Args... args) {
   // Test op over integer tensors
   if (option & BinaryOpsKernel::IntMask) {
-    unit_binary_ops_test(
-        func, x_tensor.to(kInt), y_tensor.to(kInt), exp.to(kInt), args...);
+    unit_binary_ops_test(func, x_tensor, y_tensor, exp, kInt, args...);
   }
 
   // Test op over float tensors
   if (option & BinaryOpsKernel::FloatMask) {
-    unit_binary_ops_test(
-        func,
-        x_tensor.to(kFloat),
-        y_tensor.to(kFloat),
-        exp.to(kFloat),
-        args...);
+    unit_binary_ops_test(func, x_tensor, y_tensor, exp, kFloat, args...);
   }
 
   // Test op over boolean tensors
   if (option & BinaryOpsKernel::BoolMask) {
-    unit_binary_ops_test(
-        func, x_tensor.to(kBool), y_tensor.to(kBool), exp.to(kBool), args...);
+    unit_binary_ops_test(func, x_tensor, y_tensor, exp, kBool, args...);
   }
 }
 
@@ -189,7 +183,7 @@ TEST_F(atest, max_operators) {
   auto exp_tensor = tensor({10, 1, 0, 1, 10});
   run_binary_ops_test<
       at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
-      max_out, x_tensor, y_tensor, exp_tensor, INT);
+      max_out, x_tensor, y_tensor, exp_tensor, INTBOOLFLOAT);
 }
 
 TEST_F(atest, min_operators) {
