@@ -1496,7 +1496,7 @@ def scalar_tensor(g, scalar, dtype, *options):
 def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
-        dtype = 4 # int64
+        dtype = 4  # int64
     if sym_help._is_packed_list(data):
         input_list = list()   
         for t in sym_help._unpack_list(data):
