@@ -71,7 +71,7 @@ size_t blockIndex(const Block* b) {
  * NB: this is not a topological index. Topologically, two nodes in
  * different blocks of an if node are not topologically < or > each other.
  */
-bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
+bool isBefore(Node* n1, Node* n2) {
   // Invalid to call with the same node as both args
   AT_ASSERT(n1 != n2);
 
@@ -83,7 +83,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
     n1 = n1->owningBlock()->owningNode();
     // n2 contains n1
     if (n1 == n2) {
-      return !checking_before;
+      return false;
     }
   }
 
@@ -91,7 +91,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
     n2 = n2->owningBlock()->owningNode();
     // n1 contains n2
     if (n2 == n1) {
-      return checking_before;
+      return true;
     }
   }
 
@@ -99,7 +99,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
   // recurse upwards, checking if they are on the same block
   while (true) {
     if (n1->owningBlock() == n2->owningBlock()) {
-      return n1->isBefore(n2) == checking_before;
+      return n1->isBefore(n2);
     }
 
     auto new_n1 = n1->owningBlock()->owningNode();
@@ -112,7 +112,7 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
       // take whichever node is in the earlier block
       auto index_1 = blockIndex(n1->owningBlock());
       auto index_2 = blockIndex(n2->owningBlock());
-      return (index_1 < index_2) == checking_before;
+      return index_1 < index_2;
     }
 
     n1 = new_n1;
@@ -120,21 +120,21 @@ bool isBeforeOrAfter(Node* n1, Node* n2, bool checking_before) {
   }
 }
 
-bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
+bool isBefore(const Use& a, const Use& b) {
   // If two uses are the same node, we order on offset
   if (a.user == b.user) {
-    return (a.offset < b.offset) == checking_before;
+    return a.offset < b.offset;
   }
 
-  return isBeforeOrAfter(a.user, b.user, checking_before);
+  return isBefore(a.user, b.user);
 }
 
 bool isAfter(const Use& a, const Use& b) {
-  return isBeforeOrAfter(a, b, /*checking_before*/ false);
+  return !isBefore(a, b);
 }
 
-bool isBefore(const Use& a, const Use& b) {
-  return isBeforeOrAfter(a, b, /*checking_before*/ true);
+bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
+  return checking_before ? isBefore(a, b) : isAfter(a, b);
 }
 
 c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
