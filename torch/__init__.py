@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors. It also defines mathematical operations that can be performed over these tensors.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -272,6 +272,7 @@ def set_default_tensor_type(t):
 def set_default_dtype(d):
     r"""Sets the default floating point dtype to :attr:`d`.
     This dtype is:
+
     1. The inferred dtype for python floats in :func:`torch.tensor`.
     2. Used to infer dtype for python complex numbers. The default complex dtype is set to
        ``torch.complex128`` if default floating point dtype is ``torch.float64``,
@@ -282,7 +283,7 @@ def set_default_dtype(d):
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
-    Example::
+    Example:
         >>> # initial default for floating point is torch.float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32

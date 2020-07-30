@@ -294,7 +294,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
       if (data[k] != expected) {
-        throw std::runtime_error("BOOM!");
+        throw std::runtime_error("Allreduce ouputs do not match expected outputs");
       }
     }
   }
@@ -322,7 +322,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
+            throw std::runtime_error("Broadcast outputs do not match expected outputs");
           }
         }
       }
@@ -353,7 +353,7 @@ void testReduce(const std::string& path, int rank, int size) {
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
+            throw std::runtime_error("Reduce outputs do not match expected outputs");
           }
         }
       }
@@ -380,7 +380,7 @@ void testAllgather(const std::string& path, int rank, int size) {
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         if (data[k] != expected) {
-          throw std::runtime_error("BOOM!");
+          throw std::runtime_error("Allgather outputs do not match expected outputs");
         }
       }
     }
