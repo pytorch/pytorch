@@ -382,7 +382,8 @@ void testLiteInterpreterOneSubmoduleInfo() {
     ++pc;
   }
 
-  std::unordered_set<std::string> expected_result({"top(B).forward", "top(B).A0(A).forward"});
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A0(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -422,10 +423,8 @@ void testLiteInterpreterTwoSubmodulesInfo() {
     ++pc;
   }
 
-  std::unordered_set<std::string> expected_result({
-      "top(C).forward",
-      "top(C).A0(A).forward",
-      "top(C).B0(B).forward"});
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -465,9 +464,8 @@ void testLiteInterpreterSequentialModuleInfo() {
     ++pc;
   }
 
-  std::unordered_set<std::string> expected_result({
-      "top(C).A0(A).forward",
-      "top(C).B0(B).forward"});
+  std::unordered_set<std::string> expected_result(
+      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
