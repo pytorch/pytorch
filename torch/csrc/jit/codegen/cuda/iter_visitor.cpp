@@ -55,7 +55,7 @@ void remove_visited(
 } // namespace
 
 void IterVisitor::traverseFrom(
-    Fusion* const fusion,
+    Fusion* fusion,
     const std::vector<Val*>& from,
     bool traverseAllPaths) {
   FusionGuard fg(fusion);
@@ -102,7 +102,7 @@ void IterVisitor::traverseFrom(
 }
 
 void IterVisitor::traverse_(
-    Fusion* const fusion,
+    Fusion* fusion,
     bool from_outputs_only,
     bool traverse_all_paths) {
   FusionGuard fg(fusion);
@@ -124,13 +124,11 @@ void IterVisitor::traverse_(
     traverseFrom(fusion, leaves, traverse_all_paths);
 }
 
-void IterVisitor::traverse(Fusion* const fusion, bool from_outputs_only) {
+void IterVisitor::traverse(Fusion* fusion, bool from_outputs_only) {
   traverse_(fusion, from_outputs_only, false);
 }
 
-void IterVisitor::traverseAllPaths(
-    Fusion* const fusion,
-    bool from_outputs_only) {
+void IterVisitor::traverseAllPaths(Fusion* fusion, bool from_outputs_only) {
   traverse_(fusion, from_outputs_only, true);
 }
 
@@ -223,7 +221,7 @@ std::vector<Statement*> BackwardVisitor::next(Val* val) {
 }
 
 void BackwardVisitor::traverseFrom(
-    Fusion* const fusion,
+    Fusion* fusion,
     const std::vector<Val*>& from,
     bool traverseAllPaths) {
   FusionGuard fg(fusion);

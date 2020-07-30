@@ -20,9 +20,9 @@ namespace jit {
 namespace fuser {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
-  ir_cloner->registerClone(src, this);
   name_ = src->name_;
   fusion_ = ir_cloner->fusion();
+  ir_cloner->registerClone(src, this);
 }
 
 Val* Statement::asVal() {

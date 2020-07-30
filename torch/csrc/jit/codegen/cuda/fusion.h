@@ -178,6 +178,13 @@ class TORCH_CUDA_API Fusion final {
   // Register stmt with this fusion.
   StmtNameType registerStatement(Statement* stmt);
 
+  // Lowered nodes
+  StmtNameType registerLoweredVal(Val* val);
+  StmtNameType registerLoweredExpr(Expr* expr);
+
+  // Lowered counterpart to inFusion()
+  bool inKernelIr(const Statement* stmt) const;
+
   // Check if val is used in this fusion. Not equivelent to DCE
   bool used(Val* val) const;
 
@@ -270,6 +277,13 @@ class TORCH_CUDA_API Fusion final {
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // Lowered IR
+  std::unordered_set<Val*> lowered_val_set_;
+  std::unordered_set<Expr*> lowered_expr_set_;
+
+  StmtNameType lowered_val_name_counter_ = 0;
+  StmtNameType lowered_expr_name_counter_ = 0;
 };
 
 } // namespace fuser
