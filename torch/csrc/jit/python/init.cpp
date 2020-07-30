@@ -943,6 +943,10 @@ void initJITBindings(PyObject* module) {
             c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
       }))
       .def(
+          "done",
+          // Intentionally not releasing GIL
+          &PythonFutureWrapper::done)
+      .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())

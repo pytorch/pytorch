@@ -2582,14 +2582,14 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-def _smooth_l1_loss(input, target):
-    # type: (Tensor, Tensor) -> Tensor
+def _smooth_l1_loss(input, target, delta=1.):
+    # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -2609,7 +2609,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
-        ret = _smooth_l1_loss(input, target)
+        ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
