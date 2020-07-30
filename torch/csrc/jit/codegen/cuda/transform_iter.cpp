@@ -144,7 +144,7 @@ ReplayTransformations::ReplayTransformations(
           val);
       IterDomain* id = val->as<IterDomain>();
       TORCH_INTERNAL_ASSERT(
-          this->id_map_.find(id) != this->id_map_.end(),
+          id_map_.find(id) != id_map_.end(),
           "Could not find required input: ",
           id,
           " in provided id_map.");

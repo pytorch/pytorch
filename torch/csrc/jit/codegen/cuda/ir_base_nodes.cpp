@@ -47,9 +47,9 @@ Val::Val(ValType _vtype, DataType _dtype, bool register_val)
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_CHECK(
       fusion != nullptr, "No active fusion group found when creating a Val.");
-  this->fusion_ = fusion;
+  fusion_ = fusion;
   if (register_val)
-    this->name_ = this->fusion_->registerVal(this);
+    name_ = fusion_->registerVal(this);
 }
 
 Val::Val(const Val* src, IrCloner* ir_cloner)
@@ -152,7 +152,7 @@ Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
-  this->fusion_ = fusion;
+  fusion_ = fusion;
 }
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
