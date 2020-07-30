@@ -767,6 +767,23 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
+inline Tensor _pin_memory_if_cuda_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() == at::kCUDA)
+    ? mem.pin_memory() : mem;
+}
+
+inline Tensor _pin_and_move_memory_if_cuda_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() == at::kCUDA)
+    ? mem.pin_memory().to(at::device_of(in).value(), /*non_blocking=*/true)
+    : mem;
+}
+
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -865,8 +882,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, 1},
     A.dtype()
   );
-  bs = (A.device().type() == at::kCUDA)
-    ? bs.pin_memory().to(A.device().type(), /*non_blocking=*/true) : bs;
+  bs = _pin_and_move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -928,8 +944,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, 1},
     A.dtype()
   );
-  bs = (A.device().type() == at::kCUDA)
-    ? bs.pin_memory().to(A.device().type(), /*non_blocking=*/true) : bs;
+  bs = _pin_and_move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -996,8 +1011,9 @@ Tensor mexp_impl(
       auto idx_curr_norm_interval = (
         (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
       ).nonzero().squeeze(-1);
-      idx_curr_norm_interval = (a.device().type() == at::kCUDA)
-        ? idx_curr_norm_interval.pin_memory() : idx_curr_norm_interval;
+      idx_curr_norm_interval = _pin_memory_if_cuda_input(
+        idx_curr_norm_interval, a
+      );
 
       if (idx_curr_norm_interval.numel()) {
         auto idx_to_device = idx_curr_norm_interval
@@ -1011,8 +1027,10 @@ Tensor mexp_impl(
     // We pin memory to make the transfer to CUDA faster and async
     auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
       .nonzero().squeeze(-1);
-    idx_large_norm = (a.device().type() == at::kCUDA)
-      ? idx_large_norm.pin_memory() : idx_large_norm;
+    idx_large_norm = _pin_memory_if_cuda_input(
+      idx_large_norm, a
+    );
+
     if (idx_large_norm.numel()) {
       auto idx_to_device = idx_large_norm
         .to(a.device().type(), /*non_blocking=*/true);
