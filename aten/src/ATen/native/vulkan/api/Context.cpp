@@ -246,7 +246,7 @@ VkCommandPool create_command_pool(
 VContext::VContext(const bool enable_validation_layers)
     : instance_(create_instance(enable_validation_layers), &VK_DELETER(Instance)),
       physical_device_(acquire_physical_device(instance())),
-      physical_device_limits_(query_physical_device_physical_device_limits(physical_device_)),
+      physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
       device_(create_device(physical_device(), compute_queue_family_index_), &VK_DELETER(Device)),
       queue_(acquire_queue(device(), compute_queue_family_index_)),
