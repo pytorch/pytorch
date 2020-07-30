@@ -9,6 +9,13 @@
 
 namespace c10 {
 
+TypeVerbosity type_verbosity() {
+  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static TypeVerbosity verbosity = c_verbosity ?
+    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+  return verbosity;
+}
+
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if (auto value = t.cast<TensorType>()) {
     if  (value->scalarType().has_value()) {
@@ -34,21 +41,24 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info) {
+        if (has_valid_strides_info &&
+            type_verbosity() >= TypeVerbosity::TypeAndStride) {
           out << ":" << *value->strides()[i];
         }
       }
-      if (value->requiresGrad()) {
-        if (i++ > 0) {
-          out << ", ";
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        if (value->requiresGrad()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "requires_grad=" << *value->requiresGrad();
         }
-        out << "requires_grad=" << *value->requiresGrad();
-      }
-      if (value->device()) {
-        if (i++ > 0) {
-          out << ", ";
+        if (value->device()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "device=" << *value->device();
         }
-        out << "device=" << *value->device();
       }
       out << ")";
     }
