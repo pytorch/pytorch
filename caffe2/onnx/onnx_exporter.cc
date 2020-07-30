@@ -500,7 +500,7 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
     attr->set_type(AttributeProto::STRINGS);
   } else if (arg.ints_size()) {
     attr->mutable_ints()->CopyFrom(arg.ints());
-    attr->set_type(AttributeProto::INTS);
+    attr->set_type(AttributeProto::INTS); 
   } else if (arg.strings_size()) {
     attr->mutable_strings()->CopyFrom(arg.strings());
     attr->set_type(AttributeProto::STRINGS);
