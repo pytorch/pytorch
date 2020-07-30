@@ -120,8 +120,6 @@ class TestOptimizer(unittest.TestCase):
         optimization_blacklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
         bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blacklist_no_prepack)
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-                   .run(str(get_forward_graph(bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
