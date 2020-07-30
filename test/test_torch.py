@@ -5418,28 +5418,28 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
-    # @onlyOnCPUAndCUDA
-    # def test_out_resize_warning(self, device):
-    #     a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
-    #     b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
+    @onlyOnCPUAndCUDA
+    def test_out_resize_warning(self, device):
+        a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
+        b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
 
-    #     unary_inputs = (a,)
-    #     binary_inputs = (a, b)
-    #     unary_ops = (torch.ceil, torch.exp)
-    #     binary_ops = (torch.add, torch.sub)
-    #     for op in (unary_ops + binary_ops):
-    #         with warnings.catch_warnings(record=True) as w:
-    #             warnings.simplefilter("always")
-    #             inputs = unary_inputs if op in unary_ops else binary_inputs
+        unary_inputs = (a,)
+        binary_inputs = (a, b)
+        unary_ops = (torch.ceil, torch.exp)
+        binary_ops = (torch.add, torch.sub)
+        for op in (unary_ops + binary_ops):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                inputs = unary_inputs if op in unary_ops else binary_inputs
 
-    #             # No warnings
-    #             op(*inputs, out=torch.empty(3, device=device))
-    #             op(*inputs, out=torch.empty(0, device=device))
-    #             self.assertEqual(len(w), 0)
+                # No warnings
+                op(*inputs, out=torch.empty(3, device=device))
+                op(*inputs, out=torch.empty(0, device=device))
+                self.assertEqual(len(w), 0)
 
-    #             # Cases that throw warnings
-    #             op(*inputs, out=torch.empty(2, device=device))
-    #             self.assertEqual(len(w), 1)
+                # Cases that throw warnings
+                op(*inputs, out=torch.empty(2, device=device))
+                self.assertEqual(len(w), 1)
 
     @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):

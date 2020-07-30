@@ -9,8 +9,8 @@ namespace at { namespace native {
 void resize_output(Tensor& output, IntArrayRef shape) {
   // Tests for resizing of tensors with one more elements
   if (output.numel() != 0 && !output.sizes().equals(shape)) {
-    TORCH_CHECK(false,
-      "An output with one or more elements was resized, since it had ",
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
       "shape ", output.sizes(), ", which does not match the required ",
       "output shape ", shape, ".",
       "This behavior is deprecated, and in a future PyTorch release outputs ",
