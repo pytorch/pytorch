@@ -10083,7 +10083,7 @@ class TestTorchDeviceType(TestCase):
                 msg = gen_error_message(x.size(), p, keepdim, dim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
-            
+
             # matrix norm
             for p in ['fro', 'nuc']:
                 res = x.norm(p, keepdim=keepdim).cpu()
@@ -10148,7 +10148,7 @@ class TestTorchDeviceType(TestCase):
                     msg = gen_error_message(x.size(), p, keepdim)
                     self.assertEqual(res.shape, expected.shape, msg=msg)
                     self.assertEqual(res, expected, msg=msg)
-            
+
             # TODO: remove error test and add functionality test above when 2-norm support is added
             with self.assertRaisesRegex(RuntimeError, r'norm with p=2 not supported for complex tensors'):
                 x = torch.randn(2, device=device, dtype=torch.complex64).norm(p=2)
