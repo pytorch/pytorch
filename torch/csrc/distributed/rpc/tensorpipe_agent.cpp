@@ -85,7 +85,7 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
-#ifdef TP_ENABLE_SHM
+#if TENSORPIPE_HAS_SHM_TRANSPORT
 
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = std::make_shared<tensorpipe::transport::shm::Context>();
@@ -112,7 +112,7 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
 // transport to be used as a channel.
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 
-#ifdef TP_ENABLE_CMA
+#if TENSORPIPE_HAS_CMA_CHANNEL
 
 std::unique_ptr<ChannelRegistration> makeCmaChannel() {
   auto context = std::make_shared<tensorpipe::channel::cma::Context>();
@@ -892,7 +892,7 @@ const std::string& TensorPipeAgent::findWorkerURL(
   return it->second;
 }
 
-#ifdef TP_ENABLE_SHM
+#if TENSORPIPE_HAS_SHM_TRANSPORT
 std::string TensorPipeAgent::createUniqueShmAddr() {
   thread_local uint32_t threadLocalId = 0;
   return c10::str(
