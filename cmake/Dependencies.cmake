@@ -1318,8 +1318,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     set(BUILD_TESING ${__BUILD_TESTING})
 
-    # Make it public because we include its headers in our headers.
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS tensorpipe)
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()
 endif()
 
