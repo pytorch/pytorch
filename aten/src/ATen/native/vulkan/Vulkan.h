@@ -197,10 +197,10 @@ class VBuffer final {
   class MapMemory final {
    public:
     MapMemory(
-        VkDevice device,
-        VkDeviceMemory deviceMemory,
-        VkDeviceSize offset,
-        VkDeviceSize size)
+        const VkDevice device,
+        const VkDeviceMemory deviceMemory,
+        const VkDeviceSize offset,
+        const VkDeviceSize size)
         : device_(device),
           deviceMemory_(deviceMemory),
           offset_(offset),
