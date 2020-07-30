@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class LinearReLU(nnqat.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules, attached with
-    FakeQuantize modules for output activation and weight, used in
+    FakeQuantize modules for weight, used in
     quantization aware training.
 
     We adopt the same interface as :class:`torch.nn.Linear`.
@@ -15,7 +15,6 @@ class LinearReLU(nnqat.Linear):
     default.
 
     Attributes:
-        activation_post_process: fake quant module for output activation
         weight: fake quant module for weight
 
     Examples::
@@ -33,8 +32,7 @@ class LinearReLU(nnqat.Linear):
         super(LinearReLU, self).__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(
-            F.linear(input, self.weight_fake_quant(self.weight), self.bias)))
+        return F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
