@@ -1027,9 +1027,7 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::toOption
     return c10::nullopt;
   }
   AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
-  return c10::optional<std::reference_wrapper<const std::string>>(
-    std::reference_wrapper(static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string())
-  );
+  return std::reference_wrapper<const std::string>(static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string());
 }
 
 inline PyObject* IValue::toPyObject() const {
