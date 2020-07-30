@@ -267,6 +267,10 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor cos(const Tensor& self) { return unary_op_impl(self, at::cos_out); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
+Tensor& sinc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinc_stub); }
+Tensor sinc(const Tensor& self) { return unary_op_impl(self, at::sinc_out); }
+Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
+
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
@@ -569,6 +573,7 @@ DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
 DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinc_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);

@@ -895,6 +895,9 @@
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos()
 
+- name: sinc(Tensor self) -> Tensor
+  self: grad * (self.cos() - self.sin()) / self
+
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh()
 

@@ -2620,6 +2620,15 @@
   dispatch:
     CPU, CUDA: sin_out
 
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

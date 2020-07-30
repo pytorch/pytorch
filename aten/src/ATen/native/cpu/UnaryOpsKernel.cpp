@@ -298,6 +298,15 @@ static void sinh_kernel(TensorIterator& iter) {
   });
 }
 
+static void sinc_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinc_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return (a != scalar_t(0)) 
+            ? std::sin(a * M_PIf) / (a * M_PIf) : scalar_t(1); });
+    });
+}
+
 static void cosh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
@@ -614,6 +623,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
