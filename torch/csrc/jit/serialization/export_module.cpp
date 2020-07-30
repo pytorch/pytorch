@@ -165,7 +165,6 @@ c10::IValue getFunctionTuple(
     std::vector<IValue> module_paths;
     module_paths.reserve(op_module_paths.size());
     for (auto& path : op_module_paths) {
-      std::cout << "Path: " << path << std::endl;
       module_paths.emplace_back(std::move(path));
     }
 

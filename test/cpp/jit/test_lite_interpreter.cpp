@@ -8,6 +8,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <unordered_set>
+
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -298,6 +300,175 @@ void testLiteInterpreterBuiltinFunction() {
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
+}
+
+void testLiteInterpreterModuleInfoBasic() {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return 2 * x
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    std::string module_info = bc.get_forward_method_debug_info(pc);
+    if (module_info == "<no module info for pc>") {
+      break;
+    }
+    if (!module_info.empty()) {
+      module_debug_info_set.insert(module_info);
+    }
+    ++pc;
+  }
+
+  std::unordered_set<std::string> expected_result({"top(M).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterNotSavingModuleInfo() {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  size_t pc = 0;
+  while (true) {
+    std::string module_info = bc.get_forward_method_debug_info(pc);
+    if (module_info == "<no module info for pc>") {
+      break;
+    }
+    AT_ASSERT(module_info.empty());
+    ++pc;
+  }
+}
+
+void testLiteInterpreterOneSubmoduleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return 2 * x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    std::string module_info = bc.get_forward_method_debug_info(pc);
+    if (module_info == "<no module info for pc>") {
+      break;
+    }
+    if (!module_info.empty()) {
+      module_debug_info_set.insert(module_info);
+    }
+    ++pc;
+  }
+
+  std::unordered_set<std::string> expected_result({"top(B).forward", "top(B).A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterTwoSubmodulesInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.B0.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    std::string module_info = bc.get_forward_method_debug_info(pc);
+    if (module_info == "<no module info for pc>") {
+      break;
+    }
+    if (!module_info.empty()) {
+      module_debug_info_set.insert(module_info);
+    }
+    ++pc;
+  }
+
+  std::unordered_set<std::string> expected_result({
+      "top(C).forward",
+      "top(C).A0(A).forward",
+      "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterSequentialModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(self.B0.forward(x))
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    std::string module_info = bc.get_forward_method_debug_info(pc);
+    if (module_info == "<no module info for pc>") {
+      break;
+    }
+    if (!module_info.empty()) {
+      module_debug_info_set.insert(module_info);
+    }
+    ++pc;
+  }
+
+  std::unordered_set<std::string> expected_result({
+      "top(C).A0(A).forward",
+      "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
 }
 
 namespace {
