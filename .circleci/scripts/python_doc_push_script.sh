@@ -50,21 +50,13 @@ export PATH=/opt/conda/bin:$PATH
 
 rm -rf pytorch || true
 
-# Install TensorBoard in python 3 so torch.utils.tensorboard classes render
-pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
-
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
-checkout_install_torchvision
 pushd docs
-rm -rf source/torchvision
-cp -a ../vision/docs/source source/torchvision
 
 # Build the docs
-pip -q install -r requirements.txt || true
+pip -q install -r requirements.txt
 if [ "$is_master_doc" = true ]; then
-  # TODO: fix gh-38011 then enable this which changes warnings into errors
-  # export SPHINXOPTS="-WT --keep-going"
   make html
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.

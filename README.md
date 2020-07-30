@@ -168,7 +168,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 #### Install Dependencies
 
 Common
-```
+```bash
 conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 ```
 
@@ -304,7 +304,7 @@ make -f docker.Makefile
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
 
-```
+```bash
 cd docs/
 pip install -r requirements.txt
 ```
