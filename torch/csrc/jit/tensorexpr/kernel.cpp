@@ -1084,7 +1084,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             int64_t i = 0;
             for (auto a : axes) {
               if (i++ != dim) {
-                indices.push_back(ExprHandle(a.node()));
+                indices.emplace_back(ExprHandle(a.node()));
               }
             }
 
