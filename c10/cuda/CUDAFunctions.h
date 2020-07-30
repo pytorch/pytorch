@@ -11,6 +11,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {

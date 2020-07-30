@@ -32,6 +32,7 @@ set(C10_CUDA_HEADERS
     CUDAMacros.h
     CUDAMathCompat.h
     CUDAStream.h
+    CUDAFunctions.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
