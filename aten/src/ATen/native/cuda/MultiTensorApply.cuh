@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/Utils.cuh>
+#include <ATen/native/cuda/ForeachUtils.cuh>
 
 namespace at { namespace native {
 
@@ -35,19 +35,6 @@ void multi_tensor_apply(
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Amount of tensor lists has to match the depth.");
-        TORCH_CHECK(tensor_lists[0].size() > 0, "Tensor list must have at least one tensor.");
-
-        for (auto tl : tensor_lists) {
-            TORCH_CHECK(tl.size() == tensor_lists[0].size(), "All tensor lists have to have the same amount of tensors.")
-            for (int i = 0; i < tl.size(); i++) {
-                // checks every tensor against its partner in the first list
-                tl[i].sizes() = tensor_lists[0][i].sizes();
-                tl[i].strides() = tensor_lists[0][i].strides();
-
-                TORCH_CHECK(tl[i].layout() == at::kStrided, "Only tensors with strided layouts are supported.");
-                TORCH_CHECK(tl[i].is_non_overlapping_and_dense(), "Only non overlapping and dense tensors are supported.");
-            }
-        }
 
         int n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;

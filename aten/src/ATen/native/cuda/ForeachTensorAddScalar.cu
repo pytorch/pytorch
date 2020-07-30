@@ -1,5 +1,5 @@
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/Utils.cuh>
+#include <ATen/native/cuda/ForeachUtils.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -72,10 +72,16 @@ struct AddScalarFunctor {
 } // namespace
 
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
+    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+    if (!check_fast_route(tensors, scalar)) {
+        return at::native::foreach_add_scalar_kernel_cpu(tensors, scalar);
+    }
+
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
     for (int i = 0; i < tensors.size(); i++) {
-        vec_res.emplace_back(at::empty_like(tensors[i]));
+        vec_res.emplace_back(at::native::empty_like(tensors[i]));
     }
 
     tensor_lists.emplace_back(std::move(tensors.vec()));
