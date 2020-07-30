@@ -303,7 +303,6 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
-    signbit
     sin
     sinh
     sqrt
