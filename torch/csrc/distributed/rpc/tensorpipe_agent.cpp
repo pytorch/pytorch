@@ -3,6 +3,8 @@
 #include <limits>
 
 #include <fmt/format.h>
+#include <tensorpipe/tensorpipe.h>
+
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
