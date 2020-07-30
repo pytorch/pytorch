@@ -6759,6 +6759,22 @@
   variants: function, method
   device_guard: False
 
+- func: isposinf(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: isposinf_out
+
+- func: isneginf(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: isneginf_out
+
 # NOTE [_add_batch_dim and _remove_batch_dim]
 # _add_batch_dim and _remove_batch_dim are meant to be used in the implementation
 # of the vmap frontend API (see torch/_vmap_internals.py). They are not
