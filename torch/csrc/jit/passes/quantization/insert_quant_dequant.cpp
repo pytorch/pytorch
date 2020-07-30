@@ -232,14 +232,14 @@ bool isNoopObserver(Value* observer) {
   return false;
 }
 
-bool isFp16Observer(Value* observer) {
-  if (getModuleName(observer).has_value()) {
-    auto name = getModuleName(observer).value();
-    if (name == "__torch__.torch.quantization.observer.Fp16Observer") {
-      return true;
-    }
+c10::optional<at::ScalarType> getObserverDtype(Module& module, Value* v) {
+  auto observer_name = findObserverName(v);
+  if (observer_name.has_value()) {
+    auto observer_module = module.attr(observer_name.value()).toModule();
+    at::ScalarType scalar_type = observer_module.attr("dtype").toScalarType();
+    return scalar_type;
   }
-  return false;
+  return c10::nullopt;
 }
 
 c10::optional<std::string> getEmbeddingBagObsName(
@@ -394,7 +394,9 @@ void insertQuantizationOps(
     return;
   }
   if (quant_type == QuantType::DYNAMIC) {
-    if (isFp16Observer(observer->input(0))) {
+    if (getObserverDtype(module, observer_out).has_value() &&
+        getObserverDtype(module, observer_out).value() ==
+            at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       // For activation tensors we insert choose_qparams, quant, dequant ops.
@@ -959,14 +961,14 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   QParamVector qparams;
   c10::QScheme qscheme;
 
-  if (isNoopObserver(n->input(0)) || isFp16Observer(n->input(0))) {
+  auto observer_module = module.attr(observer_name.value()).toModule();
+  auto scalar_type = observer_module.attr("dtype");
+  if (isNoopObserver(n->input(0)) || scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
-  auto observer_module = module.attr(observer_name.value()).toModule();
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
   IValue result = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(result);
-  auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(
       scalar_type.toScalarType() != at::ScalarType::Undefined,
       "dtype of observer can't be undefined");
