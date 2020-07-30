@@ -525,7 +525,7 @@ bool OnnxExporter::IsBlockListed(const caffe2::Argument& arg) {
       return it->second.count(arg.i());
     }
   } else if (arg.has_s()) {
-    const auto it = kBlockkListString.find(arg.name());
+    const auto it = kBlockListString.find(arg.name());
     if (it != kBlockListString.end()) {
       return it->second.count(arg.s());
     }
