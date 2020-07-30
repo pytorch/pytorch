@@ -484,12 +484,18 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.
     if zipfile.is_zipfile(cached_file):
-        with zipfile.ZipFile(cached_file) as cached_zipfile:
-            members = cached_zipfile.infolist()
-            if len(members) != 1:
-                raise RuntimeError('Only one file(not dir) is allowed in the zipfile')
-            cached_zipfile.extractall(model_dir)
-            extraced_name = members[0].filename
-            cached_file = os.path.join(model_dir, extraced_name)
-
+        # Hub used to support automatically extracts from zipfile manually compressed by users.
+        # Since PyTorch 1.6 release we add zipfile as default serialization format.
+        # Here we first try torch.load() the zipfile directly assuming it's the new format,
+        # then fall back to the old way if that fails.
+        try:
+            return torch.load(cached_file, map_location=map_location)
+        except RuntimeError:
+            with zipfile.ZipFile(cached_file) as cached_zipfile:
+                members = cached_zipfile.infolist()
+                if len(members) != 1:
+                    raise RuntimeError('Only one file(not dir) is allowed in the zipfile')
+                cached_zipfile.extractall(model_dir)
+                extraced_name = members[0].filename
+                cached_file = os.path.join(model_dir, extraced_name)
     return torch.load(cached_file, map_location=map_location)
