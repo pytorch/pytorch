@@ -352,7 +352,10 @@ Comparison Ops
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
     lt

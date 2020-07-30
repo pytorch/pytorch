@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 
@@ -256,5 +257,42 @@ TEST(IValueTest, ListNestedEquality) {
   EXPECT_EQ(c1, c2);
   EXPECT_NE(c1, c3);
   EXPECT_NE(c2, c3);
+}
+
+TEST(IValueTest, EnumEquality) {
+  EXPECT_EQ(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1))),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1)))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1))),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_2", "enum_name_1", IValue(1)))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1))),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_2", IValue(1)))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1))),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(2)))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue(1))),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          "enum_class_1", "enum_name_1", IValue("1")))
+  );
 }
 } // namespace c10

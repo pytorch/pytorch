@@ -52,7 +52,7 @@ TORCH_MODULE(L1Loss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ KLDivLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// The `Kullback-Leibler divergence`_ Loss
+/// The Kullback-Leibler divergence loss measure
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.KLDivLoss to learn
 /// about the exact behavior of this module.
 ///
