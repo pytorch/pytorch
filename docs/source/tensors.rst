@@ -339,6 +339,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
+   .. automethod:: isposinf
+   .. automethod:: isneginf
    .. automethod:: isnan
    .. automethod:: is_contiguous
    .. automethod:: is_complex
