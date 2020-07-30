@@ -147,6 +147,8 @@ void LayerNormBackwardKernelImplInternal(
   // First path of dgamma/dbeta and dX
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
     int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads,
+                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     T* dgamma_buffer_ptr = dgamma_null ? nullptr : buffer_data + tid * N;
     T* dbeta_buffer_ptr = dbeta_null ? nullptr : buffer_data + num_threads * N + tid * N;
     for (int64_t i = start; i < end; ++i) {
