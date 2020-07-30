@@ -245,7 +245,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   std::vector<uint8_t> w_zero_points;
   at::Tensor w_scales;
   std::tie(w_zero_points, w_scales) =
-      make_zero_points_and_scales_tensor(weight_contig);
+      make_zero_points_and_scales_tensor(weight_contig, transpose);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
   // during the first invocation of operator run. Refer to qconv.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
