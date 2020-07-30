@@ -77,9 +77,16 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Synchronize streams by blocking each on the NCCL stream
+    void synchronizeStreams();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
+
+    // Get a Future object that will be marked as completed internally.
+    // It actually returns a FutureNCCL object which is a sub class Future.
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     // The cached list of CUDA devices to operate on
@@ -125,7 +132,58 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
+    // Store a Future work associated with WorkNCCL.
+    c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
+
     friend class ProcessGroupNCCL;
+  };
+
+  // FutureNCCL is a subclass of c10d ivalue's Future. FutureNCCL has a
+  // reference to WorkNCCL and our goal is to use this class in getFuture API of
+  // WorkNCCL. Once NCCL kernel is done executing, this future will have NCCL
+  // collective's outputs as its value. Inside FutureNCCL's constructor, we mark
+  // it as completed with NCCL collective's unfinished outputs to allow async
+  // execution of callbacks. We next set its completed false until NCCL streams
+  // are synchronized in wait() or addCallback() (called by Future's then()).
+  //
+  // We override wait() and addCallback() of Future for our purpose.
+  // Inside wait(), we simply synchronize the streams using WorkNCCL's
+  // synchronizeStreams(). This preserves the async execution model for CUDA.
+  // When we add a callback to this future (.then()), we first
+  // synchronizeStreams() and invoke the callback inline.
+  // Callbacks return a Future (not FutureNCCL).
+  struct FutureNCCL : at::ivalue::Future {
+   public:
+    explicit FutureNCCL(
+        std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
+        std::vector<at::Tensor>& outputs)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          work_(work) {
+      markCompleted(at::IValue(outputs));
+      completed_ = false;
+    }
+
+    // Synchronizes the streams using WorkNCCL's synchronizeStreams(). After
+    // that, it sets completed true. No need to write the value again, since it
+    // is already set in constructor.
+    void wait() override {
+      work_->synchronizeStreams();
+      completed_ = true;
+    };
+
+    // Add a callback to FutureNCCL. FutureNCCL invokes the callback inline
+    // after NCCL streams are synchronized. Callbacks return a Future (not
+    // FutureNCCL).
+    void addCallback(std::function<void(void)> callback) {
+      work_->synchronizeStreams();
+      completed_ = true;
+
+      // Run callback inline after synchronizeStreams.
+      callback();
+    }
+
+   private:
+    std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
