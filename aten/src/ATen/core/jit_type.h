@@ -1145,7 +1145,7 @@ struct CAFFE2_API EnumType : public NamedType {
         AT_ERROR(
             "Cannot create Enum with value type '",
             value->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float and string are supported");
     }
   }
 
@@ -1539,6 +1539,16 @@ private:
   PyObjectType()
   : Type(TypeKind::PyObjectType) {}
 };
+
+enum class TypeVerbosity {
+  None,
+  Type,
+  TypeAndStride,
+  Full,
+  Default = Full,
+};
+
+CAFFE2_API TypeVerbosity type_verbosity();
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 template <typename T>

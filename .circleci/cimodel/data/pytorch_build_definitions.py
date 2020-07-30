@@ -34,7 +34,7 @@ class Conf:
 
     @staticmethod
     def is_test_phase(phase):
-        return phase in ["test", "test1", "test2"]
+        return "test" in phase
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -235,7 +235,7 @@ def instantiate_configs():
 
         elif compiler_name == "rocm":
             rocm_version = fc.find_prop("compiler_version")
-            restrict_phases = ["build", "test1", "test2"]
+            restrict_phases = ["build", "test1", "test2", "caffe2_test"]
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")

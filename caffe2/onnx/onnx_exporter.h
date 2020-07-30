@@ -24,6 +24,11 @@ using ::ONNX_NAMESPACE::TensorProto;
 using ConvertedResult =
     std::pair<std::vector<NodeProto>, std::vector<TensorProto>>;
 
+// Useful utility function
+void rewriteSubnet(
+    Argument* arg,
+    std::map<std::string, std::string> oldname_to_newname);
+
 // Rewrite Caffe2 nets into SSA forms. Notice that we will preserve the external
 // output names for predict net.
 CAFFE2_API std::unordered_map<std::string, std::string> SsaRewrite(

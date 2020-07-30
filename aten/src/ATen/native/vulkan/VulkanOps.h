@@ -19,6 +19,16 @@ void upsample_nearest2d(
     float scaleH,
     float scaleW);
 
+void adaptive_avg_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int64_t IH,
+    const int64_t IW,
+    const int64_t OH,
+    const int64_t OW,
+    const int64_t IN,
+    const int64_t IC);
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
@@ -68,7 +78,7 @@ void clamp(
 
 void addmm(
     VulkanTensor& output,
-    const VulkanTensor& t,
+    c10::optional<const VulkanTensor> t,
     const VulkanTensor& m1,
     const VulkanTensor& m2,
     float beta,

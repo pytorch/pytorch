@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -98,7 +97,7 @@ if(MSVC)
     if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
 elseif(APPLE)
@@ -166,6 +165,9 @@ if(USE_DISTRIBUTED)
       endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if(USE_TENSORPIPE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      endif()
     endif()
 endif()
 

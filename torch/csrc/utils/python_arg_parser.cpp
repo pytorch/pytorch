@@ -67,7 +67,7 @@ static const std::unordered_map<std::string, std::vector<std::string>> numpy_com
 // overloads and binding to the Tensor overload with a number of a different
 // type will trigger a type error.
 //
-// If you modify this, you will need to adjust the blacklist in
+// If you modify this, you will need to adjust the blocklist in
 // tools/pyi/gen_pyi.py (and add hardcoded signatures for these
 // functions.)
 static bool should_allow_numbers_as_tensors(const std::string& name) {
