@@ -70,6 +70,9 @@ class _NormBase(Module):
         raise NotImplementedError
 
     def extra_repr(self):
+        if "track_running_stats" not in self.__dict__:
+            return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}'.format(**self.__dict__)
+
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
