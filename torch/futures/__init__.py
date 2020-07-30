@@ -22,6 +22,14 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
+
+    def done(self) -> bool:
+        r"""
+        Return ``True`` if this ``Future`` is done. A ``Future`` is done if it
+        has a result or an exception.
+        """
+        return super().done()
+
     def wait(self) -> T:
         r"""
         Block until the value of this ``Future`` is ready.
