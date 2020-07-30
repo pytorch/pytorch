@@ -152,13 +152,24 @@ ncclResult_t ncclAlltoall(
     cudaStream_t stream) {
   int numranks;
   size_t rankdiff = count * size;
+  int tempbuff = 0;
+
   C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
   C10D_NCCL_CHECK(ncclGroupStart());
   for (int r = 0; r < numranks; r++) {
+    void* sbuff;
+    void* rbuff;
+    if (count != 0) {
+      sbuff = (char*)sendbuff + r * rankdiff;
+      rbuff = (char*)recvbuff + r * rankdiff;
+    } else {
+      sbuff = &tempbuff;
+      rbuff = &tempbuff;
+    }
     C10D_NCCL_CHECK(ncclSend(
-        ((char*)sendbuff) + r * rankdiff, count, type, r, comm, stream));
+        sbuff, count, type, r, comm, stream));
     C10D_NCCL_CHECK(ncclRecv(
-        ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
+        rbuff, count, type, r, comm, stream));
   }
   C10D_NCCL_CHECK(ncclGroupEnd());
   return ncclSuccess;
@@ -176,18 +187,32 @@ ncclResult_t ncclAlltoallv(
     ncclComm_t comm,
     cudaStream_t stream) {
   int numranks;
+  int tempbuff = 0;
+
   C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
   C10D_NCCL_CHECK(ncclGroupStart());
   for (int r = 0; r < numranks; r++) {
+    void* sbuff;
+    void* rbuff;
+    if (sendcounts[r] != 0) {
+      sbuff = (char*)sendbuff + senddispls[r] * size;
+    } else {
+      sbuff = &tempbuff;
+    }
+    if (recvcounts[r] != 0) {
+      rbuff = (char*)recvbuff + recvdispls[r] * size;
+    } else {
+      rbuff = &tempbuff;
+    }
     C10D_NCCL_CHECK(ncclSend(
-        ((char*)sendbuff) + senddispls[r] * size,
+        sbuff,
         sendcounts[r],
         type,
         r,
         comm,
         stream));
     C10D_NCCL_CHECK(ncclRecv(
-        ((char*)recvbuff) + recvdispls[r] * size,
+        rbuff,
         recvcounts[r],
         type,
         r,
