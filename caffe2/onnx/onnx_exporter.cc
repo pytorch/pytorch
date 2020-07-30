@@ -129,46 +129,6 @@ void collectExternalsFromIfOpSubnet(
   }
 }
 
-void rewriteSubnet(
-    Argument* arg,
-    std::map<std::string, std::string> oldname_to_newname) {
-  NetDef* net = arg->mutable_n();
-  // clear external inputs and outputs since they're no longer valid
-  net->mutable_external_input()->Clear();
-  net->mutable_external_output()->Clear();
-  for (auto& op : *(net->mutable_op())) {
-    for (auto& input : *(op.mutable_input())) {
-      if (oldname_to_newname.find(input) != oldname_to_newname.end()) {
-        input = oldname_to_newname[input];
-      }
-    }
-    for (auto& output : *(op.mutable_output())) {
-      if (oldname_to_newname.find(output) != oldname_to_newname.end()) {
-        output = oldname_to_newname[output];
-      }
-    }
-  }
-  for (auto& external_input : *(net->mutable_external_input())) {
-    if (oldname_to_newname.find(external_input) != oldname_to_newname.end()) {
-      external_input = oldname_to_newname[external_input];
-    }
-  }
-  for (auto& external_output : *(net->mutable_external_output())) {
-    if (oldname_to_newname.find(external_output) != oldname_to_newname.end()) {
-      external_output = oldname_to_newname[external_output];
-    }
-  }
-}
-
-Argument* getArgumentFromName(OperatorDef* op, const std::string& name) {
-  for (int i = 0; i < op->arg_size(); i++) {
-    if (op->mutable_arg(i)->name() == name) {
-      return op->mutable_arg(i);
-    }
-  }
-  return nullptr;
-}
-
 void ssaRewriteForIfOp(
     OperatorDef* op,
     std::unordered_map<std::string, int>* blob_versions,
@@ -179,18 +139,27 @@ void ssaRewriteForIfOp(
   // both then_net and else_net
   std::vector<std::string> if_external_input;
   std::vector<std::string> if_external_output;
+
+  std::unordered_set<std::string> if_inputs, if_outputs;
+  for (const auto& input: op->input()) {
+    if_inputs.insert(input);
+  }
+  for (const auto& output: op->output()) {
+    if_outputs.insert(output);
+  }
+
   ArgumentHelper helper(*op);
   Argument *then_arg = nullptr, *else_arg = nullptr;
   NetDef* target_net = nullptr;
   bool has_then = false, has_else = false;
 
   if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
-    then_arg = getArgumentFromName(op, "then_net");
+    then_arg = GetMutableArgument("then_net", false, op);
     target_net = then_arg->mutable_n();
     has_then = true;
   }
   if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
-    else_arg = getArgumentFromName(op, "else_net");
+    else_arg = GetMutableArgument("else_net", false, op);
     if (!has_then) {
       target_net = else_arg->mutable_n();
     }
@@ -200,6 +169,18 @@ void ssaRewriteForIfOp(
   if (has_then || has_else) {
     collectExternalsFromIfOpSubnet(
         target_net, &if_external_input, &if_external_output);
+
+    // Add inputs/outputs of the sub_net to the inputs/outputs of the op
+    for (const auto& input : if_external_input) {
+      if (if_inputs.count(input) == 0) {
+        op->add_input(input);
+      }
+    }
+    for (const auto& output : if_external_output) {
+      if (if_outputs.count(output) == 0) {
+        op->add_output(output);
+      }
+    }
     std::map<string, string> oldname_to_newname;
 
     // Build oldname_to_newname map
@@ -261,14 +242,14 @@ void revertRenamedExternalOutputForIfOp(
   revertRenamedExternalOutput(if_op, renamed_external_outputs);
 
   if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
-    then_arg = getArgumentFromName(if_op, "then_net");
+    then_arg = GetMutableArgument("then_net", false, if_op);
     NetDef* net = then_arg->mutable_n();
     for (auto& op : *(net->mutable_op())) {
       revertRenamedExternalOutput(&op, renamed_external_outputs);
     }
   }
   if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
-    else_arg = getArgumentFromName(if_op, "else_net");
+    else_arg = GetMutableArgument("else_net", false, if_op);
     NetDef* net = else_arg->mutable_n();
     for (auto& op : *(net->mutable_op())) {
       revertRenamedExternalOutput(&op, renamed_external_outputs);
@@ -299,6 +280,27 @@ void revertRenamedExternalOutputForIfOp(
       return ::ONNX_NAMESPACE::TensorProto::FLOAT;
   }
 #undef CAFFE2_TO_ONNX_TYPE
+}
+
+void rewriteSubnet(
+    Argument* arg,
+    std::map<std::string, std::string> oldname_to_newname) {
+  NetDef* net = arg->mutable_n();
+  // clear external inputs and outputs since they're no longer valid
+  net->mutable_external_input()->Clear();
+  net->mutable_external_output()->Clear();
+  for (auto& op : *(net->mutable_op())) {
+    for (auto& input : *(op.mutable_input())) {
+      if (oldname_to_newname.find(input) != oldname_to_newname.end()) {
+        input = oldname_to_newname[input];
+      }
+    }
+    for (auto& output : *(op.mutable_output())) {
+      if (oldname_to_newname.find(output) != oldname_to_newname.end()) {
+        output = oldname_to_newname[output];
+      }
+    }
+  }
 }
 
 std::unordered_map<std::string, std::string> SsaRewrite(
@@ -332,6 +334,13 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       external_outputs.emplace(output);
     }
     for (auto& op : *pred_net->mutable_op()) {
+      // Special SSA Rewrite for subnet of If Operator
+      // This needs to happen first because the inputs/outputs of If/AsyncIf
+      // may get modified inside ssaRewriteForIfOp
+      if (op.type() == "If" || op.type() == "AsyncIf") {
+        ssaRewriteForIfOp(&op, &blob_versions, &is_initialized_tensor);
+      }
+
       for (auto& input : *op.mutable_input()) {
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
@@ -343,10 +352,7 @@ std::unordered_map<std::string, std::string> SsaRewrite(
           continue;
         }
       }
-      // Special SSA Rewrite for subnet of If Operator
-      if (op.type() == "If" || op.type() == "AsyncIf") {
-        ssaRewriteForIfOp(&op, &blob_versions, &is_initialized_tensor);
-      }
+
       for (auto& output : *op.mutable_output()) {
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
