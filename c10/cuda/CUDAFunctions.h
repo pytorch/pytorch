@@ -35,14 +35,14 @@ inline DeviceIndex device_count() noexcept {
   return static_cast<DeviceIndex>(count);
 }
 
-DeviceIndex current_device();
+C10_CUDA_API DeviceIndex current_device();
 
-void set_device(DeviceIndex device);
+C10_CUDA_API void set_device(DeviceIndex device);
 
 // Returns a pair of an int containing the version number and a string containing an error description,
 // if the string is not empty then the function has failed and the integer value should be discarded
-std::pair<int32_t, std::string> driver_version();
+C10_CUDA_API std::pair<int32_t, std::string> driver_version();
 
-void device_synchronize();
+C10_CUDA_API void device_synchronize();
 
 }} // namespace c10::cuda
