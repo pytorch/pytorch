@@ -155,13 +155,29 @@ auto handle_torch_function_setter(THPVariable* self, const std::string& property
   return 0;
 }
 
+// Combines self and args into one tuple.
+auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
+  if (args == nullptr) {
+    return py::make_tuple(py::handle(self));
+  }
+  else if (self == nullptr) {
+    return py::reinterpret_borrow<py::tuple>(args);
+  }
+
+  auto py_args = py::reinterpret_borrow<py::tuple>(args);
+  size_t n = py_args.size();
+  auto args_ = py::tuple(n + 1);
+  args_[0] = py::handle(self);
+  for (size_t i = 0; i < n; i++) {
+    args_[i+1] = py_args[i];
+  }
+  return args_;
+}
+
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* torch_api, const std::string& module_name) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
-  py::tuple args_ = py::make_tuple(py::handle(self));
-  if (args != nullptr) {
-    args_ = args_ + py::reinterpret_borrow<py::tuple>(args);
-  }
+  py::tuple args_ = combine_self_args(self, args);
   py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
   py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
   py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), NULL));
@@ -182,11 +198,7 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::object ret;
-  py::tuple args_ = py::reinterpret_borrow<py::tuple>(args);
-  if (self != nullptr) {
-    args_ = py::make_tuple(py::handle(self)) + args_;
-  }
-
+  py::tuple args_ = combine_self_args(self, args);
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(r.signature.overloaded_args.size());
