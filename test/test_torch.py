@@ -18183,16 +18183,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             # TODO: Investigate why the output is not close to numpy.
             if dtype == torch.float16:
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         atol=0.4, rtol=1e-2, exact_dtype=exact_dtype,
-                                                         with_keepdim=with_keepdim, with_extremal=with_extremal)
+                atol = 0.4
+                rtol = 1e-2
             elif dtype == torch.float32:
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         atol=7e-05, rtol=3e-06, exact_dtype=exact_dtype,
-                                                         with_keepdim=with_keepdim, with_extremal=with_extremal)
+                atol = 7e-05
+                rtol = 3e-06
             else:
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                         exact_dtype=exact_dtype, with_keepdim=with_keepdim)
+                # Default values
+                atol = None
+                rtol = None
+            self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype,
+                                                     with_keepdim=with_keepdim, with_extremal=with_extremal)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
