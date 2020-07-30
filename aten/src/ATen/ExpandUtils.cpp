@@ -1,8 +1,34 @@
+#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 
 namespace at {
 std::vector<Tensor> infer_size(std::vector<Tensor> a, std::vector<Tensor> b) {
-  return a;
+  size_t dimsA = a.size();
+  size_t dimsB = b.size();
+  size_t ndim = dimsA > dimsB ? dimsA : dimsB;
+  std::vector<Tensor> expandedSizes(ndim);
+
+  // Use ptrdiff_t to ensure signed comparison.
+  for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
+    ptrdiff_t offset = ndim - 1 - i;
+    ptrdiff_t dimA = dimsA - 1 - offset;
+    ptrdiff_t dimB = dimsB - 1 - offset;
+    auto constOne = at::ones({1}, at::kLong);
+    Tensor sizeA = (dimA >= 0) ? a[dimA] : constOne;
+    Tensor sizeB = (dimB >= 0) ? b[dimB] : constOne;
+
+    TORCH_CHECK(
+        // sizeA[0] == sizeB[0] || sizeA[0] == 1 || sizeB[0] == 1,
+        sizeA.equal(sizeB) || sizeA.equal(constOne) || sizeB.equal(constOne),
+        "The size of tensor a (", sizeA[0],
+        ") must match the size of tensor b (", sizeB[0],
+        ") at non-singleton dimension ", i);
+
+      // 1s map to the other size (even 0).
+      expandedSizes[i] = sizeA.equal(constOne) ? sizeB : sizeA;
+  }
+
+  return expandedSizes;
 }
 
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
