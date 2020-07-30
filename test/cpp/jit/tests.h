@@ -173,6 +173,7 @@ namespace jit {
   _(GPU_FusionReductionScheduler)                   \
   _(GPU_FusionReductionSchedulerMultiDimNonFastest) \
   _(GPU_FusionReductionSchedulerMultiDimFastest)    \
+  _(GPU_FusionReductionSchedulerDimShmoo)           \
   _(GPU_FusionCacheBefore)                          \
   _(GPU_FusionCacheAfter)                           \
   _(GPU_FusionCacheIndirect)                        \
