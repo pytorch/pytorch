@@ -7487,9 +7487,19 @@ class TestTorchDeviceType(TestCase):
         def run_test(coeff_shape, data_shape):
             coeffs = torch.rand(*coeff_shape, device=device, dtype=torch.float)
             x = torch.rand(coeff_shape[1], *data_shape, device=device, dtype=dtype)
+
             res1 = torch._compute_linear_combination(x, coeffs)
             res2 = (x.unsqueeze(0) * coeffs.view(*coeff_shape, *([1] * len(data_shape)))).sum(1)
             self.assertEqual(res1, res2, atol=1e-5, rtol=0.0)
+
+            # check `out=` version
+            res3 = torch.zeros(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=res3)
+            self.assertEqual(res1, res3, atol=1e-5, rtol=0.0)
+
+            res4 = torch.ones(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=res4)
+            self.assertEqual(res1, res4 - 1.0, atol=1e-5, rtol=0.0)
 
         run_test([5, 3], [2, 2])
         run_test([5, 3], [100, 100])

@@ -1799,6 +1799,10 @@
   dispatch:
     CPU, CUDA: _compute_linear_combination
 
+- func: _compute_linear_combination.out(Tensor input, Tensor coefficients, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: _compute_linear_combination_out
+
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method

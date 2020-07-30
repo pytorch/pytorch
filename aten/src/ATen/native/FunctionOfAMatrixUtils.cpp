@@ -23,6 +23,15 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
     input.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
+  _compute_linear_combination_out(input, coefficients, output);
+
+  return output;
+}
+
+Tensor _compute_linear_combination_out(const Tensor& input, const Tensor& coefficients, Tensor& output) {
+  auto output_first_dim_size = coefficients.size(0);
+  auto input_first_dim_size = coefficients.size(1);
+
   // restride output
   auto output_to_broadcasted_dim = output.unsqueeze(1);
   auto output_restrided_sizes = output_to_broadcasted_dim.sizes().vec();
