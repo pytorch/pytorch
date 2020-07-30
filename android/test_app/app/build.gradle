@@ -42,13 +42,23 @@ android {
         buildConfigField("boolean", "NATIVE_BUILD", 'false')
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
+    signingConfigs {
+        debug {
+            storeFile file("debug.keystore")
+            storePassword 'password'
+            keyAlias 'alias'
+            keyPassword 'password'
+        }
+    }
     buildTypes {
         debug {
             minifyEnabled false
             debuggable true
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
+            signingConfig signingConfigs.debug
         }
     }
     // Commented due to dependency on local copy of pytorch_android aar to aars folder
@@ -72,6 +82,15 @@ android {
             buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
             addManifestPlaceholders([APP_NAME: "RN18"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
+        }
+        issue {
+            dimension "model"
+            applicationIdSuffix ".issue"
+            //buildConfigField("String", "MODULE_ASSET_NAME", "\"trace_model_issue40027_170.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"trace_model_issue40027_150.pt\"")
+            addManifestPlaceholders([APP_NAME: "PTI"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-iss\"")
+            buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 112, 112}")
         }
         local {
             dimension "build"
@@ -110,8 +129,9 @@ android {
     if (!testAppAllVariantsEnabled.toBoolean()) {
         variantFilter { variant ->
             def names = variant.flavors*.name
-            if (names.contains("nightly")
-                || names.contains("camera")
+            if (//names.contains("nightly")
+                //|| 
+                names.contains("camera")
                 || names.contains("aar")
                 || names.contains("nativeBuild")) {
                 setIgnore(true)
@@ -140,8 +160,8 @@ dependencies {
     //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
-    nightlyImplementation 'org.pytorch:pytorch_android:1.7.0-SNAPSHOT'
-    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.7.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android:1.5.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.5.0-SNAPSHOT'
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
