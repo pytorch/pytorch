@@ -91,4 +91,4 @@ def load_op_list_and_strip_overload(op_list, op_list_path):
         with open(op_list_path, 'r') as f:
             op_list += yaml.load(f, Loader=YamlLoader)
     # strip out the overload part
-    return [opname.split('.', 1)[0] for opname in op_list]
+    return set([opname.split('.', 1)[0] for opname in op_list])
