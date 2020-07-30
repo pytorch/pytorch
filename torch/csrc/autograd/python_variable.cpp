@@ -152,9 +152,6 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   });
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse((PyObject *) self, args, kwargs, parsed_args);
-  if (r.has_torch_function()) {
-    return handle_torch_function(r, (PyObject *)self, args, kwargs, THPVariableClass, "torch.Tensor");
-  }
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
