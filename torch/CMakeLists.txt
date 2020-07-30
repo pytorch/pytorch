@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -166,6 +165,9 @@ if(USE_DISTRIBUTED)
       endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if(USE_TENSORPIPE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      endif()
     endif()
 endif()
 
