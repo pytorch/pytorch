@@ -7,16 +7,16 @@ namespace jit {
 class ReconstructScopesPass {
  public:
   ReconstructScopesPass(const Module& m, Graph& g, std::string p)
-      : root_module(m),
-        graph(g),
-        prefix(std::move(p)),
-        class_types_are_not_unique(false){};
+      : root_module_(m),
+        graph_(g),
+        prefix_(std::move(p)),
+        class_types_are_not_unique_(false){};
   void run();
 
  private:
-  const Module& root_module;
-  Graph& graph;
-  std::string prefix;
+  const Module& root_module_;
+  Graph& graph_;
+  std::string prefix_;
 
   // This boolean indicates whether there are two submodules of the same
   // class type. This issue may occur in q scripted module and make it
@@ -47,7 +47,7 @@ class ReconstructScopesPass {
   // it is difficult to distinguish 'A0' and 'A1' in the module hierarchy
   // after the graph is inlined. In this case, we add a warning to let
   // users know that the debugging information may be incomplete.
-  bool class_types_are_not_unique;
+  bool class_types_are_not_unique_;
 
   std::unordered_map<Function*, ModulePtr> func_to_module;
   std::unordered_map<ModulePtr, std::string> module_names;
@@ -71,9 +71,9 @@ class ReconstructScopesPass {
 void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
   for (const auto& method : module.get_methods()) {
     Function* func_ptr = &method.function();
-    if (!class_types_are_not_unique &&
+    if (!class_types_are_not_unique_ &&
         func_to_module.find(func_ptr) != func_to_module.end()) {
-      class_types_are_not_unique = true;
+      class_types_are_not_unique_ = true;
     }
     func_to_module[func_ptr] = module._ivalue();
   }
@@ -133,7 +133,7 @@ std::string ReconstructScopesPass::getScopeString(
   }
   std::string scopeString = module_names.at(m) + "." + f->name();
 
-  if (class_types_are_not_unique) {
+  if (class_types_are_not_unique_) {
     appendSourceRangeInfo(scopeString, frame);
   }
   return scopeString;
@@ -168,14 +168,14 @@ void ReconstructScopesPass::visitBlock(
 }
 
 void ReconstructScopesPass::run() {
-  GRAPH_DUMP("Graph before reconstructing scope", &graph);
+  GRAPH_DUMP("Graph before reconstructing scope", &graph_);
   func_to_module.clear();
   module_names.clear();
 
-  constructFunctionToModuleMap(root_module);
-  constructRelativeNamesForModules(root_module, prefix);
+  constructFunctionToModuleMap(root_module_);
+  constructRelativeNamesForModules(root_module_, prefix_);
 
-  if (class_types_are_not_unique) {
+  if (class_types_are_not_unique_) {
     TORCH_WARN(
         "It seems that the module contain two instances of the same class type.\n",
         "The current debugging program has not provided support for distinguishing ",
@@ -184,9 +184,9 @@ void ReconstructScopesPass::run() {
   }
 
   std::string root_scope_string =
-      getModuleName(root_module, prefix) + ".forward";
-  visitBlock(graph.block(), root_scope_string);
-  GRAPH_DUMP("Graph after reconstructing scope", &graph);
+      getModuleName(root_module_, prefix_) + ".forward";
+  visitBlock(graph_.block(), root_scope_string);
+  GRAPH_DUMP("Graph after reconstructing scope", &graph_);
 }
 
 void ReconstructScopes(
