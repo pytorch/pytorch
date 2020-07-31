@@ -217,6 +217,48 @@ void testKernel_4() {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
+  {
+    // Test that shape inference handles aten::cat
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph(%a : Float(5:6, 3:2, 2:1, device=cpu),
+            %b : Float(5:14, 7:2, 2:1, device=cpu),
+            %c : Float(5:18, 9:2, 2:1, device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto o = at::zeros({5, 19, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto ref = at::cat({a, b, c}, 1);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a, b, c};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    o = stack[0].toTensor();
+
+    // Check sizes
+    CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    size_t num_el = 1;
+    for (auto idx = 0; idx < ref.sizes().size(); idx++) {
+      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      num_el *= ref.sizes()[idx];
+    }
+
+    // Check the contents
+    for (size_t i = 0; i < num_el; i++) {
+      CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    }
+  }
 }
 
 } // namespace jit
