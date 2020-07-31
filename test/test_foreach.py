@@ -70,15 +70,29 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     def test_add_scalar_with_different_scalar_type(self, device):
+        # int tensor with float scalar
         scalar = 1.1
         tensors = [torch.tensor([1], dtype=torch.int, device=device)]
         res = torch._foreach_add(tensors, scalar)
         self.assertEqual(res, [torch.tensor([2.1], device=device)])
 
+        # float tensor with int scalar
         scalar = 1
         tensors = [torch.tensor([1.1], device=device)]
         res = torch._foreach_add(tensors, scalar)
         self.assertEqual(res, [torch.tensor([2.1], device=device)])
+
+        # bool tensor with int scalar
+        scalar = 1
+        tensors = [torch.tensor([False], device=device)]
+        res = torch._foreach_add(tensors, scalar)
+        self.assertEqual(res, [torch.tensor([1], device=device)])
+
+        # bool tensor with float scalar
+        scalar = 1.1
+        tensors = [torch.tensor([False], device=device)]
+        res = torch._foreach_add(tensors, scalar)
+        self.assertEqual(res, [torch.tensor([1.1], device=device)])
 
 instantiate_device_type_tests(TestForeach, globals())
 
