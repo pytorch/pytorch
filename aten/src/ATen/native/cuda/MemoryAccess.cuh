@@ -72,8 +72,7 @@ struct unroll_load_helper {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(loader.template load<arg_t>(self.data[arg_index + 1], offset[arg_index], arg_index));
-    std::get<arg_index>(args[j]) = *ptr;
+    std::get<arg_index>(args[j]) = loader.template load<arg_t>(self.data[arg_index + num_outputs], offset[arg_index], arg_index);
   }
 };
 
@@ -261,9 +260,10 @@ struct vectorized {
 };
 
 template <typename data_t, typename inp_calc_t, typename out_calc_t, int num_outputs>
-struct multi_outputs_unroll : unroll<data_t, inp_calc_t, out_calc_t, num_outputs> {
+struct multi_outputs_unroll : unroll<data_t, inp_calc_t, out_calc_t, LoadWithoutCast, StoreWithoutCast, num_outputs> {
 
-  using unroll<data_t, inp_calc_t, out_calc_t, num_outputs>::unroll;
+  __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
+    unroll<data_t, inp_calc_t, out_calc_t, LoadWithoutCast, StoreWithoutCast, num_outputs>(data, remaining, ic, oc, LoadWithoutCast(), StoreWithoutCast()) {}
 
   template <typename return_t>
   __device__ inline void store(return_t *from, int idx) {
