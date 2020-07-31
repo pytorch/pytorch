@@ -2580,20 +2580,22 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
             m = prepare_dynamic_jit(model, {'': qconfig})
 
-            # for input of FC for dynamic quant
-            assert len(attrs_with_prefix(m, '_observer_')) == 1
-            # for weight
+            # observer for weight
             assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
-            if qconfig == float16_dynamic_qconfig:
-                observer_name = 'NoopObserver = prim::GetAttr[name="_observer_'
-            else:
-                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
 
-            FileCheck().check(observer_name) \
-                       .check('prim::GetAttr[name="fc"]') \
-                       .check('prim::CallMethod') \
-                       .check_not('Observer = prim::GetAttr[name="_observer_') \
-                       .run(m.graph)
+            if qconfig == float16_dynamic_qconfig:
+                observer_name = 'Fp16Observer = prim::GetAttr[name="_observer_'
+                FileCheck().check(observer_name) \
+                           .run(m.fc.graph)
+            else:
+                # for input of FC for dynamic quant
+                assert len(attrs_with_prefix(m, '_observer_')) == 1
+                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+                FileCheck().check(observer_name) \
+                           .check('prim::GetAttr[name="fc"]') \
+                           .check('prim::CallMethod') \
+                           .check_not('Observer = prim::GetAttr[name="_observer_') \
+                           .run(m.graph)
 
 
     def test_prepare_dynamic_child_qconfig(self):
@@ -2835,8 +2837,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
-        FileCheck().check("aten::to") \
-                   .check_next("aten::to") \
+        FileCheck().check("aten::_saturate_weight_to_fp16") \
                    .check("aten::linear") \
                    .check_not("aten::dequantize") \
                    .check_not("aten::quantize") \
@@ -2917,9 +2918,11 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
 
         from torch.quantization import QConfigDynamic, NoopObserver
-        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"),
+        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
+                                                                                custom_op_name="embedding_bag_4bit"),
                                               weight=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"))
-        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(custom_op_name="embedding_bag_byte"),
+        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
+                                                                                custom_op_name="embedding_bag_byte"),
                                               weight=NoopObserver.with_args(custom_op_name="embedding_bag_byte"))
         m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
         FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
@@ -3153,13 +3156,17 @@ class TestQuantizeJit(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_linear_dynamic_fp16(self):
         linear_model = SingleLayerLinearModel().eval()
+        # Create weight tensor values that are beyond fp16 max
+        x = torch.ones(5, 5) * 65532
+        linear_model.fc1.weight = torch.nn.Parameter(x)
+        import warnings
         model_eager = quantize_dynamic(linear_model, dtype=torch.float16)
         result_eager = model_eager(self.calib_data[0][0])
-        model_script = torch.jit.script(linear_model)
-        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-        qconfig_dict = {'' : float16_dynamic_qconfig}
-
-        for model in [model_traced, model_script]:
-            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
-            # TODO check model with debug=True matches quantized model result
-            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for trace in [True]:
+            with warnings.catch_warnings(record=True) as w:
+                quantized_model = self.checkGraphModeOp(linear_model, self.calib_data[0][0],
+                                                        "quantized::linear_dynamic_fp16",
+                                                        tracing=trace,
+                                                        dynamic=True, qconfig=float16_dynamic_qconfig)
+            # compare result with eager mode
+            self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)

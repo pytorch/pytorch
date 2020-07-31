@@ -195,27 +195,14 @@ DynamicQuantOps insertChooseQParamQuantDequant(
 }
 
 Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
-  auto default_false = graph->insertConstant(false);
-  Value* fp16_dtype = graph->insertConstant(IValue(c10::kHalf));
-  Value* float_dtype = graph->insertConstant(IValue(c10::kFloat));
-
-  std::vector<Value*> input_to_fp16 = {observer_out,
-                                       fp16_dtype,
-                                       /* non_blocking */ default_false,
-                                       /* copy */ default_false};
-  Node* cast_to_fp16 = graph->create(Symbol::aten("to"), input_to_fp16);
-  graph->insertNode(cast_to_fp16);
-
-  auto fp16_out = cast_to_fp16->output();
-  std::vector<Value*> input_to_fp32 = {fp16_out,
-                                       float_dtype,
-                                       /* non_blocking */ default_false,
-                                       /* copy */ default_false};
-  Node* cast_to_fp32 = graph->create(Symbol::aten("to"), input_to_fp32);
-  graph->insertNode(cast_to_fp32);
+  // If the weight value is outside of the range for FP16 range, i.e. [5.96e-8,
+  // 65504], we saturate the values to the min/max of this range.
+  Node* saturated_weight =
+      graph->create(Symbol::aten("_saturate_weight_to_fp16"), {observer_out});
+  graph->insertNode(saturated_weight);
   graph->lint();
 
-  return cast_to_fp32;
+  return saturated_weight;
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -245,12 +232,14 @@ bool isNoopObserver(Value* observer) {
   return false;
 }
 
-bool isFP16NoopObserver(script::Module& module, Node* n) {
-  Value* v = n->output();
-  auto observer = n->input(0);
-  auto observer_module = module.attr(findObserverName(v).value()).toModule();
-  return (observer_module.attr("dtype") == at::ScalarType::Half) &&
-      isNoopObserver(observer);
+at::ScalarType getObserverDtype(Module& module, Value* v) {
+  auto observer_name = findObserverName(v);
+  if (observer_name.has_value()) {
+    auto observer_module = module.attr(observer_name.value()).toModule();
+    at::ScalarType scalar_type = observer_module.attr("dtype").toScalarType();
+    return scalar_type;
+  }
+  return at::ScalarType::Undefined;
 }
 
 c10::optional<std::string> getEmbeddingBagObsName(
@@ -405,7 +394,7 @@ void insertQuantizationOps(
     return;
   }
   if (quant_type == QuantType::DYNAMIC) {
-    if (isFP16NoopObserver(module, observer)) {
+    if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       // For activation tensors we insert choose_qparams, quant, dequant ops.
@@ -421,7 +410,6 @@ void insertQuantizationOps(
     dequant =
         insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
   }
-
   observer_out->replaceAllUsesWith(original_val);
 
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
@@ -971,14 +959,14 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   QParamVector qparams;
   c10::QScheme qscheme;
 
-  if (isNoopObserver(n->input(0))) {
+  auto observer_module = module.attr(observer_name.value()).toModule();
+  auto scalar_type = observer_module.attr("dtype");
+  if (isNoopObserver(n->input(0)) || scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
-  auto observer_module = module.attr(observer_name.value()).toModule();
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
   IValue result = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(result);
-  auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(
       scalar_type.toScalarType() != at::ScalarType::Undefined,
       "dtype of observer can't be undefined");
