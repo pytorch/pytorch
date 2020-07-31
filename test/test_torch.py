@@ -12746,45 +12746,49 @@ class TestTorchDeviceType(TestCase):
 
     def test_scatter_reduce_operations_to_large_input(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        test_data = [
-            (torch.zeros(4, 4, device=device, dtype=torch.float32),
-             torch.ones(2, 2, device=device, dtype=torch.float32),
-             torch.tensor([[0, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [0, 0, 0, 0]],
-                          device=device, dtype=torch.float32), "add"),
-            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
-             torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
-             torch.tensor([[2, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-        ]
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
+            + torch.testing.get_all_complex_dtypes():
+            test_data = [
+                (torch.zeros(4, 4, device=device, dtype=dtype),
+                 torch.ones(2, 2, device=device, dtype=dtype),
+                 torch.tensor([[0, 0, 0, 0],
+                               [1, 0, 0, 0],
+                               [1, 0, 0, 0],
+                               [0, 0, 0, 0]],
+                              device=device, dtype=dtype), "add"),
+                (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4),
+                 torch.tensor([2], device=device, dtype=dtype).repeat(2, 2),
+                 torch.tensor([[2, 2, 2, 2],
+                               [4, 2, 2, 2],
+                               [4, 2, 2, 2],
+                               [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
+            ]
 
-        for input, src, result, operation in test_data:
-            input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result)
+            for input, src, result, operation in test_data:
+                input.scatter_(0, index, src, reduce=operation)
+                self.assertEqual(input, result)
 
     def test_scatter_reduce_scalar(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        test_data = [
-            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
-             torch.tensor([[0, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [0, 0, 0, 0]],
-                          device=device, dtype=torch.float32), "add"),
-            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
-             torch.tensor([[2, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-        ]
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
+            + torch.testing.get_all_complex_dtypes():
+                test_data = [
+                    (torch.zeros(4, 4, device=device, dtype=dtype), 1,
+                    torch.tensor([[0, 0, 0, 0],
+                                [1, 0, 0, 0],
+                                [1, 0, 0, 0],
+                                [0, 0, 0, 0]],
+                                device=device, dtype=dtype), "add"),
+                    (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4), 2,
+                    torch.tensor([[2, 2, 2, 2],
+                                [4, 2, 2, 2],
+                                [4, 2, 2, 2],
+                                [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
+                ]
 
-        for input, src, result, operation in test_data:
-            input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result)
+                for input, src, result, operation in test_data:
+                    input.scatter_(0, index, src, reduce=operation)
+                    self.assertEqual(input, result)
 
     # TODO: remove this after scatter_add_ is deprecated.
     def test_scatter_add_non_unique_index(self, device):
@@ -12803,19 +12807,21 @@ class TestTorchDeviceType(TestCase):
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
-        test_data = [
-            (torch.ones(height, width, device=device, dtype=torch.float32),
-             torch.ones(height, width, device=device, dtype=torch.float32),
-             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "add"),
-            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
-             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
-             torch.tensor([[8], [2]], device=device,
-                          dtype=torch.float32).repeat(1, width), "multiply"),
-        ]
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
+            + torch.testing.get_all_complex_dtypes():
+            test_data = [
+                (torch.ones(height, width, device=device, dtype=dtype),
+                torch.ones(height, width, device=device, dtype=dtype),
+                torch.tensor([[3], [1]], device=device, dtype=dtype).repeat(1, width), "add"),
+                (torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
+                torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
+                torch.tensor([[8], [2]], device=device,
+                            dtype=dtype).repeat(1, width), "multiply"),
+            ]
 
-        for input, src, result, operation in test_data:
-            input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
+            for input, src, result, operation in test_data:
+                input.scatter_(0, index, src, reduce=operation)
+                self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
 
     def test_scatter_to_large_input(self, device):
