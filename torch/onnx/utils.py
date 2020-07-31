@@ -558,9 +558,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             output_names, operator_export_type,
                                                             example_outputs, _retain_param_name,
                                                             val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size, training=training,
-                                                            enable_jit_freezing_and_functionalization=
-                                                            enable_jit_freezing_and_functionalization)
+                                                            fixed_batch_size=fixed_batch_size,
+                                                            training=training,
+                                                            enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

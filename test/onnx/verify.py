@@ -355,8 +355,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                                        add_node_names=add_node_names,
                                        operator_export_type=operator_export_type,
-                                       enable_jit_freezing_and_functionalization=
-                                       enable_jit_freezing_and_functionalization)
+                                       enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -371,8 +370,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
                                            add_node_names=add_node_names,
                                            operator_export_type=operator_export_type,
-                                           enable_jit_freezing_and_functionalization=
-                                           enable_jit_freezing_and_functionalization)
+                                           enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)

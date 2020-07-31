@@ -44,8 +44,7 @@ class TestUtilityFuns(TestCase):
                                      operator_export_type=operator_export_type,
                                      training=training,
                                      example_outputs=example_outputs,
-                                     enable_jit_freezing_and_functionalization=
-                                     self.enable_jit_freezing_and_functionalization)
+                                     enable_jit_freezing_and_functionalization=self.enable_jit_freezing_and_functionalization)
 
     def test_is_in_onnx_export(self):
         test_self = self
