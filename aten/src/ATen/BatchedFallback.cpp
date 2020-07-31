@@ -63,6 +63,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   const auto num_arguments = schema.arguments().size();
   const auto arguments = torch::jit::last(stack, num_arguments);
+  const auto arguments_begin = stack->size() - num_arguments;
 
   // Figure out which arguments are BatchedTensor. Save them to a vector.
   // For each BatchedTensor, also record what position of `arguments` they came from.
@@ -112,14 +113,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
     for (int64_t arg_idx = 0; arg_idx < num_arguments; ++arg_idx) {
-      // The accounting for this is tricky. Assume `op` has 4 args, A, B, C, D.
-      // and `arg_idx = 2`. Every iteration of this loop pushes one element
-      // onto the stack, so we've already pushed two things (call them A' and B').
-      // At this point, the stack should look like the following:
-      // [..., A, B, C, D, A', B'] (top of stack here)
-      // To get at C (argument number 2), we have to peek `num_arguments`
-      // into the stack from the top
-      const auto& argument = torch::jit::peek(stack, 0, num_arguments);
+      // We assume that torch::jit::Stack is backed by vector<IValue> for
+      // simplicity. When that is not the case, this code should be updated.
+      const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
