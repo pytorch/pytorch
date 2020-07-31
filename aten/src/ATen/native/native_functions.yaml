@@ -1179,6 +1179,10 @@
   manual_kernel_registration: True
   variants: method
   device_guard: False
+  dispatch:
+    CPU: resize_
+    CUDA: resize_cuda_
+    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   variants: function
@@ -2496,7 +2500,7 @@
 - func: silu(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  
+
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
 
