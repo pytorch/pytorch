@@ -197,7 +197,7 @@ m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_w
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${class_type}::${type_wrapper_name}))
+       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(${class_type}::${type_wrapper_name}))
 );
 """)
 
