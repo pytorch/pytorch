@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 from torch.nn.intrinsic import ConvReLU2d
+from torch.quantization import register_activation_post_process_hook
 
 class Conv2d(nn.Conv2d):
     r"""
@@ -52,7 +53,7 @@ class Conv2d(nn.Conv2d):
                        groups=mod.groups, bias=mod.bias is not None,
                        padding_mode=mod.padding_mode, qconfig=qconfig)
         qat_conv.activation_post_process = mod.qconfig.activation()
-        torch.quantization.register_activation_post_process_hook(qat_conv)
+        register_activation_post_process_hook(qat_conv)
         qat_conv.weight = mod.weight
         qat_conv.bias = mod.bias
         return qat_conv

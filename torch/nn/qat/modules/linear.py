@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
+from torch.quantization import register_activation_post_process_hook
 
 class Linear(nn.Linear):
     r"""
@@ -48,7 +49,7 @@ class Linear(nn.Linear):
         qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
         qat_linear.activation_post_process = qconfig.activation()
-        torch.quantization.register_activation_post_process_hook(qat_linear)
+        register_activation_post_process_hook(qat_linear)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear

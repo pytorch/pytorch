@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
+from torch.quantization import register_activation_post_process_hook
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
 
@@ -174,7 +175,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                          False,
                          qconfig)
         qat_convbn.activation_post_process = qconfig.activation()
-        torch.quantization.register_activation_post_process_hook(qat_convbn)
+        register_activation_post_process_hook(qat_convbn)
         qat_convbn.weight = conv.weight
         qat_convbn.bias = conv.bias
         qat_convbn.bn.weight = bn.weight
