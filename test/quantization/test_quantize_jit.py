@@ -2584,7 +2584,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
 
             if qconfig == float16_dynamic_qconfig:
-                observer_name = 'Fp16Observer = prim::GetAttr[name="_observer_'
+                observer_name = 'PlaceholderObserver = prim::GetAttr[name="_observer_'
                 FileCheck().check(observer_name) \
                            .run(m.fc.graph)
             else:
@@ -2917,13 +2917,13 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
 
-        from torch.quantization import QConfigDynamic, NoopObserver
-        int4_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
-                                                                                custom_op_name="embedding_bag_4bit"),
-                                              weight=NoopObserver.with_args(custom_op_name="embedding_bag_4bit"))
-        int8_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float,
-                                                                                custom_op_name="embedding_bag_byte"),
-                                              weight=NoopObserver.with_args(custom_op_name="embedding_bag_byte"))
+        from torch.quantization import QConfigDynamic, PlaceholderObserver
+        int4_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                                       custom_op_name="embedding_bag_4bit"),
+                                              weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
+        int8_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                                       custom_op_name="embedding_bag_byte"),
+                                              weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
         m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
         FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
                    .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
