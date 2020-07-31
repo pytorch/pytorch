@@ -532,7 +532,7 @@ sparse = _make_deprecate(sparse_)
 
 GET_SEMANTIC_VERSION = re.compile(r'\d+\.\d+\.\d+')
 
-def _get_semantic_version_from_string(version: str) -> Tuple[int, int, int]:
+def _get_version_as_tuple_from_string(version: str) -> Tuple[int, int, int]:
     """version: should be 'major.minor.micro'"""
     v = GET_SEMANTIC_VERSION.findall(version)
 
@@ -544,7 +544,7 @@ def _get_semantic_version_from_string(version: str) -> Tuple[int, int, int]:
 
 
 init_version = (1, 6, 1)
-_torch_version = _get_semantic_version_from_string(torch.__version__)
+_torch_version = _get_version_as_tuple_from_string(torch.__version__)
 
 def parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int, int, int]:
     if version is None:
@@ -555,7 +555,7 @@ def parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int
             if not isinstance(x, int):
                 raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
     elif isinstance(version, str):
-        version = _get_semantic_version_from_string(version)
+        version = _get_version_as_tuple_from_string(version)
     else:
         raise TypeError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
 
@@ -576,11 +576,6 @@ def use_init_version(version=None):
             version are (1,7,0), '1.7.1'.
 
     Examples:
-        >>> with nn.init.use_init_version() as version:
-        >>>     # use the default pytorch initialization used till pytorch version 1.6.1
-        >>>     # This is the default behaviour.
-        >>>     model = nn.Sequential(...)
-        >>>
         >>> with nn.init.use_init_version(version='1.7.1') as version:
         >>>     model = nn.Sequential(...)
         >>>

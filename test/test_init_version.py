@@ -39,7 +39,7 @@ class InitVersionTest(TestCase):
         self.assertEqual(x, y)
 
     def test_version_greater_than_torch(self):
-        # cannot pass version greater than torch.__version__ in init_version
+        # cannot pass version greater than torch.__version__ in use_init_version
         current_torch_version = parse_version(torch.__version__)
         new_torch_version = (current_torch_version[0], current_torch_version[1] + 1, current_torch_version[2])
 
