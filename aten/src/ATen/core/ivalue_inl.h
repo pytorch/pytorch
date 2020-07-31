@@ -268,7 +268,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   /**
    * Explicitly mark the future as completed with the output value.
    */
-  void markCompleted(IValue value) {
+  virtual void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -402,7 +402,10 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
  protected:
+  mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
+
+  IValue value_; // when finished the value
 
  private:
   void setErrorInternal(
@@ -422,10 +425,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     }
   }
 
-  mutable std::mutex mutex_;
   std::condition_variable finished_cv_;
 
-  IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;

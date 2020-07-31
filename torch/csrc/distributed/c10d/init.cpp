@@ -711,13 +711,21 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::call_guard<py::gil_scoped_release>(),
           R"(
             ``get_future`` retrieves a future associated with the completion of
-            ``c10d.ProcessGroup.work``. As an example, a future object can be set by
-            `future_work = dist.allreduce(tensors).get_future()`. `future_work` wait()
-            and then() callbacks will return once ``dist.allreduce`` is finished.
+            ``c10d.ProcessGroup.work``. As an example, a future object can be set
+            by `fut = dist.allreduce(tensors).get_future()`.
+
+            In the example above, if `dist.allreduce` work was done on GPU,
+            `fut.wait()` would return after synchronizing the correct GPU streams
+            to ensure we can have async CUDA execution and it does not wait for
+            the entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
+            in that case, it would wait for the entire operation to complete before
+            returning. In addition, if a callback function was added by `fut.then()`,
+            it will synchronize the appropriate streams and invoke the callback inline.
+
+            Note that `fut.done()` actually returns if the work was completed on the GPU.
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend. For NCCL backend,
-                it returns a FutureNCCL which is a sub class of Future.
+                ``get_future`` API supports only NCCL backend.
            )");
 
   module.def(
