@@ -142,11 +142,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // reference to WorkNCCL and NCCL collective's outputs. The goal is to
   // use this class in getFuture API of WorkNCCL. Once NCCL kernel is done
   // executing, this future will have NCCL collective's outputs as its value.
-  // Inside FutureNCCL's constructor, we mark it as completed with NCCL
-  // collective's unfinished outputs to allow async execution of callbacks. We
-  // next set its completed false until NCCL streams are synchronized in wait()
-  // or addCallback() (called by Future's then()).
-  //
   // It overrides wait(), markCompleted(), and addCallback() methods of Future.
   struct FutureNCCL : at::ivalue::Future {
    public:
