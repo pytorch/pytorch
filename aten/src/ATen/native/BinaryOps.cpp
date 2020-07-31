@@ -166,19 +166,18 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, creates
-  // temporary float copies as new inputs.
-  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
-   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    auto iter = TensorIterator::binary_op(result,
-                                          self.to(scalar_type),
-                                          divisor.to(scalar_type),
-                                          /*check_mem_overlap=*/ true);
-    div_stub(iter.device_type(), iter);
-    return result;
-  }
-  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  TensorIterator iter = TensorIteratorConfig()
+     .set_check_mem_overlap(true)
+     .add_output(result)
+     .add_input(self)
+     .add_input(divisor)
+     .allow_cpu_scalars(true)
+     .promote_inputs_to_common_dtype(true)
+     .promote_integer_inputs_to_float(true)
+     .cast_common_dtype_to_outputs(true)
+     .enforce_safe_casting_to_output(true)
+     .build();
+
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -860,7 +859,7 @@ Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor gcd(const Tensor& self, const Tensor& other) {  
+Tensor gcd(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::gcd_out(result, self, other);
 }
@@ -875,7 +874,7 @@ Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor lcm(const Tensor& self, const Tensor& other) {  
+Tensor lcm(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::lcm_out(result, self, other);
 }
