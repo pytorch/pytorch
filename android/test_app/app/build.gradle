@@ -160,8 +160,12 @@ dependencies {
     //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
-    nightlyImplementation 'org.pytorch:pytorch_android:1.5.0-SNAPSHOT'
-    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.5.0-SNAPSHOT'
+    //nightlyImplementation 'org.pytorch:pytorch_android:1.5.0-SNAPSHOT'
+    //inightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.5.0-SNAPSHOT'
+
+    nightlyImplementation 'org.pytorch:pytorch_android:1.5.0'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.5.0'
+
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
