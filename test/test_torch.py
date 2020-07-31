@@ -14272,7 +14272,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
-    def test_blas_nan_out(self, device):
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + torch.testing.get_all_fp_dtypes()))
+    def test_blas_nan_out(self, device, dtype):
         # These functions should work correctly with NaN filled outputs,
         # but need special handling, see [NOTE: cpu_zero]
         b = 3
@@ -14291,6 +14292,9 @@ class TestTorchDeviceType(TestCase):
         mp = torch.randn((p, m), device=device).t()
         np_out = torch.full((n, p), float('nan'), device=device)
         self.assertEqual(torch.mm(nm, mp), torch.mm(nm, mp, out=np_out))
+
+        if dtype.is_complex and device.startswith('cuda'):
+            return
 
         # torch.bmm
         bnm = torch.randn((b, m, n), device=device).transpose(1, 2)
@@ -17135,7 +17139,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
@@ -17229,7 +17233,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             _test_mm(n, m, p, dtype, genf)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
@@ -17245,7 +17249,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cuda(), b2))
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_addbmm(self, device, dtype):
         # num_batches = 10
         # M, N, O = 12, 8, 5
@@ -17289,7 +17293,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(res6, res2 * .1 + .5 * res.sum(0)),
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 5
@@ -19438,23 +19442,23 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types + _complex_types, True, [tf32_on_and_off(0.005)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types + _complex_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types + _complex_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types + _complex_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types + _complex_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types + _complex_types, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
