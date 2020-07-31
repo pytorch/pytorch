@@ -111,7 +111,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(TypeDefault::${type_wrapper_name})));
+       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(TypeDefault::${type_wrapper_name})));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -131,7 +131,8 @@ m.impl("${unqual_operator_name_with_overload}",
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${Type}::${type_wrapper_name})))
+                       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(
+                           TORCH_FN(${Type}::${type_wrapper_name})))
 );
 """)
 
@@ -551,6 +552,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    ('schema_order_cpp_signature', str),
     # 'schema_order_arguments' is like 'arguments' but keeps them in the
     # order they are defined in the JIT function schema while
     # 'arguments' does some modifications (e.g. reorders out arguments
@@ -983,6 +985,9 @@ def create_generic(top_env, declarations):
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
+            elif schema_order and argument.get('is_nullable') and argument['type'] == 'Tensor':
+                argument['type'] = "const c10::optional<Tensor>&"
+
 
             # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
             # I.e., the signature of the cpp implementation currently fits the code
@@ -1296,6 +1301,7 @@ def create_generic(top_env, declarations):
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             manual_kernel_registration=option['manual_kernel_registration'],
+            schema_order_cpp_signature=option['schema_order_cpp_signature'],
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
