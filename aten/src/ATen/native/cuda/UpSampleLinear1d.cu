@@ -299,6 +299,8 @@ Tensor upsample_linear1d_backward_cuda(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_linear1d_backward_cuda");
   auto osize = compute_output_size(input_size, output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
   auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

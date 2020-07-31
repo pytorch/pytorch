@@ -1320,6 +1320,20 @@ gather(dim, index) -> Tensor
 See :func:`torch.gather`
 """)
 
+add_docstr_all('gcd',
+               r"""
+gcd(other) -> Tensor
+
+See :func:`torch.gcd`
+""")
+
+add_docstr_all('gcd_',
+               r"""
+gcd_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.gcd`
+""")
+
 add_docstr_all('ge',
                r"""
 ge(other) -> Tensor
@@ -1623,6 +1637,20 @@ isinf() -> Tensor
 See :func:`torch.isinf`
 """)
 
+add_docstr_all('isposinf',
+               r"""
+isposinf() -> Tensor
+
+See :func:`torch.isposinf`
+""")
+
+add_docstr_all('isneginf',
+               r"""
+isneginf() -> Tensor
+
+See :func:`torch.isneginf`
+""")
+
 add_docstr_all('isfinite',
                r"""
 isfinite() -> Tensor
@@ -1635,6 +1663,13 @@ add_docstr_all('isclose',
 isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 See :func:`torch.isclose`
+""")
+
+add_docstr_all('isreal',
+               r"""
+isreal() -> Tensor
+
+See :func:`torch.isreal`
 """)
 
 add_docstr_all('is_contiguous',
@@ -1704,6 +1739,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('lcm',
+               r"""
+lcm(other) -> Tensor
+
+See :func:`torch.lcm`
+""")
+
+add_docstr_all('lcm_',
+               r"""
+lcm_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.lcm`
 """)
 
 add_docstr_all('le',
@@ -2783,6 +2832,13 @@ sign_() -> Tensor
 In-place version of :meth:`~Tensor.sign`
 """)
 
+add_docstr_all('signbit',
+               r"""
+signbit() -> Tensor
+
+See :func:`torch.signbit`
+""")
+
 add_docstr_all('sin',
                r"""
 sin() -> Tensor
@@ -3633,6 +3689,20 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
+""")
+
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
 """)
 
 add_docstr_all('stft',
