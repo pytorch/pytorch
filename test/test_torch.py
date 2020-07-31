@@ -17499,35 +17499,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    # NOTE: inferring the dtype from bool or integer fill values is
-    #   disabled because the behavior is changing from PyTorch 1.5,
-    #   where the default scalar type would be inferred, to PyTorch 1.7,
-    #   where bool or long, respectively, will be inferred.
-    def test_full_unsupported_integer_inference(self, device):
-        size = (2, 2)
-        # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1).dtype, torch.float)
-
-        # Explicitly setting the dtype doesn't warn
-        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
-
-        # Performs same tests with named tensor
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
-
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, True, names=('a', 'b'), dtype=torch.bool).dtype
-            self.assertEqual(dt, torch.bool)
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
-            self.assertEqual(dt, torch.long)
-
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_full_inference(self, device, dtype):
@@ -17536,17 +17507,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.bool dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, True)
-            self.assertEqual(t.dtype, dtype)
+        # Tests bool fill value inference
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, torch.bool)
 
-        # Tests integer fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.long dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, 1)
-            self.assertEqual(t.dtype, dtype)
+        # Tests integer fill value inference
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, torch.long)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
