@@ -25,7 +25,7 @@ class SGDParamState {
 };
 
 struct TORCH_API SGDOptions {
-  SGDOptions(double lr);
+  /* implicit */ SGDOptions(double lr);
   TORCH_ARG(double, lr);
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(double, dampening) = 0;
@@ -52,7 +52,14 @@ class TORCH_API SGDParamGroup {
         options_(
             param_group.has_options() ? param_group.options().clone()
                                       : nullptr) {}
-  SGDParamGroup(std::vector<Tensor> params) : params_(std::move(params)) {}
+  SGDParamGroup& operator=(const SGDParamGroup& param_group) {
+    this->params_ = param_group.params();
+    this->options_ =
+        param_group.has_options() ? param_group.options().clone() : nullptr;
+    return *this;
+  }
+  /* implicit */ SGDParamGroup(std::vector<Tensor> params)
+      : params_(std::move(params)) {}
   SGDParamGroup(std::vector<Tensor> params, std::unique_ptr<SGDOptions> options)
       : params_(std::move(params)), options_(std::move(options)) {}
 
