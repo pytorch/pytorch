@@ -49,11 +49,28 @@ class Linear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features}, \text{in\_features})`. The values are
-            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-            :math:`k = \frac{1}{\text{in\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized from
+            :math:`(\text{out\_features}, \text{in\_features})`. The following
+            initializations are available:
+
+            1. PyTorch >= 1.7.0
+
+                :math:`\mathcal{N}(0, std^2)`, where 
+                :math:`std = \frac{2}{\text{out\_features}}`
+
+            2. PyTorch < 1.7.0 (default)
+
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
+                :math:`k = \frac{1}{\text{in\_features}}`
+
+        bias: the learnable bias of the module of shape :math:`(\text{out\_features})`.
+            The following initializations are available:
+
+            1. PyTorch >= 1.7.0
+
+                :math:`\text{vector of 0's}`
+
+            2. PyTorch < 1.7.0 (default)
+
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                 :math:`k = \frac{1}{\text{in\_features}}`
 
@@ -81,7 +98,7 @@ class Linear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self, version: Union[Tuple[int, int, int], str] = None) -> None:
+    def reset_parameters(self, version: Union[Tuple[int, int, int], str, None] = None) -> None:
         with init.use_init_version(version) as version:
             if version >= (1, 7, 0):
                 init.kaiming_normal_(self.weight, mode='fan_out')
@@ -169,7 +186,7 @@ class Bilinear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self, version: Union[Tuple[int, int, int], str] = None) -> None:
+    def reset_parameters(self, version: Union[Tuple[int, int, int], str, None] = None) -> None:
         with init.use_init_version(version) as version:
             if version >= (1, 7, 0):
                 init.kaiming_normal_(self.weight, mode='fan_out')

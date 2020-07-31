@@ -533,27 +533,30 @@ sparse = _make_deprecate(sparse_)
 GET_SEMANTIC_VERSION = re.compile(r'\d+\.\d+\.\d+')
 
 def _get_version_as_tuple_from_string(version: str) -> Tuple[int, int, int]:
-    """version: should be 'major.minor.micro'"""
-    v = GET_SEMANTIC_VERSION.findall(version)
+    """version: should be 'major.minor.patch'"""
+    v = GET_SEMANTIC_VERSION.match(version).group(0)
 
-    if len(v) != 1:
-        raise TypeError("Invalid version, not a valid semantic version (e.g. of correct input 1.7.1)")
+    if v is None:
+        raise TypeError("Invalid version, not a valid semantic version (e.g. of correct input, 1.7.1)")
 
-    v = v[0].split('.')
+    v = v.split('.')
     return (int(v[0]), int(v[1]), int(v[2]))
 
-
-init_version = (1, 6, 1)
 _torch_version = _get_version_as_tuple_from_string(torch.__version__)
 
-def parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int, int, int]:
+# If you want to set the default initialization change the value of 'init_version', e.g. if
+# you want to set the pytorch default to latest initialization, set this value to _torch_version.
+# or any other version that you want like (1,8,1).
+init_version = (1, 6, 1)
+
+def _parse_version(version: Union[Tuple[int, int, int], str, None] = None) -> Tuple[int, int, int]:
     if version is None:
         return init_version
 
     if isinstance(version, tuple):
         for x in version:
             if not isinstance(x, int):
-                raise ValueError("Invalid version, must be a version string (e.g. '1.7.0') or tuple of integers")
+                raise ValueError("Invalid version, it should be a tuple of integers (e.g. (1, 7, 0))")
     elif isinstance(version, str):
         version = _get_version_as_tuple_from_string(version)
     else:
@@ -568,12 +571,19 @@ def parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int
 @contextlib.contextmanager
 def use_init_version(version=None):
     r"""Context manager to use a specific version of initialization for `nn.modules`.
-    By default, the pytorch initialization used till version 1.6.1 is used.
+    By default (will change in the future), the pytorch initialization used till version 1.6.1 is used.
 
     Args:
-        version : Union[Tuple[int, int, int], str], which pytorch version to use for initializing nn.modules.
-            The format should be a version string (major,minor,micro) or a tuple of integers. Examples of valid
+        version (Union[Tuple[int, int, int], str, None]): which pytorch version to use for initializing nn.modules.
+            The format should be a version string `major.minor.patch` or a tuple of integers. Examples of valid
             version are (1,7,0), '1.7.1'.
+
+    Yields:
+        Tuple[int, int, int]: version converted as a tuple of integers
+
+    Note:
+        It is recommended to provide `version`, as the default behaviour of handling `version=None` will change in
+        the future.
 
     Examples:
         >>> with nn.init.use_init_version(version='1.7.1') as version:
@@ -585,7 +595,7 @@ def use_init_version(version=None):
     """
     global init_version
 
-    version = parse_version(version)
+    version = _parse_version(version)
 
     old_init_version = init_version
     init_version = version

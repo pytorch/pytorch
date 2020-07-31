@@ -21,3 +21,4 @@ torch.nn.init
 .. autofunction:: kaiming_normal_
 .. autofunction:: orthogonal_
 .. autofunction:: sparse_
+.. autofunction:: use_init_version
