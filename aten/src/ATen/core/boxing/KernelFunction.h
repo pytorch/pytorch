@@ -87,14 +87,6 @@ public:
   Return call(const OperatorHandle& opHandle, Args... args) const;
 
   /**
-   * Like call, but with the stack of the already boxed inputs, in addition to the same
-   * inputs in the parameter pack
-   */
-  template<class Return, class... Args>
-  Return callBoxedOrUnboxed(
-      const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const;
-
-  /**
    * Create a KernelFunction from a boxed function.
    *
    * Example:
