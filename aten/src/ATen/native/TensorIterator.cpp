@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 
@@ -842,9 +843,7 @@ void TensorIterator::resize_outputs(const TensorIteratorConfig& config) {
     auto& tensor = operands_[i].tensor;
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
       if (config.resize_outputs_ && !operands_[i].is_read_write) {
-        // Preserve legacy resizing behavior of out=... arguments
-        // TODO: issue warning
-        tensor.resize_(shape_);
+        at::native::resize_output(tensor, shape_);
         if (tensor.dim() == 4 && requires_channels_last_2d_output()) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
           tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);

@@ -5324,6 +5324,29 @@ class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
     @onlyOnCPUAndCUDA
+    def test_out_resize_warning(self, device):
+        a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
+        b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
+
+        unary_inputs = (a,)
+        binary_inputs = (a, b)
+        unary_ops = (torch.ceil, torch.exp)
+        binary_ops = (torch.add, torch.sub)
+        for op in (unary_ops + binary_ops):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                inputs = unary_inputs if op in unary_ops else binary_inputs
+
+                # No warnings
+                op(*inputs, out=torch.empty(3, device=device))
+                op(*inputs, out=torch.empty(0, device=device))
+                self.assertEqual(len(w), 0)
+
+                # Cases that throw warnings
+                op(*inputs, out=torch.empty(2, device=device))
+                self.assertEqual(len(w), 1)
+
+    @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
         values = torch.tensor((1, 2, 3), device=device)
@@ -5402,7 +5425,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
-                complex_out = torch.empty(1, device=device, dtype=dtype)
+                complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
@@ -12975,7 +12998,7 @@ class TestTorchDeviceType(TestCase):
                     dst2 += [src[i]]
             self.assertEqual(dst, torch.tensor(dst2), atol=0, rtol=0)
 
-            dst3 = torch.empty_like(src, device=device)
+            dst3 = torch.empty(0, device=device, dtype=dtype)
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
