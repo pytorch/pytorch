@@ -108,7 +108,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch.jit.freeze(m)
 
         # Check if frozen module looks as below:
         # module m {
@@ -127,6 +127,7 @@ class TestFreezing(JitTestCase):
         #     }
         #   }
         # }
+        mf = mf._c
         self.assertFalse(mf.hasattr('sub1'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
