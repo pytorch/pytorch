@@ -543,14 +543,12 @@ def _get_semantic_version_from_string(version: str) -> Tuple[int, int, int]:
     return (int(v[0]), int(v[1]), int(v[2]))
 
 
-# Use "init_version" to handle "_init_version". This value corresponds to the last pytorch version that
-# did not have 'init_version' context manager.
-_init_version = (1, 6, 1)
+init_version = (1, 6, 1)
 _torch_version = _get_semantic_version_from_string(torch.__version__)
 
-def _parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int, int, int]:
+def parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[int, int, int]:
     if version is None:
-        return _init_version
+        return init_version
 
     if isinstance(version, tuple):
         for x in version:
@@ -568,7 +566,7 @@ def _parse_version(version: Union[Tuple[int, int, int], str] = None) -> Tuple[in
 
 
 @contextlib.contextmanager
-def init_version(version=None):
+def use_init_version(version=None):
     r"""Context manager to use a specific version of initialization for `nn.modules`.
     By default, the pytorch initialization used till version 1.6.1 is used.
 
@@ -578,47 +576,27 @@ def init_version(version=None):
             version are (1,7,0), '1.7.1'.
 
     Examples:
-        >>> with nn.init.init_version() as version:
+        >>> with nn.init.use_init_version() as version:
         >>>     # use the default pytorch initialization used till pytorch version 1.6.1
         >>>     # This is the default behaviour.
         >>>     model = nn.Sequential(...)
         >>>
-        >>> with nn.init.init_version(version='1.7.1') as version:
+        >>> with nn.init.use_init_version(version='1.7.1') as version:
         >>>     model = nn.Sequential(...)
-
-    Note:
-        For researchers, who want to make their models available to the community, avoid hard-coding version
-        number as `with init_version('my.version.number')` in your code. The reason being when a new
-        initialization is released in pytorch, people would have to change the source code of your repo
-        in order to use that initialization. Instead, log/print a warning, to tell the community that your
-        model was built using this version of initialization scheme.
-
-        This can be illustrated as follows:
-        1. You release a model with version='1.7.0' hard-coded in your source code.
-            ```python
-            with nn.init.init_version('1.7.0') as version:
-                model = MyModel(...)
-            ```
-        2. Now in PyTorch=1.42.0 release a new initialization scheme is introduced.
-        3. To use this new initialization scheme, people would have to change the source code of your repo.
-        This can be a little inconvinient. 
-        4. To avoid this situation you can log a warning during model initialization that our model used this 
-        version of PyTorch for initialization.
-            ```python
-            with nn.init.init_version() as version:
-                if version != (1,7,0):
-                    log.warning(f"This model was designed to use `init_version('1.7.0') but was initialized with {version}")
-            ``` 
+        >>>
+        >>> # You can also set `init_version` as a global variable, as shown
+        >>> # NOTE:- Pass the version as Tuple[int, int, int]
+        >>> nn.init.init_version = (1, 7, 0)
     """
-    global _init_version
+    global init_version
 
-    version = _parse_version(version)
+    version = parse_version(version)
 
-    old_init_version = _init_version
-    _init_version = version
+    old_init_version = init_version
+    init_version = version
 
     yield version
 
-    if _init_version != version:
+    if init_version != version:
         raise Exception('version was modified before resetting it back to original value.')
-    _init_version = old_init_version
+    init_version = old_init_version
