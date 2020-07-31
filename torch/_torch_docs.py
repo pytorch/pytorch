@@ -5745,6 +5745,29 @@ Example::
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
 """.format(**common_args))
 
+add_docstr(torch.sinc,
+           r"""
+sinc(input, out=None) -> Tensor
+
+Returns a new tensor with the sine cardinal of the elements of
+:attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sinc(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-1.0163, -0.3653, -0.5485, -1.8217])
+    >>> torch.sinc(a)
+    tensor([-0.0160,  0.7945,  0.5736, -0.0928])
+""".format(**common_args))
+
 add_docstr(torch.sinh,
            r"""
 sinh(input, out=None) -> Tensor
