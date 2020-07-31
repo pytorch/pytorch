@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import TestCase, load_tests, run_tests
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests')
+    print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
@@ -3413,6 +3413,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # aborting nccl communicators before throwing Operation timed out
             a = torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
+            # Clean up structures (ex: files for FileStore before going down)
+            del process_group
             func()
         else:
             # Wait for timeout
@@ -3494,7 +3496,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     return
                 else:
                     raise e
-            time.sleep(1)
+            time.sleep(0.1)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
