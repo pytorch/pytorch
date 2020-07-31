@@ -102,6 +102,9 @@ public:
     __m256 cmp = _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_EQ_OQ);
     return _mm256_movemask_ps(cmp);
   }
+  Vec256<float> isnan() const {
+    return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+  }
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
