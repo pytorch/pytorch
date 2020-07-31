@@ -2,7 +2,6 @@
 #include <ATen/core/ivalue.h>
 //#include <aten/src/Aten/core/operator_name.h>
 #include <vector>
-// #include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -34,8 +33,6 @@ class Function {
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
-  std::vector<std::string> module_debug_info_list_;
-  // std::unordered_map<size_t, std::string> pc_to_module_debug_info_;
   std::vector<std::string> pc_to_module_debug_info_;
 };
 

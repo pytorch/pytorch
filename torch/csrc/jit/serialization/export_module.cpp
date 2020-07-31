@@ -20,7 +20,6 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
-#include <stack>
 #include <string>
 #include <vector>
 

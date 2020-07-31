@@ -81,7 +81,7 @@ std::string Function::get_module_debug_info(size_t pc) {
 }
 
 bool Function::run(Stack& stack) const {
-  InterpreterState interp_state(code_, module_debug_info_list_);
+  InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }
 
