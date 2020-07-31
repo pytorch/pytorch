@@ -395,6 +395,80 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # for weight
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
 
+    def test_insert_observers_interface(self):
+        @torch.jit.interface
+        class SubInterface(torch.nn.Module):
+            def addOne(self, inp) -> torch.Tensor:
+                pass
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def addOne(self, inp):
+                return self.fc(inp) + 1
+
+            def forward(self, x):
+                return self.addOne(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+                self.sub = Sub()
+
+            def forward(self, x):
+                return self.sub(self.conv(x))
+
+        m = torch.jit.script(M())
+        qconfig_dict = {'sub.conv': default_qconfig}
+        m = prepare_jit(m, qconfig_dict)
+
+    def test_insert_observers_interface_unshare_type(self):
+        @torch.jit.interface
+        class OperatorIf(nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class Operator(nn.Module):
+            def __init__(self, a):
+                super().__init__()
+                self.a = a
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return self.a * (inp + self.a)
+
+        class Inner(nn.Module):
+            op: OperatorIf
+
+            def __init__(self, op):
+                super().__init__()
+                self.op = op
+
+            def forward(self, inp):
+                return self.op(inp)
+
+
+        class Outer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner_a = Inner(Operator(1))
+                self.inner_b = Inner(Operator(3.0))
+
+            def forward(self, inp):
+                return self.inner_a(inp) + self.inner_b(inp)
+
+        qconfig_dict = {'inner_a': default_qconfig, 'inner_b': default_qconfig}
+
+        eager_model = Outer()
+        for tracing in [True, False]:
+            x = torch.rand(3)
+            script_model = get_script_module(eager_model, tracing, x)
+            # make sure it runs
+            prepare_jit(script_model, qconfig_dict)
+
+
     def test_insert_observers_child_qconfig(self):
         class Sub(torch.nn.Module):
             def __init__(self):
