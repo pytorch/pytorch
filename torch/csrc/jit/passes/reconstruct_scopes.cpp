@@ -7,13 +7,13 @@ namespace jit {
 class ReconstructScopesPass {
  public:
   ReconstructScopesPass(const Module& m, Graph& g, std::string p)
-      : root_module(m), graph(g), prefix(std::move(p)){};
+      : root_module_(m), graph_(g), prefix_(std::move(p)){};
   void run();
 
  private:
-  const Module& root_module;
-  Graph& graph;
-  std::string prefix;
+  const Module& root_module_;
+  Graph& graph_;
+  std::string prefix_;
 
   std::unordered_map<Function*, ModulePtr> func_to_module;
   std::unordered_map<ModulePtr, std::string> module_names;
@@ -82,15 +82,15 @@ void ReconstructScopesPass::visitBlock(Block* b) {
 }
 
 void ReconstructScopesPass::run() {
-  GRAPH_DUMP("Graph before reconstructing scope", &graph);
+  GRAPH_DUMP("Graph before reconstructing scope", &graph_);
   func_to_module.clear();
   module_names.clear();
 
-  constructFunctionToModuleMap(root_module);
-  constructRelativeNamesForModules(root_module, prefix);
+  constructFunctionToModuleMap(root_module_);
+  constructRelativeNamesForModules(root_module_, prefix_);
 
-  visitBlock(graph.block());
-  GRAPH_DUMP("Graph after reconstructing scope", &graph);
+  visitBlock(graph_.block());
+  GRAPH_DUMP("Graph after reconstructing scope", &graph_);
 }
 
 void ReconstructScopes(
