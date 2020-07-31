@@ -140,11 +140,8 @@ class TestVmapAPI(TestCase):
             return x.cos_()
 
         x = torch.randn(3)
-        # TODO(rzou): Yeah, this error message is pretty bad because the
-        # dispatcher's fallback mechanism doesn't work for ops that don't support
-        # boxing. Fix the error message at some point.
         with self.assertRaisesRegex(
-                RuntimeError, 'Tried to call KernelFunction::call'):
+                RuntimeError, 'Batching rule not implemented'):
             vmap(foo)(x)
 
     def test_nonzero_out_dims(self):
