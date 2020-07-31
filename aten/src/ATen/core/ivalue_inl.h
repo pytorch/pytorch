@@ -315,7 +315,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Get the result of the current future.
-  IValue value() {
+  virtual IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (error_) {
@@ -326,7 +326,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  virtual const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!error_);
@@ -374,11 +374,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() const{
+  virtual bool completed() const{
     return completed_;
   }
 
-  bool hasValue() const {
+  virtual bool hasValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return completed_ && !error_;
   }
@@ -401,12 +401,6 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
- protected:
-  mutable std::mutex mutex_;
-  std::atomic_bool completed_ = {false}; // is this future complete
-
-  IValue value_; // when finished the value
-
  private:
   void setErrorInternal(
       FutureError error,
@@ -425,8 +419,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     }
   }
 
+  mutable std::mutex mutex_;
+  std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
+  IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;

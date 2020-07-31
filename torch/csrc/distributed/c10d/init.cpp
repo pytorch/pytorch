@@ -711,8 +711,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::call_guard<py::gil_scoped_release>(),
           R"(
             ``get_future`` retrieves a future associated with the completion of
-            ``c10d.ProcessGroup.work``. As an example, a future object can be set
-            by `fut = dist.allreduce(tensors).get_future()`.
+            ``c10d.ProcessGroup.work``. As an example, a future object can be
+            retrieved by `fut = dist.allreduce(tensors).get_future()`.
 
             In the example above, if `dist.allreduce` work was done on GPU,
             `fut.wait()` would return after synchronizing the correct GPU streams
