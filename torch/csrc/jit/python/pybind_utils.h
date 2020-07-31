@@ -74,6 +74,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
+  bool done() {
+    return fut->completed();
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {

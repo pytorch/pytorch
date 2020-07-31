@@ -154,7 +154,7 @@ function(dedent outvar text)
     INPUT_FILE "${CMAKE_BINARY_DIR}/indented.txt"
     RESULT_VARIABLE _dedent_exitcode
     OUTPUT_VARIABLE _dedent_text)
-  if(NOT ${_dedent_exitcode} EQUAL 0)
+  if(NOT _dedent_exitcode EQUAL 0)
     message(ERROR " Failed to remove indentation from: \n\"\"\"\n${text}\n\"\"\"
     Python dedent failed with error code: ${_dedent_exitcode}")
     message(FATAL_ERROR " Python dedent failed with error code: ${_dedent_exitcode}")
@@ -202,7 +202,7 @@ function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
   pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
 
-  if(NOT ${_exitcode} EQUAL 0)
+  if(NOT _exitcode EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
   endif()

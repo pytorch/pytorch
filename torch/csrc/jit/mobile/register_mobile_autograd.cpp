@@ -95,8 +95,7 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto self = (std::move(peek(*stack, 0, 3))).toTensor();
   auto dim = (std::move(peek(*stack, 1, 3))).toInt();
   auto dtype = (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>();
-  auto result_ =
-      at::TypeDefault::log_softmax_int(self, dim, dtype);
+  auto result_ = at::TypeDefault::log_softmax_int(self, dim, dtype);
   drop(*stack, 3);
   pack(*stack, std::move(result_));
 }
@@ -106,8 +105,6 @@ TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
   m.impl("add.Scalar", TORCH_FN(torch::autograd::VariableType::add_Scalar));
   m.impl("mul.Tensor", TORCH_FN(torch::autograd::VariableType::mul_Tensor));
   m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
-  //m.impl("dropout", TORCH_FN(VariableType::dropout));
-  //m.impl("feature_dropout", TORCH_FN(VariableType::feature_dropout));
   m.impl(
       "log_softmax.int",
       torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
