@@ -2783,7 +2783,7 @@ hypot(input, other, *, out=None) -> Tensor
 Given the legs of a right triangle, return its hypotenuse.
 
 .. math::
-\text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
+    \text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
 
 The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
