@@ -725,7 +725,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& fn_dropout_state
     ) {
 
-  check_device(input_r, weight, {hx, cx});
+  check_device(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
   if (!weight_buf.defined()) {
@@ -1224,15 +1224,11 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
       cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
-  for (const auto& p : parameters) {
-    if (p.scalar_type() != input.scalar_type()) {
-      return {};
-    }
-  }
 
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
-  auto datatype = getCudnnDataType(input);
+  auto & any_param = parameters.at(0);
+  auto datatype = getCudnnDataType(any_param);
 
   RNNDescriptorParams rnn;
   rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
@@ -1240,12 +1236,14 @@ Tensor try_get_weight_buf(
 
   TensorGeometry x_geom ({1, input.size(-1)});
   TensorDescriptor x_desc;
+  // datatype for x_desc comes from any_param, not input.
+  // try_get_weight_buf's job is to check "is the weight buffer correctly laid out
+  // for us to run it with input of the same datatype?"
   x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_params = get_num_weights(handle, rnn_desc, x_desc, datatype);
 
   // Try to get parameter storage
-  auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
   auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage);
   if (weight_buf.size(0) < num_params) {
