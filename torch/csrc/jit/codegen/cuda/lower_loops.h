@@ -48,6 +48,10 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // initialization
   ThreadPredicateMap& thread_predicates_;
 
+  // Create the allocation for tv, place it inside the loop associated with
+  // alloc_id, return the node
+  Expr* pushAlloc(TensorView*, IterDomain* alloc_id);
+
   // Fusion shared_memory values
   // Tracks if shared memory is modified
   std::unordered_map<Val*, bool> smem_;
@@ -61,9 +65,6 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Return the status of the shared memory buffer
   // False if TensorView is not shared memory buffer
   bool isModifiedSharedMemory(Val* key) const;
-
-  // Create, place, and return the allocation for tv
-  Expr* pushAlloc(TensorView*);
 
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
@@ -82,8 +83,12 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
 
   // Initialize a buffer to init_val. If this buffer is in smem or registers,
   // pass in its allocation statement so we can make sure that we insert this
-  // initialization comes after the allocation.
-  void initReduction(TensorView* tv, Val* init_val, Expr* alloc_expr = nullptr);
+  // initialization after the allocation.
+  void initReduction(
+      TensorView* tv,
+      Val* init_val,
+      IterDomain* alloc_id,
+      Expr* alloc_expr = nullptr);
 
   // Check if expr is a TV op and handle accordingly.
   void handle(Expr*) final;
