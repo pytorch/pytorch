@@ -120,15 +120,18 @@ def _split_tensor_list_constants(g, block):
                   .setType(ListType.ofTensors()))
             node.output().replaceAllUsesWith(lc)
 
-def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
-    # Inline everyting
+
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None, enable_jit_freezing_and_functionalization=False):
+    # Inline everything
     torch._C._jit_pass_inline(graph)
 
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_remove_inplace_ops(graph)
+    if not enable_jit_freezing_and_functionalization:
+        torch._C._jit_pass_remove_inplace_ops(graph)
+
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
@@ -154,6 +157,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+
+        if enable_jit_freezing_and_functionalization:
+            torch._C._jit_pass_onnx_preprocess(graph)
+            torch._C._jit_pass_remove_mutation(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -334,13 +341,13 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freeze_module):
+def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freezing_and_functionalization):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
         try:
-            if not enable_jit_freeze_module:
-                graph = model.forward.graph
-                torch._C._jit_pass_onnx_function_substitution(graph)
+            graph = model.forward.graph
+            torch._C._jit_pass_onnx_function_substitution(graph)
+            if not enable_jit_freezing_and_functionalization:
                 method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             else:
                 freezed_m = torch._C._freeze_module(model._c)
@@ -380,7 +387,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, enable_jit_freeze_module=False):
+                    training=None, enable_jit_freezing_and_functionalization=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -391,7 +398,7 @@ def _model_to_graph(model, args, verbose=False,
 
     graph, params, torch_out = _model_to_jit_graph(model, args,
                                                    _retain_param_name,
-                                                   enable_jit_freeze_module)
+                                                   enable_jit_freezing_and_functionalization)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
@@ -399,8 +406,8 @@ def _model_to_graph(model, args, verbose=False,
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
-                            fixed_batch_size=fixed_batch_size, params_dict=params_dict)
-
+                            fixed_batch_size=fixed_batch_size, params_dict=params_dict,
+                            enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
@@ -509,7 +516,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False, enable_jit_freeze_module=False):
+            enable_onnx_checker=True, use_external_data_format=False, enable_jit_freezing_and_functionalization=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -551,7 +558,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             example_outputs, _retain_param_name,
                                                             val_do_constant_folding,
                                                             fixed_batch_size=fixed_batch_size, training=training,
-                                                            enable_jit_freeze_module=enable_jit_freeze_module)
+                                                            enable_jit_freezing_and_functionalization=
+                                                            enable_jit_freezing_and_functionalization)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

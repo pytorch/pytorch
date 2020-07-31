@@ -15,5 +15,8 @@ TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
 // Removes list mutation with functional equivalents
 TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
 
+// Return True if node is an in-place aten op
+TORCH_API bool isInplaceOpVariant(const std::shared_ptr<Graph>& graph, Node* node);
+
 } // namespace jit
 } // namespace torch

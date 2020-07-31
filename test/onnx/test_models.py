@@ -47,7 +47,8 @@ class TestModels(TestCase):
         with torch.onnx.select_model_mode_for_export(model, None):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
-            verify(model, inputs, backend, rtol=rtol, atol=atol)
+            verify(model, inputs, backend, rtol=rtol, atol=atol,
+                   enable_jit_freezing_and_functionalization=True)
 
     def test_ops(self):
         x = Variable(
