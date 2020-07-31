@@ -330,7 +330,6 @@ static bool isOne(ExprHandle e) {
 
 std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
-  bool seenBroadcast = false;
   size_t n = shapes.size();
   if (n == 1) {
     return shapes[0];
