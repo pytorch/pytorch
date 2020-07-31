@@ -1450,7 +1450,7 @@ struct CAFFE2_API QSchemeType : public Type {
 
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
-// This type represents a Generator
+// This type represents a Device
 struct CAFFE2_API DeviceObjType : public Type {
   static DeviceObjTypePtr create() {
     return DeviceObjTypePtr(
