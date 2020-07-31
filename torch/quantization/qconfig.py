@@ -63,8 +63,8 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
 
 default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                          weight=default_weight_observer)
-float16_dynamic_qconfig = QConfigDynamic(activation=NoopObserver.with_args(dtype=torch.float16),
-                                         weight=Fp16Observer.with_args(dtype=torch.float16))
+float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
+                                         weight=PlaceholderObserver.with_args(dtype=torch.float16))
 per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                              weight=default_per_channel_weight_observer)
 
