@@ -12746,8 +12746,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_scatter_reduce_operations_to_large_input(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-        + torch.testing.get_all_complex_dtypes():
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.zeros(4, 4, device=device, dtype=dtype),
                  torch.ones(2, 2, device=device, dtype=dtype),
@@ -12770,8 +12769,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_scatter_reduce_scalar(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-        + torch.testing.get_all_complex_dtypes():
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.zeros(4, 4, device=device, dtype=dtype), 1,
                  torch.tensor([[0, 0, 0, 0],
@@ -12807,8 +12805,7 @@ class TestTorchDeviceType(TestCase):
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
-        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-        + torch.testing.get_all_complex_dtypes():
+        for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.ones(height, width, device=device, dtype=dtype),
                 torch.ones(height, width, device=device, dtype=dtype),

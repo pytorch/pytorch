@@ -11,7 +11,6 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCAtomics.cuh>
-#include <ATen/native/cuda/AtomicOps.cuh>
 
 namespace at { namespace native {
 
@@ -20,7 +19,7 @@ class ReduceMultiply {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    atomic_ops::gpuAtomic<atomic_ops::mul_op>()(self_data, *src_data);
+    gpuAtomicMul(self_data, *src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -29,7 +28,7 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    atomic_ops::gpuAtomic<atomic_ops::add_op>()(self_data, *src_data);
+    gpuAtomicAdd(self_data, *src_data);
   }
 };
 static ReduceAdd reduce_add;

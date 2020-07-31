@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
-#include <ATen/native/cuda/AtomicOps.cuh>
+#include <THC/THCAtomics.cuh>
 
 #include <stdio.h>
-
-using namespace at::native::atomic_ops;
 
 const int blocksize = 256;
 const int factor = 4;
@@ -14,7 +12,7 @@ __global__ void addition_test_kernel(T * a, T * sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
   
-  gpuAtomic<add_op>()(&sum[idx], a[idx]);
+  gpuAtomicAdd(&sum[idx], a[idx]);
 }
 
 template <typename T>
@@ -22,7 +20,7 @@ __global__ void mul_test_kernel(T * a, T * sum) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int idx = (tid) % arraysize;
   
-  gpuAtomic<mul_op>()(&sum[idx], a[idx]);
+  gpuAtomicMul(&sum[idx], a[idx]);
 }
 
 template <typename T>
@@ -112,17 +110,15 @@ TEST(TestAtomicOps, TestAtomicAdd) {
   test_atomic_add<at::Half>();
   test_atomic_add<float>();
   test_atomic_add<double>();
+  test_atomic_add<c10::complex<float> >();
+  test_atomic_add<c10::complex<double> >();
 }
 
 TEST(TestAtomicOps, TestAtomicMul) {
-  test_atomic_mul<uint8_t>();
-  test_atomic_mul<int8_t>();
-  test_atomic_mul<int16_t>();
-  test_atomic_mul<int32_t>();
-  test_atomic_mul<int64_t>();
-
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();
   test_atomic_mul<double>();
+  test_atomic_add<c10::complex<float> >();
+  test_atomic_add<c10::complex<double> >();
 }
