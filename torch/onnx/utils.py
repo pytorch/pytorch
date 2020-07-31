@@ -121,7 +121,8 @@ def _split_tensor_list_constants(g, block):
             node.output().replaceAllUsesWith(lc)
 
 
-def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None, enable_jit_freezing_and_functionalization=False):
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
+                    params_dict=None, enable_jit_freezing_and_functionalization=False):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
@@ -554,13 +555,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
-            graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
-                                                            output_names, operator_export_type,
-                                                            example_outputs, _retain_param_name,
-                                                            val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size,
-                                                            training=training,
-                                                            enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
+            graph, params_dict, torch_out = \
+                _model_to_graph(model, args, verbose, input_names,
+                                output_names, operator_export_type,
+                                example_outputs, _retain_param_name,
+                                val_do_constant_folding,
+                                fixed_batch_size=fixed_batch_size,
+                                training=training,
+                                enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
