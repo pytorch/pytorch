@@ -191,5 +191,5 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, [2, 2], [2, 2], 1)
         # z2 did did not get merged into the subgraph
         FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
-            .check_next("aten::add_").check_next("Differentiable").run(graph)
+            .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
