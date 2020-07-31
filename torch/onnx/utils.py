@@ -341,7 +341,7 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freezing_and_functionalization):
+def _model_to_jit_graph(model, args, _retain_param_name, enable_jit_freezing_and_functionalization):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
         try:
@@ -369,7 +369,7 @@ def _model_to_jit_graph(model, args, retain_param_name, enable_jit_freezing_and_
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
-        if retain_param_name:
+        if _retain_param_name:
             graph_inputs = list(graph.inputs())
             user_input_num = len(graph_inputs) - len(state_dict)
             param_names = list(state_dict.keys())
@@ -499,7 +499,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size)
+                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size,
+                                                        training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
