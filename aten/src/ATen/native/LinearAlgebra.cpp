@@ -882,7 +882,7 @@ Tensor compute_T12(const Tensor& A) {
   // gather coefficients `b` from above into a tensor,
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
-    reinterpret_cast<void*>(b.begin()),
+    reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
@@ -944,7 +944,7 @@ Tensor compute_T18(const Tensor& A) {
   // gather coefficients `b` from above into a tensor,
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
-    reinterpret_cast<void*>(b.begin()),
+    reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
