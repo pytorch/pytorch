@@ -58,67 +58,38 @@ class TestComplexTensor(TestCase):
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.float16, torch.complex64, torch.complex128, torch.bool)
     def test_torch_complex_floating_dtype_error(self, device, dtype):
-        real = torch.tensor([1, 2], device=device, dtype=dtype)
-        imag = torch.tensor([3, 4], device=device, dtype=dtype)
-        error = "Both inputs must be either Float or Double"
+        for op in (torch.complex, torch.complex_polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            error = r"Expected both inputs to be Float or Double tensors but " \
+                    r"got [A-Za-z]+ and [A-Za-z]+"
         with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex(real, imag)
-
-
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.complex64, torch.complex128, torch.bool)
-    def test_torch_complex_polar_floating_dtype_error(self, device, dtype):
-        abs = torch.tensor([1, 2], device=device, dtype=dtype)
-        angle = torch.tensor([3, 4], device=device, dtype=dtype)
-        error = "Both inputs must be either Float or Double"
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex_polar(abs, angle)
+            op(a, b)
 
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_same_dtype_error(self, device, dtype):
-        other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        real = torch.tensor([1, 2], device=device, dtype=dtype)
-        imag = torch.tensor([3, 4], device=device, dtype=other_dtype)
-        error = "Expected object of scalar type {} but got scalar type {} " \
-                "for second argument".format(dtype_name(dtype),
-                                             dtype_name(other_dtype))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex(real, imag)
-
-    @dtypes(torch.float32, torch.float64)
-    def test_torch_complex_polar_same_dtype_error(self, device, dtype):
-        other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        abs = torch.tensor([1, 2], device=device, dtype=dtype)
-        angle = torch.tensor([3, 4], device=device, dtype=other_dtype)
-        error = "Expected object of scalar type {} but got scalar type {} " \
-                "for second argument".format(dtype_name(dtype),
-                                             dtype_name(other_dtype))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex_polar(abs, angle)
+        for op in (torch.complex, torch.complex_polar):
+            other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=other_dtype)
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for second argument".format(dtype_name(dtype),
+                                                    dtype_name(other_dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b)
 
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_out_dtype_error(self, device, dtype):
-        real = torch.tensor([1, 2], device=device, dtype=dtype)
-        imag = torch.tensor([3, 4], device=device, dtype=dtype)
-        out = torch.zeros(2, device=device, dtype=dtype)
-        expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-        error = "Expected object of scalar type {} but got scalar type {} " \
-                "for argument 'out'".format(dtype_name(expected_dtype),
-                                            dtype_name(dtype))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex(real, imag, out=out)
-
-    @dtypes(torch.float32, torch.float64)
-    def test_torch_complex_polar_out_dtype_error(self, device, dtype):
-        abs = torch.tensor([1, 2], device=device, dtype=dtype)
-        angle = torch.tensor([3, 4], device=device, dtype=dtype)
-        out = torch.zeros(2, device=device, dtype=dtype)
-        expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
-        error = "Expected object of scalar type {} but got scalar type {} " \
-                "for argument 'out'".format(dtype_name(expected_dtype),
-                                            dtype_name(dtype))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.complex_polar(abs, angle, out=out)
+        for op in (torch.complex, torch.complex_polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            out = torch.zeros(2, device=device, dtype=dtype)
+            expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for argument 'out'".format(dtype_name(expected_dtype),
+                                                   dtype_name(dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b, out=out)
 
     @dtypes(torch.float32, torch.float64)
     def test_torch_complex_backward(self, device, dtype):

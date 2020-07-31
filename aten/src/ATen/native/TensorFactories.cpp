@@ -106,7 +106,8 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 void complex_check_floating(const Tensor& a, const Tensor& b) {
   TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
               (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
-              "Both inputs must be either Float or Double");
+              "Expected both inputs to be Float or Double tensors but got ",
+              a.scalar_type(), " and ", b.scalar_type());
 }
 
 void complex_check_dtype(
@@ -123,23 +124,15 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-inline TensorIterator complex_op(
-    Tensor& out,
-    const Tensor& a,
-    const Tensor& b,
-    bool check_mem_overlap) {
-  return TensorIteratorConfig()
-      .set_check_mem_overlap(check_mem_overlap)
-      .add_output(out)
-      .add_input(a)
-      .add_input(b)
-      .check_all_same_dtype(false)
-      .build();
-}
-
 Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
   complex_check_dtype(result, real, imag);
-  auto iter = complex_op(result, real, imag, /*check_mem_overlap=*/true);
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(real)
+      .add_input(imag)
+      .check_all_same_dtype(false)
+      .build();
   complex_stub(iter.device_type(), iter);
   return result;
 }
@@ -157,7 +150,13 @@ Tensor& complex_polar_out(
     const Tensor& abs,
     const Tensor& angle) {
   complex_check_dtype(result, abs, angle);
-  auto iter = complex_op(result, abs, angle, /*check_mem_overlap=*/true);
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(abs)
+      .add_input(angle)
+      .check_all_same_dtype(false)
+      .build();
   complex_polar_stub(iter.device_type(), iter);
   return result;
 }
