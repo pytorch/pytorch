@@ -776,6 +776,19 @@ inline Tensor _pin_and_move_memory_if_cuda_input(
     : mem;
 }
 
+template <typename scalar_t>
+inline Tensor _blob_to_Tensor(
+  std::initializer_list<scalar_t> blob,
+  const Tensor& in
+) {
+  // we convert to void* expecitly because begin() returns
+  // a pointer to a constant.
+  // we also insert a fake dimension so that the result could directly
+  // be used in _compute_linear_combination
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size()).unsqueeze(0);
+  return _pin_and_move_memory_if_cuda_input(tensor, in);
+}
+
 // I + A
 Tensor compute_T1(const Tensor& A) {
   // 2 for {I, A}
@@ -869,7 +882,7 @@ Tensor compute_T12(const Tensor& A) {
   // gather coefficients `b` from above into a tensor,
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
-    reinterpret_cast<void*>(&b),
+    reinterpret_cast<void*>(b.begin()),
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
@@ -931,7 +944,7 @@ Tensor compute_T18(const Tensor& A) {
   // gather coefficients `b` from above into a tensor,
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
-    reinterpret_cast<void*>(&b),
+    reinterpret_cast<void*>(b.begin()),
     {num_prods, num_prods},
     {num_prods, 1},
     A.dtype()
