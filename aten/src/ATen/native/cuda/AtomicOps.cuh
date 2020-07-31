@@ -297,14 +297,14 @@ struct gpuAtomic<mul_op> {
   inline __device__ at::Half operator() (at::Half * address, at::Half val) {
     return AtomicFPOp<at::Half>()(address, val,
                                   [](at::Half bsum, at::Half val) {
-                                    return THCNumerics<at::Half>::add(bsum, val);
+                                    return THCNumerics<at::Half>::mul(bsum, val);
                                   });
   }
 
   inline __device__ at::BFloat16 operator() (at::BFloat16 * address, at::BFloat16 val) {
     return AtomicFPOp<at::BFloat16>()(address, val,
                                       [](at::BFloat16 bsum, at::BFloat16 val) {
-                                        return THCNumerics<at::BFloat16>::add(bsum, val);
+                                        return THCNumerics<at::BFloat16>::mul(bsum, val);
                                       });    
   }
 
