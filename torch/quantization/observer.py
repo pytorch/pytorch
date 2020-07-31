@@ -985,34 +985,31 @@ class HistogramObserver(_ObserverBase):
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                              missing_keys, unexpected_keys, error_msgs)
 
-class Fp16Observer(ObserverBase):
-    def __init__(self, dtype=torch.float16):
-        super(Fp16Observer, self).__init__(dtype=dtype)
-        assert dtype == torch.float16, "Fp16Observer should be initialized with torch.float16 dtype"
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+class PlaceholderObserver(ObserverBase):
+    r"""
+    Observer that doesn't do anything and just passes its configuration to the
+    quantized module's ``.from_float()``.
+
+    Can be used for quantization to float16 which doesn't require determining
+    ranges.
+
+    Args:
+        dtype: Quantized data type
+        custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
+                        (Can be used in Graph Mode Passes for special case ops).
+    """
+    def __init__(self, dtype=torch.float16, custom_op_name=""):
+        super(PlaceholderObserver, self).__init__(dtype=dtype)
+        self.dtype = dtype
+        self.custom_op = custom_op_name
 
     def forward(self, x):
-        x = x.detach()
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
-        else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
-        if min_val < -65504 or max_val > 65504:
-            warnings.warn("Calling FP16 Observer on tensor with range outside [-65504, 65504].\
-            Values will be clipped to FP16 range")
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        return x
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for FP16Observer")
+        raise Exception("calculate_qparams should not be called for PlaceholderObserver")
+
 
 
 class RecordingObserver(_ObserverBase):

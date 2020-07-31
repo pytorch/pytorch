@@ -222,10 +222,10 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-bool isNoopObserver(Value* observer) {
+bool isPlaceholderObserver(Value* observer) {
   if (getModuleName(observer).has_value()) {
     auto name = getModuleName(observer).value();
-    if (name == "__torch__.torch.quantization.observer.NoopObserver") {
+    if (name == "__torch__.torch.quantization.observer.PlaceholderObserver") {
       return true;
     }
   }
@@ -250,7 +250,7 @@ c10::optional<std::string> getEmbeddingBagObsName(
   auto observer_module = module.attr(findObserverName(v).value()).toModule();
   if (observer_module.hasattr("custom_op")) {
     auto op_name = observer_module.attr("custom_op").toStringRef();
-    return isNoopObserver(observer) ? op_name : "";
+    return isPlaceholderObserver(observer) ? op_name : "";
   }
   return c10::nullopt;
 }
@@ -961,7 +961,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
-  if (isNoopObserver(n->input(0)) || scalar_type == at::ScalarType::Half) {
+  if (isPlaceholderObserver(n->input(0)) ||
+      scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
@@ -1308,8 +1309,8 @@ void InsertQuantDeQuantHelper::run(
       auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
-      // We check the size here because for some observers (like NoopObserver)
-      // the qparams might be empty.
+      // We check the size here because for some observers (like
+      // PlaceholderObserver) the qparams might be empty.
       if (qparam_map.size() > 0) {
         TORCH_INTERNAL_ASSERT(
             qparam_name_map_for_node_.count(n),
