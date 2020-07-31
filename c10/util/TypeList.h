@@ -153,18 +153,17 @@ using contains = typename detail::contains<TypeList, Type>::type;
 /**
  * Returns true iff the type trait is true for all types in the type list
  * Examples:
- *   true   ==  true_for_each_type<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value
- *   false  ==  true_for_each_type<std::is_reference, typelist<int&, const float&&, MyClass>>::value
+ *   true   ==  all<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value
+ *   false  ==  all<std::is_reference, typelist<int&, const float&&, MyClass>>::value
  */
-template<template <class> class Condition, class TypeList> struct true_for_each_type final {
-    static_assert(false_t<TypeList>::value, "In typelist::true_for_each_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+template<template <class> class Condition, class TypeList> struct all {
+    static_assert(false_t<TypeList>::value, "In typelist::all<Condition, TypeList>, the TypeList argument must be typelist<...>.");
 };
 template<template <class> class Condition, class... Types>
-struct true_for_each_type<Condition, typelist<Types...>> final
+struct all<Condition, typelist<Types...>>
 : guts::conjunction<Condition<Types>...> {
-    static_assert(is_type_condition<Condition>::value, "In typelist::true_for_each_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
+    static_assert(is_type_condition<Condition>::value, "In typelist::all<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
 };
-
 
 
 /**
@@ -197,6 +196,7 @@ template<class Head, class... Tail> struct head<typelist<Head, Tail...>> final {
 };
 template<class TypeList> using head_t = typename head<TypeList>::type;
 
+
 /**
  * Returns the N-th element of a type list.
  * Example:
@@ -225,6 +225,7 @@ template<size_t Index, class Head, class... Tail> struct element<Index, typelist
 template<size_t Index, class TypeList>
 using element_t = typename element<Index, TypeList>::type;
 
+
 /**
  * Returns the last element of a type list.
  * Example:
@@ -249,6 +250,7 @@ using last_t = typename last<TypeList>::type;
 static_assert(
     std::is_same<int, last_t<typelist<double, float, int>>>::value,
     "");
+
 
 /**
  * Take/drop a number of arguments from a typelist.
