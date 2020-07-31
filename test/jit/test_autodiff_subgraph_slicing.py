@@ -168,11 +168,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             z = y * k
             return z, k
 
-        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
 
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 3)
 
 
     def test_merge_respects_aliasing(self):
