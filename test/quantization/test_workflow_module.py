@@ -8,6 +8,7 @@ from torch.quantization import (
     MinMaxDynamicQuantObserver,
     HistogramObserver,
     RecordingObserver,
+    Fp16Observer,
     FakeQuantize,
     default_debug_qconfig,
     default_observer,
@@ -402,6 +403,26 @@ class TestObserver(QuantizationTestCase):
         self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
                          "QConfig is expected to NOT propagate")
 
+    def test_fp16_observer(self):
+        obs = Fp16Observer()
+        x = torch.ones(5, 5) * 65532
+        y = torch.ones(5, 5)
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            obs(x)
+            for warn in w:
+                self.assertTrue(("Calling FP16 Observer on tensor with range outside" in warn.message.args[0]),
+                                "Expected warning for tensor range")
+        with warnings.catch_warnings(record=True) as w:
+            obs(y)
+            for warn in w:
+                self.assertTrue(("Calling FP16 Observer on tensor with range outside" in warn.message.args[0]),
+                                "Expected warning for tensor range")
+
+        # Test observer is scriptable
+        scripted = torch.jit.script(Fp16Observer())
+        t = torch.ones(5, 5)
+        scripted(t)
 
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py
