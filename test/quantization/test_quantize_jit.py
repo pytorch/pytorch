@@ -460,12 +460,13 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return self.inner_a(inp) + self.inner_b(inp)
 
         qconfig_dict = {'inner_a': default_qconfig, 'inner_b': default_qconfig}
-        model = torch.jit.script(Outer())
-        # make sure it runs
-        prepare_jit(model, qconfig_dict)
 
-        model = torch.jit.trace(Outer(), torch.randn(3))
-        prepare_jit(model, qconfig_dict)
+        eager_model = Outer()
+        for tracing in [True, False]:
+            x = torch.rand(3)
+            script_model = get_script_module(eager_model, tracing, x)
+            # make sure it runs
+            prepare_jit(script_model, qconfig_dict)
 
 
     def test_insert_observers_child_qconfig(self):

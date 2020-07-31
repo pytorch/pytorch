@@ -53,22 +53,17 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::call() on an uninitialized KernelFunction.");
-    return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, functor_.get(), opHandle, std::forward<Args>(args)...);
-}
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        boxed_kernel_func_ != nullptr,
+        "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+    );
 
-template<class Return, class... Args>
-inline Return KernelFunction::callBoxedOrUnboxed(const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const {
-    // note: Args above is intentionally not Args&&. We don't want perfect
-    // forwarding, which would require Args to be deduced, but instead we
-    // want callers to explicitly specify the Args.
-
-    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
-    }
-
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callBoxedOrUnboxed() on an uninitialized KernelFunction.");
-    return impl::callBoxedFunc<Return>(boxed_kernel_func_, functor_.get(), opHandle, stack);
+    return impl::BoxedKernelWrapper<Return(Args...)>::call(
+        boxed_kernel_func_,
+        functor_.get(),
+        opHandle,
+        std::forward<Args>(args)...
+    );
 }
 
 template<KernelFunction::BoxedKernelFunction* func>

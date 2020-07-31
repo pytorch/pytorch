@@ -54,6 +54,7 @@ TESTS = [
     'test_vulkan',
     'test_quantization',
     'test_sparse',
+    'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
     'test_torch',
