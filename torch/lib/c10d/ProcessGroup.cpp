@@ -56,7 +56,7 @@ bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
 }
 
 void ProcessGroup::Work::abort(){
-    TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.")}
+  TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.")}
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
   TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")

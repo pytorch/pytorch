@@ -142,6 +142,10 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_tensor",
+          &::c10d::GradBucket::getTensor,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
@@ -708,15 +712,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
-          py::call_guard<py::gil_scoped_release>(),
           R"(
             ``get_future`` retrieves a future associated with the completion of
             ``c10d.ProcessGroup.work``. As an example, a future object can be
-            retrieved by `fut = dist.allreduce(tensors).get_future()`.
+            retrieved by ``fut = dist.all_reduce(tensor).get_future()``.
 
-            In the example above, if `dist.allreduce` work was done on GPU,
-            `fut.wait()` would return after synchronizing the correct GPU streams
-            to ensure we can have async CUDA execution and it does not wait for
+            In the example above, if ``dist.all_reduce`` work was done on GPU,
+            ``fut.wait()`` would return after synchronizing the correct GPU streams
+            to ensure we can have asynchronous CUDA execution and it does not wait for
             the entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
             in that case, it would wait for the entire operation to complete before
             returning. In addition, if a callback function was added by `fut.then()`,

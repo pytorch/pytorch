@@ -3099,7 +3099,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            return process_group.allreduce(bucket.get_tensors()).get_future()
+            return process_group.allreduce(bucket.get_tensor()).get_future()
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
@@ -3109,29 +3109,33 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_then_mult_hook_nccl(self):
+    def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that calls allreduce and then
-        multiplies the result by ten gives the expected result.
+        multiplies the result by ten and divides by two gives the expected result.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_then_mult_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            fut = process_group.allreduce(bucket.get_tensors()).get_future()
+            fut = process_group.allreduce(bucket.get_tensor()).get_future()
 
-            def fut_then(fut):
+            def mult(fut):
                 # Multiply result by 10.
                 return [10 * t for t in fut.wait()]
 
-            return fut.then(fut_then)
+            def div(fut):
+                # Divide result by 2.
+                return [0.5 * t for t in fut.wait()]
+
+            return fut.then(mult).then(div)
 
         # Get GPU model with allreduce_then_mult_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_then_mult_hook)
 
-        # check whether the grads are equal to what allreduce returns multuplied by 10.
+        # check whether the grads are equal to what allreduce returns multuplied by 5.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
-        self._run_and_verify_hook(gpu_model, 8, 2.5 * torch.ones(2, 2))
+        self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_init(self):

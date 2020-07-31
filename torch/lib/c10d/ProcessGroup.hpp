@@ -89,8 +89,8 @@ class ProcessGroup {
 
     virtual void abort();
 
-    // Returns a Future object that will be marked as completed once work is
-    // completed. Only NCCL backend is currently supported.
+    // Returns a Future object that will be associated with the completion of
+    // work. Only NCCL backend is currently supported.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
    protected:

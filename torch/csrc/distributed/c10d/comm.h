@@ -21,8 +21,11 @@ void broadcast_coalesced(
 class GradBucket {
  public:
   explicit GradBucket(std::vector<at::Tensor> tensors);
-
   const std::vector<at::Tensor>& getTensors();
+
+  // Can only be used when tensors contain bucket contents tensor for just one
+  // replica.
+  const at::Tensor& getTensor();
 
  private:
   std::vector<at::Tensor> tensors_;

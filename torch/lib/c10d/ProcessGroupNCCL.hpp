@@ -138,15 +138,14 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  // FutureNCCL is a subclass of c10d ivalue's Future. The goal is to
-  // use this class in getFuture API of WorkNCCL. This Future is mostly a
-  // wrapper to synchronize streams appropriately and it mostly enables the
-  // async programming model of CUDA while trying to adhere to the Future
-  // interface.
+  // FutureNCCL is a subclass of ivalue's Future. The goal is to use
+  // this class in getFuture API of WorkNCCL. This Future is mostly a
+  // wrapper to synchronize streams appropriately and it mostly enables
+  // the async programming model of CUDA while trying to adhere to the
+  // Future interface.
   //
   // FutureNCCL has a reference to WorkNCCL and NCCL collective's outputs.
-  // Its value is NCCL collective's outputs and should only be used after
-  // NCCL kernel is done executing.
+  // Its value is NCCL collective's outputs.
   struct FutureNCCL : at::ivalue::Future {
    public:
     explicit FutureNCCL(
@@ -156,10 +155,10 @@ class ProcessGroupNCCL : public ProcessGroup {
           work_(work),
           outputs_(outputs) {}
 
-    // Simply calls WorkNCCL's wait(). It will return after
-    // synchronizing the correct GPU streams to ensure we can have async CUDA
-    // execution and it does not wait for the entire operation to complete on
-    // GPU. If NCCL_BLOCKING_WAIT is enabled, in that case, it will wait for the
+    // Simply calls WorkNCCL's wait(). It will return after synchronizing
+    // the correct GPU streams to ensure we can have async CUDA execution
+    // and it does not wait for the entire operation to complete on GPU.
+    // If NCCL_BLOCKING_WAIT is enabled, in that case, it will wait for the
     // entire operation to complete before returning.
     void wait() override {
       work_->wait();
@@ -168,25 +167,23 @@ class ProcessGroupNCCL : public ProcessGroup {
     // FutureNCCL's value is NCCL collective's outputs and callbacks were
     // invoked inline by addCallback(), so markCompleted is not needed.
     void markCompleted(at::IValue value) override {
-      TORCH_CHECK(false, "FutureNCCL::markCompleted is not supported.");
+      C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
     }
 
-    // Returns NCCL collective's outputs. This should only be used after NCCL
-    // kernel is done executing.
+    // Returns NCCL collective's outputs after WorkNCCL wait() returns.
     at::IValue value() override {
+      work_->wait();
       return outputs_;
     }
 
     const at::IValue& constValue() override {
+      work_->wait();
       return outputs_;
     }
 
-    // Add a callback to FutureNCCL. FutureNCCL invokes the callback inline
-    // after WorkNCCL wait() returns.
+    // Add a callback to FutureNCCL. FutureNCCL invokes the callback inline.
     // Callbacks return a Future (not FutureNCCL).
     void addCallback(std::function<void(void)> callback) override {
-      work_->wait();
-
       // Run callback inline after synchronizeStreams.
       callback();
     }
