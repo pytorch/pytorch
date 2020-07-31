@@ -602,6 +602,7 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+        return self
 
     def _register_comm_hook(self, state: object, hook: callable):
         r"""
@@ -632,9 +633,6 @@ class DistributedDataParallel(Module):
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
 
-                             We also provide an API called "get_future" to retrieve a future
-                             associated with the completion of c10d.ProcessGroupNCCL.work.
-
         .. warning ::
             DDP communication hook can only be registered once and should be registered
             before calling backward.
@@ -655,30 +653,6 @@ class DistributedDataParallel(Module):
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.get_tensors())
             >>>     return fut
-
-        Example::
-            Below is an example of a simple allreduce hook.
-
-            >>> ddp._register_comm_hook(state = None, hook = allreduce)
-
-            >>> def allreduce(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     work = dist.allreduce(bucket.get_tensors())
-            >>>     return work.get_future()
-
-        Example::
-            Below is an example of a Parallel SGD algorithm where gradients are encoded before
-            allreduce, and then decoded after allreduce.
-
-            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
-
-            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     encoded_tensors = encode(bucket.get_tensors()) # encode gradients
-            >>>     fut = process_group.allreduce(encoded_tensors).get_future()
-            >>>     # Define the then callback to decode.
-            >>>     def decode(fut):
-            >>>         decoded_tensors = decode(fut.wait()) # decode gradients
-            >>>         return decoded_tensors
-            >>>     return fut.then(decode)
 
         """
         self._check_comm_hook(hook)
@@ -712,7 +686,10 @@ class DistributedDataParallel(Module):
                         # to zero the grads on all model replicas as well.
                         # This snippet is copied from torch.optim.Optimizer.
                         if param.grad is not None:
-                            param.grad.detach_()
+                            if param.grad.grad_fn is not None:
+                                param.grad.detach_()
+                            else:
+                                param.grad.requires_grad_(False)
                             param.grad.zero_()
 
             # module buffer sync
