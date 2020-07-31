@@ -162,7 +162,18 @@ void initTreeViewBindings(PyObject* module) {
                        const Def& getter,
                        Def* setter) {
         return Property::create(r, name, getter, wrap_maybe(r, setter));
-      }));
+      }))
+      .def("name", [](const Property& property) { return property.name(); })
+      .def(
+          "getter_name",
+          [](const Property& property) { return property.getter().name(); })
+      .def("setter_name", [](const Property& property) {
+        if (property.setter().present()) {
+          return property.setter().get().name();
+        }
+
+        return Ident::create(property.range(), "");
+      });
 
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name,

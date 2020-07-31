@@ -607,24 +607,6 @@ class TestRecursiveScript(JitTestCase):
         m = M()
         self.checkModule(m, (torch.randn(5, 5), ))
 
-    def test_property(self):
-        class M(nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.x = 0
-
-            @property
-            def x_and_1(self):
-                return self.x + 1
-
-            def forward(self, new_x):
-                # type: (int) -> int
-                self.x = new_x
-                return self.x_and_1
-
-        with self.assertRaisesRegex(RuntimeError, "property"):
-            torch.jit.script(M())
-
     def test_inner_traced_module(self):
         class Dummy(nn.Module):
             def forward(self, x):

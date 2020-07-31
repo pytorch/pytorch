@@ -1559,27 +1559,43 @@ void initJitScriptBindings(PyObject* module) {
             return self.equals(other);
           })
       .def(
-          "_create_methods",
+          "_create_methods_and_properties",
           [](std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
+             const std::vector<Property>& properties,
+             const std::vector<ResolutionCallback>& propertyRcbs,
+             const std::vector<Def>& methodDefs,
+             const std::vector<ResolutionCallback>& methodRcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
+            TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
+            TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
+
+            std::vector<ResolverPtr> methodResolvers, propertyResolvers;
+            methodResolvers.reserve(methodRcbs.size());
+            for (auto& callback : methodRcbs) {
+              methodResolvers.push_back(pythonResolver(callback));
             }
+
+            propertyResolvers.reserve(propertyRcbs.size());
+            for (auto& callback : propertyRcbs) {
+              propertyResolvers.push_back(pythonResolver(callback));
+            }
+
             const auto& selfType =
                 concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
-            cu->define(prefix, defs, resolvers, &self);
+            cu->define(
+                prefix,
+                properties,
+                propertyResolvers,
+                methodDefs,
+                methodResolvers,
+                &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
+            auto defs_it = methodDefs.begin();
+            while (defs_it != methodDefs.end()) {
               const auto method_name =
                   QualifiedName(prefix, (*defs_it).name().name());
               auto& method = cu->get_function(method_name);

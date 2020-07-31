@@ -533,6 +533,30 @@ class TestScriptPy3(JitTestCase):
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
 
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+
     def test_export_opnames_interface(self):
         global OneTwoModule
 
