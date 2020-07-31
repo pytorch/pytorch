@@ -534,12 +534,12 @@ GET_SEMANTIC_VERSION = re.compile(r'\d+\.\d+\.\d+')
 
 def _get_version_as_tuple_from_string(version: str) -> Tuple[int, int, int]:
     """version: should be 'major.minor.patch'"""
-    v = GET_SEMANTIC_VERSION.match(version).group(0)
+    v = GET_SEMANTIC_VERSION.match(version)
 
     if v is None:
         raise TypeError("Invalid version, not a valid semantic version (e.g. of correct input, 1.7.1)")
 
-    v = v.split('.')
+    v = v.group(0).split('.')
     return (int(v[0]), int(v[1]), int(v[2]))
 
 _torch_version = _get_version_as_tuple_from_string(torch.__version__)
