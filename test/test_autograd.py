@@ -5985,6 +5985,23 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
+    def test_where_scalar(self, device):
+        x = torch.randn(5, 5, device=device, requires_grad=True)
+        scalar = 4.
+        cond = mask_not_all_zeros((5, 5)).to(device=device)
+
+        def where_scalar_first(cond, x):
+            return torch.where(cond, scalar, x)
+
+        def where_scalar_second(cond, x):
+            return torch.where(cond, x, scalar)
+
+        gradcheck(where_scalar_first, (cond, x))
+        gradgradcheck(where_scalar_first, (cond, x))
+
+        gradcheck(where_scalar_second, (cond, x))
+        gradgradcheck(where_scalar_second, (cond, x))
+
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):

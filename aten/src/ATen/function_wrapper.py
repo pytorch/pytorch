@@ -1245,8 +1245,6 @@ def create_generic(top_env, declarations):
             schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
-            # Having manual_kernel_registration for an abstract method doesn't make sense.
-            assert not option['manual_kernel_registration']
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
@@ -1547,10 +1545,6 @@ def create_derived(backend_type_env, declarations):
         env = nested_dict(option, backend_type_env)
 
         if isinstance(dispatch, dict):
-            # If we're here, then our native_functions.yaml entry has dispatch configuration.
-            # Having manual kernel registration doesn't make sense.
-            assert not option['manual_kernel_registration']
-
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
 
