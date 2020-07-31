@@ -1341,6 +1341,21 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
+c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+  for (auto& prop : properties_) {
+    if (name == prop.name) {
+      return prop;
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  properties_.push_back({name, getter, setter});
+}
+
+
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {

@@ -27,6 +27,7 @@ namespace torch {
 namespace jit {
 
 struct Def;
+struct Property;
 struct ClassDef;
 struct SugaredValue;
 struct Resolver;
@@ -82,6 +83,16 @@ struct TORCH_API CompilationUnit {
         "Please use getGraphExecutorOptimize()");
     return true;
   }
+
+  // Version of define but with support for properties.
+  std::vector<Function*> define(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const std::vector<Property>& properties,
+      const std::vector<ResolverPtr>& propResolvers,
+      const std::vector<Def>& definitions,
+      const std::vector<ResolverPtr>& defResolvers,
+      const Self* self,
+      bool shouldMangle = false);
 
   // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Function's just defined.
@@ -257,6 +268,14 @@ struct TORCH_API CompilationUnit {
   std::unique_ptr<Function> define(
       const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
+      const ResolverPtr& resolver,
+      const Self* self,
+      const std::unordered_map<std::string, Function*>& function_table,
+      bool shouldMangle = false) const;
+
+  std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> define(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const Property& prop,
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,

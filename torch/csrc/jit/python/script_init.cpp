@@ -1293,8 +1293,10 @@ void initJitScriptBindings(PyObject* module) {
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_type(classType);
-        std::vector<ResolverPtr> rcbs;
+        std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
+        std::vector<Property> props;
+
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
@@ -1303,11 +1305,21 @@ void initJitScriptBindings(PyObject* module) {
                    "something else!";
           }
           methodDefs.emplace_back(Def(def));
-          rcbs.push_back(
+          methodRcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
+
+        // Compile getters and setters for properties as regular methods.
+        if (classDef.properties().present()) {
+          for (const auto& prop : classDef.properties().get()) {
+            props.emplace_back(prop);
+            propRcbs.push_back(
+                pythonResolver(rcb, classDef.name().name(), classType));
+          }
+        }
+
         const auto self = SimpleSelf(classType);
-        cu->define(classname, methodDefs, rcbs, &self);
+        cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
       });
   m.def(
       "_jit_script_interface_compile",

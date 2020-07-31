@@ -424,6 +424,30 @@ struct Def : public TreeView {
   }
 };
 
+// Property represents a named attribute combined with a getter and setter
+// method to access and mutate that attribute.
+struct Property : public TreeView {
+  explicit Property(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_PROP);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  Def getter() const {
+    return Def(subtree(1));
+  }
+  Maybe<Def> setter() const {
+    return Maybe<Def>(subtree(2));
+  }
+  static Property create(
+      const SourceRange& range,
+      const Ident& name,
+      const Def& getter,
+      const Maybe<Def>& setter) {
+    return Property(Compound::create(TK_PROP, range, {name, getter, setter}));
+  }
+};
+
 struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
@@ -441,13 +465,20 @@ struct ClassDef : public TreeView {
   List<Stmt> body() const {
     return List<Stmt>(subtree(2));
   }
+  Maybe<List<Property>> properties() const {
+    return Maybe<List<Property>>(subtree(3));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
-      const List<Stmt>& body) {
+      const List<Stmt>& body,
+      c10::optional<const List<Property>> properties = {}) {
+    auto props = properties.has_value()
+        ? Maybe<List<Property>>::create(range, properties.value())
+        : Maybe<List<Property>>::create(range);
     return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body}));
+        Compound::create(TK_CLASS_DEF, range, {name, superclass, body, props}));
   }
 };
 
