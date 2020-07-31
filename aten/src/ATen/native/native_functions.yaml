@@ -3048,6 +3048,18 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
 - func: where(Tensor condition) -> Tensor[]
   use_c10_dispatcher: full
   variants: function
@@ -4968,6 +4980,15 @@
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: sign_out
+
+- func: signbit(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: signbit_out
+    CUDA: signbit_out
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   use_c10_dispatcher: full
