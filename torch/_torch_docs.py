@@ -2778,11 +2778,12 @@ Example::
 
 add_docstr(torch.hypot,
            r"""
-hypot(input, other, out=None) -> Tensor
+hypot(input, other, *, out=None) -> Tensor
 
 Given the legs of a right triangle, return its hypotenuse.
 
-Equivalent to calculating pointwise :math:`\sqrt{x^2 + y^2}`.
+.. math::
+\text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
 
 The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
@@ -2790,6 +2791,8 @@ The shapes of ``input`` and ``other`` must be
 Args:
     input (Tensor): the first input tensor
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::

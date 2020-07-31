@@ -16906,11 +16906,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_hypot(self, device, dtype):
-        t1 = torch.tensor([3.0, 0, 4.5, -5.5], dtype=dtype, device=device)
-        t2 = torch.tensor([4.0, 5.0, -1, -6.5], dtype=dtype, device=device)
-        actual = torch.hypot(t1, t2)
-        expected = np.hypot(t1.cpu().numpy(), t2.cpu().numpy())
-        self.assertEqual(actual, expected)
+        inputs = [
+            (torch.randn(10, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)),
+            (torch.randn((3, 3, 3), device=device, dtype=dtype), torch.randn((3, 3, 3), device=device, dtype=dtype)),
+            (torch.randn((10, 1), device=device, dtype=dtype), torch.randn((10, 1), device=device, dtype=dtype).transpose(0, 1)),
+            (torch.ones(10, device=device, dtype=torch.long), torch.randn(10, device=device, dtype=dtype))
+        ]
+        for input in inputs:
+            actual = torch.hypot(input[0], input[1])
+            expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
+            self.assertEqual(actual, expected)
 
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):

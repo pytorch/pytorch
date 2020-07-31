@@ -891,8 +891,10 @@ Tensor& hypot_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor hypot(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::hypot_out(result, self, other);
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  hypot_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& hypot_(Tensor& self, const Tensor& other) {
