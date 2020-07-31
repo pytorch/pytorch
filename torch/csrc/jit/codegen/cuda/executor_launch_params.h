@@ -7,9 +7,9 @@ namespace fuser {
 namespace cuda {
 
 class TORCH_CUDA_API LaunchParams {
+ public:
   static constexpr int64_t UNINITIALIZED_VAL = -1;
 
- public:
   LaunchParams(
       int64_t gdimx = UNINITIALIZED_VAL,
       int64_t gdimy = UNINITIALIZED_VAL,
@@ -94,6 +94,8 @@ class TORCH_CUDA_API LaunchParams {
 
   // Returns false if value associated with p_type == UNINITIALIZED_VAL
   bool hasDim(ParallelType p_type) const;
+
+  bool operator==(const LaunchParams& other) const;
 
  private:
   // Spell them out because I want signed ints to know if they were initialized
