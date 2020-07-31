@@ -155,13 +155,12 @@ struct AtomicFPOp<double> {
 
     do {
       assumed = old;
-      old = atomicCAS(address_as_ull, assumed,
-                      __double_as_longlong(val *
-                                           __longlong_as_double(assumed)));
-
+      old = atomicCAS(address_as_ull, assumed, func(val, assumed));
       // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
     } while (assumed != old);
-  } 
+
+    return __longlong_as_double(old);
+  }
 };
     
 template <typename operation>
@@ -229,7 +228,7 @@ struct gpuAtomic<add_op> {
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
   // from CUDA C Programmic Guide
-  inline __device__ void operator() (double* address, double val)
+  inline __device__ double operator() (double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wgcc-compat"
@@ -237,7 +236,7 @@ struct gpuAtomic<add_op> {
 #pragma GCC diagnostic pop
 #endif
   {
-    AtomicFPOp<double>()(address, val,
+    return AtomicFPOp<double>()(address, val,
                          [](double val, unsigned long long int assumed) {
                            return __double_as_longlong(val + __longlong_as_double(assumed));
                          });
@@ -246,8 +245,8 @@ struct gpuAtomic<add_op> {
 
   // default double and float types call CUDA atomicAdd.
   template <typename T>
-  inline __device__ void operator() (T * address, T val) {
-    atomicAdd(address, val);
+  inline __device__ T operator() (T * address, T val) {
+    return atomicAdd(address, val);
   }
 
   template <typename T>
@@ -312,14 +311,14 @@ struct gpuAtomic<mul_op> {
     *address = address && val;
   }
     
-  inline __device__ void operator() (double * address, double val) {
-    AtomicFPOp<double>()(address, val,
+  inline __device__ double operator() (double * address, double val) {
+    return AtomicFPOp<double>()(address, val,
                          [](double val, unsigned long long int assumed) {
                            return __double_as_longlong(val * __longlong_as_double(assumed));
                          });
   }
 
-  inline __device__ void operator() (float * address, float val) {
+  inline __device__ float operator() (float * address, float val) {
     unsigned int* address_as_ull = (unsigned int*)address;
     unsigned int old = *address_as_ull;
     unsigned int assumed;

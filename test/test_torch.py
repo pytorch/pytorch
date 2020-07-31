@@ -12747,7 +12747,7 @@ class TestTorchDeviceType(TestCase):
     def test_scatter_reduce_operations_to_large_input(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-            + torch.testing.get_all_complex_dtypes():
+        + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.zeros(4, 4, device=device, dtype=dtype),
                  torch.ones(2, 2, device=device, dtype=dtype),
@@ -12757,10 +12757,10 @@ class TestTorchDeviceType(TestCase):
                                [0, 0, 0, 0]],
                               device=device, dtype=dtype), "add"),
                 (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4),
-                 torch.tensor([2], device=device, dtype=dtype).repeat(2, 2),
+                 torch.tensor([6], device=device, dtype=dtype).repeat(2, 2),
                  torch.tensor([[2, 2, 2, 2],
-                               [4, 2, 2, 2],
-                               [4, 2, 2, 2],
+                               [12, 2, 2, 2],
+                               [12, 2, 2, 2],
                                [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
             ]
 
@@ -12771,24 +12771,24 @@ class TestTorchDeviceType(TestCase):
     def test_scatter_reduce_scalar(self, device):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-            + torch.testing.get_all_complex_dtypes():
-                test_data = [
-                    (torch.zeros(4, 4, device=device, dtype=dtype), 1,
-                    torch.tensor([[0, 0, 0, 0],
-                                [1, 0, 0, 0],
-                                [1, 0, 0, 0],
-                                [0, 0, 0, 0]],
-                                device=device, dtype=dtype), "add"),
-                    (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4), 2,
-                    torch.tensor([[2, 2, 2, 2],
-                                [4, 2, 2, 2],
-                                [4, 2, 2, 2],
-                                [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
-                ]
+        + torch.testing.get_all_complex_dtypes():
+            test_data = [
+                (torch.zeros(4, 4, device=device, dtype=dtype), 1,
+                 torch.tensor([[0, 0, 0, 0],
+                               [1, 0, 0, 0],
+                               [1, 0, 0, 0],
+                               [0, 0, 0, 0]],
+                              device=device, dtype=dtype), "add"),
+                (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4), 2,
+                 torch.tensor([[2, 2, 2, 2],
+                               [4, 2, 2, 2],
+                               [4, 2, 2, 2],
+                               [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
+            ]
 
-                for input, src, result, operation in test_data:
-                    input.scatter_(0, index, src, reduce=operation)
-                    self.assertEqual(input, result)
+            for input, src, result, operation in test_data:
+                input.scatter_(0, index, src, reduce=operation)
+                self.assertEqual(input, result)
 
     # TODO: remove this after scatter_add_ is deprecated.
     def test_scatter_add_non_unique_index(self, device):
@@ -12808,7 +12808,7 @@ class TestTorchDeviceType(TestCase):
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
         for dtype in torch.testing.get_all_fp_dtypes(include_bfloat16=device.startswith('cuda')) \
-            + torch.testing.get_all_complex_dtypes():
+        + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.ones(height, width, device=device, dtype=dtype),
                 torch.ones(height, width, device=device, dtype=dtype),
