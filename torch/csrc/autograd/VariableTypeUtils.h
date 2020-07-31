@@ -202,6 +202,12 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
   }
 }
 
+inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name) {
+  if (tensor.has_value()) {
+    check_no_requires_grad(*tensor, name);
+  }
+}
+
 inline void check_no_requires_grad(TensorList tensors, const char* name) {
   for (auto& tensor : tensors) {
     check_no_requires_grad(tensor, name);
