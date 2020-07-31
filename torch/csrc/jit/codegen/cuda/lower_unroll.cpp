@@ -31,6 +31,24 @@ void UnrollPass::handle(Expr* expr) {
 
 namespace {
 
+bool initLocalBuffer(
+    const std::vector<Expr*>& tv_ops,
+    const std::unordered_set<Expr*>& init_exprs) {
+  size_t num_init_exprs =
+      std::count_if(tv_ops.begin(), tv_ops.end(), [&init_exprs](Expr* tv_op) {
+        if (init_exprs.find(tv_op) == init_exprs.end()) {
+          return false;
+        }
+        auto out = ir_utils::getTVOutput(tv_op);
+        TORCH_INTERNAL_ASSERT(out != nullptr);
+        return out->getMemoryType() == MemoryType::Local;
+      });
+  TORCH_INTERNAL_ASSERT(
+      num_init_exprs == 0 || num_init_exprs == tv_ops.size(),
+      "Some are local-buffer initializers but not all of them");
+  return num_init_exprs == tv_ops.size();
+}
+
 kir::Bool* getPredicate(
     const std::vector<Expr*>& tv_ops,
     const std::vector<Val*>& inds_,
@@ -42,7 +60,7 @@ kir::Bool* getPredicate(
 
   std::vector<kir::Bool*> all_preds;
 
-  if (init_exprs.find(tv_ops[0]) == init_exprs.end()) {
+  if (!initLocalBuffer(tv_ops, init_exprs)) {
     // Need to start with an output to (effectively) grab its root domain size
     std::vector<bool> overall_contiguity =
         ir_utils::getTVOutput(tv_ops[0])->domain()->contiguity();
