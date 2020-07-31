@@ -1472,17 +1472,12 @@ complex(real, imag, *, out=None) -> Tensor
 Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
 
-.. math::
-    \text{out} = \text{real} + \text{imag} \cdot i
-""" + r"""
 Args:
-    real (Tensor): The real part of the complex tensor. Must be
-        ``torch.float32`` or ``torch.float64``.
-    imag (Tensor): The imaginary part of the complex tensor. Must be
-        ``torch.float32`` or ``torch.float64`` and furthermore of same dtype as
-        :attr:`real`.
+    real (Tensor): The real part of the complex tensor. Must be float or double.
+    imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
+        as :attr:`real`.
 
-Keyword arguments:
+Keyword args:
     {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
         the inputs are ``torch.float64``, must be ``torch.complex128``.
 
@@ -1506,15 +1501,15 @@ corresponding to the polar coordinates with absolute value / magnitude
 :attr:`abs` and angle :attr:`angle`.
 
 .. math::
-    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot i
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
 """ + r"""
 Args:
     abs (Tensor): The absolute value / magnitude of the complex tensor. Must be
-        ``torch.float32`` or ``torch.float64``.
-    angle (Tensor): The angle of the complex tensor. Must be ``torch.float32``
-        or ``torch.float64`` and furthermore of same dtype as :attr:`abs`.
+        float or double.
+    angle (Tensor): The angle of the complex tensor. Must be same dtype as
+        :attr:`abs`.
 
-Keyword arguments:
+Keyword args:
     {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
         the inputs are ``torch.float64``, must be ``torch.complex128``.
 
