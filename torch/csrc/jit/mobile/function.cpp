@@ -58,6 +58,9 @@ void Function::set_module_debug_info_list_size(size_t size) {
 }
 
 void Function::append_module_info(const std::string& module_info, size_t pc) {
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
   pc_to_module_debug_info_[pc] = module_info;
 }
 

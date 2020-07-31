@@ -27,7 +27,8 @@
 //      ('operators', (('aten::Int', 'Tensor'),)),
 //      ('constants', ()),
 //      ('types', ()),
-//      ('register_size', 2))))
+//      ('register_size', 2)
+//      ('module_debug_info', (top(A).foo(B).forward)))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
