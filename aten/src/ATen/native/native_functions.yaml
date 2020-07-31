@@ -3048,6 +3048,18 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
 - func: where(Tensor condition) -> Tensor[]
   use_c10_dispatcher: full
   variants: function
