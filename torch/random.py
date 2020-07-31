@@ -24,7 +24,10 @@ def manual_seed(seed) -> torch._C.Generator:
     `torch.Generator` object.
 
     Args:
-        seed (int): The desired seed.
+        seed (int): The desired seed. Value must be within the inclusive range
+            `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+            is raised. Negative inputs are remapped to positive values with the formula
+            `0xffff_ffff_ffff_ffff + seed`.
     """
     seed = int(seed)
     import torch.cuda
