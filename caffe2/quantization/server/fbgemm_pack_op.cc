@@ -182,12 +182,12 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
 }
 
 // FIXME: code duplication with ConvDNNLowPOp::QuantizeBias_
-static void QuantizeConvBias(
+void QuantizeConvBias(
     const Blob& blob,
     int M,
     const TensorQuantizationParams& in_qparams,
     const vector<TensorQuantizationParams>& filter_qparams,
-    vector<int32_t>& b_quantized) {
+    vector<int32_t>& b_quantized, bool round_to_nearest_even) {
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
@@ -210,13 +210,19 @@ static void QuantizeConvBias(
       int i_begin = g * (M / filter_qparams.size());
       int i_end = i_begin + (M / filter_qparams.size());
       for (int i = i_begin; i < i_end; ++i) {
-        b_quantized[i] = fbgemm::Quantize<int32_t>(
-            bdata[i],
-            0,
-            in_qparams.scale * filter_qparams[g].scale,
-            32,
-            true /* signed */);
+        if (round_to_nearest_even) {
+          b_quantized[i] = fbgemm::Quantize<int32_t>(
+              bdata[i],
+              0,
+              in_qparams.scale * filter_qparams[g].scale,
+              32,
+              true /* signed */);
+        } else {
+          b_quantized[i] = round((1.0f / in_qparams.scale) * (1.0f / filter_qparams[g].scale) * bdata[i]);
+          b_quantized[i] = std::max(std::min(b_quantized[i], INT32_MAX), INT32_MIN);
+        }
       }
+
     }
   }
 }
@@ -860,11 +866,41 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format")
-    .Output(1, "B_q", "Bias int32 quantized tensor");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8FCDNNLowPPackedWeightBlob")
+    .Output(1, "B_q", "Bias int32 quantized tensor")
+    .Arg("axis_w", "See FC operator")
+    .Arg(
+        "quantize_channelwise",
+        "Default false. Per output channel quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
@@ -879,9 +915,36 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8ConvDNNLowPPackedWeightBlob")
+    .Arg("quantize_groupwise", "Default false. Per group quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 } // namespace caffe2

@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -100,7 +101,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
+      : Node(at::sequence_number::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -113,8 +114,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// function call.
   variable_list operator()(variable_list&& inputs) {
     RECORD_FUNCTION(
-        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
-
+        name(), std::vector<c10::IValue>(inputs.begin(), inputs.end()), sequence_nr());
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
@@ -332,11 +332,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  static uint64_t peek_at_next_sequence_nr();
-
  protected:
-  static uint64_t& get_next_sequence_nr();
-
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 

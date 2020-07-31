@@ -232,6 +232,7 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, backend_t
                 'BFloat16' in backend_types['CUDA'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
+        'schema_order_arguments': copy.deepcopy(arguments),
         'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,
@@ -293,15 +294,6 @@ def backward_declaration(base, thnn_functions, backend_types):
         # the mask array<bool, N> specifies which return values to compute
         arg['mask'] = True
         arg['is_nullable'] = True
-
-        # grad_weight and grad_bias need to be resized and zeroed
-        if arg['name'] == 'grad_weight':
-            arg['resize'] = 'weight'
-            arg['zero'] = True
-        if arg['name'] == 'grad_bias':
-            dim = 1 if 'transpose' in name else 0
-            arg['resize'] = [('weight', dim)]
-            arg['zero'] = True
 
     is_batch_norm_backward = '_backward' in thnn_functions[0].name
     grad_params = []

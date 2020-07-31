@@ -7,12 +7,11 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
-#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -24,8 +23,8 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -335,7 +334,7 @@ struct DifferentiableGraphOp {
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  int operator()(Stack& stack) const {
+  void operator()(Stack* stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -352,8 +351,8 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
 
-    detachVariables(stack);
-    InterpreterState(f).run(stack);
+    detachVariables(*stack);
+    InterpreterState(f).run(*stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -371,9 +370,8 @@ struct DifferentiableGraphOp {
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
-      stack.erase(stack.end() - num_temporary_outputs, stack.end());
+      stack->erase(stack->end() - num_temporary_outputs, stack->end());
     }
-    return 0;
   }
 
  private:
@@ -776,12 +774,13 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  // Fuse the dequant - op - quant patterns into quantized ops
-  QuantFusion(graph);
-
-  FuseGraph(graph, strict_fuser_check);
-
-  fuseTensorExprs(graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {

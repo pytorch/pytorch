@@ -1732,10 +1732,11 @@ void addGlobalMethods(py::module& m) {
       "onnxifi",
       [](const py::bytes& pred_net_str,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
-         const std::vector<int>& black_list,
+         const std::vector<int>& block_list,
          const std::vector<std::string>& weight_names,
          int max_batch_size,
          int max_seq_size,
+         int timeout,
          bool adjust_batch,
          bool debug_builder,
          bool merge_fp32_inputs_into_fp16,
@@ -1758,13 +1759,14 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.timeout = timeout;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        std::unordered_set<int> blacklist_set(
-            black_list.begin(), black_list.end());
+        std::unordered_set<int> blocklist_set(
+            block_list.begin(), block_list.end());
         std::vector<std::string> weight_names_overwrite{};
         if (weight_names.size() == 0) {
           weight_names_overwrite = curr_ws->Blobs();
@@ -1776,7 +1778,7 @@ void addGlobalMethods(py::module& m) {
             &pred_net,
             weight_names_overwrite,
             shape_map,
-            blacklist_set);
+            blocklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);

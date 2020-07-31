@@ -62,6 +62,7 @@ void specializeAutogradZero(Graph& g) {
           add_node->addInput(b);
           add_node->addInput(cOne);
           auto* add_output = add_node->output();
+          add_output->setType(n->output()->type());
           state[add_output] = State::Nonzero;
           n->output()->replaceAllUsesWith(add_output);
           it.destroyCurrent();

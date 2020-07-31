@@ -219,12 +219,42 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    auto dict = getSugaredDict(loc, m);
+    auto mods = dict->getModules();
+    return mods;
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleList or Sequential modules can be used as tuple";
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
     Value* idx) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
+    return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+  } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+    if (auto ivalue = toIValue(idx)) {
+      auto sd = getSugaredDict(loc, m);
+      auto idx_str = ivalue->toStringRef();
+      auto keys_iter = sd->keys_;
+      auto module_values_iter = sd->modules_;
+      for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+        auto key = keys_iter->tup_.at(i);
+        auto key_str = toIValue(key->asValue(loc, m))->toStringRef();
+        if (key_str == idx_str) {
+          return module_values_iter->tup_.at(i);
+        }
+      }
+      throw ErrorReport(loc) << "Key Error, " << idx_str;
+    }
+    throw ErrorReport(loc)
+        << "Unable to extract string literal index. "
+        << "ModuleDict indexing is only supported with string literals. "
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
@@ -257,7 +287,7 @@ void recurseThroughNestedModules(
   values.push_back(self);
 
   checkInterface(loc, m, self, field);
-  auto module_dict = self->getSugaredModuleDict(loc, m);
+  auto module_dict = self->getSugaredDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
   for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
@@ -278,7 +308,35 @@ void recurseThroughNestedModules(
   };
 }
 
-std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
+    const SourceRange& loc,
+    Function& m) {
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
+
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_buffer(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredDict(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
@@ -303,13 +361,13 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     values.push_back(mod_v);
   }
 
-  return std::make_shared<SugaredModuleDict>(
+  return std::make_shared<SugaredDict>(
       std::make_shared<ModuleValue>(self_, concreteType_),
       std::make_shared<SugaredTupleValue>(keys),
       std::make_shared<SugaredTupleValue>(values));
 }
 
-std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
+std::shared_ptr<SugaredValue> SugaredDict::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
@@ -321,7 +379,9 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
   } else if (field == "values" || field == "children") {
     return std::make_shared<ModuleDictMethod>(modules_, field);
-  } else if (field == "items" || field == "named_children") {
+  } else if (
+      field == "items" || field == "named_children" ||
+      field == "named_buffers") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
@@ -362,8 +422,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 }
 
-// This method controls how we desugar attribute lookups on ScriptModules.
-std::shared_ptr<SugaredValue> ModuleValue::attr(
+// This method controls how we desugar attribute lookups on ScriptModules
+std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
@@ -382,7 +442,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         concreteType_->findSubmoduleConcreteType(field);
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-  } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
+  } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -395,13 +455,17 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // values() calls into the appropriate method.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (field == "items" || field == "keys" || field == "values") {
-      return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+      return getSugaredDict(loc, m)->attr(loc, m, field);
     }
   }
 
   if (field == "named_modules" || field == "modules" || field == "children" ||
       field == "named_children") {
-    return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+    return getSugaredDict(loc, m)->attr(loc, m, field);
+  }
+
+  if (field == "named_buffers") {
+    return getSugaredNamedBufferDict(loc, m)->attr(loc, m, field);
   }
 
   // 3. Check if this is the name of an overloaded method.
@@ -426,7 +490,19 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       concreteType_->getPyClass(),
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
+
   if (py::isinstance<py::function>(unboundMethod)) {
+    bool isStaticFn = py::cast<bool>(
+        py::module::import("torch._jit_internal")
+            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    if (isStaticFn) {
+      // Functions within the module annotated with @staticmethod do not need
+      // binding.
+      py::object staticFn = py::module::import("torch._jit_internal")
+                                .attr("get_static_fn")(
+                                    concreteType_->getPyClass(), field.c_str());
+      return toSugaredValue(staticFn, m, loc);
+    }
     // For Python methods that we're trying to call directly, we need to bind
     // the method to a self. (see the documentation for lazy_bind in Python for
     // more info).
@@ -455,14 +531,35 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr(loc, m, field);
   }
 
-  // We've exhausted all possibilities. Bailout with a hint to the user.
+  return nullptr;
+}
+
+bool ModuleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  return tryGetAttr(loc, m, field) != nullptr;
+}
+
+// This method controls how we desugar attribute lookups on ScriptModules.
+std::shared_ptr<SugaredValue> ModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (auto attr = tryGetAttr(loc, m, field)) {
+    return attr;
+  }
+
+  // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
   }
 
-  throw ErrorReport(loc) << "Module '" << selfType->name()->name() << "'"
-                         << " has no attribute '" << field << "' " << hint;
+  throw ErrorReport(loc)
+      << "Module '"
+      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << " has no attribute '" << field << "' " << hint;
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
@@ -472,7 +569,7 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
         << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
-  auto module_dict = getSugaredModuleDict(loc, m);
+  auto module_dict = getSugaredDict(loc, m);
   if (iterableModuleKind == IterableModuleKind::DICT) {
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {
@@ -494,6 +591,18 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
   }
 
   return ClassValue::attr(loc, m, field);
+}
+
+bool PythonClassValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  try {
+    py::getattr(py_type_, field.c_str());
+    return true;
+  } catch (py::error_already_set& e) {
+    return false;
+  }
 }
 
 void ModuleValue::setAttr(
@@ -557,7 +666,7 @@ bool isNamedTupleClass(const py::object& obj) {
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-      py::module::import("torch.jit").attr("_qualified_name")(obj)));
+      py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
   // Currently don't support default values
   if (py::hasattr(obj, "_field_defaults")) {
     auto default_dict = py::cast<std::map<std::string, py::object>>(
@@ -579,8 +688,8 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     }
   }
 
-  py::object props =
-      py::module::import("torch.jit").attr("_get_named_tuple_properties")(obj);
+  py::object props = py::module::import("torch._jit_internal")
+                         .attr("_get_named_tuple_properties")(obj);
   std::string unqualName;
   std::vector<std::string> fields;
   std::vector<TypePtr> annotations;
@@ -592,7 +701,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
         "Can't to redefine NamedTuple: ",
-        tt->python_str());
+        tt->repr_str());
     return type;
   }
   get_python_cu()->register_type(tt);
@@ -661,18 +770,18 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
+      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      // RPC module is only avaialble for Python3
-      // when build flag "USE_DISTRIBUTED" is on.
-      !py::module::import("torch._six").attr("PY2").cast<bool>() &&
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
-          py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
+      py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {
@@ -681,7 +790,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   py::object builtin_name =
-      py::module::import("torch.jit").attr("_find_builtin")(obj);
+      py::module::import("torch.jit._builtins").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
@@ -694,8 +803,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  py::object dispatched_fn =
-      py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
+  py::object dispatched_fn = py::module::import("torch._jit_internal")
+                                 .attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
@@ -714,7 +823,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
+        py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
     auto qualname = c10::QualifiedName(qualifiedName);
     if (auto classType = pyCu->get_class(qualname)) {
@@ -730,16 +839,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
-
-        {
-          // We're starting a new compilation, so update the error call stack in
-          // case it fails
-          ErrorReport::CallStack stack(qualname.name());
-          ErrorReport::CallStack::update_pending_range(loc);
-
-          py::module::import("torch.jit")
-              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-        }
+        py::module::import("torch.jit._script")
+            .attr("_recursive_compile_class")(obj, loc);
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
@@ -756,7 +857,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
     auto overloads =
-        py::module::import("torch.jit").attr("_get_overloads")(obj);
+        py::module::import("torch.jit._script").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
       return std::make_shared<FunctionValue>(std::move(compiled_fns));

@@ -48,6 +48,12 @@ TORCH_CUDA_API void check_inputs(
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
+TORCH_CUDA_API void check_inputs(
+    at::TensorList inputs,
+    const at::Tensor& output,
+    int root,
+    int input_multiplier,
+    int output_multiplier);
 TORCH_CUDA_API ncclDataType_t get_data_type(const at::Tensor& t);
 
 } // namespace detail
@@ -72,7 +78,7 @@ size_t get_max_count();
 
 TORCH_CUDA_API void reduce(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    at::Tensor& output,
     int32_t root = 0,
     int32_t op = ncclSum,
     const stream_list& streams = {},

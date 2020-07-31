@@ -10,7 +10,6 @@ VALGRIND=${VALGRIND:=ON}
 ./atest
 ./scalar_test
 ./broadcast_test
-./complex_test
 ./wrapdim_test
 ./apply_utils_test
 ./dlconvertor_test
@@ -25,6 +24,7 @@ VALGRIND=${VALGRIND:=ON}
 ./Dict_test
 ./NamedTensor_test
 ./cpu_generator_test
+./vmap_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi

@@ -241,6 +241,10 @@ TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const c10::optional<ArrayRef<int64_t>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
@@ -249,6 +253,10 @@ TORCH_API void addInputs(
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
@@ -322,7 +330,10 @@ template <
     typename = torch::enable_if_t<(
         !std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
         !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
-        !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
+        !std::is_convertible<torch::decay_t<T>, at::Tensor>::value &&
+        !std::is_convertible<
+            torch::decay_t<T>,
+            c10::intrusive_ptr<c10::ivalue::Object>>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ",
@@ -333,6 +344,9 @@ TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 TORCH_API void addOutput(Node* node, const c10::List<at::Tensor>& list);
+TORCH_API void addOutput(
+    Node* node,
+    const c10::intrusive_ptr<c10::ivalue::Object>& output);
 
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,

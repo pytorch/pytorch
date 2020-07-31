@@ -53,7 +53,6 @@ class VarSubMutator : public IRMutator {
   }
 
   const Expr* mutate(const ReduceOp* var) override {
-    const Expr* init = var->initializer()->accept_mutator(this);
     auto body = var->body().node()->accept_mutator(this);
     std::vector<const Expr*> new_outer;
     std::vector<const Var*> new_inner;
@@ -75,7 +74,6 @@ class VarSubMutator : public IRMutator {
 
     return new ReduceOp(
         const_cast<Buf*>(var->accumulator()),
-        init,
         ExprHandle(body),
         var->interaction(),
         new_outer,

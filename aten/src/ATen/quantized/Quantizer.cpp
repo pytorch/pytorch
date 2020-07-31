@@ -4,10 +4,10 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <cmath>
 #include <typeinfo>
@@ -66,7 +66,9 @@ inline Tensor new_qtensor(
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  at::Allocator* allocator = GetAllocator(options.device().type());
+  at::Allocator* allocator = options.device().type() == DeviceType::CUDA
+    ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
+    : at::getCPUAllocator();
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
@@ -81,14 +83,15 @@ inline Tensor new_qtensor(
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage = c10::make_intrusive<StorageImpl>(
-      dtype,
-      nelements,
-      allocator->allocate(nelements * dtype.itemsize()),
+      StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::DispatchKeySet(tensorDispatchKey), quantizer);
+      storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;

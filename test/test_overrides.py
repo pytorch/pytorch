@@ -462,14 +462,50 @@ class TestTorchFunctionOverride(TestCase):
             quux(t1)
 
 def generate_tensor_like_override_tests(cls):
+    from torch.testing._internal.generated.annotated_fn_args import annotated_args
+
     def test_generator(func, override):
-        args = inspect.getfullargspec(override)
-        nargs = len(args.args)
-        if args.defaults is not None:
-            nargs -= len(args.defaults)
-        func_args = [TensorLike() for _ in range(nargs)]
-        if args.varargs is not None:
-            func_args += [TensorLike(), TensorLike()]
+        func_args = []
+        if inspect.isbuiltin(func) and func in annotated_args:
+            for arg in annotated_args[func]:
+                # Guess valid input to aten function based on type of argument
+                t = arg['simple_type']
+                if t.endswith('?'):
+                    t = t[:-1]
+                if t == 'Tensor':
+                    func_args.append(TensorLike())
+                elif t == 'TensorList':
+                    func_args.append([TensorLike(), TensorLike()])
+                elif t == 'IntArrayRef':
+                    size = arg.get('size', 2)
+                    if size == 1:
+                        func_args.append(1)
+                    else:
+                        func_args.append([1] * size)
+                elif t == 'Scalar':
+                    func_args.append(3.5)
+                elif t == 'bool':
+                    func_args.append(False)
+                elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                    func_args.append(0)
+                elif t.startswith('float') or t == 'double':
+                    func_args.append(1.0)
+                elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
+                    func_args.append(None)
+                elif t == 'ScalarType':
+                    func_args.append(torch.float32)
+                elif t == 'std::string':
+                    func_args.append('')
+                else:
+                    raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
+        else:
+            args = inspect.getfullargspec(override)
+            nargs = len(args.args)
+            if args.defaults is not None:
+                nargs -= len(args.defaults)
+            func_args += [TensorLike() for _ in range(nargs)]
+            if args.varargs is not None:
+                func_args += [TensorLike(), TensorLike()]
 
         def test(self):
             self.assertEqual(func(*func_args), -1)
@@ -487,6 +523,40 @@ def generate_tensor_like_override_tests(cls):
         setattr(cls, name, test_method)
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
+
+class TestEinsumOverride(TestCase):
+    "Regression test for gh-38479"
+    def test_wrapper(self):
+        class Wrapper():
+            "Basic data container that knows how to unwrap itself"
+            def __init__(self, data):
+                self.data = data
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                # unwrap inputs if necessary
+                def unwrap(v):
+                    return v.data if isinstance(v, Wrapper) else v
+
+                args = map(unwrap, args)
+                kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+
+                return func(*args, **kwargs)
+
+        x = Wrapper(torch.randn(5))
+        y = Wrapper(torch.randn(4))
+        self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
+                                       torch.ger(x, y)))
+
+        # in the old einsum interface, `operands` is a list
+        a = Wrapper(torch.randn(2, 3))
+        b = Wrapper(torch.randn(5, 3, 7))
+        c = Wrapper(torch.randn(2, 7))
+        self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
+                                       torch.nn.functional.bilinear(a, c, b)))
+
 
 if __name__ == '__main__':
     unittest.main()

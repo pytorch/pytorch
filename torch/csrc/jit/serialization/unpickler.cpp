@@ -70,20 +70,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
-        // no op, there is nothing to tag
-        break;
       case AnyType::Kind:
       case AnyListType::Kind:
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
-        // if Any type does show up, we no longer have a way to precisely
-        // recover the type information since the w.value may be an untagged
-        // List/Dict. We should prevent objects being serialized from having the
-        // Any type and if we do allow it in functions limit it to non-heap
-        // locations.
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "AnyType, AnyTupleType, AnyListType, and AnyClassType should not show up in the static type of objects");
+      case AnyEnumType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case EnumType::Kind:
+        // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
+        AT_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -157,7 +153,7 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
-    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+    AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
 }
 
@@ -410,9 +406,10 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
+          c10::Storage::use_byte_size_t(),
+          numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
@@ -426,12 +423,12 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == at::DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA) {
         tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != at::DeviceType::CPU) {
+      } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
             "supported devices include CPU and CUDA, however got ",
-            at::DeviceTypeName(device.type(), false));
+            DeviceTypeName(device.type(), false));
       }
       stack_.push_back(std::move(tensor));
     } break;
@@ -643,10 +640,10 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx++).toBool();
+    bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
-    impl->set_storage(storage_tensor.storage());
+    impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);

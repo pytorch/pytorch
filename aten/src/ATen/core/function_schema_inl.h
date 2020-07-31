@@ -190,7 +190,7 @@ inline void FunctionSchema::checkArg(
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, value.type()->python_str(), pos));
+            argument, value.type()->repr_str(), pos));
   }
 }
 

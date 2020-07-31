@@ -172,7 +172,7 @@ void CheckCPUGPUEqual(vector<int64_t> shape, vector<int> indices) {
   for (auto k : shape) {
     input_size *= k;
   }
-  int K = input_size / N;
+  int K = N ? input_size / N : 0;
   vector<float> features(input_size);
   std::iota(features.begin(), features.end(), 0);
 
@@ -260,6 +260,7 @@ TEST(BatchPermutationTest, CHECKCPUGPUEqualGenericDimension) {
     CheckCPUGPUEqual(shape, vector<int>{4, 5, 6, 7, 0, 1, 2, 3});
     CheckCPUGPUEqual(shape, vector<int>{3, 1, 5, 7, 6, 2, 4, 0});
   }
+  CheckCPUGPUEqual({0, 128}, vector<int>{});
   auto t1 = std::chrono::high_resolution_clock::now();
   double elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();

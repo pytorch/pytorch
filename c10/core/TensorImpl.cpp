@@ -28,9 +28,9 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "    with torch.no_grad():\n"
     "        x.set_(y)";
 
-at::Tensor& TensorImpl::grad() {
+at::Tensor& TensorImpl::mutable_grad() {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  return autograd_meta_->grad();
+  return autograd_meta_->mutable_grad();
 }
 
 const at::Tensor& TensorImpl::grad() const {
@@ -44,8 +44,11 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set)
-    : TensorImpl(std::move(storage), key_set, storage.dtype(), storage.device()) {}
+TensorImpl::TensorImpl(
+    Storage&& storage,
+    DispatchKeySet key_set,
+    const caffe2::TypeMeta& data_type)
+    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}

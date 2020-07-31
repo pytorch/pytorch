@@ -36,7 +36,7 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
@@ -48,7 +48,7 @@ static void import_libs(
 void testClassImport() {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
@@ -83,7 +83,7 @@ void testClassImport() {
 void testScriptObject() {
   Module m1("m1");
   Module m2("m2");
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
@@ -121,16 +121,16 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  ASSERT_TRUE(cls->getMethod(method->name()));
+  ASSERT_TRUE(cls->findMethod(method->name()));
 
   // Refining a new class should retain attributes and methods
   auto newCls = cls->refine({TensorType::get()});
   ASSERT_TRUE(newCls->hasAttribute("attr"));
-  ASSERT_TRUE(newCls->getMethod(method->name()));
+  ASSERT_TRUE(newCls->findMethod(method->name()));
 
   auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
   ASSERT_TRUE(newCls2->hasAttribute("attr"));
-  ASSERT_TRUE(newCls2->getMethod(method->name()));
+  ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
 static const auto torchbindSrc = R"JIT(
@@ -144,7 +144,7 @@ class FooBar1234(Module):
 
 void testSaveLoadTorchbind() {
   auto cu1 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,

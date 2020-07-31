@@ -7,6 +7,13 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# Temp: use new sccache
+if [[ -n "$IN_CIRCLECI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Download customized sccache
+  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
+  sudo chmod 755 /opt/cache/bin/sccache
+fi
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # For distributed, four environmental configs:
@@ -20,7 +27,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc5* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
@@ -109,19 +116,24 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
+  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+    build_args+=("-DUSE_VULKAN=ON")
+  fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
-  if [ -n "${SCCACHE_BUCKET}" ]; then
+  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CIRCLECI" ]]; then
     mkdir -p ./sccache
 
     SCCACHE="$(which sccache)"
@@ -145,11 +157,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
+  if [[ -n "$IN_CIRCLECI" ]]; then
+      # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
+
   python tools/amd_build/build_amd.py
   python setup.py install --user
-
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
 
   exit 0
 fi
@@ -222,6 +237,17 @@ else
     mkdir "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
     popd
     assert_git_not_dirty

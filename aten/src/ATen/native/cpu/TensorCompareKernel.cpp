@@ -10,47 +10,42 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native { namespace {
 
 template <typename scalar_t, typename func_t>
-static inline void compare_base_kernel(Tensor& result, Tensor& indice,
+static inline void compare_base_kernel(Tensor& result, Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
     const func_t& f) {
-  const int64_t input_ndim = self.dim();
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
 
   // result and indice may be a empty tensor, if not,
   // reshape them as self dims
-  if (0 == result.numel()) {
-    result.resize_(self_sizes);
-  } else {
-    //error out if result cannot be viewed as desired size
-    auto result_view = result.view(self_sizes);
-    result.set_(result_view);
+  if (!keepdim) {
+    if (result.ndimension() >= dim) {
+      result.unsqueeze_(dim);
+    }
+    if (indices.ndimension() >= dim) {
+      indices.unsqueeze_(dim);
+    }
   }
-  if (0 == indice.numel()) {
-    indice.resize_(self_sizes);
-  } else {
-    auto indices_view = indice.view(self_sizes);
-    indice.set_(indices_view);
-  }
+  result.resize_(self_sizes);
+  indices.resize_(self_sizes);
 
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
-  iter.dont_resize_outputs();
-  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
-  iter.add_output(result);
-  iter.add_output(indice);
-  iter.add_input(self);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .add_output(result)
+    .add_output(indices)
+    .add_input(self)
+    .build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* result_data_bytes = data[0];
@@ -70,7 +65,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
 
   if (!keepdim) {
     result.squeeze_(dim);
-    indice.squeeze_(dim);
+    indices.squeeze_(dim);
   }
 }
 
@@ -83,11 +78,14 @@ static void min_kernel_impl(
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
+  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t min_number = self_data[0];
         int64_t index = 0;
@@ -117,11 +115,14 @@ static void max_kernel_impl(
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
+  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t max_number = self_data[0];
         int64_t index = 0;
@@ -160,10 +161,24 @@ static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
+static void isposinf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
+static void isneginf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
 }} // namespace at::native

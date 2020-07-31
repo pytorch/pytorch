@@ -1,4 +1,8 @@
 #pragma once
+
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace vec256 {
@@ -13,9 +17,9 @@ inline scalar_t vec_reduce_all(
   scalar_t acc_arr[Vec::size()];
   acc_vec.store(acc_arr);
   for (int64_t i = 1; i < size; i++) {
-    scalar_t acc_arr_next[Vec::size()];
+    std::array<scalar_t, Vec::size()> acc_arr_next = {0};
     acc_arr_next[0] = acc_arr[i];
-    Vec acc_vec_next = Vec::loadu(acc_arr_next);
+    Vec acc_vec_next = Vec::loadu(acc_arr_next.data());
     acc_vec = vec_fun(acc_vec, acc_vec_next);
   }
   acc_vec.store(acc_arr);
@@ -38,6 +42,35 @@ inline scalar_t reduce_all(const Op& vec_fun, scalar_t* data, int64_t size) {
     acc_vec = Vec::set(acc_vec, vec_fun(acc_vec, data_vec), size - d);
   }
   return vec_reduce_all(vec_fun, acc_vec, Vec::size());
+}
+
+// similar to reduce_all, but reduces into two outputs
+template <typename scalar_t, typename Op1, typename Op2>
+inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
+    scalar_t* data, int64_t size) {
+  using Vec = vec256::Vec256<scalar_t>;
+  if (size < Vec::size()) {
+    auto loaded_data = Vec::loadu(data, size);
+    return std::pair<scalar_t, scalar_t>(
+      vec_reduce_all(vec_fun1, loaded_data, size),
+      vec_reduce_all(vec_fun2, loaded_data, size));
+  }
+  int64_t d = Vec::size();
+  Vec acc_vec1 = Vec::loadu(data);
+  Vec acc_vec2 = Vec::loadu(data);
+  for (; d < size - (size % Vec::size()); d += Vec::size()) {
+    Vec data_vec = Vec::loadu(data + d);
+    acc_vec1 = vec_fun1(acc_vec1, data_vec);
+    acc_vec2 = vec_fun2(acc_vec2, data_vec);
+  }
+  if (size - d > 0) {
+    Vec data_vec = Vec::loadu(data + d, size - d);
+    acc_vec1 = Vec::set(acc_vec1, vec_fun1(acc_vec1, data_vec), size - d);
+    acc_vec2 = Vec::set(acc_vec2, vec_fun2(acc_vec2, data_vec), size - d);
+  }
+  return std::pair<scalar_t, scalar_t>(
+    vec_reduce_all(vec_fun1, acc_vec1, Vec::size()),
+    vec_reduce_all(vec_fun2, acc_vec2, Vec::size()));
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp>

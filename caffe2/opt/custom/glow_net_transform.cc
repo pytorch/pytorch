@@ -19,6 +19,11 @@ C10_DEFINE_bool(
     "For test purpose only. Build a dummy net just to test the functionality");
 
 C10_DEFINE_bool(
+    enforce_fp32_inputs_into_fp16,
+    false,
+    "Whether to enforce fp32 to fp16 conversion for external inputs.");
+
+C10_DEFINE_bool(
     merge_fp32_inputs_into_fp16,
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
@@ -27,6 +32,11 @@ C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
     "Minimum number of ops for a subgraph to be lowered to backend");
+
+C10_DEFINE_int32(
+    onnxifi_timeout_ms,
+    0,
+    "Timeout limit for onnxifi inference in milliseconds. 0 means no timeout");
 
 C10_DEFINE_string(
     onnxifi_shape_hints,
@@ -63,6 +73,10 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   }
   auto tokens = caffe2::split(',', str);
   for (const auto& token : tokens) {
+    if (token == "-1") {
+      net_position_list.emplace(-1);
+      continue;
+    }
     auto range = caffe2::split('-', token);
     if (range.size() == 1) {
       net_position_list.emplace(std::stoi(range[0]));
@@ -130,9 +144,11 @@ void onnxifi(
   opts.adjust_batch = FLAGS_onnxifi_adjust_batch;
   opts.min_ops = FLAGS_onnxifi_min_ops;
   opts.load_model_by_blob = load_model_by_blob;
+  opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.loop_test = FLAGS_onnxifi_loop_test_mode;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
+  opts.timeout = FLAGS_onnxifi_timeout_ms;
 
   ShapeInfoMap more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

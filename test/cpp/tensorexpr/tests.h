@@ -33,14 +33,16 @@ namespace jit {
   _(ExprBitwiseOps)                         \
   _(IRPrinterBasicValueTest)                \
   _(IRPrinterBasicValueTest02)              \
-  _(IRPrinterLetTest01)                     \
-  _(IRPrinterLetTest02)                     \
   _(IRPrinterCastTest)                      \
+  _(IRPrinterFunctionName)                  \
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
+  _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(SplitWithTailWithLoopOptions)           \
+  _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
   _(ScheduleInlineFunc01)                   \
@@ -58,12 +60,22 @@ namespace jit {
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
   _(ReduceRfactor)                          \
-  _(Reduce3DRfactor)                        \
-  _(Reduce3DRfactor2)                       \
-  _(Reduce3DRfactor3)                       \
+  _(Reduce3DRfactorInternal)                \
+  _(Reduce3DRfactorInner)                   \
+  _(Reduce3DRfactorOuter)                   \
+  _(Reduce3DRfactorWithOuter)               \
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceRepeatedInternalRfactor)          \
+  _(ReduceSplitTail)                        \
+  _(ReduceSplitNoTail)                      \
+  _(ReduceOverSplitTail)                    \
+  _(ReduceSplitMask)                        \
+  _(ReduceSplitNoMask)                      \
+  _(ReduceOverSplitMask)                    \
+  _(ReduceSplitRfactor)                     \
+  _(ReduceOverSplitRfactor)                 \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -119,6 +131,7 @@ namespace jit {
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
+  _(HashForLoopOptions)                     \
   _(SimplifyAdd)                            \
   _(SimplifySub)                            \
   _(SimplifyMultiLayer)                     \
@@ -146,12 +159,15 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)    \
   _(SimplifyConstantBranches)               \
   _(SimplifyConstantCond)                   \
+  _(SimplifyEliminateEmptyCond)             \
   _(SimplifyEliminateZeroLengthFor)         \
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
   _(SimplifyMultilevelFor)                  \
   _(SimplifyForCleansUp)                    \
+  _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
+  _(SimplifyEliminateZeroLengthAlloc)       \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -172,10 +188,13 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
+  _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
-  _(Kernel_3)
+  _(Kernel_3)                               \
+  _(FuserPass_1)                            \
+  _(FuserPass_2)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
@@ -298,8 +317,9 @@ namespace jit {
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
-  _(LLVMRFactorReduction)                  \
-  _(LLVMRFactorVectorizedReduction)
+  _(LLVMRFactorReduction)
+
+// _(LLVMRFactorVectorizedReduction)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \

@@ -70,15 +70,13 @@ TEST(TestQTensor, QuantDequantAPIs) {
 
 TEST(TestQTensor, RoundingMode) {
   // We assume that quantization is defined as:
-  //   qx = clamp(round(x / scale + zero_point))
-  // If the zero_point is added after rounding, the result will be wrong.
+  //   qx = clamp(zero_point + round(x / scale))
+  // If the zero_point is added before rounding, the result will be wrong.
   int32_t zero_point = 5;
   std::vector<float> x_values{
-    -5.5, -4.5, -3.5, -2.5, -1.5, -0.5,
-    0.5, 1.5, 2.5, 3.5, 4.5, 5.5};
+      -5.5, -4.5, -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5};
   std::vector<uint8_t> qx_expect{
-    0, 0, 2, 2, 4, 4,
-    6, 6, 8, 8, 10, 10};  // scale = 1.0
+      0, 1, 1, 3, 3, 5, 5, 7, 7, 9, 9, 11}; // scale = 1.0
 
   Tensor x = from_blob(x_values.data(), x_values.size());
   Tensor qx = at::quantize_per_tensor(x, /*scale=*/1.0, zero_point, kQUInt8);
@@ -86,7 +84,7 @@ TEST(TestQTensor, RoundingMode) {
   auto qx_data = qx.data_ptr<quint8>();
   for (size_t idx = 0; idx < x_values.size(); ++idx) {
     ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
-      << "Tie breaking during rounding element " << idx << " failed!";
+        << "Tie breaking during rounding element " << idx << " failed!";
   }
 }
 

@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -98,8 +99,11 @@ struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
-      int64_t dist_autograd_context_id = 0)
-      : state(state_), stack(std::move(stack_)) {
+      int64_t dist_autograd_context_id = 0,
+      c10::optional<at::ThreadLocalState> tls_state = c10::nullopt)
+      : state(state_),
+        stack(std::move(stack_)),
+        tls_state_(std::move(tls_state)) {
 #ifdef USE_DISTRIBUTED
     dist_autograd_context_id_ = dist_autograd_context_id;
 #endif
@@ -110,6 +114,7 @@ struct InterpreterContinuation {
  private:
   InterpreterState state;
   Stack stack;
+  c10::optional<at::ThreadLocalState> tls_state_ = c10::nullopt;
 #ifdef USE_DISTRIBUTED
   int64_t dist_autograd_context_id_;
 #endif

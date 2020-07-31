@@ -106,10 +106,20 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministic() const;
+  void setDeterministic(bool);
+  void alertNotDeterministic(c10::string_view const& caller);
+  bool allowTF32CuBLAS() const;
+  void setAllowTF32CuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
   bool isXNNPACKAvailable() const;
+  // This method is used to release the original weight after pre-packing.
+  // It should be called once before loading/running the model.
+  // NB: By default it is set to true for mobile builds.
+  void setReleaseWeightsWhenPrepacking(bool e);
+  bool releaseWeightsWhenPrepacking() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
@@ -126,8 +136,15 @@ class CAFFE2_API Context {
   std::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool _deterministic = false;
   bool benchmark_cudnn = false;
+  bool allow_tf32_cublas = true;
   bool enabled_mkldnn = true;
+  #ifdef C10_MOBILE
+  bool release_original_weights = true;
+  #else
+  bool release_original_weights = false;
+  #endif
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;

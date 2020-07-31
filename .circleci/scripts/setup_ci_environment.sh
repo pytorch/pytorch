@@ -2,16 +2,30 @@
 set -ex -o pipefail
 
 # Set up NVIDIA docker repo
-curl -s -L --retry 3 https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+if [[ "${BUILD_ENVIRONMENT}" == *cu* ]]; then
+  curl -s -L --retry 3 https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+  echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+  echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+else
+  # Explicitly remove nvidia docker apt repositories if not building for cuda
+  sudo rm -rf /etc/apt/sources.list.d/nvidia-docker.list
+fi
 
 # Remove unnecessary sources
 sudo rm -f /etc/apt/sources.list.d/google-chrome.list
 sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
+
+retry () {
+    $*  || $* || $* || $* || $*
+}
+
+# Method adapted from here: https://askubuntu.com/questions/875213/apt-get-to-retry-downloading
+# (with use of tee to avoid permissions problems)
+# This is better than retrying the whole apt-get command
+echo "APT::Acquire::Retries \"3\";" | sudo tee /etc/apt/apt.conf.d/80-retries
 
 sudo apt-get -y update
 sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
@@ -27,20 +41,28 @@ sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic d
 # Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
 # apt what the packages you need are.  Note that the CircleCI image
 # comes with Docker.
-sudo apt-get -y install \
-  linux-headers-$(uname -r) \
-  linux-image-generic \
-  moreutils \
-  docker-ce=5:18.09.4~3-0~ubuntu-xenial \
-  nvidia-container-runtime=2.0.0+docker18.09.4-1 \
-  nvidia-docker2=2.0.3+docker18.09.4-1 \
-  expect-dev
+#
+# Using 'retry' here as belt-and-suspenders even though we are
+# presumably retrying at the single-package level via the
+# apt.conf.d/80-retries technique.
+if [[ "${BUILD_ENVIRONMENT}" == *cu* ]]; then
+  retry sudo apt-get -y install \
+    linux-headers-$(uname -r) \
+    linux-image-generic \
+    moreutils \
+    docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+    nvidia-container-runtime=2.0.0+docker18.09.4-1 \
+    nvidia-docker2=2.0.3+docker18.09.4-1 \
+    expect-dev
+else
+  retry sudo apt-get -y install \
+    moreutils \
+    docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+    expect-dev
+fi
 
 sudo pkill -SIGHUP dockerd
 
-retry () {
-    $*  || $* || $* || $* || $*
-}
 
 retry sudo pip -q install awscli==1.16.35
 

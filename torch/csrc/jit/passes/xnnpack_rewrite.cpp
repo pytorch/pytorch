@@ -4,12 +4,16 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
-#include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -19,6 +23,9 @@ namespace jit {
 namespace {
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %r = prim::CallFunction(%linear, %input, %weight, %bias)
@@ -65,7 +72,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -85,41 +92,6 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
-}
-
-bool isClampFusable(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  TORCH_CHECK(
-      vmap.find("dummy_min_max") != vmap.end(),
-      "Expected to find dummy_min_max Value in the subgraph to be replaced.");
-  auto dummy_min_max =
-      graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
-
-  auto is_fusable = !dummy_min_max || dummy_min_max.value().isNone();
-
-  // Also check if the output_min and output_max values are actually constant.
-  // If hardtanh's min/max Value's are not actually constants, we will end up
-  // rerouting those values to prepack op. And if they are not constants
-  // we will not be able to remove prepacking ops.
-  if (vmap.find("output_min") != vmap.end()) {
-    // aten::relu pattern does not have output_min/output_max.
-    // aten::hardtanh/_ does.
-    TORCH_CHECK(
-        vmap.find("output_max") != vmap.end(),
-        "Expected to find output_max as well given "
-        "output_min exist in pattern graph.");
-    // If output_min/max are not constant, we get c10::nullopt.
-    auto output_min =
-        graph_rewrite_helper::getIValue("output_min", match_vmap, vmap);
-    auto output_max =
-        graph_rewrite_helper::getIValue("output_max", match_vmap, vmap);
-    is_fusable =
-        is_fusable && (output_min.has_value() && output_max.has_value());
-  }
-
-  return is_fusable;
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -188,7 +160,7 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv2d_prepack_run_hardtanh_inplace, conv2d_prepack_run_hardtanh_fused);
 
-  rewriter.runOnGraph(graph, isClampFusable);
+  rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
 }
 
 void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -260,7 +232,14 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
       linear_prepack_run_relu_inplace, linear_prepack_run_relu_fused);
   rewriter.RegisterRewritePattern(
       conv2d_prepack_run_relu_inplace, conv2d_prepack_run_relu_fused);
-  rewriter.runOnGraph(graph, isClampFusable);
+  rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
+}
+
+void runCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Not sure if we have models running on mobile that require loop unrolling.
+  // Perhaps language/speech models? Conservatively setting that to false.
+  runOptimization(graph, false /* no loop unrolling */);
 }
 
 } // namespace
@@ -296,13 +275,38 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& m,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
+    const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
-  cloned_module = FoldConvBatchNorm2d(cloned_module);
-  insertPrePackedOps(cloned_module);
-  cloned_module = freeze_module(cloned_module);
-  FoldPrePackingOps(cloned_module);
+
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+    cloned_module = FoldConvBatchNorm(cloned_module);
+  }
+
+  if (!optimization_blocklist.count(
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    insertPrePackedOps(cloned_module);
+    cloned_module = freeze_module(cloned_module, preserved_methods);
+    fusePrePackedLinearConvWithClamp(cloned_module);
+    FoldPrePackingOps(cloned_module);
+  }
+
+  // Run canonical optimizations post freezing
+  // since freezing inlines the graph. Otherwise we
+  // will have to explicitly call Inlining pass.
+  runCanonicalOptimizations(cloned_module);
+
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+    removeDropout(cloned_module);
+  }
+
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    FuseAddRelu(cloned_module);
+  }
+
   return cloned_module;
 }
 
@@ -328,11 +332,14 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& module,
+    const std::set<MobileOptimizerType>& blocklist,
+    const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
-  return c10::nullopt;
+  return module;
 }
 
 #endif

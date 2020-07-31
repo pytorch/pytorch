@@ -14,15 +14,14 @@ namespace torch {
 namespace jit {
 
 using namespace torch::indexing;
-using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
 void testKernel_1() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:3,3:1)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:3,3:1, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
@@ -35,7 +34,7 @@ void testKernel_1() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -50,8 +49,8 @@ void testKernel_2() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:1,3:5)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:1,3:5, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
@@ -65,7 +64,7 @@ void testKernel_2() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -80,8 +79,8 @@ void testKernel_3() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1),
-            %1 : Float(5:12,3:2)):
+      graph(%0 : Float(5:3,3:1, device=cpu),
+            %1 : Float(5:12,3:2, device=cpu)):
         %2 : Float(5:3,3:1) = aten::mul(%0, %1)
         %3 : Float(5:3,3:1) = aten::mul(%0, %2)
         return (%3))IR";
@@ -95,7 +94,7 @@ void testKernel_3() {
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
-  Stmt* s = k.getStmtForInputs(fmap<IValue>(inputs));
+  Stmt* s = k.getCodeGenStmt();
   // TODO: verify stmt
 
   std::vector<IValue> stack = fmap<IValue>(inputs);

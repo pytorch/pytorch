@@ -95,17 +95,17 @@ Value* tryConvertToType(
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
-        value = graph.insert(aten::FloatImplicit, {value});
+        value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::IntImplicit, {value});
+        value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = graph.insert(aten::ScalarImplicit, {value});
+        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
       }
     } else if (value_equals_number) {
       if (concrete_float) {
-        value = graph.insert(aten::Float, {value});
+        value = graph.insert(aten::Float, {value}, {}, loc);
       } else if (concrete_int) {
-        value = graph.insert(aten::Int, {value});
+        value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
 
@@ -148,8 +148,8 @@ static Value* tryMatchArgument(
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
-      err() << "Could not match type " << value->type()->python_str() << " to "
-            << arg.type()->python_str() << " in argument '" << arg.name()
+      err() << "Could not match type " << value->type()->repr_str() << " to "
+            << arg.type()->repr_str() << " in argument '" << arg.name()
             << "': " << matched.reason() << ".\n";
     }
     return nullptr;
@@ -157,9 +157,9 @@ static Value* tryMatchArgument(
   const auto concrete_type = tryEvalTypeVariables(arg.type(), type_env);
   if (!concrete_type) {
     if (failure_messages) {
-      err() << "Type variables in type " << arg.type()->python_str()
+      err() << "Type variables in type " << arg.type()->repr_str()
             << " could not be inferred from actual type "
-            << value->type()->python_str();
+            << value->type()->repr_str();
     }
     return nullptr;
   }
@@ -172,7 +172,19 @@ static Value* tryMatchArgument(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
-          << arg.formatTypeMismatchMsg(value->type()->python_str());
+          << arg.formatTypeMismatchMsg(value->type()->repr_str());
+
+      if (auto pt = value->type()->cast<TensorType>()) {
+        if (pt->isInferredType()) {
+          std::string inferred_type_hint;
+          inferred_type_hint = c10::str(
+              "Inferred the value for argument '",
+              arg.name(),
+              "' to be of type 'Tensor' ",
+              "because it was not annotated with an explicit type.\n");
+          ostream << inferred_type_hint;
+        }
+      }
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -402,7 +414,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   auto return_types = fmap(returns, [&](const Argument& r) {
     TypePtr result = tryEvalTypeVariables(r.type(), type_env);
     TORCH_INTERNAL_ASSERT(
-        result, r.type()->python_str(), " has unbound type variables.");
+        result, r.type()->repr_str(), " has unbound type variables.");
     return result;
   });
   // Codegen does not support return of namedtuples with undefined field names.

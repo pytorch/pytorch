@@ -32,6 +32,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // Whether to lower model blob by blob
   bool load_model_by_blob{false};
 
+  // Whether to enforce fp32 inputs into fp16.
+  bool enforce_fp32_inputs_into_fp16{false};
+
   // Whether to combine fp32 batched inputs into one tensor and convert it to
   // fp16 or not
   bool merge_fp32_inputs_into_fp16{false};
@@ -41,6 +44,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
+
+  // Inference timeout
+  int timeout{0};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -77,7 +83,6 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
       const std::string& onnx_model_str,
-      const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs,

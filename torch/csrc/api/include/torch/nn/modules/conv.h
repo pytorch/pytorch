@@ -33,7 +33,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
       options.out_channels() % options.groups() == 0,
       "out_channels must be divisible by groups");
 
-    _padding_repeated_twice = torch::nn::modules::utils::_repeat_vector(options.padding(), 2);
+    _reversed_padding_repeated_twice = torch::nn::modules::utils::_reverse_repeat_vector(options.padding(), 2);
 
     if (options.transposed()) {
       std::vector<int64_t> weight_sizes = {
@@ -111,7 +111,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
   Tensor bias;
 
  protected:
-  std::vector<int64_t> _padding_repeated_twice;
+  std::vector<int64_t> _reversed_padding_repeated_twice;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

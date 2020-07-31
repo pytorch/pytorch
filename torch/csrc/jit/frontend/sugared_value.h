@@ -41,6 +41,13 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
 
+  virtual bool hasAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
+    throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+  }
+
   // assign an attribute on it, e.g. `this.field = newValue`
   virtual void setAttr(
       const SourceRange& loc,
@@ -58,6 +65,11 @@ struct TORCH_API SugaredValue
       Function& m,
       const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
+  }
+
+  // TODO @wconstab refactor to use ModuleValue::asTuple instead of new API
+  virtual SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asType(
@@ -140,7 +152,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
-    ss << "value of type '" << value_->type()->python_str() << "'";
+    ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
   Value* asValue(const SourceRange& range, Function& m) override {
@@ -154,6 +166,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
 
   void setAttr(
       const SourceRange& loc,
@@ -431,16 +446,15 @@ struct MethodValue : public SugaredValue {
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
-        auto method = class_type->getMethod(method_name);
-        TORCH_INTERNAL_ASSERT(method);
+        Function& method = class_type->getMethod(method_name);
         try {
-          method->ensure_defined();
+          method.ensure_defined();
         } catch (const RecursiveMethodCallError&) {
           throw ErrorReport(loc)
-              << " method '" << method->name() << "' is called recursively. "
+              << " method '" << method.name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
-        schemas.push_back(&method->getSchema());
+        schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
@@ -496,6 +510,36 @@ struct TORCH_API CastValue : public BuiltinFunction {
 
  private:
   TypePtr type_;
+};
+
+struct TORCH_API TensorCastValue : public SugaredValue {
+  TensorCastValue(at::ScalarType type, NamedValue self)
+      : dtype_(type), self_(std::move(self)) {}
+
+  std::string kind() const override {
+    return "Cast";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    TORCH_INTERNAL_ASSERT(inputs.size() == 0 && attributes.size() == 0);
+    Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
+    std::vector<NamedValue> kwargs{self_,
+                                   NamedValue(loc, "dtype", dtype_const)};
+    Value* casted_val = m.graph()->insert(
+        /*opname=*/Symbol::fromQualString("aten::to"),
+        /*args=*/inputs,
+        /*kwargs=*/kwargs,
+        /*range=*/loc);
+    return std::make_shared<SimpleValue>(casted_val);
+  }
+
+  at::ScalarType dtype_;
+  NamedValue self_;
 };
 
 // builtins operators and functions that call a method if it exists

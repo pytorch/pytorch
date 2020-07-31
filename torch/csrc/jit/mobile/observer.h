@@ -1,11 +1,11 @@
 #pragma once
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 #include <string>
 
 namespace torch {
 
-class MobileDebugInfo : public at::DebugInfoBase {
+class MobileDebugInfo : public c10::DebugInfoBase {
  public:
   const std::string& getModelName() {
     return model_name_;
@@ -43,10 +43,13 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnter(
-      const std::string& model_name,
-      const std::string& method_name) {}
-  virtual void onExit() {}
+  virtual void onEnterRunMethod(const std::string&, const std::string&) {}
+  virtual void onExitRunMethod() {}
+  virtual void onCancelRunMethod(const std::string&) {}
+  virtual void onFailRunMethod(const std::string&) {}
+  virtual void onEnterLoadModel() {}
+  virtual void onExitLoadModel(const std::string&) {}
+  virtual void onFailLoadModel(const std::string&) {}
 };
 
 class MobileObserverConfig {

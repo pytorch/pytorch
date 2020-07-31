@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <vector>
 
@@ -8,8 +8,8 @@
  * Index compute takes in a list of indices typically generated from the
  * surrounding for loop nest. The number of indicies are intended to match the
  * number of dimensions of the incomming TensorView which may have less or more
- * dimensions than its root due to split/merge/reorder operations.
- * Split/merge/reorder operations are then replayed backwards produce resulting
+ * dimensions than its root due to split/merge operations.
+ * Split/merge operations are then replayed backwards produce resulting
  * indices (based on input indices) that match the root dimension.
  *
  * For example with GLOBAL tensor:
@@ -55,24 +55,68 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Play split/merge/reorder operations backwards to compute indexing into
-// original tensor.
-struct IndexCompute : public TransformIter {
- protected:
-  // Replay overrides which modify indices
-  void replayBackward(Split* expr) override;
-  void replayBackward(Merge* expr) override;
-  void replayBackward(Reorder* expr) override;
+class IndexCompute : public BackwardVisitor {
+ private:
+  using BackwardVisitor::handle;
+  void handle(Split*) override;
+  void handle(Merge*) override;
+  void handle(Expr*) override;
 
-  // Axis_map for
-  std::vector<Val*> indices;
+  // Otherwise warning on runBackward as it hides an overloaded virtual
+  // using TransformIter::runBackward;
 
-  IndexCompute(const TensorView* tv, std::vector<Val*> _indices);
+  IndexCompute(const TensorDomain* td, const std::vector<Val*>& _indices);
+  std::unordered_map<IterDomain*, Val*> index_map_;
+  std::vector<Val*> indices_;
 
  public:
-  static std::vector<Val*> computeIndices(
-      const TensorView* tv,
-      std::vector<Val*> _indices);
+  static std::vector<Val*> get(
+      const TensorDomain* td,
+      const std::vector<Val*>& _indices);
+};
+
+// Simple interface for IndexCompute
+class Index {
+ private:
+  // Producer indexing if it's in shared or local memory
+  static TensorIndex* getProducerIndex_impl(
+      const TensorView* producer,
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer indexing if it's in shared or local memory
+  static TensorIndex* getConsumerIndex_impl(
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Producer if it's in global memory
+  static TensorIndex* getGlobalProducerIndex(
+      const TensorView* producer,
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer indexing if it's in global memory
+  static TensorIndex* getGlobalConsumerIndex(
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+ public:
+  // Indexing functions
+  // Consumer = Producer
+  // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
+  // Producer indexing dispatch
+  static TensorIndex* getProducerIndex(
+      const TensorView* producer,
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Consumer index dispatch
+  static TensorIndex* getConsumerIndex(
+      const TensorView* consumer,
+      const std::vector<ForLoop*>& loops);
+
+  // Will run inds through back prop index computation for tv
+  static TensorIndex* manualBackprop(TensorView tv, std::vector<Val*> inds);
 };
 
 } // namespace fuser

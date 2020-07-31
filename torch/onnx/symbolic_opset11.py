@@ -8,7 +8,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import expand
+from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
@@ -43,6 +43,16 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+def clamp_min(g, self, min):
+    max = unused(g)
+    return clamp(g, self, min, max)
+
+
+def clamp_max(g, self, max):
+    min = unused(g)
+    return clamp(g, self, min, max)
 
 
 # Opset 11 gather accepts negative indices
@@ -222,10 +232,12 @@ def scatter(g, self, dim, index, src):
 @parse_args('v', 'i', 'none')
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
-    csum = g.op("CumSum", self, dim_tensor)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+        cast = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    else:
+        cast = self
+    csum = g.op("CumSum", cast, dim_tensor)
     return csum
 
 
@@ -636,29 +648,20 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    if dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
+
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
-        if (end_dim == -1 or (end_dim is not None and end_dim == dim - 1)):
+        if (end_dim == -1 or end_dim == dim - 1):
             return g.op("Flatten", input, axis_i=start_dim)
     elif start_dim == 0:
-        if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
+        if (end_dim == -2 or end_dim == dim - 2):
             return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
     # if end_dim is negative add dim
     if end_dim < 0 :
         end_dim = dim + end_dim
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
-    p = _reshape_from_tensor(g, input, shape)
-    return p
+
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)

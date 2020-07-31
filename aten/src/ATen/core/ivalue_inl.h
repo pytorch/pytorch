@@ -8,8 +8,10 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 
 namespace torch {
@@ -96,12 +98,20 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return moveToIntrusivePtr<ivalue::PyObjectHolder>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return toIntrusivePtr<ivalue::PyObjectHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() && {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::EnumHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const & {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return toIntrusivePtr<ivalue::EnumHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
@@ -216,6 +226,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
 struct Object;
 struct PyObjectHolder;
+struct EnumHolder;
 }
 
 // Future
@@ -230,7 +241,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
-  Future(TypePtr type) : type_(type) {}
+  explicit Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -259,7 +270,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
 
@@ -283,17 +297,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    error_ = std::move(error);
+    setErrorInternal(std::move(error), lock);
+  }
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG(INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
+      return;
+    } else {
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
@@ -304,6 +321,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     if (error_) {
       throw *error_;
     }
+    return value_;
+  }
+
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const IValue& constValue() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!error_);
     return value_;
   }
 
@@ -323,9 +349,38 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     callbacks_.emplace_back(std::move(callback));
   }
 
+  /**
+   * Add a callback to the future, and return another Future to hold the return
+   * value of the callback. This is necessary when the callback provider needs
+   * to know for sure when the callback has finished.
+   */
+  c10::intrusive_ptr<Future> then(
+      std::function<IValue(void)> callback,
+      TypePtr type) {
+    auto fut = c10::make_intrusive<Future>(type);
+    // Cannot move capture std::function in lambda, because it cannot deduce
+    // the template type for std::function. Hence use std::bind to explicitly
+    // specify types.
+    addCallback(std::bind(
+        [fut](std::function<IValue(void)> cb) {
+          try {
+            fut->markCompleted(cb());
+          } catch (std::exception& e) {
+            fut->setError(e.what());
+          }
+        },
+        std::move(callback)));
+    return fut;
+  }
+
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasValue() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return completed_ && !error_;
   }
 
   bool hasError() const {
@@ -342,11 +397,28 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() const {
+  TypePtr elementType() const {
     return type_;
   }
 
  private:
+  void setErrorInternal(
+      FutureError error,
+      std::unique_lock<std::mutex>& lock) {
+    AT_ASSERT(!completed());
+    completed_ = true;
+    error_ = std::move(error);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
@@ -356,6 +428,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;
 };
+
+// Input is a list of Futures with the same target type.
+// Output is a Future to the List of completed Futures.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+// Input is a List of Futures with the same target type.
+// Output is a Future that will be updated with a seen value.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
@@ -433,7 +514,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
   c10::intrusive_ptr<Object> deepcopy() const;
+
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
  private:
@@ -449,6 +533,39 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual ~PyObjectHolder() {};
+};
+
+struct ivalue::EnumHolder : c10::intrusive_ptr_target {
+ public:
+  EnumHolder(c10::QualifiedName qualified_class_name, std::string name, IValue value)
+      : qualified_class_name_(std::move(qualified_class_name)),
+        name_(std::move(name)), value_(std::move(value)) {}
+
+  bool is(const ivalue::EnumHolder& rhs) {
+    return *this == rhs;
+  }
+
+  bool operator==(const ivalue::EnumHolder& o) const {
+    return qualified_class_name_ == o.qualifiedClassName() &&
+        name_ == o.name() && value_ == o.value();
+  }
+
+  const std::string& qualifiedClassName() const {
+    return qualified_class_name_.qualifiedName();
+  }
+
+  const std::string& name() const {
+    return name_;
+  }
+
+  const IValue& value() const {
+    return value_;
+  }
+
+private:
+  c10::QualifiedName qualified_class_name_;
+  std::string name_;
+  IValue value_;
 };
 
 #undef TORCH_FORALL_TAGS
@@ -517,6 +634,7 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
@@ -857,10 +975,17 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
+: tag(Tag::Enum), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob) {
   IValue iv;
   iv.tag = Tag::Capsule;
@@ -895,18 +1020,34 @@ inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
   payload.as_intrusive_ptr = v.release();
 }
 inline const std::string& IValue::toStringRef() const {
-  return toString()->string();
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  return static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string();
 }
 
 inline PyObject* IValue::toPyObject() const {
   return toPyObjectHolder()->getPyObject();
 }
+
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {
     return nullopt;
   }
   return this->to<T>();
+}
+
+inline OptionalArray<int64_t> IValue::toOptionalIntArray() {
+  if (this->isNone()) {
+    return {};
+  }
+  return this->toIntVector();
+}
+
+inline OptionalArray<double> IValue::toOptionalDoubleArray() {
+  if (this->isNone()) {
+    return {};
+  }
+  return this->toDoubleVector();
 }
 
 inline bool IValue::isCustomClass() const {

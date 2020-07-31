@@ -36,17 +36,8 @@ get_pytorch_version() {
 }
 
 aws_promote() {
-    package_type=$1
-    package_name=$2
+    package_name=$1
     pytorch_version=$(get_pytorch_version)
-    PYTORCH_S3_FROM=${PYTORCH_S3_FROM:-test}
-    PYTORCH_S3_TO=${PYTORCH_S3_TO:-}
-    if [[ -n "${PYTORCH_S3_TO}" ]]; then
-        # Add a trailing slash so that it'll go to the correct subdir instead of creating a prefix+file thing
-        PYTORCH_S3_TO="${PYTORCH_S3_TO}/"
-    fi
-    # Can be changed
-    PYTORCH_S3_BUCKET=${PYTORCH_S3_BUCKET:-"s3://pytorch"}
     # Dry run by default
     DRY_RUN=${DRY_RUN:-enabled}
     DRY_RUN_FLAG="--dryrun"
@@ -54,22 +45,16 @@ aws_promote() {
         DRY_RUN_FLAG=""
     fi
     AWS=${AWS:-aws}
-    while IFS=$'\n' read -r s3_ls_result; do
-        # File should be the last field
-        from=$(echo "${s3_ls_result}" | rev | cut -d' ' -f 1 | rev)
-        to=${from//${PYTORCH_S3_FROM}\//${PYTORCH_S3_TO}}
-        (
-            set -x
-            ${AWS} s3 cp ${DRY_RUN_FLAG} \
-                --only-show-errors \
-                --acl public-read \
-                "${PYTORCH_S3_BUCKET}/${from}" \
-                "${PYTORCH_S3_BUCKET}/${to}"
-        )
-    done < <(\
-        aws s3 ls --recursive "${PYTORCH_S3_BUCKET}/${package_type}/${PYTORCH_S3_FROM}" \
-            | grep -E "${package_name}-.*${pytorch_version}" \
-            | sed -e '/dev/d' \
+    (
+        set -x
+        ${AWS} s3 cp ${DRY_RUN_FLAG} \
+            --only-show-errors \
+            --acl public-read \
+            --recursive \
+            --exclude '*' \
+            --include "*${package_name}-${pytorch_version}*" \
+            "${PYTORCH_S3_FROM/\/$//}" \
+            "${PYTORCH_S3_TO/\/$//}"
     )
     # ^ We grep for package_name-.*pytorch_version to avoid any situations where domain libraries have
     #   the same version on our S3 buckets

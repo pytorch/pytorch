@@ -14,8 +14,10 @@ import zipfile
 import functools
 
 # Testing utils
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode, TEST_BAILOUTS
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
@@ -34,6 +36,14 @@ import textwrap
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+RUN_CUDA_HALF = RUN_CUDA
+# HIP supports half, no version check necessary
+if torch.cuda.is_available() and not torch.version.hip:
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(torch.cuda.device_count()):
+        major = torch.cuda.get_device_capability(d)[0]
+        if (major < 6):
+            RUN_CUDA_HALF = False
 
 def execWrapper(code, glob, loc):
     exec(code, glob, loc)
@@ -52,6 +62,31 @@ def get_execution_plan(graph_executor_state):
         raise RuntimeError('This test assumes this GraphExecutor should '
                            'only have one execution plan, got: {}'.format(num_plans))
     return execution_plans[0]
+
+class _AssertRaisesRegexWithHighlightContext(object):
+    """
+    A context manager that is useful for checking that error messages highlight
+    the correct part of the source code.
+    """
+
+    def __init__(self, test_case, exception, regex, highlight):
+        self.test_case = test_case
+        self.exception_type = exception
+        self.regex = regex
+        self.highlight = highlight
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        with self.test_case.assertRaisesRegex(self.exception_type, self.regex):
+            if type:
+                raise value
+
+        if self.highlight:
+            FileCheck().check_source_highlighted(self.highlight).run(str(value))
+
+        return True
 
 
 class JitTestCase(TestCase):
@@ -124,7 +159,7 @@ class JitTestCase(TestCase):
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             try:
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
@@ -302,6 +337,9 @@ class JitTestCase(TestCase):
         defined_vars.update(frame.f_globals)
         return defined_vars
 
+    def assertRaisesRegexWithHighlight(self, exception, regex, highlight):
+        return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
+
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
                                outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
         """
@@ -309,7 +347,7 @@ class JitTestCase(TestCase):
         when executed with normal python, the string frontend, and the AST frontend
         """
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # normal python
             with self.assertRaisesRegex(exception, regex):
                 script(*inputs)
@@ -352,7 +390,7 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -629,3 +667,8 @@ def get_module_method(m, module, method):
 def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
+
+op_alias_mappings = {
+    "absolute" : "abs",
+    "absolute_" : "abs_",
+}

@@ -5,9 +5,6 @@ for "smoketest" builds.
 Each subclass of ConfigNode represents a layer of the configuration hierarchy.
 These tree nodes encapsulate the logic for whether a branch of the hierarchy
 should be "pruned".
-
-In addition to generating config.yml content, the tree is also traversed
-to produce a visualization of config dimensions.
 """
 
 from collections import OrderedDict
@@ -53,7 +50,8 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.7",
         ],
     )),
-    windows=(dimensions.CUDA_VERSIONS, OrderedDict(
+    # Skip CUDA-9.2 builds on Windows
+    windows=([v for v in dimensions.CUDA_VERSIONS if v != '92'], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
@@ -61,9 +59,6 @@ CONFIG_TREE_DATA = OrderedDict(
         ],
     )),
 )
-
-CONFIG_TREE_DATA_NO_WINDOWS = CONFIG_TREE_DATA.copy()
-CONFIG_TREE_DATA_NO_WINDOWS.pop("windows")
 
 # GCC config variants:
 #
@@ -170,8 +165,6 @@ class PyVersionConfigNode(ConfigNode):
         self.props["pyver"] = pyver
 
     def get_children(self):
-
-        smoke = self.find_prop("smoke")
         package_format = self.find_prop("package_format")
         os_name = self.find_prop("os_name")
 

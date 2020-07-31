@@ -56,6 +56,37 @@ bool use_max_pool2d(
   //   Namely, setting both output_min and output_max to 0 is not valid usage.
   // * Finally, application of this operator to the input tensor with the given
   //   max pool 2d parameters must result in an output tensor with a valid shape.
+  const int64_t pt_outputHeight = pooling_output_shape(
+      input.size(Layout::Activation4D::height),
+      parameters.kernel[Layout::Parameter::height],
+      parameters.padding[Layout::Parameter::height],
+      parameters.stride[Layout::Parameter::height],
+      parameters.dilation[Layout::Parameter::height],
+      ceil_mode);
+  const int64_t pt_outputWidth = pooling_output_shape(
+      input.size(Layout::Activation4D::width),
+      parameters.kernel[Layout::Parameter::width],
+      parameters.padding[Layout::Parameter::width],
+      parameters.stride[Layout::Parameter::width],
+      parameters.dilation[Layout::Parameter::width],
+      ceil_mode);
+  const int64_t xnnpack_outputHeight = pooling_output_shape(
+      input.size(Layout::Activation4D::height),
+      parameters.kernel[Layout::Parameter::height],
+      parameters.padding[Layout::Parameter::height],
+      parameters.stride[Layout::Parameter::height],
+      parameters.dilation[Layout::Parameter::height],
+      false);
+  const int64_t xnnpack_outputWidth = pooling_output_shape(
+      input.size(Layout::Activation4D::width),
+      parameters.kernel[Layout::Parameter::width],
+      parameters.padding[Layout::Parameter::width],
+      parameters.stride[Layout::Parameter::width],
+      parameters.dilation[Layout::Parameter::width],
+      false);
+
+  const bool output_size_eq = (pt_outputHeight == xnnpack_outputHeight) &&
+    (pt_outputWidth == xnnpack_outputWidth);
 
   return xnnpack::internal::available() &&
       // Input
@@ -82,7 +113,7 @@ bool use_max_pool2d(
       (parameters.dilation[Layout::Parameter::height] > 0) &&
       (parameters.dilation[Layout::Parameter::width] > 0) &&
       // Ceil Mode
-      !ceil_mode &&
+      (!ceil_mode || output_size_eq) &&
       // Output Min / Max
       (output_max > output_min) &&
       // Output
@@ -177,6 +208,8 @@ Tensor max_pool2d(
       0u,                                                             // flags
       &max_pool_op);                                                  // operator
 
+  Operator max_pool_scoped_op(max_pool_op);
+
   TORCH_CHECK(
       xnn_status_success == create_status,
       "xnn_create_max_pooling2d_nhwc_f32 failed!");
@@ -188,15 +221,15 @@ Tensor max_pool2d(
       input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
       input_padded_contig_nhwc.data_ptr<float>(),                   // input
       output_padded_contig_nhwc.data_ptr<float>(),                  // output
-      caffe2::xnnpack_threadpool());                                // threadpool
+      caffe2::pthreadpool_());                                      // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      max_pool_op,                    // operator
-      caffe2::xnnpack_threadpool());  // threadpool
+      max_pool_op,              // operator
+      caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,

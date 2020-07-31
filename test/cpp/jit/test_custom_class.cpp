@@ -32,6 +32,10 @@ struct Foo : torch::CustomClassHolder {
   }
 };
 
+struct NoInit : torch::CustomClassHolder {
+  int64_t x;
+};
+
 template <class T>
 struct MyStackClass : torch::CustomClassHolder {
   std::vector<T> stack_;
@@ -79,6 +83,9 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
 
+  m.class_<NoInit>("_NoInit").def(
+      "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });
+
   m.class_<MyStackClass<std::string>>("_StackString")
       .def(torch::init<std::vector<std::string>>())
       .def("push", &MyStackClass<std::string>::push)
@@ -97,7 +104,21 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(
           "top",
           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
-              -> std::string { return self->stack_.back(); });
+              -> std::string { return self->stack_.back(); })
+      .def(
+          "__str__",
+          [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
+            std::stringstream ss;
+            ss << "[";
+            for (size_t i = 0; i < self->stack_.size(); ++i) {
+              ss << self->stack_[i];
+              if (i != self->stack_.size() - 1) {
+                ss << ", ";
+              }
+            }
+            ss << "]";
+            return ss.str();
+          });
   // clang-format off
         // The following will fail with a static assert telling you you have to
         // take an intrusive_ptr<MyStackClass> as the first argument.

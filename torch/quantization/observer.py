@@ -15,7 +15,7 @@ def _with_args(cls_or_self, **kwargs):
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances.
 
-    .. Example::
+    Example::
 
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
@@ -66,21 +66,13 @@ class ObserverBase(ABC, nn.Module):
     def calculate_qparams(self, **kwargs):
         pass
 
-    # Returns all quantization parameters that's needed
-    # for a quantize function call
-    # For instance, per channel obsserver will return
-    # scales, zero_points and axis
-    @abstractmethod
-    def get_qparams(self, **kwargs):
-        pass
-
     with_args = classmethod(_with_args)
 
 
 class _ObserverBase(ObserverBase):
     r"""Internal common base for all qint/quint8 observers.
 
-    This base is for commonly used paramters used internally.
+    This base is for commonly used parameters used internally.
     Users should use `~torch.quantization.observer.ObserverBase` as a base class
     for custom observers.
 
@@ -89,6 +81,9 @@ class _ObserverBase(ObserverBase):
         qscheme: Quantization scheme to be used.
         reduce_range: Reduces the range of the quantized data type by 1 bit.
                       This is sometimes required to avoid instruction overflow.
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     .. warning::
 
@@ -103,13 +98,11 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_affine``
         - ``torch.per_channel_symmetric``
     """
-
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+                 reduce_range=False, initial_dynamic_qrange=None):
         super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         self.reduce_range = reduce_range
-
         self.eps = torch.finfo(torch.float32).eps
         assert self.qscheme in (
             torch.per_tensor_affine,
@@ -123,6 +116,72 @@ class _ObserverBase(ObserverBase):
             torch.qint8,
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
+        self.is_dynamic_qrange = initial_dynamic_qrange is not None
+        if self.is_dynamic_qrange:
+            self._validate_dynamic_range_init(initial_dynamic_qrange)
+        self.initial_dynamic_qrange = initial_dynamic_qrange
+
+    @torch.jit.export
+    def _validate_dynamic_range_init(self, initial_dynamic_qrange):
+        # type: (Tuple[int, int]) -> None
+        r"""Validates that the dynamic quantization range is properly initialized
+        and within the given bound supported by the observer dtype.
+
+        To accommodate lower-bit quantization with respect to the existing torch.qint8 and
+        torch.quint8 datatypes, the user can choose to use dynamic quantization range by passing
+        in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
+        values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
+        fake quantization. These estimates are compared against parameters learned through backpropagation.
+        The related literatures for scale and zero point via backpropagation are as follows:
+
+        Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
+        Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf
+        """
+        # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
+        # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
+        initial_qmin, initial_qmax = initial_dynamic_qrange
+        assert initial_qmin <= 0 <= initial_qmax, "Dynamic quantization range must include 0."
+        assert initial_qmin < initial_qmax, "qmin must be strictly less than qmax for dynamic quantization range."
+
+    @torch.jit.export
+    def _calculate_qmin_qmax(self):
+        # type: () -> Tuple[int, int]
+        r"""Calculates actual qmin and qmax based on the quantization range,
+        observer datatype and if range is reduced.
+        """
+        if self.is_dynamic_qrange:
+            # This initialization here is to be resolve TorchScript compilation issues and allow
+            # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
+            # The actual values of initial_qmin and initial_qmax will be reset below.
+            initial_qmin, initial_qmax = 0, 255
+            # The following assignment of initial_qrange to a local variable and the if check refine the
+            # attribute from Optional to a valid tuple for use, based on TorchScript's requirements.
+            initial_dynamic_qrange = self.initial_dynamic_qrange
+            if initial_dynamic_qrange is not None:
+                initial_qmin, initial_qmax = initial_dynamic_qrange
+
+            qrange_len = initial_qmax - initial_qmin + 1
+            assert 0 < qrange_len <= 256, \
+                "quantization range should be positive and not exceed the maximum bit range (=256)."
+            if self.dtype == torch.qint8:
+                qmin, qmax = -qrange_len // 2, qrange_len // 2 - 1
+            else:
+                qmin, qmax = 0, qrange_len - 1
+            if self.reduce_range:
+                qmin, qmax = qmin // 2, qmax // 2
+        else:
+            # Fallback onto default 8-bit qmin and qmax calculation if dynamic range is not used.
+            if self.dtype == torch.qint8:
+                if self.reduce_range:
+                    qmin, qmax = -64, 63
+                else:
+                    qmin, qmax = -128, 127
+            else:
+                if self.reduce_range:
+                    qmin, qmax = 0, 127
+                else:
+                    qmin, qmax = 0, 255
+        return qmin, qmax
 
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
@@ -154,16 +213,7 @@ class _ObserverBase(ObserverBase):
                 min_val, max_val
             )
 
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
-            else:
-                qmin, qmax = -128, 127
-        else:
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
+        qmin, qmax = self._calculate_qmin_qmax()
 
         min_val = torch.min(min_val, torch.zeros_like(min_val))
         max_val = torch.max(max_val, torch.zeros_like(max_val))
@@ -177,7 +227,11 @@ class _ObserverBase(ObserverBase):
             scale = max_val / (float(qmax - qmin) / 2)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
-                zero_point = zero_point.new_full(zero_point.size(), 128)
+                if self.is_dynamic_qrange:
+                    # When dynamic quantization range is used, down-rounded midpoint of the range is chosen.
+                    zero_point = zero_point.new_full(zero_point.size(), (qmin + qmax) // 2)
+                else:
+                    zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
@@ -185,19 +239,17 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        # if len(scale.shape) == 0:
-        #     scale = torch.tensor(scale)
-        #     scale = torch.tensor([scale])
-        # if len(zero_point.shape) == 0:
-        #     zero_point = torch.tensor(zero_point)
-        #     zero_point = torch.tensor([zero_point])
+        # For scalar values, cast them to Tensors of size 1 to keep the shape
+        # consistent with default values in FakeQuantize.
+        if len(scale.shape) == 0:
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+        if len(zero_point.shape) == 0:
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
 
         return scale, zero_point
 
-    @torch.jit.export
-    def get_qparams(self):
-        r"""Get all quantization parameters needed for quantize call"""
-        return self.calculate_qparams()
 
 class MinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
@@ -211,6 +263,9 @@ class MinMaxObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -262,7 +317,7 @@ class MinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+                 reduce_range=False, initial_dynamic_qrange=None):
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -272,7 +327,8 @@ class MinMaxObserver(_ObserverBase):
 
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
-                                             reduce_range=reduce_range)
+                                             reduce_range=reduce_range,
+                                             initial_dynamic_qrange=initial_dynamic_qrange)
         self.register_buffer('min_val', torch.tensor([]))
         self.register_buffer('max_val', torch.tensor([]))
         if self.qscheme == torch.per_tensor_symmetric and \
@@ -284,6 +340,7 @@ class MinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -292,8 +349,10 @@ class MinMaxObserver(_ObserverBase):
         else:
             min_val = torch.min(torch.min(x), min_val)
             max_val = torch.max(torch.max(x), max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     @torch.jit.export
@@ -339,6 +398,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The moving average min/max is computed as follows
 
@@ -361,20 +423,23 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
 
-    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+    .. note:: Only works with ``torch.per_tensor_affine`` quantization scheme.
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
     """
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_tensor_affine, reduce_range=False,
+                 initial_dynamic_qrange=None):
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
                                                           qscheme=qscheme,
-                                                          reduce_range=reduce_range)
+                                                          reduce_range=reduce_range,
+                                                          initial_dynamic_qrange=initial_dynamic_qrange)
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -383,8 +448,10 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
 
@@ -413,8 +480,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
         r"""Calculates the quantization parameters."""
 
         if self.max_val.numel() == 0 or self.min_val.numel() == 0:
-            warnings.warn("Must run observer before calling calculate_qparams.\
-                           Returning default scale and zero point.")
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert self.min_val <= self.max_val, "min {} should be less than max {}".format(
@@ -465,52 +530,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
 
         return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
 
-# This observer is a temporary solution for quantizing modules with tensor lists as inputs.
-# If we decide to support more observers with TensorList this should be refactored
-# to work with multiple observer types.
-class _MinMaxTensorListObserver(MinMaxObserver):
-    r"""Observer module that works on lists of tensors.
-    It uses MinMaxObserver for computing the quantization parameters based on the
-    tensor min and max values.
-    This observer is used currently for dynamic quantization of LSTM modules that
-    require list of tensors for weight inputs.
-    """
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
-        super(_MinMaxTensorListObserver, self).__init__(dtype=dtype,
-                                                        qscheme=qscheme,
-                                                        reduce_range=reduce_range)
-
-    def forward(self, tensor_list):
-        # type: (List[Tensor]) -> (List[Tensor])
-        r"""Records the running minimum and maximum of ``tensor_list``."""
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            max_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(x)
-                max_val[i] = torch.max(x)
-        else:
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(torch.min(x), min_val[i])
-                max_val[i] = torch.max(torch.max(x), max_val[i])
-        self.min_val = min_val
-        self.max_val = max_val
-        return tensor_list
-
-    def calculate_qparams(self):
-        scales = []
-        zero_points = []
-        for i in range(self.min_val.numel()):
-            x, y = self._calculate_qparams(self.min_val[i], self.max_val[i])
-            scales.append(x)
-            zero_points.append(y)
-        return scales, zero_points
-
-
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
@@ -525,6 +544,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
@@ -536,10 +558,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False,
+                 initial_dyanmic_qrange=None):
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
-                                                       reduce_range=reduce_range)
+                                                       reduce_range=reduce_range,
+                                                       initial_dynamic_qrange=initial_dyanmic_qrange)
         self.ch_axis = ch_axis
         self.register_buffer('min_vals', torch.tensor([]))
         self.register_buffer('max_vals', torch.tensor([]))
@@ -566,6 +590,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
         y = x.permute(tuple(new_axis_list))
+        # Need to match dtype of min/max because the updates to buffers
+        # are done in place and types need to match for comparisons
+        y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals = torch.min(y, 1)[0]
@@ -573,18 +600,15 @@ class PerChannelMinMaxObserver(_ObserverBase):
         else:
             min_vals = torch.min(torch.min(y, 1)[0], min_vals)
             max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_vals, self.max_vals)
-
-    @torch.jit.export
-    def get_qparams(self):
-        scales, zero_points = self.calculate_qparams()
-        return scales, zero_points, self.ch_axis
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
@@ -622,6 +646,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        initial_dynamic_qrange: Nullable tuple containing the initial qmin and qmax values
+                                to support dynamic quantization range. If unspecified,
+                                the initialization of qmin and qmax follows the 8-bit setup.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.quantization.observer.MovingAverageMinMaxObserver`, with the
@@ -633,14 +660,16 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     """
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False,
+                 initial_dynamic_qrange=None):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
-            reduce_range=reduce_range)
+            reduce_range=reduce_range, initial_dyanmic_qrange=initial_dynamic_qrange)
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_vals.dtype)
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
@@ -656,8 +685,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         else:
             min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
             max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
 class HistogramObserver(_ObserverBase):
@@ -877,12 +908,17 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        same_values = False
+        if min_val.numel() > 0 and max_val.numel() > 0:
+            same_values = min_val.item() == max_val.item()
+        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
             min_val = torch.min(x)
             max_val = torch.max(x)
-            self.min_val = min_val
-            self.max_val = max_val
-            self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
+            self.min_val.resize_(min_val.shape)
+            self.min_val.copy_(min_val)
+            self.max_val.resize_(max_val.shape)
+            self.max_val.copy_(max_val)
+            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
@@ -905,9 +941,12 @@ class HistogramObserver(_ObserverBase):
                     start_idx,
                     self.bins)
 
-            self.histogram = combined_histogram
-            self.min_val = combined_min
-            self.max_val = combined_max
+            self.histogram.resize_(combined_histogram.shape)
+            self.histogram.copy_(combined_histogram)
+            self.min_val.resize_(combined_min.shape)
+            self.min_val.copy_(combined_min)
+            self.max_val.resize_(combined_max.shape)
+            self.max_val.copy_(combined_max)
         return x_orig
 
     @torch.jit.export
@@ -984,20 +1023,20 @@ class NoopObserver(ObserverBase):
 
     Args:
         dtype: Quantized data type
+        custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
+                        (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16):
-        if dtype != torch.float16:
-            raise ValueError("Only float16 quantization can be used without calibration process")
+    def __init__(self, dtype=torch.float16, custom_op_name=""):
         super(NoopObserver, self).__init__(dtype=dtype)
+        self.dtype = dtype
+        self.custom_op = custom_op_name
 
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
-
-    def get_qparams(self):
-        return self.calculate_qparams()
 
 
 # Restrict activations to be in the range (0,127)

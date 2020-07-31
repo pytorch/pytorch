@@ -1,15 +1,23 @@
-import __future__
 import torch
 import sys
 import ast
 import inspect
 import string
 from textwrap import dedent
-from torch._six import PY2
-from torch._C._jit_tree_views import *
+from torch._C._jit_tree_views import (
+    ClassDef, Ident, Stmt, Decl, Def, Var,
+    EmptyTypeAnnotation, Param, ExprStmt, Assign,
+    Delete, Return, Raise, Assert, AugAssign, While,
+    For, If, Pass, Break, Continue, Apply, Dots, Select,
+    TrueLiteral, FalseLiteral, NoneLiteral, Starred,
+    ListLiteral, TupleLiteral, DictLiteral, Const,
+    StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
+    SliceExpr, Subscript, TernaryIf, With, WithItem,
+)
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext
+from torch._jit_internal import SourceContext, should_drop
+import torch.jit.annotations
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -110,21 +118,14 @@ class FrontendTypeError(FrontendError):
     pass
 
 
+def build_withitems(ctx, items):
+    items = [build_withitem(ctx, i) for i in items]
+    return list(items)
+
+
 def build_stmts(ctx, stmts):
     stmts = [build_stmt(ctx, s) for s in stmts]
     return list(filter(None, stmts))
-
-
-def _uses_true_division(fn):
-    if not PY2:
-        return True
-    if inspect.ismethod(fn):
-        return _uses_true_division(fn.__func__)
-    elif inspect.isfunction(fn):
-        return fn.__globals__.get('division') is __future__.division
-    else:
-        raise RuntimeError(
-            '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
 def get_jit_class_def(cls, self_name):
@@ -134,7 +135,8 @@ def get_jit_class_def(cls, self_name):
         cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
 
     method_defs = [get_jit_def(method[1],
-                   self_name=self_name) for method in methods]
+                               method[0],
+                               self_name=self_name) for method in methods]
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
@@ -145,7 +147,21 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
-def get_jit_def(fn, self_name=None):
+def get_jit_def(fn, def_name, self_name=None):
+    """
+    Build a JIT AST (TreeView) from the given function.
+
+    Arguments:
+        fn: A function object to compile
+        def_name: The name to give to the resulting AST object. This is not
+            always the same as `fn.__name__`, for example:
+                def _forward(self):
+                    ...
+                forward = _forward
+            In this case, the `__name__` attribute of the function object is "_forward",
+            but we want the result AST to have the name "forward".
+        self_name: If this function is a method, what the type name of `self` is.
+    """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -154,8 +170,20 @@ def get_jit_def(fn, self_name=None):
         raise RuntimeError("Expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
-    return build_def(ctx, py_ast.body[0], type_line, self_name)
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
+    fn_def = py_ast.body[0]
+
+    # Swap out the function signature and body if it is unused
+    if should_drop(fn):
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
+        fn_def.body = unused_fn_def.body
+        # kwarg/vararg not supported by `build_def`
+        fn_def.args.kwarg = fn_def.args.vararg = None
+        for arg in fn_def.args.args + fn_def.args.kwonlyargs:
+            # Replace potentially unsupported type annotations by "Any"
+            arg.annotation = unused_fn_def.args.args[0].annotation
+
+    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
 
 class Builder(object):
@@ -172,7 +200,7 @@ def build_class_def(ctx, py_def, methods, self_name):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
-def build_def(ctx, py_def, type_line, self_name=None):
+def build_def(ctx, py_def, type_line, def_name, self_name=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
@@ -186,7 +214,8 @@ def build_def(ctx, py_def, type_line, self_name=None):
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
         decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
-    return Def(Ident(r, py_def.name),
+
+    return Def(Ident(r, def_name),
                decl,
                build_stmts(ctx, body))
 
@@ -241,12 +270,30 @@ def get_default_args(fn):
     }
 
 
+class WithItemBuilder(Builder):
+    @staticmethod
+    def build_withitem(ctx, item):
+        lineno = item.context_expr.lineno
+        start = item.context_expr.col_offset
+        op_vars = item.optional_vars
+
+        if op_vars:
+            end = op_vars.col_offset + len(op_vars.id)
+        else:
+            end = start + len(item.context_expr.id)
+
+        r = ctx.make_range(lineno, start, end)
+
+        return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
+
+
 class StmtBuilder(Builder):
     augassign_map = {
         ast.Add: '+',
         ast.Sub: '-',
         ast.Mult: '*',
         ast.Div: '/',
+        ast.Mod: '%',
     }
 
     @staticmethod
@@ -276,6 +323,11 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
+        if len(stmt.targets) > 1:
+            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
+                                          stmt.col_offset + len("del"))
+            raise NotSupportedError(
+                source_range, 'del with more than one operand is not supported')
         return Delete(build_expr(ctx, stmt.targets[0]))
 
     @staticmethod
@@ -355,6 +407,11 @@ class StmtBuilder(Builder):
     def build_Continue(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
         return Continue(r)
+
+    @staticmethod
+    def build_With(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
+        return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):
     binop_map = {
@@ -571,7 +628,9 @@ class ExprBuilder(Builder):
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)
         if sub_type is ast.Index:
-            if isinstance(expr.slice.value, ast.Tuple) or isinstance(expr.slice.value, ast.List):
+            if isinstance(expr.slice.value, ast.Tuple):
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                # XXX: Indexing using a list is **different**! It triggers advanced indexing.
                 indices = []
                 for index_expr in expr.slice.value.elts:
                     indices.append(build_expr(ctx, index_expr))
@@ -672,7 +731,7 @@ class ExprBuilder(Builder):
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
-
+build_withitem = WithItemBuilder()
 
 def find_before(ctx, pos, substr, offsets=(0, 0)):
     new_pos = ctx.source[:pos].rindex(substr)

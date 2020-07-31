@@ -1,6 +1,7 @@
 from collections import namedtuple
 from typing import Any, Optional, overload, Union, TypeVar, Tuple, Sequence
-from ... import Tensor, _dtype, _device
+from torch import Tensor
+from torch.types import _dtype, _device
 
 PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 

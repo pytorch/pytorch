@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/engine.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -227,9 +228,9 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_finish_.wait(lk);
+      non_reentrant_device_thread_condvar_.wait(lk);
     }
 #endif
   }
@@ -237,15 +238,29 @@ Engine::~Engine() {
 }
 
 void Engine::release_workers() {
-  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
   non_reentrant_device_thread_count_.store(0);
-  non_reentrant_device_thread_finish_.notify_one();
+  non_reentrant_device_thread_condvar_.notify_one();
 }
 
-auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
+void Engine::increment_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_add(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
+void Engine::decrement_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_sub(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
+void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
+
   at::init_num_threads();
-  // thread_init should only be called by device threads other than CPU_DEVICE
-  TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
 
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -271,29 +286,24 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   init_local_ready_queue(ready_queue);
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
-  thread_main(graph_task, /* reentrant_thread */ false);
-  // Notify about shutdown
-  {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
-    non_reentrant_device_thread_count_.fetch_sub(1);
-    non_reentrant_device_thread_finish_.notify_one();
+  thread_main(graph_task);
+  if (should_increment) {
+    // Decrement the count during shutdown if we incremented earlier.
+    decrement_non_reentrant_thread_count();
   }
 }
 
-// The guard that sets and restores current_graph_task.
-struct GraphTaskGuard {
-  GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-    last_graph_task_ = std::move(current_graph_task);
-    current_graph_task = std::move(graph_task);
-  }
-  ~GraphTaskGuard() { restore_current_graph_task(); }
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
+  last_graph_task_ = std::move(current_graph_task);
+  current_graph_task = std::move(graph_task);
+}
+GraphTaskGuard::~GraphTaskGuard() {
+  restore_current_graph_task();
+}
 
-  void restore_current_graph_task() {
-    current_graph_task = std::move(last_graph_task_);
-  }
-
-  std::shared_ptr<GraphTask> last_graph_task_;
-};
+void GraphTaskGuard::restore_current_graph_task() {
+  current_graph_task = std::move(last_graph_task_);
+}
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
@@ -322,22 +332,19 @@ struct GraphTaskGuard {
 //         synchronously until the graph_task of that owning thread is
 //         completed and exit the thread_main to continue executing the
 //         result of caller's code.
-// For 3), the reentrant backward (with reentrant_thread=true) that invokes
+// For 3), the reentrant backward that invokes
 //         thread_main, either from 1) or 2), will not spin and will exit as
 //         long as graph_task is completed and notify the owning thread as
 //         needed.
-auto Engine::thread_main(
-    const std::shared_ptr<GraphTask>& graph_task,
-    bool reentrant_thread) -> void {
-  // Either reentrant_thread should be false or we should pass in a non-null
-  // graph_task.
-  TORCH_INTERNAL_ASSERT(reentrant_thread != (graph_task == nullptr));
+auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
+  // When graph_task is nullptr, this is a long running thread that processes
+  // tasks (ex: device threads). When graph_task is non-null (ex: reentrant
+  // backwards, user thread), this function is expected to exit once that
+  // graph_task complete.
 
   // local_ready_queue should already been initialized when we get into thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
-  // Why the test on graph_task->outstanding_tasks_?  See
-  // Note [Reentrant backwards]
-  while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
+  while (graph_task == nullptr || !graph_task->future_result_->completed()) {
     // local_graph_task represents the graph_task we retrieve from the queue.
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
@@ -382,14 +389,6 @@ auto Engine::thread_main(
     if (local_graph_task->completed()) {
       local_graph_task->mark_as_completed_and_run_post_processing();
 
-      // The CPU worker thread is actually the thread that initially requested
-      // the autograd computation (i.e. `backward()/grad()` starts on CPU). Now
-      // that we're done, we need to break out of the worker loop so we can
-      // continue executing the rest of the calling code!
-      if (worker_device == CPU_DEVICE) {
-        break;
-      }
-
       auto base_owner = local_graph_task->owner_;
       // The current worker thread finish the graph_task, but the owning thread
       // of the graph_task might be sleeping on pop() if it does not have work.
@@ -408,7 +407,6 @@ auto Engine::thread_main(
     }
   }
 }
-
 
 // Reentrant call will re-use the graph_task's owner thread ready_queue for
 // queueing tasks (NOTE: this is not true in the async_mode of the engine).
@@ -435,7 +433,7 @@ void Engine::reentrant_thread_init() {
     // set the local_ready_queue to the ready queue on the graph_task->owner_ device
     local_ready_queue = ready_queue_by_index(graph_task->cpu_ready_queue_, graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
-    thread_main(graph_task, /* reentrant thread*/ true);
+    thread_main(graph_task);
   }
 }
 
@@ -587,45 +585,51 @@ void validate_outputs(
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
-    const auto& output = grads[i];
-    if (!output.defined()) {
+    auto& grad = grads[i];
+    if (!grad.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grads[i].sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+    if (!grad.sizes().equals(metadata.shape())) {
+      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
-        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << grad.sizes() << " but expected shape compatible with ";
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
+      grad = at::sum_to(std::move(grad), metadata.shape());
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
-    bool grad_is_complex = isComplexType(grads[i].scalar_type());
+    bool grad_is_complex = isComplexType(grad.scalar_type());
 
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
-      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
+    TORCH_CHECK(isFloatingType(grad.scalar_type()) || (input_is_complex == grad_is_complex));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
+      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.options(), grads[i].options())) {
+    if (grad.device() != metadata.device() &&
+        grad.dim() == 0) {
+      grad = grad.to(metadata.device());
+    }
+    if (!is_compatible_type(metadata.options(), grad.options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grads[i].options();
+       ss << metadata.options() << " but got " << grad.options();
        AT_ERROR(format_error(ss.str()));
     }
-    auto output_device = output.device();
-    if (output_device != metadata.device()) {
+    auto grad_device = grad.device();
+    if (grad_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << output_device;
+      ss << metadata.device() << " but got " << grad_device;
       AT_ERROR(format_error(ss.str()));
     }
+    // We should not build graph for Tensors that are not differentiable
+    TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
   }
 }
 
@@ -902,7 +906,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // The owning thread start to drive the engine execution with the GraphTask
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
-    thread_main(nullptr, false);
+    thread_main(graph_task);
     TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
     // reset the worker_device after the completion of the graph_task, this is so
     // that the initial state of the engine remains the same across every backward()
@@ -928,7 +932,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       // complete!
       ++current_depth;
       lock.unlock();
-      thread_main(graph_task, /* reentrant_thread */ true);
+      thread_main(graph_task);
       --current_depth;
       --total_depth;
 
@@ -1009,7 +1013,7 @@ auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device
 
 auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in 
+    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
@@ -1039,17 +1043,23 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  non_reentrant_device_thread_count_.store(num_devices);
   for (int i = 0; i < num_devices; ++i) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i]);
+    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
+  }
+  // Wait for the threads to start
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+    while(non_reentrant_device_thread_count_.load() != num_devices) {
+      non_reentrant_device_thread_condvar_.wait(lk);
+    }
   }
 }
 
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
-  // threads but not enough workers to get to the the new task that will be
+  // threads but not enough workers to get to the new task that will be
   // added
   bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
   thread_pool_shared_->graphtasks_queue_.push(graph_task);

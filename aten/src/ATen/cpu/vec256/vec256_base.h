@@ -1,5 +1,19 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+//
+// Note [Do not compile initializers with AVX]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// If you define a static initializer in this file, the initialization will use
+// AVX instructions because these object files are compiled with AVX enabled.
+// We need to avoid non-trivial global data in these architecture specific files
+// because there's no way to guard the global initializers with CPU capability
+// detection.
+//
+// See https://github.com/pytorch/pytorch/issues/37577 for an instance
+// of this bug in the past.
+
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -31,6 +45,13 @@ namespace at {
 namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
+// at::Half should be treated as floating point
+template <typename T>
+struct is_floating_point:
+    std::integral_constant<bool,
+      std::is_floating_point<T>::value ||
+      std::is_same<T, at::Half>::value> {
+};
 
 template<size_t n> struct int_of_size;
 
@@ -99,8 +120,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vec256(Args... vals) {
-    values = { vals... };
+  Vec256(Args... vals) : values{vals...}{
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
@@ -196,20 +216,20 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!std::is_floating_point<other_t_abs>::value && !c10::is_complex_t<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex_t<other_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
-            typename std::enable_if<std::is_floating_point<float_t_abs>::value, int>::type = 0>
+            typename std::enable_if<is_floating_point<float_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
-    return map(std::abs);
+    return map([](T x) -> T { return std::abs(x); });
   }
   template <typename complex_t_abs = T,
             typename std::enable_if<c10::is_complex_t<complex_t_abs>::value, int>::type = 0>
@@ -311,7 +331,7 @@ public:
   }
   template <
     typename U = T,
-    typename std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
   Vec256<T> fmod(const Vec256<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
     static_assert(std::is_same<U, T>::value, "U must be T");
@@ -691,6 +711,32 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 #endif
+
+template <typename T>
+inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+  a = a + b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a - b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a / b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a % b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a * b;
+  return a;
+}
 
 template <typename T>
 inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {

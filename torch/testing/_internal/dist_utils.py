@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 from functools import partial, wraps
 import re
+import sys
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -10,7 +11,7 @@ from torch.distributed.rpc import _rref_context_get_debug_info
 
 
 if not dist.is_available():
-    print("c10d not available, skipping tests")
+    print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -28,7 +29,7 @@ INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
-              faulty_messages=None):
+              faulty_messages=None, messages_to_delay=None):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -54,6 +55,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
             setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
             faulty_messages=faulty_messages,
+            messages_to_delay=messages_to_delay,
         )
 
     @wraps(old_test_method)
@@ -65,8 +67,20 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
 
         self.worker_id = self.rank
 
-        if faulty_messages:
-            _build_faulty_backend_options(faulty_messages)
+        if (
+            rpc.backend_registry.backend_registered("FAULTY_PROCESS_GROUP")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP
+        ):
+            _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
+
+        if (
+            rpc.backend_registry.backend_registered("TENSORPIPE")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.TENSORPIPE
+        ):
+            TEST_CONFIG.rpc_backend_name = "TENSORPIPE"
+            _build_tensorpipe_backend_options()
 
         if setup_rpc:
             rpc.init_rpc(
@@ -96,17 +110,34 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=8,
 )
 
-def _build_faulty_backend_options(faulty_messages):
+def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, messages_to_delay):
     '''
     Constructs the backend options object for the faulty process group agent
     based on the faulty_messages input to dist_init.
     '''
+    messages_to_fail = (
+        faulty_messages
+        if faulty_messages is not None
+        else faulty_agent_fixture.retryable_message_types
+    )
+    messages_to_delay = (
+        messages_to_delay
+        if messages_to_delay is not None
+        else faulty_agent_fixture.default_messages_to_delay
+    )
     TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
         test_object.rpc_backend,
         init_method=test_object.init_method,
         num_send_recv_threads=8,
-        num_fail_sends=1,
-        messages_to_fail=faulty_messages,
+        num_fail_sends=faulty_agent_fixture.num_fail_sends,
+        messages_to_fail=messages_to_fail,
+        messages_to_delay=messages_to_delay,
+    )
+
+def _build_tensorpipe_backend_options():
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
     )
 
 def noop():
@@ -144,6 +175,10 @@ def get_shutdown_error_regex(rpc_backend):
             "Connection reset by peer",
             "Connection closed by peer"
         ]
+    elif rpc_backend == "TENSORPIPE":
+        # FIXME Once we consolidate the error messages returned by the
+        # TensorPipe agent put some more specific regex here.
+        error_regexes = [".*"]
     else:
         error_regexes = [
             "Request aborted during client shutdown",
@@ -163,13 +198,13 @@ def get_timeout_error_regex(rpc_backend_name):
     should receive when an RPC has timed out. Useful for use with
     assertRaisesRegex() to ensure we have the right errors during timeout.
     """
-    if rpc_backend_name == "PROCESS_GROUP":
+    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP", "TENSORPIPE"]:
         return "RPC ran for more than"
     else:
         return "(Timed out)|(Task expired)"
 
 
-def wait_until_pending_users_flushed():
+def wait_until_pending_futures_and_users_flushed(timeout=20):
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
@@ -180,11 +215,55 @@ def wait_until_pending_users_flushed():
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.
     '''
-    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    while num_pending_users != 0:
+    start = time.time()
+    while True:
+        debug_info = _rref_context_get_debug_info()
+        num_pending_futures = int(debug_info["num_pending_futures"])
+        num_pending_users = int(debug_info["num_pending_users"])
+        if num_pending_futures == 0 and num_pending_users == 0:
+            break
         time.sleep(0.1)
-        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    return
+        if time.time() - start > timeout:
+            raise ValueError(
+                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
+                    num_pending_futures, num_pending_users
+                )
+            )
+
+
+def get_num_owners_and_forks():
+    """
+    Retrieves number of OwnerRRefs and forks on this node from
+    _rref_context_get_debug_info.
+    """
+    rref_dbg_info = _rref_context_get_debug_info()
+    num_owners = rref_dbg_info["num_owner_rrefs"]
+    num_forks = rref_dbg_info["num_forks"]
+    return num_owners, num_forks
+
+
+def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20):
+    """
+    Waits until timeout for num_forks and num_owners to exist on the rank. Used
+    to ensure proper deletion of RRefs in tests.
+    """
+    start = time.time()
+    while True:
+        num_owners_on_rank, num_forks_on_rank = rpc.rpc_sync(
+            worker_name(rank), get_num_owners_and_forks, args=(), timeout=5
+        )
+        num_owners_on_rank = int(num_owners_on_rank)
+        num_forks_on_rank = int(num_forks_on_rank)
+        if num_owners_on_rank == num_owners and num_forks_on_rank == num_forks:
+            return
+        time.sleep(1)
+        if time.time() - start > timeout:
+            raise ValueError(
+                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
+                    timeout, num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
+                )
+            )
+
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.
