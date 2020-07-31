@@ -251,8 +251,7 @@ static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::comple
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Some extensions such as torchvision call atomicAdd()
  * directly and require non-library provided data type support. Only for these, we
- * continue to pr
-ovide atomicAdd overloads.
+ * continue to provide atomicAdd overloads.
  */
 static inline __device__ at::Half atomicAdd(at::Half *address, at::Half val) {
   return gpuAtomicAdd(address, val);

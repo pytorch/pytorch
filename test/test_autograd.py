@@ -4464,8 +4464,6 @@ def add_test(
             def do_test(self, device, dtype=dtype, name=name, self_size=self_size, args=new_args, test_name=test_name,
                         output_process_fn=output_process_fn):
                 def check(name):
-                    if name == 'test_cummax_dim0_cuda':
-                        raise
                     is_magic_method = name[:2] == '__' and name[-2:] == '__'
                     is_inplace = name[-1] == "_" and not is_magic_method
                     self_variable = create_input((self_size,), dtype=dtype, device=device)[0][0]
