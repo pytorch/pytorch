@@ -1022,6 +1022,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   flattenTensors(backendType);
 
   torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
@@ -1152,6 +1153,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   Stmt* stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
   return stmt;
 }
 
