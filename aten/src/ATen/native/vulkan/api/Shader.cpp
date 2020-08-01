@@ -7,11 +7,33 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace detail {
 namespace api {
 
-struct Shader::Cache::Compiler final {
+Shader::Factory::Factory(const VkDevice device)
+ : device_(device) {
+}
+
+typename Shader::Factory::Handle Shader::Factory::operator()(const Descriptor& descriptor) const {
+  VkShaderModuleCreateInfo create_info{};
+
+  create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  create_info.pCode = descriptor.code;
+  create_info.codeSize = descriptor.count * sizeof(uint32_t);
+
+  VkShaderModule shader_module{};
+
+  VK_CHECK(vkCreateShaderModule(
+      device_, &create_info, nullptr, &shader_module));
+
+  return Handle{
+    shader_module,
+    Deleter(device_),
+  };
+}
+
 #ifdef USE_VULKAN_SHADERC_RUNTIME
+
+struct Shader::Cache::Compiler final {
   shaderc::Compiler context;
   shaderc::CompileOptions options;
 
@@ -27,7 +49,7 @@ struct Shader::Cache::Compiler final {
   #endif /* DEBUG */
   }
 
-  Binary compile(const char* const source) {
+  std::vector<uint32_t> compile(const char* const source) {
     const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
         source,
         ::strlen(source),
@@ -41,37 +63,49 @@ struct Shader::Cache::Compiler final {
         "Shader compilation error: ",
         result.GetErrorMessage());
 
-    return Binary{
-      {result.cbegin(), result.cend()},
-    };
+    return std::vector<uint32_t>(result.cbegin(), result.cend());
   }
-#else
-  Binary compile(const char* const /* source */) {
-    return Binary{};
-  }
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
 };
 
-Shader::Cache::Cache()
-  : compiler_(new Compiler) {
+#else
+
+struct Shader::Cache::Compiler final {
+  std::vector<uint32_t> compile(const char* const /* source */) {
+    return std::vector<uint32_t>{};
+  }
+};
+
+#endif /* USE_VULKAN_SHADERC_RUNTIME */
+
+Shader::Cache::Cache(const VkDevice device)
+ : compiler_(new Compiler),
+   cache_(Factory(device)) {
 }
 
-Shader Shader::Cache::retrieve(
+VkShaderModule Shader::Cache::retrieve(
     const char* const key,
-    const char* const glsl) {
-  auto iterator = shaders_.find(key);
-  if (C10_UNLIKELY(shaders_.cend() != iterator)) {
-    iterator = shaders_.insert({key, compiler_->compile(glsl)}).first;
+    const char* const source) {
+  const VkShaderModule shader_module = cache_.retrieve(key);
+  if (VK_NULL_HANDLE != shader_module) {
+    return shader_module;
   }
 
-  return Shader{
-      iterator->second.data.data(),
-      iterator->second.data.size(),
-    };;
+  const std::vector<uint32_t> binary = compiler_->compile(source);
+  const Descriptor descriptor{
+      binary.data(),
+      binary.size()
+  };
+
+  return retrieve(key, &descriptor);
+}
+
+VkShaderModule Shader::Cache::retrieve(
+    const char* const key,
+    const Descriptor* const descriptor) {
+  return cache_.retrieve(key, descriptor);
 }
 
 } // namespace api
-} // namespace detail
 } // namespace vulkan
 } // namespace native
 } // namespace at

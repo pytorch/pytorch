@@ -8,13 +8,13 @@
 #include <vulkan/vulkan.h>
 #endif
 
-#define VK_CHECK(function)                                               \
-  {                                                                      \
-    const VkResult result = (function);                                  \
-    TORCH_CHECK(result == VK_SUCCESS, "Vulkan error VkResult:", result); \
+#define VK_CHECK(function)                                  \
+  {                                                         \
+    const VkResult result = (function);                     \
+    TORCH_CHECK(result == VK_SUCCESS, "VkResult:", result); \
   }
 
-#define VK_DELETER(Handle) at::native::vulkan::detail::destroy_##Handle
+#define VK_DELETER(Handle) at::native::vulkan::api::destroy_##Handle
 #define VK_DELETER_DECLARE_DISPATCHABLE(Handle) void destroy_##Handle(const Vk##Handle handle)
 #define VK_DELETER_DECLARE_NON_DISPATCHABLE(Handle)   \
   class destroy_##Handle final {                      \
@@ -28,7 +28,7 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace detail {
+namespace api {
 
 VK_DELETER_DECLARE_DISPATCHABLE(Instance);
 VK_DELETER_DECLARE_DISPATCHABLE(Device);
@@ -51,7 +51,7 @@ VK_DELETER_DECLARE_NON_DISPATCHABLE(CommandPool);
 template <typename Type, typename Deleter>
 using Handle = std::unique_ptr<typename std::remove_pointer<Type>::type, Deleter>;
 
-} // namespace detail
+} // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at

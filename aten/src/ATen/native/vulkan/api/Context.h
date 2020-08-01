@@ -5,17 +5,16 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace detail {
 namespace api {
 
-class VContext final {
+class Context final {
  public:
-  explicit VContext(bool enable_validation_layers);
-  ~VContext() = default;
-  VContext(const VContext&) = delete;
-  VContext& operator=(const VContext&) = delete;
-  VContext(VContext&&) = default;
-  VContext& operator=(VContext&&) = default;
+  explicit Context(bool enable_validation_layers);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
+  Context(Context&&) = default;
+  Context& operator=(Context&&) = default;
+  ~Context() = default;
 
   inline VkInstance instance() const {
     return instance_.get();
@@ -52,10 +51,9 @@ class VContext final {
 };
 
 bool available();
-const VContext& context();
+Context& context();
 
 } // namespace api
-} // namespace detail
 } // namespace vulkan
 } // namespace native
 } // namespace at

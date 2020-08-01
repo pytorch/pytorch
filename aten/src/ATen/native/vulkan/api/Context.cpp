@@ -5,7 +5,6 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace detail {
 namespace api {
 namespace {
 
@@ -243,7 +242,7 @@ VkCommandPool create_command_pool(
 
 } // namespace
 
-VContext::VContext(const bool enable_validation_layers)
+Context::Context(const bool enable_validation_layers)
     : instance_(create_instance(enable_validation_layers), &VK_DELETER(Instance)),
       physical_device_(acquire_physical_device(instance())),
       physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
@@ -253,8 +252,8 @@ VContext::VContext(const bool enable_validation_layers)
       command_pool_(create_command_pool(device(), compute_queue_family_index_), VK_DELETER(CommandPool)(device())) {
 }
 
-const VContext* initialize() {
-  static const std::unique_ptr<VContext> context([]() -> VContext* {
+Context* initialize() {
+  static const std::unique_ptr<Context> context([]() -> Context* {
 #ifdef USE_VULKAN_WRAPPER
     if (!InitVulkan()) {
       TORCH_WARN("Vulkan Wrapper Failed to InitVulkan");
@@ -262,7 +261,7 @@ const VContext* initialize() {
     }
 #endif
 
-    return new VContext(Configuration::kEnableValidationLayers);
+    return new Context(Configuration::kEnableValidationLayers);
   }());
 
   return context.get();
@@ -272,12 +271,11 @@ bool available() {
   return initialize();
 }
 
-const VContext& context() {
+Context& context() {
   return *initialize();
 }
 
 } // namespace api
-} // namespace detail
 } // namespace vulkan
 } // namespace native
 } // namespace at
