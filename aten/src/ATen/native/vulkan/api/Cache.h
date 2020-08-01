@@ -26,10 +26,10 @@ class Cache final {
   // the Value corresponding to Key if present in the cache, or a default-constructed
   // Value otherwise, which in the case of Vulkan objects, can be conveniently compared
   // against VK_NULL_HANDLE in case the intended behavior is to check the presence of
-  // an item in the case.
+  // an item in the cache.
   //
-  // On the other hand, f descriptor is not null, this operation is a cache lookup
-  // in additionto resource construction using the provided Factory if and only if
+  // On the other hand, if descriptor is not null, this operation is a cache lookup
+  // in addition to a resource construction using the provided Factory if and only if
   // the resource is not already present in the cache.  Regardless, this function
   // returns  with the already present, or newly created item, available in the cache
   // for future use.
@@ -66,7 +66,7 @@ inline Value Cache<Key, Value, Factory>::retrieve(
       return Value{};
     }
 
-    iterator = cache_.insert({key, factory_(*descriptor)});
+    iterator = cache_.insert({key, factory_(*descriptor)}).first;
   }
 
   return iterator->second.get();
