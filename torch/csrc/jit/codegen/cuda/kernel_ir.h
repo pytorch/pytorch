@@ -372,12 +372,12 @@ class TORCH_CUDA_API Scope {
     exprs_.push_back(e);
   }
 
-  void insert(size_t pos, Expr* expr) {
-    exprs_.insert(exprs_.begin() + pos, expr);
+  void insert(std::vector<Expr*>::iterator it, Expr* expr) {
+    exprs_.insert(it, expr);
   }
 
-  void erase(size_t pos) {
-    exprs_.erase(exprs_.begin() + pos);
+  void erase(std::vector<Expr*>::iterator it) {
+    exprs_.erase(it);
   }
 
   bool empty() const {

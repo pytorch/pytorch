@@ -610,7 +610,6 @@ void IRPrinter::handle(const kir::TernaryOp* top) {
 
 void IRPrinter::handle(const ReductionOp* rop) {
   TORCH_CHECK(rop->out()->getValType() != ValType::TensorIndex);
-  indent();
   os << rop->out() << " = reduction( " << rop->in()
      << ", op = " << rop->getReductionOpType()
      << ", initial value = " << rop->init() << " )\n";
@@ -722,7 +721,6 @@ void IRPrinter::handle(const kir::GridReduction* gr) {
 
 void IRPrinter::handle(const BroadcastOp* bop) {
   TORCH_CHECK(bop->out()->getValType() != ValType::TensorIndex);
-  indent();
   os << bop->out() << " = broadcast( " << bop->in() << " )\n";
 }
 

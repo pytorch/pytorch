@@ -55,9 +55,6 @@ Expr* firstInnerMostScope(Expr* scope);
 
 namespace ir_utils {
 
-// Return inputs of provided IterDomains that are IterDomains
-std::vector<IterDomain*> iterDomainInputsOf(const std::vector<IterDomain*>&);
-
 std::vector<Val*> indices(std::vector<kir::ForLoop*>);
 
 std::vector<IterDomain*> iterDomains(std::vector<kir::ForLoop*>);
@@ -76,14 +73,11 @@ bool isScope(const Expr*);
 
 Expr* asExpr(Statement*);
 
-// TODO: Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
 
-// TODO: Remove in favor of ->as<ForLoop>()
 kir::ForLoop* asForLoop(Statement*);
 
-// TODO: Remove in favor of ->as<TensorView>()
-const TensorView* asConstTV(const Val*);
+const TensorView* asConstTV(const Val* const);
 
 bool isUnrolledFor(const Expr*);
 

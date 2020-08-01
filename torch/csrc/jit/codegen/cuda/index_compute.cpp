@@ -192,7 +192,6 @@ IndexCompute::IndexCompute(
     return;
   }
 
-  // We may or may not have indices associated with reductions.
   const bool exclude_reduction = td_->nDims() > indices.size();
 
   TORCH_INTERNAL_ASSERT(
@@ -221,17 +220,13 @@ IndexCompute::IndexCompute(
   traverseFrom(indices[0]->fusion(), domain_vals, false);
 
   for (auto id : td_->rootDomain()) {
-    if (exclude_reduction && id->isReduction()) {
+    if (exclude_reduction && id->isReduction())
       continue;
-    } else if (id->getIterType() == IterType::BroadcastWithStride) {
-      indices_.push_back(new Int(0));
-    } else {
-      auto it = index_map_.find(id);
-      TORCH_INTERNAL_ASSERT(
-          it != index_map_.end(),
-          "Error during index compute, missed computing a value.");
-      indices_.push_back(it->second);
-    }
+    auto it = index_map_.find(id);
+    TORCH_INTERNAL_ASSERT(
+        it != index_map_.end(),
+        "Error during index compute, missed computing a value.");
+    indices_.push_back(it->second);
   }
 }
 
@@ -260,7 +255,6 @@ std::vector<bool> IndexCompute::contiguityAnd(
   return contig_result;
 }
 
-// TODO: use new mapping functions
 std::vector<bool> IndexCompute::contiguityPasC(
     TensorDomain* producer,
     TensorDomain* consumer) {
@@ -295,212 +289,84 @@ std::vector<bool> IndexCompute::contiguityPasC(
   return as_consumer_contiguity;
 }
 
-namespace {
-// Note returned vector is relative to the producer root (rfactor domain is
-// taken here for producer if there is one as this is the root domain relative
-// to consumer)
-//
-// Consider: T3[ iS{( 1 * i5 )}, iS{i7} ] compute_at( 4, 1 )
-//                 = broadcast( T1[ iS{i5}, iS{i7} ] )
-// which could generate the loop nest:
-//   for(size_t i18 = 0; i18 < ( T4.size[0] * T4.size[1] ); ++i18 ) {
-//     float T3[T1.size[2]];
-//     for(size_t i19 = 0; i19 < T3.size[2]; ++i19 ) {
-//       T2[ 0 ]
-//         = T1[...];
-//
-// Here the first dimension to index T1 must be i18 % T4.size[1], because T3 has
-// a dimension being broadcasted to the extent of T4. This function is looking
-// for these types of cases: where there's a dimension merged into an entry into
-// consumer->domain(), but this dimension does not exist in producer_root.
-// Then we need these dimensions mapped to producer_root, so we know which ones
-// we need to access with modulo. We could go consumer->domain() =>
-// consumer->rootDomain() => producer_root however producer_root could =
-// producer->rfactorDomain() then we still might have to map to
-// producer->rootDomain(). Therefore we might as well go consumer->domain() =>
-// producer->domain() => producer->rootDomain().
-std::vector<bool> getBCastMergedIndices(
-    const TensorDomain* producer,
-    const TensorDomain* consumer) {
-  auto c_root = consumer->rootDomain();
-  auto p_root = producer->hasRFactor() ? producer->rfactorDomain()
-                                       : producer->rootDomain();
-
-  auto root_c2p_idmap = TensorDomain::mapRootCtoP(consumer, producer);
-
-  std::unordered_set<IterDomain*> bcast_not_in_P;
-  for (auto c_id : c_root) {
-    if (c_id->isBroadcast() &&
-        root_c2p_idmap.find(c_id) == root_c2p_idmap.end()) {
-      bcast_not_in_P.emplace(c_id);
-    }
-  }
-
-  // If there are no broadcasts in consumer_root that are not in producer_root,
-  // we have nothing to track here.
-  if (bcast_not_in_P.empty()) {
-    return std::vector<bool>(p_root.size(), false);
-  }
-
-  // We want to know what domains in consumer have a merged root broadcast
-  // domain not present in producer root. We then want to map that to the
-  // consumer_root axes impacted by this (the non-bcast axes merged with these
-  // bcast axes). Then we want to map this to producer_root.
-
-  std::vector<bool> c_bcast_merged(consumer->nDims(), false);
-
-  for (size_t c_i = 0; c_i < consumer->nDims(); c_i++) {
-    auto c_id = consumer->axis(c_i);
-    bool missing_bcast = false;
-    bool non_missing_bcast = false;
-
-    auto c_id_inps = ir_utils::iterDomainInputsOf({c_id});
-
-    for (auto inp : c_id_inps) {
-      if (bcast_not_in_P.find(inp) != bcast_not_in_P.end()) {
-        missing_bcast = true;
-      } else {
-        non_missing_bcast = true;
-      }
-    }
-
-    // this domain c_i is guilty.
-    c_bcast_merged[c_i] = missing_bcast && non_missing_bcast;
-  }
-
-  // If these missing axes aren't merged with non-missing axes, we have nothing
-  // to track here.
-  if (std::none_of(c_bcast_merged.begin(), c_bcast_merged.end(), [](bool b) {
-        return b;
-      })) {
-    return std::vector<bool>(p_root.size(), false);
-  }
-
-  // map c_bcast_merged to producer
-  std::vector<bool> p_bcast_merged(producer->nDims(), false);
-  std::vector<std::pair<int, int>> pc_map =
-      TensorDomain::mapDomainPandC(consumer->domain(), producer->domain());
-
-  for (std::pair<int, int> entry : pc_map) {
-    int p_i = entry.first;
-    int c_i = entry.second;
-    p_bcast_merged[p_i] = c_bcast_merged[c_i];
-  }
-
-  // map p_bcast_merged to producer->root
-  std::vector<bool> p_root_bcast_merged(producer->nDims(), false);
-  // map producer root IterDomain to it's position in producer->rootDomain()
-  std::unordered_map<IterDomain*, int> p_root_id_to_index;
-  for (size_t p_i = 0; p_i < producer->rootDomain().size(); p_i++) {
-    p_root_id_to_index[producer->rootDomain()[p_i]] = p_i;
-  }
-
-  for (size_t p_i = 0; p_i < p_bcast_merged.size(); p_i++) {
-    if (!p_bcast_merged[p_i])
-      continue;
-    IterDomain* id = producer->axis((int)p_i);
-    auto id_inps = ir_utils::iterDomainInputsOf({id});
-    for (auto inp : id_inps) {
-      p_root_bcast_merged[p_root_id_to_index.at(inp)] = true;
-    }
-  }
-
-  return p_root_bcast_merged;
-}
-} // namespace
 kir::TensorIndex* Index::getGlobalProducerIndex(
-    const TensorView* producer_tv,
-    const TensorView* consumer_tv,
+    const TensorView* producer,
+    const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
-  // producer_tv->domain() is not replayed as the loop strucutre we were
-  // provided, so replay it to match consumer_tv which is.
-  auto producer = TransformReplay::replayPasC(
-                      producer_tv->domain(), consumer_tv->domain(), -1)
-                      .first;
+  // Grab indices from the loops
+  std::vector<Val*> indices(loops.size());
+  std::transform(
+      loops.begin(), loops.end(), indices.begin(), [](kir::ForLoop* fl) {
+        return fl->index();
+      });
 
-  std::vector<int> p2c(producer->nDims(), false);
-  auto pc_map = TensorDomain::mapDomainPandC(
-      producer->domain(), consumer_tv->domain()->domain());
-  for (auto entry : pc_map) {
-    int p_i = entry.first;
-    int c_i = entry.second;
-    p2c[p_i] = c_i;
-  }
+  // What would the consumer indices be if it was global, keeping in mind
+  // reduction axes. We have to do the indexing based on consumer because we
+  // could hit instances where we have a loop nest generated based on:
+  // consumer[b{1}, i1, i2] with consumer->merge(0) => consumer[b{1}*i1, i2],
+  // but producer would just be producer[i1, i2]. It would be very hard to
+  // generate indices directly on producer, but if we do it on consumer, and
+  // grab the root axes we need (i1 and i2), it's easy to do.
+  const std::vector<Val*> c_inds = IndexCompute::get(
+      consumer->domain(),
+      indices,
+      IndexCompute::contiguityPasC(producer->domain(), consumer->domain()));
 
-  std::vector<Val*> indices;
-  for (size_t i = 0; i < producer->domain().size(); i++) {
-    indices.push_back(loops[p2c[i]]->index());
-  }
-
-  std::vector<Val*> computed_inds =
-      IndexCompute::get(producer, indices, producer_tv->domain()->contiguity());
-
-  auto p_root = TensorDomain::noReductions(producer->rootDomain());
-
+  // Computed consumer indices should have everything we need for the producer
+  std::vector<Val*> p_inds;
+  auto p_root = TensorDomain::noReductions(producer->getRootDomain());
+  // Number of root dims that are broadcasted
+  size_t implicit_bcast_dims = 0;
   {
-    // remove implicit bcast dims from root
-    std::vector<IterDomain*> without_implicit_bcast;
-
-    size_t implicit_bcast_dims = 0;
-    for (auto id : p_root) {
-      if (id->getIterType() != IterType::BroadcastWithoutStride) {
-        without_implicit_bcast.push_back(id);
+    auto c_root = consumer->getRootDomain();
+    size_t it_c = 0, it_p = 0;
+    while (it_c < c_root.size() && it_p < p_root.size()) {
+      const bool is_bcast = p_root[it_p]->isBroadcast();
+      if (c_root[it_c]->isBroadcast() && !p_root[it_p]->isBroadcast()) {
+        it_c++;
+      } else {
+        if (!p_root[it_p]->isBroadcast()) {
+          p_inds.push_back(c_inds[it_c]);
+        } else {
+          if (p_root[it_p]->getIterType() == IterType::BroadcastWithStride) {
+            p_inds.push_back(new Int(0));
+          } else {
+            implicit_bcast_dims++;
+          }
+        }
+        it_c++;
+        it_p++;
       }
     }
-    p_root = without_implicit_bcast;
   }
-
   TORCH_INTERNAL_ASSERT(
-      computed_inds.size() == p_root.size(),
+      p_inds.size() == p_root.size() - implicit_bcast_dims,
       "Dimensionality error in code generator while computing tensor indices.");
 
   bool inner_most_dim_contig =
-      p_root[p_root.size() - 1]->getIterType() == IterType::Iteration &&
-      producer->contiguity()[p_root.size() - 1];
-
-  // This function is projected as consumer->domain() => consumer->rootDomain()
-  // => producer->rootDomain()
-  auto p_root_bcast_merged =
-      getBCastMergedIndices(producer, consumer_tv->domain());
+      producer->getRootDomain()[producer->getRootDomain().size() - 1]
+              ->getIterType() == IterType::Iteration &&
+      producer->domain()->contiguity()[producer->getRootDomain().size() - 1];
 
   std::vector<Val*> strided_inds;
-  for (size_t p_i = 0; p_i < p_root.size(); p_i++) {
-    Val* extent = nullptr;
-    if (computed_inds[p_i]->isZeroInt()) {
-      // If collapsing a dim, but need to module, we need extents multiplied
-      // together
-      if (p_root[p_i]->getIterType() == IterType::Iteration) {
-        if (extent == nullptr) {
-          extent = p_root[p_i]->extent();
-        } else {
-          extent = mul(extent, p_root[p_i]->extent());
-        }
-      }
-      continue;
-    }
-
-    auto maybe_modulo = computed_inds[p_i];
-    if (p_root_bcast_merged[p_i]) {
-      maybe_modulo =
-          mod(computed_inds[p_i],
-              extent == nullptr ? p_root[p_i]->extent()
-                                : mul(extent, p_root[p_i]->extent()));
-    }
-
-    if (p_i == computed_inds.size() - 1 && inner_most_dim_contig) {
-      strided_inds.push_back(maybe_modulo);
+  for (size_t i = 0; i < p_inds.size(); i++) {
+    if (p_inds[i]->isZeroInt()) {
+      strided_inds.push_back(p_inds[i]);
+    } else if (i == p_inds.size() - 1 && inner_most_dim_contig) {
+      strided_inds.push_back(p_inds[i]);
     } else {
       std::stringstream ss;
-      ss << "T" << producer_tv->name() << ".stride[" << p_i << "]";
+      ss << "T" << producer->name() << ".stride[" << i << "]";
       strided_inds.push_back(
-          mul(maybe_modulo, new NamedScalar(ss.str(), DataType::Int)));
+          mul(p_inds[i], new NamedScalar(ss.str(), DataType::Int)));
     }
   }
 
+  // Probably shouldn't ever hit this
   if (strided_inds.size() == 0)
     strided_inds.push_back(new Int(0));
 
-  return new kir::TensorIndex(producer_tv, strided_inds);
+  return new kir::TensorIndex(producer, strided_inds);
 }
 
 // Producer index for either shared or local memory
@@ -596,11 +462,12 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
       consumer->domain(), indices, consumer->domain()->contiguity());
 
   auto root_dom = consumer->getRootDomain();
-
   TORCH_INTERNAL_ASSERT(
-      computed_inds.size() == root_dom.size() ||
-          computed_inds.size() == TensorDomain::noReductions(root_dom).size(),
+      computed_inds.size() == TensorDomain::noReductions(root_dom).size() ||
+          computed_inds.size() == root_dom.size(),
       "Dimensionality error in code generator while computing indexing.");
+
+  // Remove indices associated with reductions.
   if (computed_inds.size() == root_dom.size()) {
     for (size_t i = 0; i < root_dom.size(); i++) {
       // Do this backwards so erase offset will be right
@@ -651,7 +518,7 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
   std::vector<Val*> strided_inds;
   for (size_t i = 0; i < computed_inds.size(); i++) {
     if (computed_inds[i]->isZeroInt()) {
-      continue;
+      strided_inds.push_back(computed_inds[i]);
     } else if (i == computed_inds.size() - 1 && inner_most_dim_contig) {
       strided_inds.push_back(computed_inds[i]);
     } else {
@@ -662,6 +529,7 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
     }
   }
 
+  // Probably shouldn't ever hit this
   if (strided_inds.size() == 0)
     strided_inds.push_back(new Int(0));
 

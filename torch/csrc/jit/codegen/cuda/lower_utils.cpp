@@ -389,18 +389,6 @@ Expr* firstInnerMostScope(Expr* scope) {
 
 namespace ir_utils {
 
-std::vector<IterDomain*> iterDomainInputsOf(
-    const std::vector<IterDomain*>& input_ids) {
-  auto inputs = IterVisitor::getInputsTo({input_ids.begin(), input_ids.end()});
-  std::vector<IterDomain*> id_inputs;
-  for (auto inp : inputs) {
-    if (inp->getValType() == ValType::IterDomain) {
-      id_inputs.push_back(inp->as<IterDomain>());
-    }
-  }
-  return id_inputs;
-}
-
 std::vector<Val*> indices(std::vector<kir::ForLoop*> loops) {
   std::vector<Val*> inds(loops.size());
   std::transform(
