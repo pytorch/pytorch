@@ -82,6 +82,8 @@ Shader::Cache::Cache(const VkDevice device)
    cache_(Factory(device)) {
 }
 
+Shader::Cache::~Cache() = default;
+
 VkShaderModule Shader::Cache::retrieve(
     const char* const key,
     const char* const source) {

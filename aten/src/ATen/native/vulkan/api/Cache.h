@@ -66,7 +66,7 @@ inline Value Cache<Key, Value, Factory>::retrieve(
       return Value{};
     }
 
-    iterator = cache_.insert({key, factory_(*descriptor)});
+    iterator = cache_.insert({key, factory_(*descriptor)}).first;
   }
 
   return iterator->second.get();
