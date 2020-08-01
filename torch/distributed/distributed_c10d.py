@@ -1274,8 +1274,6 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         torch.LongTensor([0]).to(my_rank if is_nccl_backend else "cpu")
         for _ in range(group_size)
     ]
-    # Avoid copying intermediate tensors back and forth to CUDA by using gloo PG
-    # for object collectives.
     # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
     # since each rank needs to broadcast a tensor of the same (maximal) size.
     all_gather(object_size_list, local_size, group=group)
