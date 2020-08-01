@@ -1174,7 +1174,7 @@ def _tensor_to_object(tensor, tensor_size):
 def all_gather_object(object_list, obj, group=group.WORLD):
     """
     Gathers picklable objects from the whole group into a list. Similar to
-    :ref:`all_gather`, but Python objects can be passed in. Note that the object
+    :func:`all_gather`, but Python objects can be passed in. Note that the object
     must be pickable in order to be gathered.
 
     Arguments:
@@ -1192,6 +1192,12 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     .. note:: Note that this API differs slightly from the all_gather collective
         since it does not provide an async_op handle and thus will be a blocking
         call.
+
+    .. warning::
+        :func:`all_gather_object` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
     """
     if _rank_not_in_group(group):
         return
@@ -1233,7 +1239,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     """
     Gathers picklable objects from the whole group in a single process.
-    Similar to :ref:`gather`, but Python objects can be passed in. Note that the
+    Similar to :func:`gather`, but Python objects can be passed in. Note that the
     object must be picklable in order to be gathered.
 
     Arguments:
@@ -1254,6 +1260,12 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         call.
 
     ..note:: Note that this API is not supported when using the NCCL backend.
+
+    .. warning::
+        :func:`all_gather` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
     """
     if _rank_not_in_group(group):
         return
