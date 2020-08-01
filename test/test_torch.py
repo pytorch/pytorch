@@ -17105,16 +17105,19 @@ fn(*args)
             _, error = p.communicate()
             if error:
                 error_message = error.decode("utf-8")
-                self.assertTrue(should_throw_error,
+                self.assertTrue(
+                    should_throw_error,
                     msg="did not expect error to be raised for case '%s'" % test_case_info())
                 expected_error_message = "RuntimeError: Deterministic behavior was enabled with either"
-                self.assertTrue(expected_error_message in error_message,
+                self.assertTrue(
+                    expected_error_message in error_message,
                     msg=("expected error related to CuBLAS determinism for case "
-                        "'%s', but got a different error:\n%s" % (test_case_info(), error_message)))
+                         "'%s', but got a different error:\n%s" % (test_case_info(), error_message)))
             else:
-                self.assertTrue(not should_throw_error,
+                self.assertTrue(
+                    not should_throw_error,
                     msg=("expected error related to CuBLAS determinism for case "
-                        "'%s', but did not get an error" % test_case_info()))
+                         "'%s', but did not get an error" % test_case_info()))
 
     @onlyCPU
     @dtypes(torch.float)
