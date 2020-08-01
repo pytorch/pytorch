@@ -713,10 +713,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
             ``c10d.ProcessGroup.work``. As an example, a future object can be
             retrieved by ``fut = process_group.allreduce(tensors).get_future()``.
 
-            In the example above, if ``allreduce`` work was done on GPU,
-            ``fut.wait()`` would return after synchronizing the correct GPU streams
-            to ensure we can have asynchronous CUDA execution and it does not wait for
-            the entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
+            In the example above, if ``allreduce`` work was done on GPU, ``fut.wait()``
+            would return after synchronizing the correct GPU streams to ensure
+            we can have asynchronous CUDA execution and it does not wait for the
+            entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
             in that case, it would wait for the entire operation to complete before
             returning. In addition, if a callback function was added by `fut.then()`,
             it will synchronize the appropriate streams and invoke the callback inline.

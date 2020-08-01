@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanConvolution.h>
 #include <c10/util/Optional.h>

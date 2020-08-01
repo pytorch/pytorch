@@ -150,9 +150,8 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 {
-  int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  const auto count = c10::cuda::device_count();
+  if (count == 0) {
     return PyBool_FromLong(0);
   }
   return PyBool_FromLong(1);
@@ -161,11 +160,11 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
 {
   int driverVersion = -1;
-  cudaError_t err = cudaDriverGetVersion(&driverVersion);
-  if (err != cudaSuccess) {
-    PyErr_Format(PyExc_RuntimeError,
-                    "Error calling cudaDriverGetVersion: %d %s",
-                    err, cudaGetErrorString(err));
+  std::string error;
+  std::tie(driverVersion, error) = c10::cuda::driver_version();
+
+  if (!error.empty()) {
+    PyErr_Format(PyExc_RuntimeError, "Error calling cudaDriverGetVersion: %s", error.c_str());
     return nullptr;
   }
   return PyLong_FromLong((int64_t) driverVersion);
@@ -215,7 +214,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObjec
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  THCudaCheck(cudaDeviceSynchronize());
+  c10::cuda::device_synchronize();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
