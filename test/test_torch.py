@@ -6692,15 +6692,15 @@ class TestTorchDeviceType(TestCase):
         matrix_inverse = torch.inverse(matrix)
 
         identity = torch.eye(5, dtype=torch.float64, device=device)
-        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, rtol=0, msg='inverse value')
-        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, rtol=0, msg='inverse value')
+        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, rtol=0)
+        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, rtol=0)
 
         matrix_inverse_out = torch.empty(5, 5, dtype=torch.float64, device=device)
         torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0, msg='inverse value in-place')
+        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
         # second call, now that matrix_inverse_out is transposed
         torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0, msg='inverse value in-place')
+        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
         # one batch
         matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)

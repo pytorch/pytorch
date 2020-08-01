@@ -32,7 +32,7 @@ void magmaSolveBatched(
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-void magmaLu(
+void cu_xgetrf(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info);
 
@@ -56,9 +56,9 @@ template<class scalar_t>
 inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n);
 
 template<class scalar_t>
-void magmaGetri(
-    magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv, scalar_t* dwork,
-    magma_int_t lwork, magma_int_t* info);
+void cu_xgetri(
+    magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
+    magma_int_t* info, const Tensor& ret);
 
 template<class scalar_t>
 void magmaGetriBatched(
@@ -171,21 +171,29 @@ void magmaSolveBatched<float>(
 }
 
 template<>
-void magmaLu<double>(
+void cu_xgetrf<double>(
     magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dgetrf_gpu(m, n, dA, ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
+  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kDouble));
+  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
+  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf(handle, m, n, dA, ldda, buffer.data_ptr<double>(), ipiv, devInfo.data_ptr<int>()));
+  *info = devInfo.item<int>();
 }
 
 template<>
-void magmaLu<float>(
+void cu_xgetrf<float>(
     magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sgetrf_gpu(m, n, dA, ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  int lwork;
+  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
+  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kFloat));
+  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
+  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf(handle, m, n, dA, ldda, buffer.data_ptr<float>(), ipiv, devInfo.data_ptr<int>()));
+  *info = devInfo.item<int>();
 }
 
 template<>
@@ -251,21 +259,21 @@ inline magma_int_t magmaGetriOptimalBlocksize<float>(magma_int_t n) {
 }
 
 template<>
-void magmaGetri<double>(
-    magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
-    magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
+void cu_xgetri<double>(
+    magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv,
+    magma_int_t* info, const Tensor& ret) {
+  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
+  TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, n, dA, ldda, ipiv, ret.data_ptr<double>(), n, dinfo.data_ptr<int>()));
+  *info = dinfo.item<int>();
 }
 
 template<>
-void magmaGetri<float>(
-    magma_int_t n, float* dA, magma_int_t ldda, magma_int_t* ipiv, float* dwork,
-    magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
+void cu_xgetri<float>(
+    magma_int_t n, float* dA, magma_int_t ldda, magma_int_t* ipiv,
+    magma_int_t* info, const Tensor& ret) {
+  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
+  TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, n, dA, ldda, ipiv, ret.data_ptr<float>(), n, dinfo.data_ptr<int>()));
+  *info = dinfo.item<int>();
 }
 
 template<>
@@ -690,32 +698,25 @@ AT_ERROR("inverse: MAGMA library not found in "
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(Tensor& self, int64_t& info) {
-#ifndef USE_MAGMA
-AT_ERROR("inverse: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
+static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret) {
   auto self_data = self.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
-  magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
-  magma_int_t info_tmp = 0;
+  int n = magma_int_cast(self.size(-2), "self.size(-2)");
+  int info_tmp = 0;
 
-  Tensor ipiv = at::empty({n}, at::kInt);
-  Tensor dwork = at::empty({lwork}, self.options());
-  magmaLu<scalar_t>(n, n, self_data, n, ipiv.data_ptr<magma_int_t>(), &info_tmp);
+  Tensor ipiv = at::empty({n}, self.options().dtype(at::kInt));
+  cu_xgetrf<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), &info_tmp);
   if (info_tmp != 0) {
     info = info_tmp;
     return;
   }
-  magmaGetri<scalar_t>(
-    n, self_data, n, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_tmp);
+  ret = at::eye(n, self.options());
+  cu_xgetri<scalar_t>(n, self_data, n, ipiv.data_ptr<int>(), &info_tmp, ret);
   info = info_tmp;
-#endif
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
-  auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
+    auto self_inv_working_copy = cloneBatchedColumnMajor(self);
     std::vector<int64_t> infos(batchCount(self), 0);
     auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
@@ -723,14 +724,17 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
+
+    return self_inv_working_copy;
   } else {
+    Tensor ret;
     int64_t info = 0;
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse<scalar_t>(self_inv_working_copy, info);
+      apply_single_inverse<scalar_t>(self.clone(at::MemoryFormat::Contiguous).transpose_(-2, -1), info, ret);
     });
     singleCheckErrors(info, "inverse_cuda");
+    return ret;
   }
-  return self_inv_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -916,14 +920,14 @@ AT_ERROR("lu: MAGMA library not found in "
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
-    // magmaLu and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
+    // cu_xgetrf and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
     // the partially-pivoted LU decomposition with / without pivots.
     // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::empty({k}, at::kInt);
-      magmaLu<scalar_t>(
+      Tensor piv_tmp = at::empty({k}, at::device(at::kCUDA).dtype(at::kInt));
+      cu_xgetrf<scalar_t>(
         m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
       pivots.copy_(piv_tmp);
     } else {

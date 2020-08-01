@@ -5,6 +5,8 @@
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
 #include <cublas_v2.h>
+#include <cusolver_common.h>
+#include <cusolverDn.h>
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
@@ -63,6 +65,7 @@ TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
+TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 
 
 } // namespace cuda

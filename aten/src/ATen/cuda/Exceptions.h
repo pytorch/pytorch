@@ -2,6 +2,7 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include <cusolver_common.h>
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
@@ -52,6 +53,14 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 "CUDA error: ",                                 \
                 cusparseGetErrorString(__err),                  \
                 " when calling `" #EXPR "`");                   \
+  } while (0)
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                              \
+  do {                                                          \
+    cusolverStatus_t __err = EXPR;                              \
+    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,               \
+                "cusolver error: ", __err,                      \
+                ", when calling `" #EXPR "`");                  \
   } while (0)
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
