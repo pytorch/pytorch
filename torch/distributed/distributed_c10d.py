@@ -1,4 +1,3 @@
-import io
 import pickle
 import torch
 import warnings
