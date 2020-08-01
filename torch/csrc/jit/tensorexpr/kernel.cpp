@@ -1519,6 +1519,9 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
+      if (!tt->scalarType().has_value()) {
+        GRAPH_DUMP("bindInput", input->node()->owningGraph());
+      }
       Buffer inBuffer(
           "t" + input->debugName(),
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),

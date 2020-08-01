@@ -13,6 +13,9 @@
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
+#include "c10/util/Exception.h"
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -273,9 +276,10 @@ Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
+  auto orig_node = getHeader(n);
   auto te_group =
       SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
-  GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group);
+  GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group, " for node ", orig_node);
   return te_group;
 }
 
@@ -301,6 +305,8 @@ c10::optional<Node*> tryMerge(
       consumer_type_info.push_back(value_types.at(consumer->output(idx)));
     } else {
       consumer_type_info.push_back(c10::nullopt);
+      GRAPH_DEBUG("@#$ Didn't find info for producer output %", producer->output(idx)->debugName());
+      TORCH_INTERNAL_ASSERT(!consumer->output(idx)->type()->cast<TensorType>());
     }
   }
   std::vector<c10::optional<TensorTypePtr>> producer_inputs_type_info;
@@ -309,6 +315,8 @@ c10::optional<Node*> tryMerge(
     if (value_types.count(producer->output(idx))) {
       producer_outputs_type_info.push_back(value_types.at(producer->output(idx)));
     } else {
+      GRAPH_DEBUG("@#$ Didn't find info for producer output %", producer->output(idx)->debugName());
+      TORCH_INTERNAL_ASSERT(!producer->output(idx)->type()->cast<TensorType>());
       producer_outputs_type_info.push_back(c10::nullopt);
     }
   }
@@ -316,9 +324,14 @@ c10::optional<Node*> tryMerge(
     if (value_types.count(producer->input(idx))) {
       producer_inputs_type_info.push_back(value_types.at(producer->input(idx)));
     } else {
+      GRAPH_DEBUG("@#$ Didn't find info for producer input %", producer->input(idx)->debugName());
+      TORCH_INTERNAL_ASSERT(!producer->input(idx)->type()->cast<TensorType>());
       producer_inputs_type_info.push_back(c10::nullopt);
     }
   }
+
+
+
   Node* te_group = getOrCreateTensorExprSubgraph(consumer);
   // Propagate profiling info to the newly create node representing the TE
   // fusion group
@@ -333,10 +346,12 @@ c10::optional<Node*> tryMerge(
             *value_types[te_group->output(idx)],
             "\n");
       } else {
+        
         GRAPH_DEBUG(
             "No shape info for TE group output %",
             te_group->output(idx)->debugName(),
             "!\n");
+        TORCH_INTERNAL_ASSERT(!te_group->output(idx)->type()->cast<TensorType>());
       }
     }
     consumer = te_group;
@@ -358,26 +373,52 @@ c10::optional<Node*> tryMerge(
     aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
+    auto offset = consumer->outputs().size();
     Node* mergedNode = SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+    
+    
+    TORCH_INTERNAL_ASSERT(producer_outputs_type_info.size() == mergedNode->outputs().size());
     if (mergedNode) {
-      for (int idx = 0; idx < mergedNode->outputs().size(); idx++) {
-        Value* v = mergedNode->output(idx);
-        if (producer_outputs_type_info[idx]) {
-          value_types[v] = *producer_outputs_type_info[idx];
-          GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
-        } else {
-          GRAPH_DEBUG(
-              "No shape info for TE group output %", v->debugName(), "!\n");
+      GRAPH_DEBUG("producer outputs size = ", producer_outputs_type_info.size(), " mergedNode = ", mergedNode->outputs().size());
+      GRAPH_DEBUG("mergedNode = ", *mergedNode);
+      // for (size_t idx = 0; idx < mergedNode->outputs().size(); idx++) {
+      //   Value* v = mergedNode->output(idx);
+      //   if (producer_outputs_type_info[idx]) {
+      //     value_types[v] = *producer_outputs_type_info[idx];
+      //     GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
+      //   } else {
+      //     GRAPH_DEBUG(
+      //         "No shape info for newly created TE group output %", v->debugName(), "!\n");
+      //   }
+      // }
+
+      size_t msize = mergedNode->outputs().size();
+      auto te_group_graph = te_group->g(attr::Subgraph);
+      
+      for (size_t idx = 0, oidx = 0; idx < msize; idx++) {
+        if (te_group_graph->outputs()[offset + oidx] == mergedNode->output(idx)) {
+          Value* v = te_group->output(offset + oidx);
+          if (producer_outputs_type_info[idx]) {
+            value_types[v] = *producer_outputs_type_info[idx];
+            GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
+          } else {
+            GRAPH_DEBUG(
+                "No shape info for newly created TE group output %", v->debugName(), "!\n");
+          }
+          oidx++;
         }
       }
-      for (int idx = 0; idx < mergedNode->inputs().size(); idx++) {
+
+      GRAPH_DEBUG("producer inputs size = ", producer_inputs_type_info.size(), " mergedNode = ", mergedNode->inputs().size());
+      TORCH_INTERNAL_ASSERT(producer_inputs_type_info.size() == mergedNode->inputs().size());
+      for (size_t idx = 0; idx < mergedNode->inputs().size(); idx++) {
         Value* v = mergedNode->input(idx);
         if (producer_inputs_type_info[idx]) {
           value_types[v] = *producer_inputs_type_info[idx];
           GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
         } else {
           GRAPH_DEBUG(
-              "No shape info for TE group input %", v->debugName(), "!\n");
+              "No shape info for newly created TE group input %", v->debugName(), "!\n");
         }
       }
     }
@@ -515,10 +556,15 @@ void insertGuards(
     // Add guard for inputs
     Value* check_result = nullptr;
     std::unordered_map<Value*, Value*> checked_values;
-    Value* cond = b->owningGraph()->insertConstant(true);
+    Value* cond = nullptr;
+    {
+      WithInsertPoint guard{*it};
+      cond = b->owningGraph()->insertConstant(true);
+    }
+    
     for (auto inp : it->inputs()) {
-      //if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
-      if (inp->isCompleteTensor()) {
+      TORCH_INTERNAL_ASSERT(value_types.count(inp) || !inp->type()->cast<TensorType>());
+      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
         auto guard = b->owningGraph()->create(prim::TypeCheck, {inp, cond}, 2);
         auto go0 = guard->output(0);
         cond = guard->output(1);
@@ -541,7 +587,11 @@ void insertGuards(
     auto versioning_if = b->owningGraph()->create(
         prim::If, {check_result}, fusion_group->outputs().size());
 
-    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
+    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {      
+      if (value_types.count(fusion_group->output(i)) == 0) {
+        GRAPH_DEBUG("@#$ Didn't find info for %", fusion_group->output(i)->debugName());
+      }
+      TORCH_INTERNAL_ASSERT(value_types.count(fusion_group->output(i)) || !fusion_group->output(i)->type()->cast<TensorType>());
       fusion_group->output(i)->replaceAllUsesWith(versioning_if->output(i));
     }
     versioning_if->insertAfter(fusion_group);
@@ -562,6 +612,29 @@ void insertGuards(
             i, checked_values.at(fusion_group->input(i)));
       }
     }
+
+    // for (size_t i = 0; i < versioning_if->outputs().size(); i++) {
+    //   if (value_types.count(true_block->outputs()[i])) {
+    //     value_types[versioning_if->output(i)] = value_types.at(true_block->outputs()[i]);
+    //     GRAPH_DEBUG(
+    //         "%",
+    //         versioning_if->output(i)->debugName(),
+    //         " -> ",
+    //         *value_types.at(versioning_if->output(i)),
+    //         "\n");
+    //   }
+    //   else {
+    //         GRAPH_DEBUG(
+    //             "No shape info for %",
+    //             versioning_if->output(i)->debugName(),
+    //             "!\n");
+    //         GRAPH_DEBUG(
+    //             "No shape info for %",
+    //             versioning_if->blocks()[0]->outputs()[i]->debugName(),
+    //             "!\n");
+    //   }
+    // }
+
     for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       true_block->registerOutput(fusion_group->output(i));
       false_block->registerOutput(subgraphOutputs[i]);
