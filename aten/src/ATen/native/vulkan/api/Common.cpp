@@ -21,7 +21,7 @@
 namespace at {
 namespace native {
 namespace vulkan {
-namespace detail {
+namespace api {
 
 VK_DELETER_DEFINE_DISPATCHABLE(Instance);
 VK_DELETER_DEFINE_DISPATCHABLE(Device);
@@ -41,7 +41,7 @@ VK_DELETER_DEFINE_NON_DISPATCHABLE(Sampler);
 VK_DELETER_DEFINE_NON_DISPATCHABLE(DescriptorPool);
 VK_DELETER_DEFINE_NON_DISPATCHABLE(CommandPool);
 
-} // namespace detail
+} // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
