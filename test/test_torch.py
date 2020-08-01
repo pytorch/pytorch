@@ -5324,6 +5324,29 @@ class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
     @onlyOnCPUAndCUDA
+    def test_out_resize_warning(self, device):
+        a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
+        b = torch.tensor((4, 5, 6), device=device, dtype=torch.float32)
+
+        unary_inputs = (a,)
+        binary_inputs = (a, b)
+        unary_ops = (torch.ceil, torch.exp)
+        binary_ops = (torch.add, torch.sub)
+        for op in (unary_ops + binary_ops):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                inputs = unary_inputs if op in unary_ops else binary_inputs
+
+                # No warnings
+                op(*inputs, out=torch.empty(3, device=device))
+                op(*inputs, out=torch.empty(0, device=device))
+                self.assertEqual(len(w), 0)
+
+                # Cases that throw warnings
+                op(*inputs, out=torch.empty(2, device=device))
+                self.assertEqual(len(w), 1)
+
+    @onlyOnCPUAndCUDA
     def test_tensor_ctor_device_inference(self, device):
         torch_device = torch.device(device)
         values = torch.tensor((1, 2, 3), device=device)
@@ -5402,7 +5425,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
-                complex_out = torch.empty(1, device=device, dtype=dtype)
+                complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
@@ -12975,7 +12998,7 @@ class TestTorchDeviceType(TestCase):
                     dst2 += [src[i]]
             self.assertEqual(dst, torch.tensor(dst2), atol=0, rtol=0)
 
-            dst3 = torch.empty_like(src, device=device)
+            dst3 = torch.empty(0, device=device, dtype=dtype)
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
@@ -17499,35 +17522,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    # NOTE: inferring the dtype from bool or integer fill values is
-    #   disabled because the behavior is changing from PyTorch 1.5,
-    #   where the default scalar type would be inferred, to PyTorch 1.7,
-    #   where bool or long, respectively, will be inferred.
-    def test_full_unsupported_integer_inference(self, device):
-        size = (2, 2)
-        # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1).dtype, torch.float)
-
-        # Explicitly setting the dtype doesn't warn
-        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
-
-        # Performs same tests with named tensor
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
-
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, True, names=('a', 'b'), dtype=torch.bool).dtype
-            self.assertEqual(dt, torch.bool)
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
-            self.assertEqual(dt, torch.long)
-
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_full_inference(self, device, dtype):
@@ -17536,17 +17530,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.bool dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, True)
-            self.assertEqual(t.dtype, dtype)
+        # Tests bool fill value inference
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, torch.bool)
 
-        # Tests integer fill value inference (currently unsupported)
-        # Note: in the future this will return a tensor of torch.long dtype
-        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
-            t = torch.full(size, 1)
-            self.assertEqual(t.dtype, dtype)
+        # Tests integer fill value inference
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, torch.long)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
@@ -17986,6 +17976,102 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         steps = 15
         x = torch.linspace(start, end, steps, dtype=dtype, device=device)
         self.assertGreater(x[1] - x[0], (end - start) / steps)
+
+    def _test_where_scalar_template(self, device, dtype, exec_fn):
+        for with_extremal in [True, False]:
+            for ndims in range(0, 4):
+                shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                for n in range(ndims + 1):
+                    for c in combinations(list(range(ndims)), n):
+                        for scalar_type in [int, float, complex]:
+                            if dtype.is_complex:
+                                condition = self._generate_input(shape, dtype, device, with_extremal).abs() > 0.5
+                            else:
+                                condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
+
+                            x = self._generate_input(shape, dtype, device, with_extremal)
+
+                            if not dtype.is_complex and scalar_type == complex:
+                                continue
+
+                            scalar_1 = scalar_type(random.random())
+
+                            exec_fn(scalar_type, dtype, condition, x, scalar_1)
+
+    # For current implementation,
+    # below are the valid `TensorDtype` and `ScalarType` combinations.
+    def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
+        if (scalar_type == int and dtype == torch.long):
+            return True
+        elif (scalar_type == float and dtype == torch.double):
+            return True
+        elif (scalar_type == complex and dtype == torch.complex128):
+            return True
+        return False
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_where_scalar_invalid_combination_raises(self, device, dtype):
+
+        def checkRaises(scalar_type, dtype, condition, x, scalar_1):
+            if not self._where_valid_scalar_tensor_combination(scalar_type, dtype):
+                # Note: This should fail once `where` supports type promotion.
+                with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
+                    torch.where(condition, x, scalar_1)
+
+        self._test_where_scalar_template(device, dtype, checkRaises)
+
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_where_scalar_valid_combination(self, device, dtype):
+
+        def checkResult(scalar_type, dtype, condition, x, scalar_1):
+            if self._where_valid_scalar_tensor_combination(scalar_type, dtype):
+                def x_like(scalar, without_dtype=False):
+                    return torch.tensor(scalar, dtype=dtype, device=device).expand_as(x)
+
+                # X = Tensor, Y = Scalar
+                scalar_out = torch.where(condition, x, scalar_1)
+                tensor_out = torch.where(condition, x, x_like(scalar_1))
+                self.assertEqual(scalar_out, tensor_out)
+
+                # X = Scalar, Y = Tensor
+                scalar_out = torch.where(condition, scalar_1, x)
+                tensor_out = torch.where(condition, x_like(scalar_1), x)
+                self.assertEqual(scalar_out, tensor_out)
+
+        self._test_where_scalar_template(device, dtype, checkResult)
+
+    # As the test fails with Runtime Error not raised on XLA
+    @onlyOnCPUAndCUDA
+    def test_where_scalar_scalar(self, device):
+        # Scalar-Scalar Version
+        height = 5
+        width = 5
+        default_dtype = torch.get_default_dtype()
+        for test_default_dtype in [torch.float, torch.double]:
+            torch.set_default_dtype(test_default_dtype)
+            for scalar_type_1 in [int, float, complex]:
+                for scalar_type_2 in [int, float, complex]:
+                    x1 = scalar_type_1(random.random() * random.randint(10, 20))
+                    x2 = scalar_type_2(random.random() * random.randint(20, 30))
+                    condition = torch.randn(height, width, device=device) > 0.5
+                    if scalar_type_1 != scalar_type_2:
+                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
+                    else:
+                        def get_dtype(scalar_type):
+                            complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
+                            type_map = {int: torch.long, float: torch.get_default_dtype(), complex: complex_dtype}
+                            return type_map[scalar_type]
+                        expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
+                        expected[condition] = x1
+                        expected[~condition] = x2
+                        result = torch.where(condition, x1, x2)
+                        self.assertEqual(expected, result)
+
+        # Reset the original dtype
+        torch.set_default_dtype(default_dtype)
 
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):

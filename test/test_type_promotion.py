@@ -379,37 +379,37 @@ class TestTypePromotion(TestCase):
         comparison_ops = [
             dict(
                 name="lt",
-                out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.lt(x, y),
                 compare_op=lambda x, y: x < y,
             ),
             dict(
                 name="le",
-                out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.le(x, y),
                 compare_op=lambda x, y: x <= y,
             ),
             dict(
                 name="gt",
-                out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.gt(x, y),
                 compare_op=lambda x, y: x > y,
             ),
             dict(
                 name="ge",
-                out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ge(x, y),
                 compare_op=lambda x, y: x >= y,
             ),
             dict(
                 name="eq",
-                out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.eq(x, y),
                 compare_op=lambda x, y: x == y,
             ),
             dict(
                 name="ne",
-                out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ne(x, y),
                 compare_op=lambda x, y: x != y,
             ),
@@ -885,7 +885,7 @@ class TestTypePromotion(TestCase):
                                 torch.complex64, torch.complex128)))
     def test_unary_op_out_casting(self, device, dtypes):
         t = torch.tensor((1), dtype=dtypes[0], device=device)
-        out = torch.empty(1, dtype=dtypes[1], device=device)
+        out = torch.empty(0, dtype=dtypes[1], device=device)
 
         ops = (torch.neg, torch.floor, torch.ceil, torch.cos, torch.erf, torch.log)
         float_only_ops = {torch.floor, torch.ceil, torch.cos, torch.erf, torch.log}
@@ -909,7 +909,7 @@ class TestTypePromotion(TestCase):
     @onlyOnCPUAndCUDA
     def test_computation_ignores_out(self, device):
         t = torch.tensor(33000, dtype=torch.float16, device=device)
-        out = torch.empty(1, dtype=torch.float64, device=device)
+        out = torch.empty(0, dtype=torch.float64, device=device)
         result = torch.add(t, t, out=out)
         self.assertEqual(result, t + t, exact_dtype=False)
         self.assertNotEqual(result, t.double() + t, exact_dtype=False)
