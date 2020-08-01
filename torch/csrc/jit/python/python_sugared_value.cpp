@@ -696,6 +696,36 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
 
+std::shared_ptr<SugaredValue> PythonExceptionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  Value* error_message = nullptr;
+  if (inputs.size() == 0) {
+    error_message = insertConstant(*caller.graph(), "", loc);
+  } else if (inputs.size() == 1) {
+    error_message = inputs.at(0).value(*caller.graph());
+  } else {
+    std::vector<Value*> message_values;
+    message_values.reserve(inputs.size() + attributes.size());
+
+    for (auto inp : inputs) {
+      message_values.push_back(inp.value(*caller.graph()));
+    }
+    for (auto kwarg_inp : attributes) {
+      message_values.push_back(kwarg_inp.value(*caller.graph()));
+    }
+    error_message =
+        caller.graph()
+            ->insertNode(caller.graph()->createTuple(message_values))
+            ->output();
+  }
+
+  return std::make_shared<ExceptionMessageValue>(error_message);
+}
+
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
   return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
@@ -857,6 +887,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+  }
+
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("_is_exception")(obj))) {
+    return std::make_shared<PythonExceptionValue>(obj);
   }
 
   if (py::isinstance<py::function>(obj)) {
