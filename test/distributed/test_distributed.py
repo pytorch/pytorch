@@ -2451,7 +2451,7 @@ class _DistTestBase(object):
         gather_objects = [
             {"key1": 3, "key2": 4, "key3": {"nested": True}},
             f,
-            "example_string",
+            "foo",
             [1, 2, True, "string", [4, 5, "nested"]],
         ]
 
@@ -2459,6 +2459,7 @@ class _DistTestBase(object):
         dist.all_gather_object(
             output_gathered, gather_objects[self.rank % len(gather_objects)]
         )
+
         for i, val in enumerate(output_gathered):
             expected = gather_objects[i % len(gather_objects)]
             self.assertEqual(val, expected)
@@ -2474,6 +2475,7 @@ class _DistTestBase(object):
                 [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
             )
 
+    @unittest.skipIf(BACKEND == 'nccl', "NCCL does not support gather")
     def test_gather_object(self):
         # Ensure stateful objects can be gathered
         f = Foo(10)
@@ -2511,6 +2513,22 @@ class _DistTestBase(object):
             dist.gather_object(
                 gather_objects[0],
                 object_gather_list=gather_objects
+                if my_rank == gather_on_rank
+                else None,
+                dst=gather_on_rank,
+            )
+
+    @unittest.skipIf(BACKEND != "nccl", "NCCL backend specific test")
+    def test_nccl_gather_object_err(self):
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        gather_on_rank = 0
+        my_rank = dist.get_rank()
+        with self.assertRaisesRegex(
+            RuntimeError, "ProcessGroupNCCL does not support gather"
+        ):
+            dist.gather_object(
+                "foo",
+                object_gather_list=output_gathered
                 if my_rank == gather_on_rank
                 else None,
                 dst=gather_on_rank,

@@ -1,4 +1,5 @@
 import io
+import pickle
 import torch
 import warnings
 from torch._six import string_classes
@@ -1158,25 +1159,24 @@ def all_gather_multigpu(output_tensor_lists,
 
 
 def _object_to_tensor(obj):
-    buffer = io.BytesIO()
-    torch.save(obj, buffer)
-    input_tensor = torch.ByteTensor(list(buffer.getvalue()))
-    local_size = torch.LongTensor([input_tensor.numel()])
-    return input_tensor, local_size
+    buffer = pickle.dumps(obj)
+    byte_storage = torch.ByteStorage.from_buffer(buffer)
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
+    return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size):
-    buf = io.BytesIO(tensor.numpy().tobytes()[:tensor_size])
-    buf.seek(0)
-    out = torch.load(buf)
+    buf = tensor.numpy().tobytes()[:tensor_size]
+    out = pickle.loads(buf)
     return out
 
 
 def all_gather_object(object_list, obj, group=group.WORLD):
     """
     Gathers picklable objects from the whole group into a list. Similar to
-    all_gather, but Python objects can be passed in. Note that the object must
-    be pickable in order to be gathered.
+    :ref:`all_gather`, but Python objects can be passed in. Note that the object
+    must be pickable in order to be gathered.
 
     Arguments:
         object_list (list[Any]): Output list. It should be correctly sized as the
@@ -1186,7 +1186,9 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 
     Returns:
         None. If the calling rank is part of this group, the output of the
-        collective will be populated into the input object_list.
+        collective will be populated into the input `object_list`. If the
+        calling rank is not part of the group, the passed in `object_list` will
+        be unmodified.
 
     .. note:: Note that this API differs slightly from the all_gather collective
         since it does not provide an async_op handle and thus will be a blocking
@@ -1196,35 +1198,32 @@ def all_gather_object(object_list, obj, group=group.WORLD):
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
+    group_backend = get_backend(group)
+    my_rank = get_rank()
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
-    gloo_group = None
-    # Avoid copying intermediate tensors back and forth to CUDA by using gloo PG
-    # for object collectives.
-    if get_backend(group) == Backend.NCCL:
-        gloo_group = new_group(
-            ranks=[i for i in range(get_world_size()) if not _rank_not_in_group(group)],
-            backend=Backend.GLOO,
-        )
-    # Allgather tensor sizes
-    all_gather(
-        object_size_list, local_size, group=group if gloo_group is None else gloo_group
-    )
-    max_object_size = max(object_size_list)
-    # allocate a tensor of max size, and copy byte tensor into it.
-    # TODO: Is there a more efficient way to do this / can we just resize inpt_tensor to max_object_size?
-    local_max_size_tensor = torch.ByteTensor(size=(max_object_size,))
-    local_max_size_tensor[: local_size.item()] = input_tensor
-    output_tensors = [
-        torch.empty(max_object_size, dtype=torch.uint8) for _ in range(group_size)
+    object_size_list = [
+        torch.LongTensor([0]).to(my_rank if is_nccl_backend else "cpu")
+        for _ in range(group_size)
     ]
-    all_gather(
-        output_tensors,
-        local_max_size_tensor,
-        group=group if gloo_group is None else gloo_group,
-    )
+    # Allgather tensor sizes
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = max(object_size_list)
+    # Resize tensor to max size across all ranks.
+    input_tensor.resize_(max_object_size)
+    coalesced_output_tensor = torch.empty(
+        max_object_size * group_size, dtype=torch.uint8
+    ).to(my_rank if is_nccl_backend else "cpu")
+    # Output tensors are nonoverlapping views of coalesced_output_tensor
+    output_tensors = [
+        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
+        for i in range(group_size)
+    ]
+    all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.ByteTensor)
@@ -1235,14 +1234,15 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     """
     Gathers picklable objects from the whole group in a single process.
-    Similar to gather, but Python objects can be passed in. Note that the object
-    must be picklable in order to be gathered.
+    Similar to :ref:`gather`, but Python objects can be passed in. Note that the
+    object must be picklable in order to be gathered.
 
     Arguments:
         obj (Any): Input object. Must be picklable.
-        object_gather_list (list[Any]): Output list. On the dst rank, it should
-        be correctly sized as the size of the group for this collective and will
-        contain the output. Must ne None on non-dst ranks. Default=None.
+        object_gather_list (list[Any]): Output list. On the ``dst`` rank, it
+        should be correctly sized as the size of the group for this collective
+        and will contain the output. Must be ``None`` on non-dst ranks. Default
+        is None.
         dst (int, optional): Destination rank (default is 0)
         group: (ProcessGroup, optional): The process group to work on.
 
@@ -1253,6 +1253,8 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     .. note:: Note that this API differs slightly from the gather collective
         since it does not provide an async_op handle and thus will be a blocking
         call.
+
+    ..note:: Note that this API is not supported when using the NCCL backend.
     """
     if _rank_not_in_group(group):
         return
@@ -1261,35 +1263,41 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     input_tensor, local_size = _object_to_tensor(obj)
+    group_backend = get_backend(group)
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+    object_size_list = [
+        torch.LongTensor([0]).to(my_rank if is_nccl_backend else "cpu")
+        for _ in range(group_size)
+    ]
     # Avoid copying intermediate tensors back and forth to CUDA by using gloo PG
     # for object collectives.
-    gloo_group = None
-    if get_backend(group) == Backend.NCCL:
-        gloo_group = new_group(
-            ranks=[i for i in range(get_world_size()) if not _rank_not_in_group(group)],
-            backend=Backend.GLOO,
-        )
     # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
     # since each rank needs to broadcast a tensor of the same (maximal) size.
-    all_gather(
-        object_size_list, local_size, group=group if gloo_group is None else gloo_group
-    )
+    all_gather(object_size_list, local_size, group=group)
     max_object_size = max(object_size_list)
-    local_max_size_tensor = torch.ByteTensor(size=(max_object_size,))
-    local_max_size_tensor[: local_size.item()] = input_tensor
-    output_tensors = [
-        torch.empty(max_object_size, dtype=torch.uint8) for _ in range(group_size)
-    ]
+    # Resize tensor to max size across all ranks.
+    input_tensor.resize_(max_object_size)
+    # Avoid populating output tensors if the result won't be gathered on this rank.
+    if my_rank == dst:
+        coalesced_output_tensor = torch.empty(
+            max_object_size * group_size, dtype=torch.uint8
+        ).to(my_rank if is_nccl_backend else "cpu")
+        # Output tensors are nonoverlapping views of coalesced_output_tensor
+        output_tensors = [
+            coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
+            for i in range(group_size)
+        ]
     # All ranks call gather with equal-sized tensors.
     gather(
-        local_max_size_tensor,
+        input_tensor,
         gather_list=output_tensors if my_rank == dst else None,
         dst=dst,
-        group=group if gloo_group is None else gloo_group,
+        group=group,
     )
     if my_rank != dst:
         return
