@@ -702,6 +702,7 @@ RegisterOperators reg2({
         CREATE_SPECIALIZED_LIST_OPS("float", double)
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
@@ -761,6 +762,10 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::eq.str_list(str[] a, str[] b) -> bool",
+        listEq<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -771,6 +776,10 @@ RegisterOperators reg2({
     Operator(
         "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne.str_list(str[] a, str[] b) -> bool",
+        listNe<std::string>,
         aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
