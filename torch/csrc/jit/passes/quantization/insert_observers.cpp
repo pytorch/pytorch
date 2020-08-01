@@ -124,11 +124,24 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      if (type->getAttribute(i)->is_module()) {
+      std::string attr_name = type->getAttributeName(i);
+      TypePtr attr_type = type->getAttribute(i);
+      if (attr_type->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
-        r.register_module(type->getAttributeName(i), cloned);
+
+        // NOTE: why do we need to manually setattr on object instead of using
+        // register_module here? because the attr can be a module interface
+        // type and hold a Module object still. register_module will not let us
+        // correctly set up the type for this attr, so we had to do this
+        // manually. In the case it's an interface type, the type will be shared
+        // by the new cloned instance in the same compilation unit bc it only
+        // contains a list of functionSchema
+        r.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+        r._ivalue()->setAttr(attr_name, cloned._ivalue());
       } else {
         // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
