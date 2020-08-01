@@ -17094,7 +17094,10 @@ fn(*args)
                 p = subprocess.Popen(
                     [sys.executable, '-c', script],
                     stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE)
+                    stdout=subprocess.PIPE,
+                    # On Windows, opening the subprocess with the default CWD makes `import torch`
+                    # fail, so just set CWD to this script's directory
+                    cwd=os.path.dirname(os.path.realpath(__file__)))
                 processes.append((p, fn_name, config, should_throw_error))
 
         def test_case_info():
@@ -17107,7 +17110,8 @@ fn(*args)
                 error_message = error.decode("utf-8")
                 self.assertTrue(
                     should_throw_error,
-                    msg="did not expect error to be raised for case '%s'" % test_case_info())
+                    msg="did not expect this error to be raised for case '%s':\n%s" % (
+                        test_case_info(), error_message))
                 expected_error_message = "RuntimeError: Deterministic behavior was enabled with either"
                 self.assertTrue(
                     expected_error_message in error_message,
