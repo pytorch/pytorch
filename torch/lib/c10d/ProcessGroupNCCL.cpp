@@ -1038,13 +1038,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   return work;
 }
 
-#ifdef ENABLE_NCCL_P2P_SUPPORT
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
+#ifdef ENABLE_NCCL_P2P_SUPPORT
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
@@ -1099,18 +1099,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               stream.stream());
         });
   }
-}
 #else
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
-    at::Tensor& outputTensor,
-    at::Tensor& inputTensor,
-    std::vector<int64_t>& outputSplitSizes,
-    std::vector<int64_t>& inputSplitSizes,
-    const AllToAllOptions& /* unused */) {
   throw std::runtime_error(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
-}
 #endif
+}
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
