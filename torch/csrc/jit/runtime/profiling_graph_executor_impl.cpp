@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include "jit/passes/inliner.h"
 
 C10_DECLARE_bool();
 
@@ -81,21 +82,6 @@ static bool needsGradientInProfilingMode(Block* b) {
   }
   return false;
 }
-void removeProfilingNodes(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile) {
-      if (it->outputs().size()) {
-        it->input()->setType(it->output()->type());
-        it->output()->replaceAllUsesWith(it->input());
-      }
-      it.destroyCurrent();
-    } else {
-      for (Block* ib : it->blocks()) {
-        removeProfilingNodes(ib);
-      }
-    }
-  }
-}
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
@@ -108,7 +94,6 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   GRAPH_DUMP("Before running optimizations:", copy);
   runOptimization(copy, true);
   GRAPH_DUMP("Before removing profiling nodes:", copy);
-  //removeProfilingNodes(copy->block());
   GRAPH_DUMP("After fusion:", copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
@@ -146,6 +131,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& copy) {
+  Inline(*copy);
   ClearProfilingInformation(copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
@@ -211,6 +197,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   auto copy = pr_->graph()->copy();
+  GRAPH_DUMP("before runProfilingOptimizations: ", copy);
   runProfilingOptimizations(copy);
   // cache
   optimized_plan_ =
