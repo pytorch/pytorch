@@ -3099,7 +3099,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            return process_group.allreduce(bucket.get_tensors()).get_future()
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            return process_group.allreduce(tensors).get_future()
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
@@ -3118,7 +3119,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_then_mult_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            fut = process_group.allreduce(bucket.get_tensors()).get_future()
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
                 # Multiply result by 10.

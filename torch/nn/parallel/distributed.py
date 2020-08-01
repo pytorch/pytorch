@@ -640,6 +640,10 @@ class DistributedDataParallel(Module):
                              c10d.ProcessGroupNCCL.work.
 
         .. warning ::
+            GradBucket bucket's tensors will not be predivided by world_size. User is
+            responsible to divide by the world_size in case of operations like allreduce.
+
+        .. warning ::
             DDP communication hook can only be registered once and should be registered
             before calling backward.
 
@@ -664,7 +668,8 @@ class DistributedDataParallel(Module):
             Below is an example of a simple allreduce hook.
 
             >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch.futures.Future
-            >>>     work = process_group.allreduce(bucket.get_tensors())
+            >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+            >>>     work = process_group.allreduce(tensors)
             >>>     return work.get_future()
 
             >>> ddp._register_comm_hook(state = None, hook = allreduce)
@@ -674,7 +679,8 @@ class DistributedDataParallel(Module):
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch.futures.Future
-            >>>     encoded_tensors = encode(bucket.get_tensors()) # encode gradients
+            >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+            >>>     encoded_tensors = encode(tensors) # encode gradients
             >>>     fut = process_group.allreduce(encoded_tensors).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
