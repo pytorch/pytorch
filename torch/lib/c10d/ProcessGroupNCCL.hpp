@@ -166,7 +166,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // FutureNCCL's value is NCCL collective's outputs and callbacks were
     // invoked inline by addCallback(), so markCompleted is not needed.
-    void markCompleted(at::IValue value) override {
+    void markCompleted(at::IValue /* unused */) override {
       C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
     }
 

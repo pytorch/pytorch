@@ -663,7 +663,7 @@ class DistributedDataParallel(Module):
         Example::
             Below is an example of a simple allreduce hook.
 
-            >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
             >>>     work = process_group.allreduce(bucket.get_tensors())
             >>>     return work.get_future()
 
@@ -673,7 +673,7 @@ class DistributedDataParallel(Module):
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch._C.Future
             >>>     encoded_tensors = encode(bucket.get_tensors()) # encode gradients
             >>>     fut = process_group.allreduce(encoded_tensors).get_future()
             >>>     # Define the then callback to decode.
