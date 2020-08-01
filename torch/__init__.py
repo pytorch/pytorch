@@ -524,3 +524,6 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+
+from ._overrides import is_method_property

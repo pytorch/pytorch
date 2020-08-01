@@ -11,6 +11,7 @@ from torch._overrides import (
     has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
+    is_method_property
 )
 
 Tensor = torch.Tensor
@@ -284,7 +285,6 @@ def sub_diagonal_foo(a, b, c=None):
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
-HANDLED_FUNCTIONS_NAMESPACES = {}
 HANDLED_FUNCTIONS_WRAPPERS = {}
 
 def triggered_wrapper(f):
@@ -310,7 +310,6 @@ def generate_tensor_like_torch_implementations():
     testing_overrides = get_testing_overrides()
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
-            HANDLED_FUNCTIONS_NAMESPACES[func] = namespace
             if func not in testing_overrides:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
@@ -326,7 +325,7 @@ def generate_tensor_like_torch_implementations():
         # torch.Tensor method
         wrapped = triggered_wrapper(override)
         HANDLED_FUNCTIONS_WRAPPERS[func] = wrapped
-        if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
+        if is_method_property(func):
             implements_sub(func)(wrapped)
         else:
             implements_tensor_like(func)(wrapped)
@@ -532,7 +531,7 @@ def generate_tensor_like_override_tests(cls):
 
     def test_generator(func, override):
         # If func corresponds to a torch.Tensor method or property.
-        if HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor or func.__name__ == "__get__":
+        if is_method_property(func):
             # Generate an instance by using SubTensor,
             def instance_gen():
                 return SubTensor([5])
@@ -549,7 +548,7 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if arg['name'] == 'self' and HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor:
+                    if arg['name'] == 'self' and is_method_property(func):
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
@@ -621,7 +620,7 @@ def generate_tensor_like_override_tests(cls):
 
             # Unfortunately I couldn't find a way to unify these two cases
             # and there is no way for general descriptors.
-        elif HANDLED_FUNCTIONS_NAMESPACES[func] is torch.Tensor:
+        elif is_method_property(func):
             module = "Tensor"
         else:
             module = func.__module__
