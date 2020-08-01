@@ -105,6 +105,9 @@ def LSTMCellF(input, hx, cx, *params):
 
 
 def doAutodiffCheck(testname):
+    # TODO: setting false on test itself is not working
+    if "test_t_" in testname or testname == "test_t":
+        return False
 
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
