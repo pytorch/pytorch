@@ -184,7 +184,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Add a callback to FutureNCCL. FutureNCCL invokes the callback inline.
     // Callbacks return a Future (not FutureNCCL).
     void addCallback(std::function<void(void)> callback) override {
-      // Run callback inline after synchronizeStreams.
       callback();
     }
 

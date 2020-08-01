@@ -87,14 +87,6 @@ const std::vector<at::Tensor>& GradBucket::getTensors() {
   return tensors_;
 }
 
-const at::Tensor& GradBucket::getTensor() {
-  TORCH_CHECK(
-      tensors_.size() == 1,
-      "GradBucket::getTensor can only be used when tensors "
-      "contain bucket contents tensor for just one replica.")
-  return tensors_[0];
-}
-
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 

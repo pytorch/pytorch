@@ -3042,7 +3042,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
-    def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+    def _simple_hook(self, state: object, bucket: dist._GradBucket) -> torch.futures.Future:
         fut = torch.futures.Future()
         fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
 
@@ -3098,8 +3098,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            return process_group.allreduce(bucket.get_tensor()).get_future()
+        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+            return process_group.allreduce(bucket.get_tensors()).get_future()
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
@@ -3117,8 +3117,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_then_mult_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future:
-            fut = process_group.allreduce(bucket.get_tensor()).get_future()
+        def allreduce_then_mult_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+            fut = process_group.allreduce(bucket.get_tensors()).get_future()
 
             def mult(fut):
                 # Multiply result by 10.
@@ -3155,7 +3155,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
             model._register_comm_hook(state=None, hook=1)
 
-        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
+        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist._GradBucket.'):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
 
@@ -3177,13 +3177,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
-            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
+            def comm_hook(state: object, bucket: dist._GradBucket) -> int:
                 return torch.futures.Future()
 
             model._register_comm_hook(state=None, hook=comm_hook)
 
         with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
-            def comm_hook(state: object, bucket: dist.GradBucket):
+            def comm_hook(state: object, bucket: dist._GradBucket):
                 return 1
 
             model._register_comm_hook(state=None, hook=comm_hook)

@@ -137,15 +137,11 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("state"),
       py::arg("comm_hook"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_tensor",
-          &::c10d::GradBucket::getTensor,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
@@ -715,9 +711,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
           R"(
             ``get_future`` retrieves a future associated with the completion of
             ``c10d.ProcessGroup.work``. As an example, a future object can be
-            retrieved by ``fut = dist.all_reduce(tensor).get_future()``.
+            retrieved by ``fut = process_group.allreduce(tensors).get_future()``.
 
-            In the example above, if ``dist.all_reduce`` work was done on GPU,
+            In the example above, if ``allreduce`` work was done on GPU,
             ``fut.wait()`` would return after synchronizing the correct GPU streams
             to ensure we can have asynchronous CUDA execution and it does not wait for
             the entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
