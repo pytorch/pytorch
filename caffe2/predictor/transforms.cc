@@ -1,5 +1,6 @@
 #include "caffe2/caffe2/fb/predictor/Transforms.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <unordered_set>
 
@@ -24,6 +25,26 @@ bool HasOutput(const string& blob, const OperatorDef& op) {
   return false;
 }
 
+void RewriteSubnetsForIfOp(
+    const string& from,
+    const string& to,
+    OperatorDef* op) {
+  ArgumentHelper helper(*op);
+  Argument *then_arg = nullptr, *else_arg = nullptr;
+
+  std::map<std::string, std::string> oldname_to_newname;
+  oldname_to_newname[from] = to;
+
+  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+    then_arg = GetMutableArgument("then_net", false, op);
+    onnx::rewriteSubnet(then_arg, oldname_to_newname);
+  }
+  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+    else_arg = GetMutableArgument("else_net", false, op);
+    onnx::rewriteSubnet(else_arg, oldname_to_newname);
+  }
+}
+
 void RenameInputs(
     const string& from,
     const string& to,
@@ -38,6 +59,10 @@ void RenameInputs(
       children[from].erase(op_idx);
       children[to].insert(op_idx);
     }
+  }
+  // Rename inputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
   }
 }
 
@@ -55,6 +80,10 @@ void RenameOutputs(
       parents[from].erase(op_idx);
       parents[to].insert(op_idx);
     }
+  }
+  // Rename outputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
   }
 }
 
