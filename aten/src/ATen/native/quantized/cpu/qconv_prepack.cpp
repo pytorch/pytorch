@@ -23,7 +23,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose) {
-  TORCH_CHECK(!transpose, "FBGEMM doesn't supprort conv_transpose yet.")
+  TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -47,9 +47,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
       " elements for ",
       kSpatialDim,
       "D convolution.");
-  const int output_channels_idx = transpose ? 1 : 0;
-  const int output_channels = weight.size(output_channels_idx);
-  const int input_channels_per_group = weight.size(1);
+  const int input_channels = transpose ? weight.size(0)
+                                       : weight.size(1) * groups;
+  const int output_channels = transpose ? weight.size(1) * groups
+                                        : weight.size(0);
   const int kernel_d = kSpatialDim == 2 ? 1 : weight.size(2);
   const int kernel_h = weight.size(kSpatialDim);
   const int kernel_w = weight.size(kSpatialDim + 1);
@@ -61,7 +62,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const fbgemm::conv_param_t<kSpatialDim> conv_p =
       at::native::fbgemm_utils::MakeFbgemmConvParam<kSpatialDim>(
           1, // dummy batch size
-          input_channels_per_group * groups, // input channels
+          input_channels,
           output_channels,
           kSpatialDim == 2 ? std::vector<int>{28, 28} // dummy image size
                            : std::vector<int>{28, 28, 28},
@@ -101,6 +102,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
   // include the sum of columns as well as the scalar term weight_zero_point *
   // KDim
+  const int input_channels_per_group = input_channels / groups;
   const int output_channels_per_group = output_channels / groups;
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
@@ -234,7 +236,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   std::vector<uint8_t> w_zero_points;
   at::Tensor  w_scales;
   std::tie(w_zero_points, w_scales) =
-      make_zero_points_and_scales_tensor(weight_contig, transpose);
+      make_zero_points_and_scales_tensor(weight_contig, transpose, groups);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
   // during the first invocation of operator run. Refer to qconv.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
@@ -298,6 +300,7 @@ class QConvPackWeightInt8 final {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);
