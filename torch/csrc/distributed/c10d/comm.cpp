@@ -103,7 +103,7 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
     auto errMsg = c10::str(
         e.what(),
         ". DDP communication hook's callback must return a "
-        "torch.futures.Future object, but got ",
+        "torch.futures.Future or torch._C.Future object, but got ",
         type.attr("__module__").cast<std::string>(),
         ".",
         type.attr("__qualname__").cast<std::string>());

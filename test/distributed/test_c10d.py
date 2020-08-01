@@ -3155,7 +3155,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
             model._register_comm_hook(state=None, hook=1)
 
-        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist._GradBucket.'):
+        with self.assertRaisesRegex(ValueError, 'bucket annotation should be dist._GradBucket.'):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
 
@@ -3176,13 +3176,17 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             process_group=process_group
         )
 
-        with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
+        with self.assertRaisesRegex(
+                ValueError,
+                'Communication hook: return annotation should be torch.futures.Future or torch._C.Future.'):
             def comm_hook(state: object, bucket: dist._GradBucket) -> int:
                 return torch.futures.Future()
 
             model._register_comm_hook(state=None, hook=comm_hook)
 
-        with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'callback must return a torch.futures.Future or torch._C.Future object, but got'):
             def comm_hook(state: object, bucket: dist._GradBucket):
                 return 1
 
