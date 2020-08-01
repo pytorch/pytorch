@@ -1,5 +1,6 @@
 import unittest
 
+import sys
 import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
@@ -18,7 +19,6 @@ load_tests = load_tests
 
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
-    import sys
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
