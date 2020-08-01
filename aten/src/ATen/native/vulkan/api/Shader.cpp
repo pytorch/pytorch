@@ -14,16 +14,16 @@ Shader::Factory::Factory(const VkDevice device)
 }
 
 typename Shader::Factory::Handle Shader::Factory::operator()(const Descriptor& descriptor) const {
-  VkShaderModuleCreateInfo create_info{};
-
-  create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  create_info.pCode = descriptor.code;
-  create_info.codeSize = descriptor.count * sizeof(uint32_t);
+  const VkShaderModuleCreateInfo shader_module_create_info{
+    VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+    nullptr,
+    0u,
+    descriptor.count * sizeof(uint32_t),
+    descriptor.code,
+  };
 
   VkShaderModule shader_module{};
-
-  VK_CHECK(vkCreateShaderModule(
-      device_, &create_info, nullptr, &shader_module));
+  VK_CHECK(vkCreateShaderModule(device_, &shader_module_create_info, nullptr, &shader_module));
 
   return Handle{
     shader_module,
