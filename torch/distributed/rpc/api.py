@@ -86,18 +86,18 @@ def _require_initialized(func):
 class AllGatherStates(object):
     def __init__(self):
         # Each `gathered_objects` is an empty dict at beginning.
-        # It's only used by the leader worker. The leader worker is elected as
-        # the first worker in a sorted worker name list.
-        # Whenever there is a worker entering _all_gather(), it runs
-        # `_gather_to_leader` on the leader to add its own name and data obj to
-        # this dict.
-        # The leader also adds itself's name to the dict on calling
-        # `_all_gather()`.
-        self.gathered_objects = {}
+        # The leader worker is elected as the first worker in a sorted worker
+        # name list. Whenever there is a worker entering `_all_gather()`, it
+        # runs `_gather_to_leader()` on the leader to add its own name and
+        # data obj to this dict. The leader also adds itself's name to the dict
+        # on calling `_all_gather()`.
         # Once `set(gathered_objects.keys()) == _ALL_WORKER_NAMES`, the leader
-        # will broadcast the gathered dict to all follower workers and unblock
-        # them.
-        self.results_future = torch.futures.Future()
+        # will broadcast the gathered dict to all follower workers and set their
+        # `gathered_objects` field and the `proceed_signal` field.
+        self.gathered_objects = {}
+        # All workers wait on this signal until it receives all gathered
+        # objects.
+        self.proceed_signal = threading.Event()
 
 
 # States used by `def _all_gather()`.
@@ -121,18 +121,18 @@ def _gather_to_leader(sequence_id, worker_name, obj):
         )
         states.gathered_objects[worker_name] = obj
         if _ALL_WORKER_NAMES == set(states.gathered_objects.keys()):
-            states.results_future.set_result(states.gathered_objects)
+            states.proceed_signal.set()
 
 
-def _broadcast_to_followers(sequence_id, objs_map):
+def _broadcast_to_followers(sequence_id, objects_map):
     with _all_gather_dict_lock:
-        results_future = _all_gather_sequence_id_to_states[
-            sequence_id
-        ].results_future
+        states = _all_gather_sequence_id_to_states[sequence_id]
+
     assert (
-        not results_future.done()
+        not states.proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
-    results_future.set_result(objs_map)
+    states.gathered_objects = objects_map
+    states.proceed_signal.set()
 
 
 @_require_initialized
@@ -175,7 +175,7 @@ def _all_gather(obj):
         states = _all_gather_sequence_id_to_states[
             sequence_id
         ]
-    states.results_future.wait()
+    states.proceed_signal.wait()
 
     # Phase 2: Leader broadcast gathered results to all followers
     # Leader's signal is the first to be unblocked, after receiving all
@@ -199,7 +199,7 @@ def _all_gather(obj):
                         worker_name=follower_name, timeout=timeout
                     )
                 )
-    return states.results_future.wait()
+    return states.gathered_objects
 
 
 @_require_initialized
