@@ -5,10 +5,16 @@ import torch.nn.quantized as nnq
 
 import torch.quantization
 import torch.quantization._numeric_suite as ns
+from torch.quantization import QuantStub, DeQuantStub
+from torch.quantization import (
+    default_eval_fn,
+    default_qconfig,
+    quantize,
+)
 
 import copy
 
-_supported_modules = {nn.Linear, nnq.Linear, nn.Conv2d, nnq.Conv2d}
+_supported_modules = {nn.Linear, nn.Conv2d}
 
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
@@ -24,26 +30,35 @@ def get_module(model, name):
 def get_parent_module(model, name):
     ''' Given name of submodule, this function grabs the parent of the submodule, from given model
     '''
-    curr = model
-    name = name.split('.')[:-1]
-    for subname in name:
-        if subname == '':
-            return curr
-        curr = curr._modules[subname]
-    return curr
+    parent_name = name.rsplit('.', 1)[0]
+    if parent_name == name:
+        parent_name = ''
+    return get_module(model, parent_name)
 
 def get_param(module, attr):
     ''' Sometimes the weights/bias attribute gives you the raw tensor, but sometimes
     gives a function that will give you the raw tensor, this function takes care of that logic
     '''
     param = getattr(module, attr, None)
-    if isinstance(param, nn.Parameter):
+    if isinstance(param, nn.Parameter) or isinstance(param, torch.Tensor):
         return param
-    elif param is not None:
+    elif callable(param):
         return param()
+    return None
 
 
 class MeanLogger(ns.Logger):
+    ''' Takes rolling mean of data passed through
+
+    Attributes:
+        stats (Dict): the rolling mean of data passed through :math:`\frac{\text{count}}{\text{count}}`
+        count (int): the number of batches passed through
+        sum (int): the summed total of all the batches passed through
+
+    Note:
+        stats is a Dict as opposed to an int because of how the data from the logger is formatted
+        into a dictionary in the get_logger_entries() function
+    '''
     def __init__(self):
         super(MeanLogger, self).__init__()
         self.stats["tensor_val"] = None
@@ -61,10 +76,48 @@ class MeanLogger(ns.Logger):
             self.sum = x
             self.count = 1
         else:
-            torch.Tensor.add_(self.sum, x)
+            self.sum += x
             self.count += 1
             self.stats["tensor_val"] = self.sum / self.count
         return y
+
+class MeanShadowLogger(ns.Logger):
+    r"""Class used in Shadow module to record the outputs of the original and
+    shadow modules.
+    """
+
+    def __init__(self):
+        super(MeanShadowLogger, self).__init__()
+        self.stats["float"] = None
+        self.stats["quantized"] = None
+        self.count = 0
+        self.float_sum = None
+        self.quant_sum = None
+
+    def forward(self, x, y):
+        if len(x) > 1:
+            x = x[0]
+        if len(y) > 1:
+            y = y[0]
+        if x.is_quantized:
+            x = x.dequantize()
+        if self.stats["quantized"] is None:
+            self.stats["quantized"] = x
+            self.count = 1
+            self.quant_sum = x
+        else:
+            # self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
+            self.quant_sum += x
+            self.stats["quantized"] = self.quant_sum / self.count
+
+        if self.stats["float"] is None:
+            self.stats["float"] = y
+            self.count = 1
+            self.float_sum = y
+        else:
+            # self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
+            self.float_sum += y
+            self.stats["quantized"] = self.float_sum / self.count
 
 class ShadowModule(nn.Module):
     def __init__(self, float_module=None, quantized_module=None):
@@ -109,34 +162,6 @@ def add_shadow(float_model, quantized_model, white_list=_supported_modules):
 
     for key, value in reassign.items():
         quantized_model._modules[key] = value
-
-def remove_hooks(model, white_list=_supported_modules):
-    ''' Removes all the hooks from the whitelisted submodules
-    '''
-    for name, module in model.named_modules():
-        if type(module) in white_list:
-            if hasattr(module, 'activation_post_process'):
-                for key in module._forward_hooks:
-                    del module._forward_hooks[key]
-                del module.activation_post_process
-            if hasattr(module, 'activation_pre_process'):
-                for key in module._forward_pre_hooks:
-                    del module._forward_pre_hooks[key]
-                del module.activation_pre_process
-
-def remove_shadow(model):
-    ''' Goes through the submodules of a quantized model and replaces every
-    shadowModule with just the quantized submodule it contains
-    '''
-    reassign = {}
-    # logging occurences of shadowModules
-    for name, module in model.named_modules():
-        if isinstance(module, ShadowModule):
-            reassign[name] = module.quantized_module
-    # removing occurences of shadowModules
-    for name, module in reassign.items():
-        name_split = name.split('.')
-        get_parent_module(model, name)._modules[name_split[-1]] = reassign[name]
 
 def sequential_bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
     ''' Applies bias correction on the whitelisted submodules of the quantized model
@@ -290,3 +315,118 @@ def get_inputs_n_outputs(float_module, q_module):
         output_logger[key]['float'] = float_dict[key]['activation_post_process']
         output_logger[key]['quantized'] = quantized_dict[key]['activation_post_process']
     return output_logger, input_logger
+
+
+def bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
+    # marking what modules to do bias correction on
+    biased_modules = {}
+    for name, submodule in float_model.named_modules():
+        if type(submodule) in white_list:
+            biased_modules[name] = submodule
+
+    # TODO: figure out way to ensure the order of biased_modules is the same
+    # as their order of execution, and/or a way to reorder if not
+
+    #
+    for biased_module in biased_modules:
+        float_submodule = get_module(float_model, biased_module )
+        quantized_submodule = get_module(quantized_model, biased_module)
+        bias = get_param(quantized_submodule, 'bias')
+        # print(quantized_submodule.__dict__.keys())
+        if bias is not None:
+            # Collecting data
+            ns.prepare_model_with_stubs(float_model, quantized_model, white_list, MeanShadowLogger)
+            for data in img_data:
+                quantized_model(data[0])
+            ob_dict = ns.get_logger_dict(quantized_model)
+            float_data = ob_dict[biased_module + '.stats']['float']
+            quant_data = ob_dict[biased_module + '.stats']['quantized']
+
+
+
+            # calculuating bias deviation
+            epsilon_x = float_data - quant_data
+            dims = list(range(epsilon_x.dim()))
+            dims.remove(0)
+            expected_epsilon_x = torch.mean(epsilon_x, dims)
+
+            # calculating new value for bias parameter
+
+            updated_bias = bias.data - expected_epsilon_x
+            updated_bias = updated_bias.reshape(bias.data.size())
+
+            # setting new bias
+            if isinstance(quantized_submodule.bias, torch.nn.parameter.Parameter):
+                quantized_submodule.bias.data = updated_bias
+            else:
+                quantized_submodule.bias().data = updated_bias
+            print("change-oo happened")
+
+            # need to remove shadows down here
+            for name, submodule in quantized_model.named_modules():
+                if isinstance(submodule, ns.Shadow):
+                    parent = get_parent_module(quantized_model, name)
+                    child_name = name.rsplit('.', 1)[-1]
+                    parent._modules[child_name] = submodule.orig_module
+
+        # print('finished ' + biased_module)
+    # print(quantized_model)
+
+
+class LinearChain(nn.Module):
+    def __init__(self):
+        super(LinearChain, self).__init__()
+        self.linear1 = nn.Linear(3, 4)
+        self.linear2 = nn.Linear(4, 5)
+        self.linear3 = nn.Linear(5, 6)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.linear1(x)
+        x = self.linear2(x)
+        x = self.linear3(x)
+        x = self.dequant(x)
+        return x
+
+class ConvChain(nn.Module):
+    def __init__(self):
+        super(ConvChain, self).__init__()
+        self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
+        self.conv2d2 = nn.Conv2d(4, 5, 5, 5)
+        self.conv2d3 = nn.Conv2d(5, 6, 5, 5)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv2d1(x)
+        x = self.conv2d2(x)
+        x = self.conv2d3(x)
+        x = self.dequant(x)
+        return x
+
+def load_linear_quant():
+    float_model = LinearChain()
+    img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                    for _ in range(5)]
+    float_model = copy.deepcopy(float_model)
+    float_model.qconfig = default_qconfig
+    quantized_model = torch.quantization.quantize(float_model, default_eval_fn, img_data, inplace=False)
+
+    return float_model, quantized_model, img_data
+
+def load_conv_quant():
+    float_model = ConvChain()
+    img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+                    for _ in range(5)]
+    float_model = copy.deepcopy(float_model)
+    float_model.qconfig = default_qconfig
+    quantized_model = torch.quantization.quantize(float_model, default_eval_fn, img_data, inplace=False)
+
+    return float_model, quantized_model, img_data
+
+if __name__ == "__main__":
+    # main()
+    bias_correction(*load_linear_quant())
