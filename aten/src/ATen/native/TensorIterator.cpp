@@ -221,7 +221,11 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     // Checks all tensors are on the same device, if requested
     if (config.check_all_same_device_) {
       // Handles CPU scalars on CUDA kernels that support them
-      if (common_device.is_cuda() && op.tensor.dim() == 0 && op.tensor.device().is_cpu()) {
+      if (common_device.is_cuda() &&
+          config.allow_cpu_scalars_ &&
+          !op.is_output &&
+          op.tensor.dim() == 0 &&
+          op.tensor.device().is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_cuda < max_cpu_scalars_on_cuda,
                     "Trying to pass too many CPU scalars to CUDA kernel!");
         ++current_cpu_scalars_on_cuda;

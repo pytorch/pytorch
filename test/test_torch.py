@@ -5323,6 +5323,16 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
+    #   throws the correct error message
+    @onlyCUDA
+    def test_cross_device_inplace_error_msg(self, device):
+        a = torch.tensor(2.)
+        b = torch.tensor(2., device=device)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Expected all tensors to be on the same device"):
+            a += b
+
     @onlyOnCPUAndCUDA
     def test_out_resize_warning(self, device):
         a = torch.tensor((1, 2, 3), device=device, dtype=torch.float32)
