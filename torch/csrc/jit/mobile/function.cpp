@@ -1,11 +1,9 @@
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/custom_class_detail.h>
-#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -45,21 +43,20 @@ bool Function::append_operator(
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
-      if (model_version == 0x3L &&
-          model_version < caffe2::serialize::kProducedBytecodeVersion &&
-          opname == c10::OperatorName("_convolution", "")) {
-        fn = [op](Stack& stack) {
-          stack.push_back(true);
-          op->callBoxed(&stack);
-        };
-      } else {
-        fn = [op](Stack& stack) { op->callBoxed(&stack); };
-      }
+      fn = [op](Stack& stack) { op->callBoxed(&stack); };
     } else {
       return false;
     }
   }
 
+  if (model_version == 0x3L &&
+      model_version < caffe2::serialize::kProducedBytecodeVersion &&
+      opname == c10::OperatorName("_convolution", "")) {
+    fn = [fn](Stack& stack) {
+      stack.push_back(true);
+      fn(stack);
+    };
+  }
 
   code_->operators_.emplace_back(fn);
   return true;
