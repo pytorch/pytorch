@@ -18,30 +18,6 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   return sizes;
 }
 
-template <typename T>
-inline std::vector<ExprHandle> computeIndicesToBroadcast(
-    const std::vector<T>& outputAxes,
-    const std::vector<ExprHandle>& inputSizes) {
-  if (outputAxes.size() < inputSizes.size()) {
-    throw malformed_input("Cannot broadcast to a lower rank tensor");
-  }
-  std::vector<ExprHandle> bcast;
-  auto axisIt = outputAxes.rbegin();
-  auto sizeIt = inputSizes.rbegin();
-  while (sizeIt != inputSizes.rend()) {
-    auto const& size = sizeIt->AsNode<IntImm>();
-    if (size && size->value() == 1) {
-      bcast.push_back(0);
-    } else {
-      bcast.push_back(*axisIt);
-    }
-    ++axisIt;
-    ++sizeIt;
-  }
-  std::reverse(bcast.begin(), bcast.end());
-  return bcast;
-}
-
 class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
@@ -79,34 +55,13 @@ class TORCH_API TensorExprKernel {
       std::vector<std::vector<ExprHandle>> shapes);
 
   ExprHandle constant(const torch::jit::Value* v);
-
-  template <typename T, typename T1>
-  ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
-    return t->call(computeIndicesToBroadcast(
-        axes, ExprVectorToExprHandleVector(t->buf()->dims())));
-  }
-
-  template <typename T, typename T1>
+  ExprHandle broadcast(Tensor* t, const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
-      const T& t,
+      Tensor* t,
       size_t chunkIdx,
       size_t dim,
       size_t chunks,
-      const std::vector<T1>& axes) {
-    auto sizes = bufferSizes(t);
-    size_t step = sizes[dim] / chunks;
-
-    std::vector<ExprHandle> indices;
-    for (size_t i = 0; i < axes.size(); ++i) {
-      if (i == dim) {
-        indices.push_back(axes[i] + IntImm::make(chunkIdx * step));
-      } else {
-        indices.push_back(axes[i]);
-      }
-    }
-
-    return t->call(indices);
-  }
+      const std::vector<ExprHandle>& axes);
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
@@ -114,16 +69,9 @@ class TORCH_API TensorExprKernel {
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
-  template <typename T>
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
-      const std::vector<T>& axes) {
-    auto ti = tensors_.find(v->unique());
-    if (ti != tensors_.end()) {
-      return broadcast(ti->second, axes);
-    }
-    return constant(v);
-  }
+      const std::vector<ExprHandle>& axes);
 
   Tensor* computeOneOperand(
       const std::string& name,
