@@ -5151,6 +5151,15 @@
     CPU: fmod
     CUDA: fmod_cuda
 
+- func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nextafter(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: remainder_out
