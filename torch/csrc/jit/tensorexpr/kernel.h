@@ -66,6 +66,18 @@ class TORCH_API TensorExprKernel {
 
   void runKernel(Stack& stack);
 
+  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
+  std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
+  std::vector<ExprHandle> inferSizesForValue(const torch::jit::Value* v);
+  std::vector<ExprHandle> sizesFromVaryingShape(
+      const c10::VaryingShape<int64_t>& shape);
+
+  std::vector<ExprHandle> broadcastShapes(
+      const std::vector<ExprHandle>& a,
+      const std::vector<ExprHandle>& b);
+  std::vector<ExprHandle> broadcastShapes(
+      std::vector<std::vector<ExprHandle>> shapes);
+
   ExprHandle constant(const torch::jit::Value* v);
 
   template <typename T, typename T1>
@@ -219,6 +231,8 @@ class TORCH_API TensorExprKernel {
   bool fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
+  std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
+      known_sizes_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
