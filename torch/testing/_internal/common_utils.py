@@ -426,41 +426,6 @@ def wrapDeterministicFlagAPITest(fn):
             restore()
     return wrapper
 
-# Check if a given function either does or does not throw an error indicating that
-# the CuBLAS workspace config is set nondeterministically. This function should be
-# called as the target of a torch.multiprocessing.spawn() call, after setting
-# os.environ['CUBLAS_WORKSPACE_CONFIG'].
-#
-# Parameters:
-#   i                   process index (required for torch.multiprocessing.spawn)
-#   fn                  function to test
-#   fn_args             args to give to fn
-#   should_throw_error  True if fn should throw the nondeterministic error
-def checkAlertCuBLASConfigNotDeterministic(i, fn, fn_args, should_throw_error):
-    def test_case_info():
-        config = os.environ.get('CUBLAS_WORKSPACE_CONFIG')
-        return 'function "%s", config "%s"' % (fn.__name__, '' if config is None else config)
-    torch.set_deterministic(True)
-    try:
-        fn(*fn_args)
-    except RuntimeError as e:
-        if should_throw_error:
-            correct_error_message = 'Deterministic behavior was enabled with either '
-            if correct_error_message not in str(e):
-                raise RuntimeError(
-                    test_case_info() + ": "
-                    + 'expected non-deterministic CuBLAS config error message to start with "'
-                    + correct_error_message + '" but got this instead: "' + str(e) + '"')
-        else:
-            raise RuntimeError(
-                test_case_info() + ": "
-                + 'did not expect an error, but got this instead: "' + str(e) + '"')
-    else:
-        if should_throw_error:
-            raise RuntimeError(
-                test_case_info() + ": "
-                + 'expected a non-deterministic CuBLAS config error, but it was not raised')
-
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
     # build, numpy tests will fail
