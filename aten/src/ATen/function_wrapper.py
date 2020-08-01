@@ -60,24 +60,24 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals});
+${return_type} ${type_wrapper_name}(${native_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_CPU_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
@@ -111,7 +111,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(TypeDefault::${type_wrapper_name})));
+       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(TypeDefault::${type_wrapper_name})));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -131,7 +131,8 @@ m.impl("${unqual_operator_name_with_overload}",
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${Type}::${type_wrapper_name})))
+                       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(
+                           TORCH_FN(${Type}::${type_wrapper_name})))
 );
 """)
 
@@ -218,7 +219,7 @@ ${content}
 
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+CAFFE2_API ${return_type} ${native_type_method_dispatch}(${native_formals_with_defaults});
 """)
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
@@ -505,7 +506,9 @@ FunctionOption = TypedDict('FunctionOption', {
     'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
+    'native_formals_with_defaults': List[str],
     'formals': List[str],
+    'native_formals': List[str],
     'formals_types': List[str],
     'cpp_signature': str,
     # 'schema_order_cpp_signature' is like 'cpp_signature' but keeps them in the
@@ -551,6 +554,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    ('schema_order_cpp_signature', str),
     # 'schema_order_arguments' is like 'arguments' but keeps them in the
     # order they are defined in the JIT function schema while
     # 'arguments' does some modifications (e.g. reorders out arguments
@@ -767,6 +771,24 @@ def gen_device_init(option, backend_type_env):
             return ['globalContext().lazyInit{}();'.format(device_type)]
     return []
 
+# TODO The maybe_unwrap_optional_tensors is only needed because our at::native::xxx functions
+# still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+# to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+# and use the use_optional_tensor=True behavior always.
+def maybe_unwrap_optional_tensors(option, formals, args):
+    assert len(formals) == len(args), \
+        "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
+    if option['use_c10_dispatcher'] == 'full':
+        def maybe_unwrap_optional_tensor(formal, arg):
+            if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
+                return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
+            else:
+                return arg
+        return [maybe_unwrap_optional_tensor(formal, arg) for (formal, arg) in zip(formals, args)]
+    else:
+        assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        return args
+
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
     # translates defaults from cwrap types to C++ values
@@ -937,8 +959,14 @@ def create_generic(top_env, declarations):
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
-    def native_get_formals(option, schema_order, include_constants=False):
-        # type: (FunctionOption, bool, bool) -> List[AtFormal]
+    def native_get_formals(option, schema_order, use_optional_tensor, include_constants=False):
+        # type: (FunctionOption, bool, bool, bool) -> List[AtFormal]
+
+        # TODO The use_optional_tensor argument is only needed because our at::native::xxx functions
+        # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+        # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+        # and use the use_optional_tensor=True behavior always.
+
         seen = set()  # type: Set[str]
         pos_args = []
         kwd_args = []
@@ -972,6 +1000,8 @@ def create_generic(top_env, declarations):
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
             # type: (AtFormal, FunctionOption) -> AtFormal
+            argument = copy.deepcopy(argument)
+
             def translate_map(const):
                 # type: (bool) -> Dict[str, str]
                 return {
@@ -983,6 +1013,9 @@ def create_generic(top_env, declarations):
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
+            elif use_optional_tensor and argument.get('is_nullable') and argument['type'] == 'Tensor':
+                argument['type'] = "const c10::optional<Tensor>&"
+
 
             # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
             # I.e., the signature of the cpp implementation currently fits the code
@@ -1047,11 +1080,15 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-        formals = native_get_formals(option, False)
-        schema_order_formals = native_get_formals(option, True)
+        use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'
+        formals = native_get_formals(option, False, use_optional_tensors_in_cpp_frontend)
+        native_formals = native_get_formals(option, False, False)
+        schema_order_formals = native_get_formals(option, True, use_optional_tensors_in_cpp_frontend)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['native_formals'] = [format_formal(f) for f in native_formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['native_formals_with_defaults'] = [formal_with_default(f) for f in native_formals]
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -1095,6 +1132,8 @@ def create_generic(top_env, declarations):
             dispatch_key_var_name = '_dk'
             dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, [swizzle_self(f) for f in formals])
 
+            method_actuals = maybe_unwrap_optional_tensors(option, formals, option['method_actuals'])
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
                 # NB: As this code is currently written, there will NEVER be
@@ -1115,7 +1154,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['method_actuals'])
+                            actuals=method_actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1131,7 +1170,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['method_actuals'])
+                    option, actuals=method_actuals)
 
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
@@ -1161,6 +1200,8 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
+            actuals = maybe_unwrap_optional_tensors(option, formals, option['actuals'])
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
@@ -1169,7 +1210,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['actuals'])
+                            actuals=actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1184,7 +1225,7 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['actuals'])
+                    option, actuals=actuals)
 
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
@@ -1296,6 +1337,7 @@ def create_generic(top_env, declarations):
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             manual_kernel_registration=option['manual_kernel_registration'],
+            schema_order_cpp_signature=option['schema_order_cpp_signature'],
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],

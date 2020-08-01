@@ -102,37 +102,42 @@ VkInstance create_instance(const bool enable_validation_layers) {
     }
   }
 
-  VkApplicationInfo applicationInfo{};
-  applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  applicationInfo.pApplicationName = "PyTorch";
-  applicationInfo.applicationVersion = 0;
-  applicationInfo.pEngineName = "PyTorch";
-  applicationInfo.engineVersion = 0;
-  applicationInfo.apiVersion = VK_API_VERSION_1_0;
+  constexpr VkApplicationInfo application_info{
+    VK_STRUCTURE_TYPE_APPLICATION_INFO,
+    nullptr,
+    "PyTorch",
+    0,
+    "PyTorch",
+    0,
+    VK_API_VERSION_1_0,
+  };
 
-  VkInstanceCreateInfo instance_create_info{};
-  instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  instance_create_info.flags = 0;
-  instance_create_info.pApplicationInfo = &applicationInfo;
-  instance_create_info.enabledLayerCount = enabled_instance_layers.size();
-  instance_create_info.ppEnabledLayerNames = enabled_instance_layers.data();
-  instance_create_info.enabledExtensionCount = enabled_instance_extensions.size();
-  instance_create_info.ppEnabledExtensionNames = enabled_instance_extensions.data();
+  const VkInstanceCreateInfo instance_create_info{
+    VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+    nullptr,
+    0u,
+    &application_info,
+    enabled_instance_layers.size(),
+    enabled_instance_layers.data(),
+    enabled_instance_extensions.size(),
+    enabled_instance_extensions.data(),
+  };
 
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
 
   if (enable_validation_layers) {
-    VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{};
-    debugReportCallbackCreateInfo.sType =
-        VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
-    debugReportCallbackCreateInfo.flags =
-        VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
+    const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{
+      VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
+      nullptr,
+      VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
         VK_DEBUG_REPORT_WARNING_BIT_EXT |
         VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
         VK_DEBUG_REPORT_ERROR_BIT_EXT |
-        VK_DEBUG_REPORT_DEBUG_BIT_EXT;
-    debugReportCallbackCreateInfo.pfnCallback = &debug_report_callback_fn;
+        VK_DEBUG_REPORT_DEBUG_BIT_EXT,
+      debug_report_callback_fn,
+      nullptr,
+    };
 
     const auto vkCreateDebugReportCallbackEXT =
         (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
@@ -200,17 +205,27 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
 VkDevice create_device(
     const VkPhysicalDevice physical_device,
     const uint32_t compute_queue_family_index) {
-  VkDeviceQueueCreateInfo queue_create_info{};
-  queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queue_create_info.queueFamilyIndex = compute_queue_family_index;
-  queue_create_info.queueCount = 1;
-  const float queue_properties = 1.0f;
-  queue_create_info.pQueuePriorities = &queue_properties;
+  const float queue_priorities = 1.0f;
+  const VkDeviceQueueCreateInfo device_queue_create_info{
+    VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+    nullptr,
+    0u,
+    compute_queue_family_index,
+    1u,
+    &queue_priorities,
+  };
 
-  VkDeviceCreateInfo device_create_info{};
-  device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  device_create_info.queueCreateInfoCount = 1;
-  device_create_info.pQueueCreateInfos = &queue_create_info;
+  const VkDeviceCreateInfo device_create_info{
+    VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+    nullptr,
+    0u,
+    1u,
+    &device_queue_create_info,
+    0u,
+    nullptr,
+    0u,
+    nullptr,
+  };
 
   VkDevice device{};
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
@@ -226,20 +241,6 @@ VkQueue acquire_queue(
   return queue;
 }
 
-VkCommandPool create_command_pool(
-    const VkDevice device,
-    const uint32_t compute_queue_family_index) {
-  VkCommandPoolCreateInfo command_pool_create_info{};
-  command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  command_pool_create_info.flags = 0;
-  command_pool_create_info.queueFamilyIndex = compute_queue_family_index;
-
-  VkCommandPool command_pool{};
-  VK_CHECK(vkCreateCommandPool(device, &command_pool_create_info, nullptr, &command_pool));
-
-  return command_pool;
-}
-
 } // namespace
 
 Context::Context(const bool enable_validation_layers)
@@ -248,8 +249,7 @@ Context::Context(const bool enable_validation_layers)
       physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
       device_(create_device(physical_device(), compute_queue_family_index_), &VK_DELETER(Device)),
-      queue_(acquire_queue(device(), compute_queue_family_index_)),
-      command_pool_(create_command_pool(device(), compute_queue_family_index_), VK_DELETER(CommandPool)(device())) {
+      queue_(acquire_queue(device(), compute_queue_family_index_)) {
 }
 
 Context* initialize() {
