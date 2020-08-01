@@ -193,6 +193,7 @@ namespace jit {
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
+  _(Kernel_4)                               \
   _(FuserPass_1)                            \
   _(FuserPass_2)
 
