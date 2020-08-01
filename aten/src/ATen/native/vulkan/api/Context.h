@@ -36,10 +36,6 @@ class Context final {
     return queue_;
   }
 
-  inline VkCommandPool command_pool() const {
-    return command_pool_.get();
-  }
-
  private:
   Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
   VkPhysicalDevice physical_device_;
@@ -47,7 +43,6 @@ class Context final {
   uint32_t compute_queue_family_index_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
-  Handle<VkCommandPool, VK_DELETER(CommandPool)> command_pool_;
 };
 
 bool available();
