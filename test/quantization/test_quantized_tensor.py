@@ -584,3 +584,13 @@ class TestQuantizedTensor(TestCase):
 
         x = torch.randn(3)
         self.assertEqual(x.is_pinned(), False)
+
+
+    def test_fp16_saturate_op(self):
+        x = torch.ones(5, 5, dtype=torch.float32) * 65532
+        x[0] = torch.ones(5) * -65532
+        # range of fp16 value is [-65504, + 65504]
+        ref = torch.ones(5, 5) * 65504
+        ref[0] = torch.ones(5) * -65504
+        y = torch._saturate_weight_to_fp16(x)
+        self.assertEqual(y, ref)
