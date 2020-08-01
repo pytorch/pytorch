@@ -13,7 +13,7 @@
 #include <library_types.h>
 #endif
 
-#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 11000)
+#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10100)
 const char* cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
   {
