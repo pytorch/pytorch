@@ -4,6 +4,8 @@ set -ex
 
 [ -n "${ANDROID_NDK}" ]
 
+_https_amazon_aws=https://ossci-android.s3.amazonaws.com
+
 apt-get update
 apt-get install -y --no-install-recommends autotools-dev autoconf unzip
 apt-get autoclean && apt-get clean
@@ -44,7 +46,6 @@ export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
 
 # Installing android sdk
 # https://github.com/circleci/circleci-images/blob/staging/android/Dockerfile.m4
-_https_amazon_aws=https://s3.amazonaws.com/ossci-android/
 
 _tmp_sdk_zip=/tmp/android-sdk-linux.zip
 _android_home=/opt/android/sdk
