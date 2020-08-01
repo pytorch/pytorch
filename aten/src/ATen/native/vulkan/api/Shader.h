@@ -35,7 +35,7 @@ struct Shader final {
     Cache& operator=(const Cache&) = delete;
     Cache(Cache&&) = default;
     Cache& operator=(Cache&&) = default;
-    ~Cache() = default;
+    ~Cache();
 
     VkShaderModule retrieve(const char* key, const char* source = nullptr);
     VkShaderModule retrieve(const char* key, const Descriptor* descriptor = nullptr);
