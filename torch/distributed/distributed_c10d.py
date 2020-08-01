@@ -1211,9 +1211,11 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+        my_rank if is_nccl_backend else "cpu"
+    )
     object_size_list = [
-        torch.LongTensor([0]).to(my_rank if is_nccl_backend else "cpu")
-        for _ in range(group_size)
+        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
     # Allgather tensor sizes
     all_gather(object_size_list, local_size, group=group)
@@ -1281,9 +1283,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+        my_rank if is_nccl_backend else "cpu"
+    )
     object_size_list = [
-        torch.LongTensor([0]).to(my_rank if is_nccl_backend else "cpu")
-        for _ in range(group_size)
+        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
     # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
     # since each rank needs to broadcast a tensor of the same (maximal) size.
