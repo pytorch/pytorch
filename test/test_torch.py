@@ -16897,7 +16897,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -16907,12 +16907,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.gcd([0, 10, 0], [0, 0, 10])
         self.assertEqual(actual, expected)
 
-        # Compares with NumPy
-        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
-        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
-        actual = torch.gcd(a, b)
-        expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
+        if dtype == torch.uint8:
+            # Test unsigned integers with potential sign issues (i.e., uint8 with value >= 128)
+            a = torch.tensor([190, 210], device=device, dtype=dtype)
+            b = torch.tensor([190, 220], device=device, dtype=dtype)
+            actual = torch.gcd(a, b)
+            expected = torch.tensor([190, 10], device=device, dtype=dtype)
+        else:
+            # Compares with NumPy
+            a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+            b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+            actual = torch.gcd(a, b)
+            expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
+            self.assertEqual(actual, expected)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
