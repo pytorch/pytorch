@@ -20,7 +20,8 @@ TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_
     const cudnnDataType_t flat_buf_datatype,
     const TensorOptions& flat_buf_options,
     bool set_orig_weights_to_flat_buf,
-    bool allow_type_change=false);
+    bool allow_type_change=false,
+    bool include_bias=true);
 
 } // namespace cudnn_rnn
 } // namespace native

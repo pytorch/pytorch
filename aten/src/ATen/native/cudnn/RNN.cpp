@@ -403,7 +403,8 @@ namespace {
       const RNNDescriptor& rnn_desc,
       const TensorDescriptor& x_desc,
       const FilterDescriptor& w_desc,
-      const Tensor& weight_buf
+      const Tensor& weight_buf,
+      bool include_bias=true
   ) {
     auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
     std::vector<Tensor> params;
@@ -459,13 +460,19 @@ namespace {
           // might as well merge the CUDNN ones into a single tensor as well
           int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-            std::initializer_list<int64_t> size = {
-              mat_numel * num_linear_layers / 2, 1};
-            // Generate a new parameter tensor which is a view into the
-            // weight_buf.
-            Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
-            params.emplace_back(std::move(param));
-            layer_params_count++;
+            // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
+            // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict
+            // and informative check that all params are laid out the way we think they are.  If include_bias is false,
+            // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
+            // cudnnGetRNNLinLayerBiasParams iteration.
+            if (include_bias || cudnn_method == cudnnGetRNNLinLayerMatrixParams) {
+              // Generate a new parameter tensor which is a view into the weight_buf.
+              std::initializer_list<int64_t> size = {
+                mat_numel * num_linear_layers / 2, 1};
+              Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+              params.emplace_back(std::move(param));
+              layer_params_count++;
+            }
           } else {
             AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
           }
@@ -625,7 +632,8 @@ namespace cudnn_rnn {
       const cudnnDataType_t flat_buf_datatype,
       const TensorOptions& flat_buf_options,
       bool set_orig_weights_to_flat_buf,
-      bool allow_type_change/*=false*/) {
+      bool allow_type_change/*=false*/,
+      bool include_bias/*=true*/) {
     // flat_buf_datatype is accepted as a separate argument (rather than extracted from flat_buf_options)
     // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
     // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
@@ -656,7 +664,7 @@ namespace cudnn_rnn {
     // Slice off views into weight_buf
     std::vector<Tensor> params_arr;
     size_t params_stride0;
-    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
+    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
 
     MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                       params{params_arr, params_stride0};

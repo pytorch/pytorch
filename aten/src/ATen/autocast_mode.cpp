@@ -345,6 +345,9 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   for (const auto& t : weight) {
     TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");
   }
+  TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
+                        "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
+                        weight_stride0);
 
   Tensor redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
@@ -366,7 +369,8 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             /*flat_buf_datatype=*/at::native::getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
             /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
             /*set_orig_weights_to_flat_buf=*/false,
-            /*allow_type_change=*/true);
+            /*allow_type_change=*/true,
+            /*include_bias=*/weight_stride0 == 4);
   }
 
   return at::_cudnn_rnn(
