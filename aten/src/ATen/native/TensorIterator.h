@@ -475,6 +475,16 @@ public:
     return *this;
   }
 
+  // Sets the promote_integer_inputs_to_float_ flag, which is false by default
+  // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
+  // If true, if the iterator's "common dtype" is an integral type (including bool)
+  //   then it is changed to the default float scalar type.
+  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
+    promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
+    TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
+    return *this;
+  }
+
   TensorIteratorConfig& is_reduction(const bool _is_reduction) {
     is_reduction_ = _is_reduction;
     return *this;
@@ -551,6 +561,7 @@ private:
   bool check_all_same_device_ = true;
   bool enforce_safe_casting_to_output_ = false;
   bool promote_inputs_to_common_dtype_ = false;
+  bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
 };
 
