@@ -25,7 +25,7 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    enable_jit_freezing_and_functionalization = True
+    update_jit_scripting_passes = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -44,7 +44,7 @@ class TestUtilityFuns(TestCase):
                                      operator_export_type=operator_export_type,
                                      training=training,
                                      example_outputs=example_outputs,
-                                     enable_jit_freezing_and_functionalization=self.enable_jit_freezing_and_functionalization)
+                                     update_jit_scripting_passes=self.update_jit_scripting_passes)
 
     def test_is_in_onnx_export(self):
         test_self = self

@@ -53,7 +53,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False, enable_jit_freezing_and_functionalization=True):
+                   fixed_batch_size=False, update_jit_scripting_passes=True):
     model.eval()
 
     if input is None:
@@ -80,7 +80,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                            dynamic_axes=dynamic_axes,
                            input_names=input_names, output_names=output_names,
                            fixed_batch_size=fixed_batch_size,
-                           enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
+                           update_jit_scripting_passes=update_jit_scripting_passes)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -121,7 +121,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size, enable_jit_freezing_and_functionalization=True)
+                                  fixed_batch_size=fixed_batch_size, update_jit_scripting_passes=True)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)

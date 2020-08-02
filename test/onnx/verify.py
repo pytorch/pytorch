@@ -229,7 +229,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
            test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
            keep_initializers_as_inputs=True, add_node_names=False,
            operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-           enable_jit_freezing_and_functionalization=False):
+           update_jit_scripting_passes=False):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -355,7 +355,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                                        add_node_names=add_node_names,
                                        operator_export_type=operator_export_type,
-                                       enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
+                                       update_jit_scripting_passes=update_jit_scripting_passes)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -370,7 +370,7 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
                                            add_node_names=add_node_names,
                                            operator_export_type=operator_export_type,
-                                           enable_jit_freezing_and_functionalization=enable_jit_freezing_and_functionalization)
+                                           update_jit_scripting_passes=update_jit_scripting_passes)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)
