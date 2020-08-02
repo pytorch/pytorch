@@ -3217,6 +3217,11 @@
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
 
+- func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU, SparseCUDA: norm_sparse
+
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
   use_c10_dispatcher: full
