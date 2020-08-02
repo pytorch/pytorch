@@ -1731,7 +1731,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
-         const std::unordered_map<std::string, std::vector<int>>& shapes,
+         const py::bytes& shapes_str,
          const std::vector<int>& block_list,
          const std::vector<std::string>& weight_names,
          int max_batch_size,
@@ -1740,6 +1740,7 @@ void addGlobalMethods(py::module& m) {
          bool adjust_batch,
          bool debug_builder,
          bool merge_fp32_inputs_into_fp16,
+         bool net_ssa_rewritten,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
@@ -1749,13 +1750,12 @@ void addGlobalMethods(py::module& m) {
         Workspace* curr_ws = GetCurrentWorkspace();
         CAFFE_ENFORCE(curr_ws);
         splitSparseLengthsSumSparse(&pred_net, *curr_ws);
-        ShapeInfoMap shape_map;
-        for (const auto& it : shapes) {
-          shape_map.emplace(
-              it.first,
-              constructShapeInfoWithDefaultDimType(
-                  CreateTensorShape(it.second, TensorProto::FLOAT)));
-        }
+        caffe2::TensorBoundShapes tbs;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(shapes_str.cast<std::string>(), &tbs),
+            "broken TensorBoundShapes protobuf");
+        ShapeInfoMap shape_map = caffe2::extractShapeInfoFromTensorBoundShapes(
+            tbs, max_batch_size, max_seq_size);
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
@@ -1763,6 +1763,7 @@ void addGlobalMethods(py::module& m) {
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
+        opts.predictor_net_ssa_rewritten = net_ssa_rewritten;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
         std::unordered_set<int> blocklist_set(
