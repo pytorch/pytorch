@@ -23,6 +23,7 @@
 #include <bitset>
 #include <cusparse.h>
 #include <cuda_runtime_api.h>
+#include <memory>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
@@ -732,7 +733,7 @@ Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deter
   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
-#if !(defined(__HIP_PLATFORM_HCC__) || defined(_WIN32) || defined(_WIN64))
+#if !(defined(__HIP_PLATFORM_HCC__) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -872,13 +873,13 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   Tensor indices_dim1 = indices[1].to(ScalarType::Int);
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
-  int64_t mat_el_end_indices_host[num_matrices];
+  std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
   int64_t* mat_el_end_indices_device;
 
   cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t));
   search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
   cudaMemcpy(
-    mat_el_end_indices_host,
+    mat_el_end_indices_host.get(),
     mat_el_end_indices_device,
     num_matrices*sizeof(int64_t),
     cudaMemcpyDeviceToHost
