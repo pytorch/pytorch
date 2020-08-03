@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <cstdint>
 #include <cmath>
 #include <cfloat>
 #include <limits>
@@ -267,3 +268,26 @@ static inline float calc_digamma(float x) {
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
+
+template <typename T>
+static T abs_impl(T v) {
+  return std::abs(v);
+}
+
+template <>
+uint8_t abs_impl(uint8_t v) {
+  return v;
+}
+
+template <typename T>
+static inline typename std::enable_if<std::is_integral<T>::value, T>::type
+calc_gcd(T a, T b) {
+  a = abs_impl(a);
+  b = abs_impl(b);
+  while (a != 0) {
+    T c = a;
+    a = b % a;
+    b = c;
+  }
+  return b;
+}

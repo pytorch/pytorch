@@ -56,7 +56,7 @@ static void poison_fork() {
 
 void THCPModule_setDevice(int device)
 {
-  THCudaCheck(cudaSetDevice(device));
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
@@ -75,9 +75,8 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  int device;
   torch::utils::cuda_lazy_init();
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -87,6 +86,19 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   poison_fork();
   return PyLong_FromLong(at::cuda::device_count());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  poison_fork();
+#ifdef CUDA_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -127,8 +139,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
     throw python_error();
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
   }
@@ -139,9 +150,8 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 {
-  int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  const auto count = c10::cuda::device_count();
+  if (count == 0) {
     return PyBool_FromLong(0);
   }
   return PyBool_FromLong(1);
@@ -150,11 +160,11 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
 {
   int driverVersion = -1;
-  cudaError_t err = cudaDriverGetVersion(&driverVersion);
-  if (err != cudaSuccess) {
-    PyErr_Format(PyExc_RuntimeError,
-                    "Error calling cudaDriverGetVersion: %d %s",
-                    err, cudaGetErrorString(err));
+  std::string error;
+  std::tie(driverVersion, error) = c10::cuda::driver_version();
+
+  if (!error.empty()) {
+    PyErr_Format(PyExc_RuntimeError, "Error calling cudaDriverGetVersion: %s", error.c_str());
     return nullptr;
   }
   return PyLong_FromLong((int64_t) driverVersion);
@@ -204,7 +214,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObjec
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  THCudaCheck(cudaDeviceSynchronize());
+  c10::cuda::device_synchronize();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -427,6 +437,15 @@ static void bindGetDeviceProperties(PyObject* module) {
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+  TORCH_WARN(
+    "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
+    "asan is currently not compatible with torch.cuda module, "
+    "you might get unexpected behavior (eg. out of memory, crash, etc.), "
+    "please rebuild pytorch without asan if you need to use this module");
+#endif
+#endif
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   poison_fork();
@@ -493,6 +512,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getArchFlags", (PyCFunction)THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},

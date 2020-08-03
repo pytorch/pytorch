@@ -11,6 +11,7 @@ IMAGE_NAMES = [
     "pytorch-linux-bionic-py3.6-clang9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",
     "pytorch-linux-bionic-py3.8-gcc9",
+    "pytorch-linux-bionic-rocm3.5.1-py3.6",
     "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
@@ -25,8 +26,9 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-py3.6-gcc5.4",
     "pytorch-linux-xenial-py3.6-gcc7.2",
     "pytorch-linux-xenial-py3.6-gcc7",
-    "pytorch-linux-xenial-pynightly",
     "pytorch-linux-xenial-rocm3.3-py3.6",
+    "pytorch-linux-xenial-rocm3.5.1-py3.6",
+    "pytorch-linux-bionic-py3.7-conda",
 ]
 
 
@@ -36,7 +38,10 @@ def get_workflow_jobs():
         OrderedDict(
             {
                 "docker_build_job": OrderedDict(
-                    {"name": quote(image_name), "image_name": quote(image_name)}
+                    {
+                        "name": quote(f"docker-{image_name}"),
+                        "image_name": quote(image_name),
+                    }
                 )
             }
         )

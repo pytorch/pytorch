@@ -48,6 +48,12 @@ template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
 
 template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
+
+template<class T, class Iterator>
+bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+
+template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator T() const;
@@ -58,6 +64,12 @@ public:
 
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
+
+  // returns the underlying std::string by reference (only enabled if this is from a torch::List<std::string>).
+  template<class _T = T>
+  std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
+    return iterator_->toStringRef();
+  }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 

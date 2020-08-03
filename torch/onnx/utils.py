@@ -278,8 +278,16 @@ def _decide_add_node_names(add_node_names, operator_export_type):
     return _resolve_args_by_export_type("add_node_names", add_node_names, operator_export_type)
 
 
-def _decide_constant_folding(do_constant_folding, operator_export_type):
-    return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+def _decide_constant_folding(do_constant_folding, operator_export_type, training):
+    do_constant_folding = _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+    if do_constant_folding and (training is not None and training is not TrainingMode.EVAL):
+        warnings.warn("It is recommended that constant folding be turned off ('do_constant_folding=False') "
+                      "when exporting the model in training-amenable mode, i.e. with 'training=TrainingMode.TRAIN' "
+                      "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
+                      "learnable model parameters may not translate correctly in the exported ONNX model "
+                      "because constant folding mutates model parameters. Please consider "
+                      "turning off constant folding or setting the training=TrainingMode.EVAL.")
+    return do_constant_folding
 
 
 def _decide_external_data_format(use_external_data_format, operator_export_type, f):
@@ -331,7 +339,7 @@ def _model_to_graph(model, args, verbose=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=True,
-                    _disable_torch_constant_prop=False, fixed_batch_size=False):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -341,7 +349,6 @@ def _model_to_graph(model, args, verbose=False,
         example_outputs = [example_outputs]
 
     torch_out = None
-
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
@@ -404,12 +411,13 @@ def _model_to_graph(model, args, verbose=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
+    if training is None or training == TrainingMode.EVAL or (training == TrainingMode.PRESERVE and not is_originally_training):
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
-
-    params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
@@ -467,11 +475,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          operator_export_type,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
-                                                        output_names, operator_export_type,
-                                                        example_outputs, propagate, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size)
+                                                        output_names, operator_export_type, example_outputs,
+                                                        propagate, _retain_param_name, val_do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size, training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
@@ -521,7 +529,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              operator_export_type,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
@@ -529,7 +537,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             output_names, operator_export_type,
                                                             example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size)
+                                                            fixed_batch_size=fixed_batch_size, training=training)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

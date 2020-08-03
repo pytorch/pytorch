@@ -2,7 +2,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
+import math
 import os
+import random
 import sys
 import time
 import tempfile
@@ -10,13 +12,16 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
+from io import StringIO
 
 import torch
 import torch.cuda
 import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -111,7 +116,7 @@ def get_timeout(test_id):
 
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests")
+    print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 
@@ -231,6 +236,17 @@ class Barrier(object):
             time.sleep(0.1)
 
 
+@contextmanager
+def _captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+
+
 class _DistTestBase(object):
     def _barrier(self, *args, **kwargs):
         Barrier.sync(*args, **kwargs)
@@ -278,6 +294,34 @@ class _DistTestBase(object):
             for i in range(world_size)
         }
         return rank_to_GPU
+
+    def test_dump_DDP_relevant_env_vars(self):
+        with _captured_output() as (out, err):
+            _dump_DDP_relevant_env_vars()
+            lines = out.getvalue().splitlines()
+
+        def format_line(var):
+            return "env:%s=%s" % (var, os.environ[var] if var in os.environ else "N/A")
+
+        # Check relevant env vars
+        vars = [
+            "MASTER_ADDR",
+            "MASTER_PORT",
+            "WORLD_SIZE",
+            "NCCL_TOPO_DUMP_FILE",  # N/A
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertIn(line, lines)
+        # Check irrelevant env vars
+        vars = [
+            "xxx",
+            "yyy",
+            "zzz",
+        ]
+        for var in vars:
+            line = format_line(var)
+            self.assertNotIn(line, lines)
 
     # GET RANK
     def test_get_rank(self):
@@ -2207,6 +2251,192 @@ class _DistTestBase(object):
         res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
+
+    def _run_reduction_test(
+            self, tensor, expected_tensor, op, reduction_fn=dist.all_reduce, dst=None
+    ):
+        if reduction_fn != dist.all_reduce and dst is None:
+            raise ValueError(f"Reduction fn {reduction_fn} must specify dst!")
+        if dst is not None:
+            reduction_fn(tensor, dst, op)
+            # Only destination rank tensor is expected to have final result.
+            if dist.get_rank() == dst:
+                self.assertEqual(tensor, expected_tensor)
+        else:
+            reduction_fn(tensor, op)
+            self.assertEqual(tensor, expected_tensor)
+
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_nccl_backend_bool_allreduce(self):
+        torch.cuda.set_device(self.rank)
+        # Run all_reduce with PRODUCT
+        element = self.rank % 2 == 0
+        for op in [dist.ReduceOp.PRODUCT, dist.ReduceOp.MIN]:
+            input_tensor = torch.tensor([element, element]).to(self.rank)
+            self._run_reduction_test(
+                input_tensor, torch.tensor([False, False]).to(self.rank), op
+            )
+            # Ensure that all ranks contributing True (cast to 1) results in the
+            # correct reduction.
+            input_tensor = torch.tensor([True, True]).to(self.rank)
+            expected_tensor = input_tensor.clone()
+            self._run_reduction_test(
+                input_tensor, expected_tensor, op
+            )
+
+        # Run all_reduce with SUM
+        for op in [dist.ReduceOp.SUM, dist.ReduceOp.MAX]:
+            input_tensor = torch.tensor([element, element]).to(self.rank)
+            self._run_reduction_test(
+                input_tensor, torch.tensor([True, True]).to(self.rank), op
+            )
+        # TODO: NCCL backend does not work correctly for bitwise reduction ops
+        # (see https://github.com/pytorch/pytorch/issues/41362). Add tests for
+        # these once it is supported.
+
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_nccl_backend_bool_allgather(self):
+        torch.cuda.set_device(self.rank)
+        inp = {0: [True, True], 1: [False, True]}
+        input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
+        # Preserve a copy of the tensor to compare against after allgather.
+        input_tensor_copy = input_tensor.clone()
+        tensor_list = [
+            torch.tensor([False, False]).to(self.rank)
+            for _ in range(dist.get_world_size())
+        ]
+        dist.all_gather(tensor_list, input_tensor)
+
+        self.assertEqual(len(tensor_list), dist.get_world_size())
+        for i, t in enumerate(tensor_list):
+            expected = torch.tensor(inp[i % 2]).to(self.rank)
+            self.assertEqual(t, expected)
+        # Ensure that the input tensor is not modified, since this collective
+        # does not modify its input.
+        self.assertEqual(input_tensor_copy, input_tensor)
+
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+    @skip_if_rocm
+    def test_nccl_backend_bool_reduce(self):
+        torch.cuda.set_device(self.rank)
+        inp = {0: [True, True], 1: [False, False]}
+        # Run reduce() with product op
+        for op in [dist.ReduceOp.PRODUCT, dist.ReduceOp.MIN]:
+            input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
+            expected = torch.tensor([False, False]).to(self.rank)
+            self._run_reduction_test(
+                input_tensor, expected, op, dist.reduce, dst=0
+            )
+            # Ensure that all ranks contributing True (cast to 1) results in the
+            # correct reduction.
+            input_tensor = torch.tensor([True, True]).to(self.rank)
+            expected_tensor = input_tensor.clone()
+            self._run_reduction_test(
+                input_tensor, expected_tensor, op, dist.reduce, dst=0
+            )
+
+        for op in [dist.ReduceOp.SUM, dist.ReduceOp.MAX]:
+            input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
+            expected = (
+                torch.tensor([True, True]).to(self.rank)
+                if self.rank == 0
+                else input_tensor.clone()
+            )
+            self._run_reduction_test(
+                input_tensor, expected, op, dist.reduce, dst=0
+            )
+
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_nccl_backend_bool_broadcast(self):
+        tensor_size = 10
+        bcast_tensor = torch.tensor(
+            [
+                (random.random() < 0.5 if self.rank == 0 else False)
+                for _ in range(tensor_size)
+            ]
+        ).to(self.rank)
+        dist.broadcast(bcast_tensor, src=0)
+        # Now allgather and ensure the tensors are equal.
+        tensor_list = [
+            torch.tensor([False for _ in range(tensor_size)]).to(self.rank)
+            for _ in range(dist.get_world_size())
+        ]
+        dist.all_gather(tensor_list, bcast_tensor)
+        expected = tensor_list[0]
+        for tensor in tensor_list[1:]:
+            self.assertEqual(tensor, expected)
+
+    @unittest.skipIf(
+        BACKEND != "nccl" and BACKEND != "gloo",
+        "Only NCCL and GLOO backend support DistributedDataParallel",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_DistributedSampler_padding(self):
+        # Tests padding of distributed sampler.
+        world_size = dist.get_world_size()
+        dataset_size = 100 + world_size + 1
+        dataset = [torch.ones(1).to(self.rank) * i for i in range(dataset_size)]
+
+        # Specifying drop_last=True will cause the tail of the data to be dropped.
+        dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)
+        local_num_samples, local_dataset_size = (
+            dist_sampler.num_samples,
+            dist_sampler.total_size,
+        )
+        # The effective dataset size should be the greatest integer that is <=
+        # dataset_size that is divisible by the world_size. This is to ensure each
+        # rank processes the same number of samples.
+        effective_dataset_size = (
+            math.ceil((dataset_size - world_size) / world_size)
+            if dataset_size % world_size != 0
+            else dataset_size / world_size
+        )
+        self.assertEqual(local_num_samples, effective_dataset_size)
+        self.assertEqual(local_dataset_size, local_num_samples * world_size)
+        indices_list = list(iter(dist_sampler))
+        self.assertEqual(len(indices_list), local_num_samples)
+
+        def validate_global_samples(local_num_samples):
+            # Ensure that each rank processes the same number of samples.
+            world_samples = [
+                torch.LongTensor([0]).to(self.rank) for _ in range(world_size)
+            ]
+            dist.all_gather(world_samples, torch.tensor([local_num_samples]).to(self.rank))
+            world_samples = [sample.item() for sample in world_samples]
+            self.assertEqual(len(set(world_samples)), 1)
+
+        validate_global_samples(local_num_samples)
+
+        # drop_last=False is the default and will add additional indices to be sampled,
+        # increasing the effective dataset size.
+        dist_sampler_added_samples = DistributedSampler(dataset=dataset)
+        local_num_samples, local_dataset_size = (
+            dist_sampler_added_samples.num_samples,
+            dist_sampler_added_samples.total_size,
+        )
+        # The effective dataset size is the smallest integer that is >= dataset_size
+        # and divisible by the world size.
+        self.assertEqual(
+            local_num_samples, math.ceil(dataset_size / world_size)
+        )
+        self.assertEqual(local_dataset_size, local_num_samples * world_size)
+        indices_list = list(iter(dist_sampler_added_samples))
+        self.assertEqual(len(indices_list), local_num_samples)
+
+        # Ensure that each rank processes the same number of samples.
+        validate_global_samples(local_num_samples)
+
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]

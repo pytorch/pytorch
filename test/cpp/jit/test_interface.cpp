@@ -35,7 +35,7 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
@@ -49,7 +49,7 @@ void testModuleInterfaceSerialization() {
   Module parentMod("parentMod", cu);
   Module subMod("subMod", cu);
 
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       cu,
       "__torch__.OneForward",

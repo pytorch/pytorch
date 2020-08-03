@@ -38,7 +38,7 @@ def set_printoptions(
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)
         sci_mode: Enable (True) or disable (False) scientific notation. If
-            None (default) is specified, the value is defined by 
+            None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
     """
@@ -73,30 +73,16 @@ def set_printoptions(
 class _Formatter(object):
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
-        self.complex_dtype = tensor.dtype.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
-
-        # only used for complex tensors
-        self.has_non_zero_decimal_val = False
 
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
-            if self.complex_dtype:
-                # max width for complex tensors depends on whether or not tensor contains ints only
-                self.has_non_zero_decimal_val = sum([not (value.item().real.is_integer() and value.item().imag.is_integer())
-                                                     for value in tensor_view])
             for value in tensor_view:
-                if self.complex_dtype:
-                    if self.has_non_zero_decimal_val:
-                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
-                    else:
-                        value_str = "{:.0f}".format(value.item())
-                else:
-                    value_str = '{}'.format(value)
+                value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
@@ -158,60 +144,78 @@ class _Formatter(object):
                     ret += '.'
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
-        elif self.complex_dtype:
-            p = PRINT_OPTS.precision
-            ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
-            if not self.has_non_zero_decimal_val:
-                # complex tensor contains integer elements only
-                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))  # noqa: F523
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
 
 
-def _scalar_str(self, formatter):
-    return formatter.format(self.item())
+def _scalar_str(self, formatter1, formatter2=None):
+    if formatter2 is not None:
+        real_str = _scalar_str(self.real, formatter1)
+        imag_str = _scalar_str(self.imag, formatter2) + "j"
+        if self.imag < 0:
+            return real_str + imag_str.lstrip()
+        else:
+            return real_str + "+" + imag_str.lstrip()
+    else:
+        return formatter1.format(self.item())
 
-
-def _vector_str(self, indent, formatter, summarize):
+def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     # length includes spaces and comma between elements
-    element_length = formatter.width() + 2
+    element_length = formatter1.width() + 2
+    if formatter2 is not None:
+        # width for imag_formatter + an extra j for complex
+        element_length += formatter2.width() + 1
+
     elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
     char_per_line = element_length * elements_per_line
 
+    def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
+        if formatter2 is not None:
+            real_str = formatter1.format(val.real)
+            imag_str = formatter2.format(val.imag) + "j"
+            if val.imag < 0:
+                return real_str + imag_str.lstrip()
+            else:
+                return real_str + "+" + imag_str.lstrip()
+        else:
+            return formatter1.format(val)
+
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([formatter.format(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+        data = ([_val_formatter(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
                 [' ...'] +
-                [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
+                [_val_formatter(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [formatter.format(val) for val in self.tolist()]
+        data = [_val_formatter(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
     return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
-
-def _tensor_str_with_formatter(self, indent, formatter, summarize):
+# formatter2 is only used for printing complex tensors.
+# For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
+# and tensor.imag respesectively
+def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
     dim = self.dim()
 
     if dim == 0:
-        return _scalar_str(self, formatter)
+        return _scalar_str(self, formatter1, formatter2)
+
     if dim == 1:
-        return _vector_str(self, indent, formatter, summarize)
+        return _vector_str(self, indent, summarize, formatter1, formatter2)
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        slices = ([_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
+        slices = ([_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                    for i in range(0, PRINT_OPTS.edgeitems)] +
                   ['...'] +
-                  [_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
+                  [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                    for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        slices = [_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
+        slices = [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                   for i in range(0, self.size(0))]
 
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
-
 
 def _tensor_str(self, indent):
     if self.numel() == 0:
@@ -228,9 +232,14 @@ def _tensor_str(self, indent):
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
-    formatter = _Formatter(get_summarized_data(self) if summarize else self)
-    return _tensor_str_with_formatter(self, indent, formatter, summarize)
 
+    if self.dtype.is_complex:
+        real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
+        imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
+        return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
+    else:
+        formatter = _Formatter(get_summarized_data(self) if summarize else self)
+        return _tensor_str_with_formatter(self, indent, summarize, formatter)
 
 def _add_suffixes(tensor_str, suffixes, indent, force_newline):
     tensor_strs = [tensor_str]

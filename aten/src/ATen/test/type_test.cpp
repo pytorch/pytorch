@@ -78,7 +78,7 @@ static TypePtr importType(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& qual_name,
     const std::string& src) {
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   auto source = std::make_shared<torch::jit::Source>(src);
   torch::jit::SourceImporter si(
       cu,

@@ -432,6 +432,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0);
+  TORCH_CHECK(!(p.toDouble() == 2 && self.is_complex()), "norm with p=2 not supported for complex tensors");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -456,6 +457,8 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
 
 static inline Tensor _norm(const Tensor &self, Scalar p) {
   if (self.is_sparse()) {
+    // Sparse tensors need a different implementation because their values
+    // are accessed with a different API than strided tensors
     return at::native_norm(self, p);
   } else {
     TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
@@ -480,8 +483,14 @@ Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArra
 
 static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
-  Tensor result;
-  return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  if (self.is_sparse()) {
+    // Sparse tensors need a different implementation because their values
+    // are accessed with a different API than strided tensors
+    return at::native_norm(self, p, dim, keepdim, opt_dtype);
+  } else {
+    Tensor result;
+    return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  }
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
@@ -773,7 +782,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     }
     at::add_out(result1, real_out_var, imag_out_var);
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
@@ -952,6 +961,19 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
 
 Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
   return at::norm(self - other, p);
+}
+
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
+  auto mask = (self != 0);
+  return mask.sum(dims);
+}
+
+Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
+  if (dim){
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    return at::count_nonzero(self, IntArrayRef{wrap_dim});
+  }
+  return at::count_nonzero(self, IntArrayRef{});
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

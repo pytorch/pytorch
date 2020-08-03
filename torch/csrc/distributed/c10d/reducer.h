@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/c10d/comm.h>
 
 namespace c10d {
 
@@ -52,6 +53,11 @@ class Reducer {
   std::vector<std::vector<int64_t>> get_backward_stats() const {
     return backward_stats_;
   }
+
+  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // type to allow both Python and CPP hooks. This function can only
+  // be called once before calling backward.
+  void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
  protected:
   // Forward declaration.
@@ -180,6 +186,15 @@ class Reducer {
     // std::vector<at::cuda::CUDAEvent> events;
   };
 
+  // This function is called inside `initialize_buckets` and
+  // `finalize_backward`. The function call in `initialize_bucket` creates views
+  // into the contents tensor for each variable's grad. Views serve as entry
+  // points to copy_ each grad's data in/out of the flat contents tensor. The
+  // function call in `finalize_backward` happens only if DDP communication hook
+  // was registered to recrate views with the result of `future_work`. Before
+  // `finalize_backward` call, views must be cleared.
+  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
+
   // A bucket holds N bucket replicas (1 per model replica).
   //
   // If every bucket in this struct is ready, the reduction can be kicked off.
@@ -196,6 +211,9 @@ class Reducer {
 
     // Keep work handle around when this set of buckets is being reduced.
     std::shared_ptr<c10d::ProcessGroup::Work> work;
+
+    // Keep future work handle around if DDP comm hook is registered.
+    c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
@@ -239,6 +257,10 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+
+ private:
+  // comm_hook_ is used to access the DDP communication hook if registered.
+  std::unique_ptr<CommHookInterface> comm_hook_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(

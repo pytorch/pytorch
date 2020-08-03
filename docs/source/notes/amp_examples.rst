@@ -254,6 +254,8 @@ after all optimizers used this iteration have been stepped::
                 loss0 = loss_fn(2 * output0 + 3 * output1, target)
                 loss1 = loss_fn(3 * output0 - 5 * output1, target)
 
+            # (retain_graph here is unrelated to amp, it's present because in this
+            # example, both backward() calls share some sections of graph.)
             scaler.scale(loss0).backward(retain_graph=True)
             scaler.scale(loss1).backward()
 
