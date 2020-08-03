@@ -660,19 +660,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     throw unimplemented_lowering(v);
   }
 
-  TORCH_API void visit(const Intrinsics* v) override {
+  template <typename T>
+  TORCH_API void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
     for (int i = 0; i < v->nparams(); i++) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }
-    std::vector<float> v1;
+    std::vector<T> v1;
     if (values.size() >= 1ULL) {
-      v1 = values[0].as_vec<float>();
+      v1 = values[0].as_vec<T>();
     }
-    std::vector<float> v2;
+    std::vector<T> v2;
     if (values.size() >= 2ULL) {
-      v2 = values[1].as_vec<float>();
+      v2 = values[1].as_vec<T>();
       if (v1.size() != v2.size()) {
         throw malformed_input("value size mismatch in Intrinsics", v);
       }
@@ -682,7 +683,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       throw unimplemented_lowering(v);
     }
 
-    std::vector<float> result(v1.size(), -1);
+    std::vector<T> result(v1.size(), -1);
     if (values.size() == 1ULL) {
       for (size_t i = 0; i < v1.size(); i++) {
         result[i] = compute_intrinsics(v->op_type(), v1[i]);
@@ -693,6 +694,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       }
     }
     value_ = Value(result);
+  }
+
+  TORCH_API void visit(const Intrinsics* v) override {
+    auto ty = v->dtype().scalar_type();
+    switch (ty) {
+#define TYPE_CASE(Type, Name)         \
+  case ScalarType::Name:              \
+    visit_intrinsics_helper<Type>(v); \
+    break;
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        throw unsupported_dtype();
+    }
   }
 
   void visit(const Allocate* v) override {
