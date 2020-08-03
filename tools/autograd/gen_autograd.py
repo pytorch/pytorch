@@ -27,7 +27,7 @@ import os
 import yaml
 import re
 from collections import defaultdict
-from .utils import YamlLoader, split_name_params, signature_without_args
+from .utils import YamlLoader, split_name_params, op_name_without_overload
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -238,7 +238,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
     def filter_decls(aten_decls, selected_op_list):
         if selected_op_list is None:
             return aten_decls
-        return [decl for decl in aten_decls if signature_without_args(decl) in selected_op_list]
+        return [decl for decl in aten_decls if op_name_without_overload(decl) in selected_op_list]
 
     aten_decls = filter_decls(full_aten_decls, selected_op_list)
 
@@ -261,7 +261,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(out, aten_decls, template_path)
+    # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
+    gen_variable_factories(out, full_aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):

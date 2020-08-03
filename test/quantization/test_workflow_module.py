@@ -1193,7 +1193,7 @@ class TestDistributed(QuantizationTestCase):
             torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
             torch.quantization.RecordingObserver.with_args(dtype=torch.qint8),
-            torch.quantization.NoopObserver.with_args(dtype=torch.float16),
+            torch.quantization.PlaceholderObserver.with_args(dtype=torch.float16),
         ]
 
         for observer_type in observer_types:

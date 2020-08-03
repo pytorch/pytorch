@@ -53,6 +53,15 @@ OPERATOR_SCHEMA(SparseAdam)
     .NumInputs(7)
     .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // ITER input lives on CPU
+      in_dev[6] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 
     Computes the Adam Update for the sparse case.
@@ -85,6 +94,15 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .NumInputs(7)
     .NumOutputs(3, 4)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // ITER input lives on CPU
+      in_dev[6] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 
     Computes a modified Adam Update for the sparse case.

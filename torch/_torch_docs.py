@@ -5704,6 +5704,25 @@ Example::
     tensor([ 1., -1.,  0.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.signbit,
+           r"""
+signbit(input, *, out=None) -> Tensor
+
+Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
+    >>> torch.signbit(a)
+    tensor([ False, True,  False,  False])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
@@ -7216,23 +7235,16 @@ Example::
     torch.Size([2, 3])
 """.format(**factory_common_args))
 
-add_docstr(torch.full,
-           r"""
-full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+add_docstr(torch.full, r"""
+full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
-
-.. warning::
-    Providing a bool or integral :attr:`fill_value` without setting
-    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
-    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
-    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
-    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
+Creates a tensor of size :attr:`size` filled with :attr:`fill_value`. The
+tensor's dtype is inferred from :attr:`fill_value`.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-    fill_value: the number to fill the output tensor with.
+    fill_value (Scalar): the value to fill the output tensor with.
     {out}
     {dtype}
     {layout}
@@ -7244,7 +7256,6 @@ Example::
     >>> torch.full((2, 3), 3.141592)
     tensor([[ 3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416]])
-
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
@@ -7319,10 +7330,18 @@ The operation is defined as:
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
+.. note::
+    Currently valid scalar and tensor combination are
+    1. Scalar of floating dtype and torch.double
+    2. Scalar of integral dtype and torch.long
+    3. Scalar of complex dtype and torch.complex128
+
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor): values selected at indices where :attr:`condition` is ``True``
-    y (Tensor): values selected at indices where :attr:`condition` is ``False``
+    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``True``
+    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -7339,6 +7358,13 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+    >>> x = torch.randn(2, 2, dtype=torch.double)
+    >>> x
+    tensor([[ 1.0779,  0.0383],
+            [-0.8785, -1.1089]], dtype=torch.float64)
+    >>> torch.where(x > 0, x, 0.)
+    tensor([[1.0779, 0.0383],
+            [0.0000, 0.0000]], dtype=torch.float64)
 
 .. function:: where(condition) -> tuple of LongTensor
 
