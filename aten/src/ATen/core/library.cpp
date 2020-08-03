@@ -98,8 +98,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
     // in the end in any case (and if it turns out you DON'T have the right
     // information at the site, as is the case with backend specific
     // per-op registrations, you will get the right behavior!)
-    TORCH_CHECK(false,
-      *ns_opt == *ns_,
+    TORCH_CHECK(*ns_opt == *ns_,
       "Explicitly provided namespace (", *ns_opt, ") in schema string "
       "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
       "Move this definition to the (unique) TORCH_LIBRARY block corresponding to this namespace "

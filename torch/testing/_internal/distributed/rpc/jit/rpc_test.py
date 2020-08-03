@@ -1,4 +1,5 @@
 import time
+import io
 from typing import Dict, List, Tuple
 
 import torch
@@ -753,7 +754,7 @@ class JitRpcAsyncOpTest:
             ret = fut.wait()
             return ret
 
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
             ret = rpc_async_call_remote_raising_torchscript_in_torchscript(
                 dst_worker_name
             )
@@ -832,6 +833,12 @@ def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
 @torch.jit.script
 def async_wrong_type() -> Tensor:
     return torch.zeros(2)
+
+
+def load_script_module_with_pickled_rref(pickled_script_module):
+    f = io.BytesIO(pickled_script_module)
+    m = torch.jit.load(f)
+    return m()
 
 
 class JitRpcTest(
@@ -929,6 +936,26 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_load_script_module_with_pickled_rref(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        m1 = MyScriptModuleWithRRefs(dst_name)
+        m2 = MyScriptModuleWithRRefs(dst_name)
+
+        f = io.BytesIO()
+
+        rpc._enable_jit_rref_pickle()
+        torch.jit.save(m1, f)
+        rpc._disable_jit_rref_pickle()
+
+        out1 = rpc.rpc_sync(
+            dst_name,
+            load_script_module_with_pickled_rref,
+            args=(f.getvalue(),)
+        )
+        out2 = m2()
+        self.assertEqual(out1, out2)
 
     @dist_init
     def test_rref_jit_pickle_not_supported(self):
@@ -1033,7 +1060,7 @@ class JitRpcTest(
             with torch.autograd.profiler.profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
-                    torch.jit._qualified_name(one_arg),
+                    torch._jit_internal._qualified_name(one_arg),
                     "worker0",
                     "worker1",
                 )
@@ -1045,7 +1072,49 @@ class JitRpcTest(
             # After that, this test should be modified to validate the function time.
             events = prof.function_events
             function_event = get_function_event(events, prof_key)
-            self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
+            self.assertTrue(torch._jit_internal._qualified_name(one_arg) in function_event.name)
+
+    @dist_init
+    def test_rpc_async_jit_profiled(self):
+        # Tests that rpc_async calls made from within a TorchScript function are
+        # profiled.
+        if self.rank == 0:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker_name = worker_name(dst_rank)
+            args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+            kwargs = {}
+            with torch.autograd.profiler.profile() as prof:
+                rpc_async_call_remote_torchscript_in_torchscript(
+                    dst_worker_name, args, kwargs
+                )
+
+            # Ensure rpc_async call is profiled
+            function_events = prof.function_events
+            qual_name = torch._jit_internal._qualified_name(two_args_two_kwargs)
+            rpc_async_jit_event = [
+                event
+                for event in function_events
+                if qual_name in event.name and event.node_id == self.rank
+            ]
+            self.assertEqual(len(rpc_async_jit_event), 1)
+            rpc_async_jit_event = rpc_async_jit_event[0]
+            profiled_name = f"rpc_async_jit#({qual_name})#({worker_name(self.rank)})->({dst_worker_name})"
+            self.assertEqual(profiled_name, rpc_async_jit_event.name)
+            remote_events = [event for event in function_events if event.is_remote]
+            # All remote events should have taken place on dst_rank
+            remote_event_node_ids = {
+                remote_event.node_id for remote_event in remote_events
+            }
+            self.assertEqual(remote_event_node_ids, {dst_rank})
+            # rpc_async_call_remote_torchscript_in_torchscript invokes add operator
+            # so we should see this as a remote event.
+            remote_add = [
+                remote_event
+                for remote_event in remote_events
+                if "aten::add" in remote_event.name
+            ][0]
+            remote_add_profiled_name = f"{profiled_name}#remote_op: aten::add"
+            self.assertEqual(remote_add.name, remote_add_profiled_name)
 
     def test_record_function_jit_end_callbacks_with_fork(self):
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit

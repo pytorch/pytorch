@@ -8,49 +8,6 @@
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
 
-accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
-{
-  at::NoNamesGuard guard;
-  if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
-    THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimension(self), THTensor_nDimension(src));
-  }
-
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  THArgCheck(THCTensor_(nElement)(state, self) ==
-             THCTensor_(nElement)(state, src), 2, "sizes do not match");
-
-  self = THCTensor_(newContiguous)(state, self);
-  src = THCTensor_(newContiguous)(state, src);
-
-#ifdef THC_REAL_IS_FLOAT
-  accreal result = THCudaBlas_Sdot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#elif defined(THC_REAL_IS_DOUBLE)
-  accreal result = THCudaBlas_Ddot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#elif defined(THC_REAL_IS_HALF)
-  accreal result = THCudaBlas_Hdot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#endif
-
-  THCTensor_(free)(state, src);
-  THCTensor_(free)(state, self);
-  return result;
-
-#else
-  ERROR_ONLY_FP_TYPES("dot");
-  return ScalarConvert<int, accreal>::to(0);
-#endif
-}
-
 __global__ void createBatchGemmBuffer3(const scalar_t** buffer1, const scalar_t ** buffer2, const scalar_t ** buffer3, scalar_t* data1,
                                        scalar_t * data2, scalar_t * data3, int64_t stride1, int64_t stride2, int64_t stride3, int64_t num_batches) {
   const int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;

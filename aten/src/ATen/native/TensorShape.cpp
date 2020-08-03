@@ -510,6 +510,25 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
+std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0,
+           "chunk expects at least a 1-dimensional tensor");
+  TORCH_CHECK(chunks > 0,
+           "chunk expects `chunks` to be greater than 0, got: ", chunks);
+
+  std::vector<Tensor> result;
+  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+
+  // See the comment above in chunk(...)
+  if (split_size == 0 && self.size(dim) == 0) {
+    std::vector<int64_t> split_sizes(chunks, split_size);
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    return self.unsafe_split_with_sizes(split_sizes, dim);
+  } else {
+    return self.unsafe_split(split_size, dim);
+  }
+}
+
 Tensor diagflat(const Tensor& self, int64_t offset) {
   return self.contiguous().view(-1).diag(offset);
 }
@@ -1052,6 +1071,14 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
+  auto result = at::native::split(self, split_size, dim);
+  for (auto& t : result) {
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+  }
+  return result;
+}
+
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
@@ -1072,6 +1099,14 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
            "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
            " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
   return splits;
+}
+
+std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+  auto result = at::native::split_with_sizes(self, split_sizes, dim);
+  for (auto& t : result) {
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+  }
+  return result;
 }
 
 // Precondition: tensors is non-empty
@@ -1656,6 +1691,91 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
+}
+
+Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
+              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+
+  size_t self_dim = self.dim();
+  DimVector normalized_src(src.size());
+  DimVector normalized_dst(dst.size());
+
+  auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
+    for (int i = 0; i < vec.size(); i++) {
+      normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
+    }
+  };
+
+  wrap_dims(src, normalized_src);
+  wrap_dims(dst, normalized_dst);
+
+  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
+  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `source` (", src, ")");
+  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
+  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `destination` (", dst, ")");
+
+  // TODO: The algorithm below can probably be optimized.
+  // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
+
+  // Algorithm Walkthrough
+  // Example Input
+  // Variable State:
+  //     normalized_src = 0, 1
+  //     normalized_dst = 2, 4
+  //     self_dim = 5
+  DimVector order(self_dim);
+  DimVector source_dims(self_dim);
+  DimVector destination_dims(self_dim);
+
+  // We initialize two vectors to track update to the dims
+  // `order` contains the final order of the dim positions.
+  // Variable State:
+  //     order = NA, NA, NA, NA, NA
+  //     source_dims = 0, 1, 2, 3, 4
+  //     destination_dims = 0, 1, 2, 3, 4
+  std::iota(source_dims.begin(), source_dims.end(), 0);
+  std::iota(destination_dims.begin(), destination_dims.end(), 0);
+
+  // We mark and update position for the dim provided by user
+  // i.e. `normalized_src` and `normalized_dims`
+  // Variable State:
+  //     order = NA, NA, 0, NA, 1
+  //     source_dims = -1, -1, 2, 3, 4
+  //     destination_dims = 0, 1, -1, 3, -1
+  for (int64_t i = 0; i < src.size(); ++i) {
+      order[normalized_dst[i]] = normalized_src[i];
+      source_dims[normalized_src[i]] = -1;
+      destination_dims[normalized_dst[i]] = -1;
+  }
+
+  // Remove the dims whose position we already know,
+  // the ones marked with -1 in previous step
+  // Variable State:
+  //     source_dims = 2, 3, 4
+  //     destination_dims = 0, 1, 3
+  auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
+  auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
+
+  int64_t rest_dim = self.dim() - src.size();
+  TORCH_INTERNAL_ASSERT(std::distance(source_dims.begin(), source_iter)  == rest_dim);
+  TORCH_INTERNAL_ASSERT(std::distance(destination_dims.begin(), destination_iter)  == rest_dim);
+
+  // Update the position of the remaining dimensions.
+  // `source_dims` now contains the original position
+  // `destination_dims` contains the new position it will shifted to
+  // after considering the user inputs.
+  // Variable State:
+  //     order = 2, 3, 0, 4, 1
+  for (int64_t i = 0; i < rest_dim; ++i) {
+      order[destination_dims[i]] = source_dims[i];
+  }
+
+  return self.permute(order);
+}
+
+Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
 }} // at::native

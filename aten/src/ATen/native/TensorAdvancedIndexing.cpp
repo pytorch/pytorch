@@ -71,13 +71,13 @@ DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
-DEFINE_DISPATCH(masked_select_serial_stub);
-DEFINE_DISPATCH(masked_select_stub);
 
 DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
+DEFINE_DISPATCH(scatter_reduce_stub);
+DEFINE_DISPATCH(scatter_scalar_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -389,11 +389,14 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      // TODO: Maybe TensorAccessor can beused here?
+      auto* self_ptr = self.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
-        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+        scalar_t *self_ip = self_ptr + self_i * self_stride;
+        *self_ip += *(source_ptr + i * source_stride);
       }
     });
   }
@@ -533,12 +536,57 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_stub(self.device().type(), self, dim, index, source);
   return self;
 }
 
 Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_fill_stub(self.device().type(), self, dim, index, source);
+  return self;
+}
+
+SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
+  if (reduce == "add") {
+    return SCATTER_GATHER_OP::REDUCE_ADD;
+  }
+  else if (reduce == "subtract") {
+    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
+  }
+  else if (reduce == "multiply") {
+    return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+  }
+  else if (reduce == "divide") {
+    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
+  }
+  else {
+    TORCH_CHECK(false,
+                "reduce argument must be either of add, subtract, multiply or divide.");
+  } 
+}
+
+Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+                                   Scalar value, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
+  SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
+  return self;
+}
+
+Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+                      const Tensor & src, const std::string reduce) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
+  SCATTER_GATHER_OP op = get_operator_enum(reduce);
+  scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
 }
 
@@ -551,6 +599,8 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
@@ -627,82 +677,6 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
-}
-
-static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
-  NoNamesGuard guard;
-
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
-              "masked_select(): self and result must have the same scalar type");
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
-
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-
-  auto shape = _self.sizes();
-  int64_t numel = _mask.sum().item().toLong();
-  result.resize_({numel});
-  if (numel == 0) {
-    return result;
-  }
-
-  // Create strided view of result before feeding into TensorIterator
-  auto strides = DimVector(shape.size(), 0);
-  auto result_strided = result.as_strided(shape, strides);
-
-  // serial kernel
-  bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  if (use_serial_kernel) {
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .resize_outputs(false)
-      .add_output(result_strided)
-      .add_input(_self)
-      .add_input(_mask)
-      .build();
-
-    masked_select_serial_stub(iter.device_type(), iter);
-    return result;
-  }
-
-  // Use a prefix sum to record the output locations of the masked elements,
-  // so as to parallel with TensorIterator.
-  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
-  auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
-  auto mask_long_data = mask_long.data_ptr<int64_t>();
-  auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
-  // TODO: Here can only use std::partial_sum for C++14,
-  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
-  // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
-  std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
-
-  auto iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .resize_outputs(false)
-    .add_output(result_strided)
-    .add_input(_self)
-    .add_input(_mask)
-    .add_input(mask_prefix_sum)
-    .build();
-
-  masked_select_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  return masked_select_out_impl_cpu(result, self, mask);
-}
-
-Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
-  Tensor result = at::empty({0}, self.options());
-  return masked_select_out_cpu(result, self, mask);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

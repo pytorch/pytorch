@@ -23,8 +23,12 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     result.fill_(start);
   } else {
-    auto iter = TensorIterator::nullary_op(result);
+    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    auto iter = TensorIterator::nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
   }
 
   return result;

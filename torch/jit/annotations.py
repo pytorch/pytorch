@@ -1,13 +1,16 @@
 import ast
+import enum
 import inspect
+import os
 import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, FutureType
+    DeviceObjType, FutureType, EnumType
+
 
 from textwrap import dedent
 from torch._six import builtins
@@ -105,6 +108,8 @@ def get_param_names(fn, n_args):
         fn = fn.__call__
 
     if is_function_or_method(fn):
+        if is_ignored_fn(fn):
+            fn = inspect.unwrap(fn)
         return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
@@ -240,6 +245,29 @@ def try_real_annotations(fn, loc):
     return arg_types, return_type
 
 
+# Finds common type for enum values belonging to an Enum class. If not all
+# values have the same type, AnyType is returned.
+def get_enum_value_type(e: enum.Enum, loc):
+    enum_values = list(e)
+    if not enum_values:
+        raise ValueError("No enum values defined for: '{}'".format(e.__class__))
+
+    types = set([type(v.value) for v in enum_values])
+    ir_types = [try_ann_to_type(t, loc) for t in types]
+
+    # If Enum values are of different types, an exception will be raised here.
+    # Even though Python supports this case, we chose to not implement it to
+    # avoid overcomplicate logic here for a rare use case. Please report a
+    # feature request if you find it necessary.
+    return torch._C.unify_type_list(ir_types)
+
+
+# Guards against using Enum support in JIT before the feature is complete.
+# TODO(gmagogsfm): remove this check once Enum support is complete.
+def is_enum_support_enabled() -> bool:
+    return os.environ.get('EXPERIMENTAL_ENUM_SUPPORT', "0") == "1"
+
+
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
@@ -257,9 +285,11 @@ def try_ann_to_type(ann, loc):
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
-            return OptionalType(try_ann_to_type(ann.__args__[0], loc))
+            valid_type = try_ann_to_type(ann.__args__[0], loc)
         else:
-            return OptionalType(try_ann_to_type(ann.__args__[1], loc))
+            valid_type = try_ann_to_type(ann.__args__[1], loc)
+        assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(ann))
+        return OptionalType(valid_type)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
@@ -282,12 +312,17 @@ def try_ann_to_type(ann, loc):
         return DeviceObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if inspect.isclass(ann) and issubclass(ann, enum.Enum):
+        if not is_enum_support_enabled():
+            raise NotImplementedError(
+                "Enum support is work in progress, please do not use it now")
+        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
-            torch.jit._recursive_compile_class(ann, loc)
+            torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))
 
     # Maybe resolve a NamedTuple to a Tuple Type

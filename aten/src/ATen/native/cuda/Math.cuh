@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/AccumulateType.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
@@ -86,6 +87,18 @@ static inline __host__ __device__ scalar_t calc_trigamma(scalar_t in) {
   const accscalar_t ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
   return static_cast<scalar_t>(sign * result);
+}
+
+template <typename scalar_t>
+static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
+  scalar_t a = ::abs(a_in);
+  scalar_t b = ::abs(b_in);
+  while (a != 0) {
+    scalar_t c = a;
+    a = b % a;
+    b = c;
+  }
+  return b;
 }
 
 }

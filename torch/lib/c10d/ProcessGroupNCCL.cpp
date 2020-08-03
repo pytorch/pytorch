@@ -52,15 +52,30 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kInt, ncclInt32},
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
+    {at::kBool, ncclUint8},
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
+    {at::kBFloat16, ncclBfloat16},
+#endif
 };
 
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
-  try {
-    return ncclDataType.at(type);
-  } catch (std::out_of_range& e) {
-    throw std::runtime_error("Unsupported data type for NCCL process group");
+  auto it = ncclDataType.find(type);
+  TORCH_CHECK(
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
+  return it->second;
+}
+
+ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
+  if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+    // For bool tensors, map sum to max, which both represent a bitwise or.
+    // This is to prevent overflow issues with sum, since we use uint8 to
+    // represent a bool (see ncclDataType mapping).
+    return ncclMax;
   }
+  return ncclOp[reduceOp];
 }
 
 // Get the deviceList String from the list of devices
@@ -199,8 +214,15 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
-// Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
+  // Call Synchronize without a timeout. We use this method to avoid adding a
+  // timeout argument to the public synchronize API.
+  synchronizeInternal(kNoTimeout);
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
@@ -209,11 +231,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
+    // Use the passed in timeout if provided, otherwise use the default
+    // opTimeout for each WorkNCCL object.
+    std::chrono::milliseconds workTimeout =
+        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - workStartTime_) > opTimeout_) {
+              currentTimepoint - workStartTime_) > workTimeout) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -251,14 +277,29 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-bool ProcessGroupNCCL::WorkNCCL::wait() {
-  synchronize();
+bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
   TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
+}
+
+void ProcessGroupNCCL::parseNcclBlockingWait() {
+  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
+  if (blockingWait != nullptr) {
+    auto val = std::stoi(blockingWait);
+    if (val == 1) {
+      // Make wait() and synchronize() a blocking call.
+      blockingWait_ = true;
+    } else if (val != 0) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(NCCL_BLOCKING_WAIT));
+    }
+  }
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -271,19 +312,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       terminateWatchdog_(false),
       opTimeout_(opTimeout) {
-  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
   try {
-    if (blockingWait != nullptr) {
-      auto val = std::stoi(blockingWait);
-      if (val == 1) {
-        // Make wait() and synchronize() a blocking call.
-        blockingWait_ = true;
-      } else if (val != 0) {
-        throw std::runtime_error(
-            "Invalid value for environment variable: " +
-            std::string(NCCL_BLOCKING_WAIT));
-      }
-    }
+    parseNcclBlockingWait();
   } catch (std::exception& e) {
     throw std::runtime_error(
         "Invalid value for environment variable: " +
@@ -302,6 +332,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
+
+  {
+    // Abort all NCCL Communicators on Process Group Destruction
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end(); it++) {
+      auto& ncclComms = it->second;
+
+      for (const auto& ncclComm : ncclComms) {
+        ncclComm->ncclCommAbort();
+      }
+    }
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -722,7 +764,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       });
@@ -776,7 +818,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             root,
             comm,
             stream.stream());
@@ -858,7 +900,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
             output.data_ptr(),
             output.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       },

@@ -31,7 +31,7 @@ RegisterOperators reg_rpc_ops(
          fmt::format(
              "aten::to_here(RRef(t) self, float timeout = {}) -> t(*)",
              torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto timeout = pop(stack).toDouble();
            auto rref = pop(stack).toRRef();
            IValue res;
@@ -44,12 +44,11 @@ RegisterOperators reg_rpc_ops(
                        ->toHere(timeout);
            }
            push(stack, std::move(res));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::local_value(RRef(t) self) -> t(*)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto rref = pop(stack).toRRef();
            TORCH_CHECK(
                rref->isOwner(),
@@ -58,63 +57,57 @@ RegisterOperators reg_rpc_ops(
                c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
                    ->getValue();
            push(stack, std::move(res));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::is_owner(RRef(t) self) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->isOwner());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::owner(RRef(t) self) -> __torch__.torch.classes.dist_rpc.WorkerInfo",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto rref = pop(stack).toRRef();
            push(
                stack,
                torch::make_custom_class<distributed::rpc::WorkerInfo>(
                    rref->ownerName(), rref->owner()));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::owner_name(RRef(t) self) -> str",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->ownerName());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::confirmed_by_owner(RRef(t) self) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto rref = pop(stack).toRRef();
            push(stack, rref->confirmedByOwner());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool retain_graph = pop(stack).toBool();
            auto roots_list = pop(stack).toTensorList();
            int64_t context_id = pop(stack).toInt();
            torch::autograd::variable_list roots(
                roots_list.begin(), roots_list.end());
            dist_autograd::backward(context_id, roots, retain_graph);
-           return 0;
          },
          aliasAnalysisConservative()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
-           return [num_inputs](Stack& stack) {
+           return [num_inputs](Stack* stack) {
              // Get inputs from the stack.
-             auto stackIter = stack.end() - num_inputs;
+             auto stackIter = stack->end() - num_inputs;
              auto& dstWorkerIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
@@ -225,8 +218,7 @@ RegisterOperators reg_rpc_ops(
 
              // Push output to the stack.
              drop(stack, num_inputs);
-             stack.emplace_back(std::move(futureIValuePtr));
-             return 0;
+             stack->emplace_back(std::move(futureIValuePtr));
            };
          },
          aliasAnalysisSpecialCase())});

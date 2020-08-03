@@ -23,14 +23,23 @@ class FeatureSparseToDense(ModelLayer):
         `input_specs` follows the format of FeatureSpec from schema. To be more
         precise it's a namedtuple that should have:
             'feature_type', 'feature_names', 'feature_ids'
+        Default_dense_value can only be 0.0 or float("NaN"). Any input that isn't
+        None will be NaN.
         """
         super(FeatureSparseToDense, self).__init__(model, name, input_record, **kwargs)
+        if default_dense_value is None:
+            default_dense_value = 0.0
+        default_dense_value = float(default_dense_value)
+        assert (
+            np.isnan(default_dense_value) or default_dense_value == 0.0
+        ), "default_dense_value can only be 0.0 or NaN"
 
         self.input_specs = input_specs
-        model.maybe_add_global_constant(
-            "DEFAULT_FLOAT_FEATURE_VALUE", float(default_dense_value or 0.0)
+        self.default_float_value = (
+            model.global_constants["NAN"]
+            if np.isnan(default_dense_value)
+            else model.global_constants["ZERO"]
         )
-        self.default_float_value = model.global_constants["DEFAULT_FLOAT_FEATURE_VALUE"]
         self.zero_range = model.global_constants["ZERO_RANGE"]
 
         outputs = []

@@ -182,8 +182,13 @@ find_library(PYTORCH_LIBRARY pytorch_jni
   PATHS ${PYTORCH_LINK_DIRS}
   NO_CMAKE_FIND_ROOT_PATH)
 
+find_library(FBJNI_LIBRARY fbjni
+  PATHS ${PYTORCH_LINK_DIRS}
+  NO_CMAKE_FIND_ROOT_PATH)
+
 target_link_libraries(${PROJECT_NAME}
   ${PYTORCH_LIBRARY})
+  ${FBJNI_LIBRARY})
 
 ```
 If your CMakeLists.txt file is located in the same directory as your build.gradle, `set(build_DIR ${CMAKE_SOURCE_DIR}/build)` should work for you. But if you have another location of it, you may need to change it.

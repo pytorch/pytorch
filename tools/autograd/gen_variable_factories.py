@@ -66,7 +66,11 @@ def process_function(decl, has_tensor_options):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            actual = "at::TensorOptions({})".format(actual)
+            # note: we remove the requires_grad setting from the TensorOptions because
+            # it is ignored anyways (and we actually have an assertion that it isn't set
+            # which would fail otherwise). We handle requires_grad explicitly here
+            # instead of passing it through to the kernel.
+            actual = "at::TensorOptions({}).requires_grad(c10::nullopt)".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
 

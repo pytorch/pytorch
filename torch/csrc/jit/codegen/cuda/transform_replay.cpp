@@ -15,7 +15,7 @@ using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
 namespace {
 
-struct ReplaySelf : public ReplayTransformations {
+class ReplaySelf : public ReplayTransformations {
  private:
   // Took a good bit of this from ReplayTransformations::handle(Split...)
   void handle(Split* s) override {
@@ -129,8 +129,8 @@ struct ReplaySelf : public ReplayTransformations {
 
 // Self replay.
 TensorDomain* TransformReplay::fullSelfReplay(
-    TensorDomain* new_self_root,
-    TensorDomain* self) {
+    const TensorDomain* new_self_root,
+    const TensorDomain* self) {
   TORCH_INTERNAL_ASSERT(
       new_self_root->nDims() == self->rootDomain().size(),
       "Invalid number of IterDomains provided.");
@@ -174,15 +174,14 @@ TensorDomain* TransformReplay::fullSelfReplay(
   return new TensorDomain(new_self_root->domain(), new_domain);
 }
 
-// Replay producer as consumer.
 // Producer could have rfactor axes which consumer may want replayed. We can
 // "replay" them as long as it doesn't modify the root rfactor axes. What we
 // really want to do is validate if we replayed these axes to the ones they
 // mapped to in the consumer the operations would all be the same. then we want
 // to start the replay of the producer from the rfactor root axes, not the root.
-TensorDomain* TransformReplay::replayPasC(
-    TensorDomain* producer,
-    TensorDomain* consumer,
+std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
+    const TensorDomain* producer,
+    const TensorDomain* consumer,
     int consumer_compute_at_axis) {
   if (consumer_compute_at_axis < 0)
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
@@ -192,17 +191,9 @@ TensorDomain* TransformReplay::replayPasC(
       "Invalid axis in transform replayPasC.");
 
   // consumer ids we need to match in producer
-  std::vector<IterDomain*> consumer_CA_ids;
-  {
-    int itc = 0;
-    while (itc < consumer_compute_at_axis) {
-      if (consumer->axis(itc)->isBroadcast()) {
-        itc++;
-      } else {
-        consumer_CA_ids.emplace_back(consumer->axis(itc++));
-      }
-    }
-  }
+  std::vector<IterDomain*> consumer_CA_ids(
+      consumer->domain().begin(),
+      consumer->domain().begin() + consumer_compute_at_axis);
 
   // Figure out all inputs required to generate the compute_at dimensions
   std::unordered_set<Val*> consumer_CA_root_ids = IterVisitor::getInputsTo(
@@ -228,7 +219,8 @@ TensorDomain* TransformReplay::replayPasC(
   {
     size_t itc = 0, itp = 0;
     while (itc < consumer_root.size() || itp < producer_root.size()) {
-      if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast()) {
+      if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast() &&
+          (itp >= producer_root.size() || !producer_root[itp]->isBroadcast())) {
         itc++;
         continue;
       }
@@ -273,11 +265,14 @@ TensorDomain* TransformReplay::replayPasC(
   // rest
   for (auto c_id : consumer_CA_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
-    TORCH_INTERNAL_ASSERT(
-        it != replay_PasC.getReplay().end(),
-        "Could not find axis, ",
-        c_id,
-        ", requested in replay.");
+    if (it == replay_PasC.getReplay().end()) {
+      TORCH_INTERNAL_ASSERT(
+          c_id->isBroadcast(),
+          "Could not find axis, ",
+          c_id,
+          ", requested in replay.");
+      continue;
+    }
     if (leaf_ids.find(it->second) != leaf_ids.end())
       leaf_ids.erase(it->second);
   }
@@ -328,15 +323,19 @@ TensorDomain* TransformReplay::replayPasC(
   // Add axes in (1)
   for (auto c_id : consumer_CA_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
-    TORCH_INTERNAL_ASSERT(
-        it != replay_PasC.getReplay().end(),
-        "Could not find axis, ",
-        c_id,
-        ", requested in replay.");
+    if (it == replay_PasC.getReplay().end()) {
+      TORCH_INTERNAL_ASSERT(
+          c_id->isBroadcast(),
+          "Could not find axis, ",
+          c_id,
+          ", requested in replay.");
+      continue;
+    }
     new_IDs.push_back(it->second);
     used_IDs.emplace(it->second);
   }
 
+  unsigned int producer_compute_at_axis = new_IDs.size();
   // Add axes in (2)
   std::unordered_set<IterDomain*> consumer_CA_ids_set(
       consumer_CA_ids.begin(), consumer_CA_ids.end());
@@ -369,16 +368,16 @@ TensorDomain* TransformReplay::replayPasC(
 
   TensorDomain* replayed = new TensorDomain(
       producer->rootDomain(), producer->rfactorDomain(), new_IDs);
-  return replayed;
+  return {replayed, producer_compute_at_axis};
 }
 
-// Replay consumer as producer.
-TensorDomain* TransformReplay::replayCasP(
-    TensorDomain* consumer,
-    TensorDomain* producer,
+std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
+    const TensorDomain* consumer,
+    const TensorDomain* producer,
     int producer_compute_at_axis) {
   if (producer_compute_at_axis < 0)
     producer_compute_at_axis += (int)producer->nDims() + 1;
+
   TORCH_INTERNAL_ASSERT(
       producer_compute_at_axis >= 0 &&
           (unsigned int)producer_compute_at_axis <= producer->nDims(),
@@ -397,20 +396,30 @@ TensorDomain* TransformReplay::replayCasP(
     }
   }
 
-  // Figure out all inputs required to generate the compute_at dimensions
-  std::unordered_set<Val*> producer_CA_root_ids = IterVisitor::getInputsTo(
-      std::vector<Val*>(producer_CA_ids.begin(), producer_CA_ids.end()));
-
   // Map of producer_CA_root_ids to related producer_CA_ids
   id_map replay_root_map;
 
   // Grab root domains of producer and consumer
   std::vector<IterDomain*> consumer_root = consumer->rootDomain();
   std::vector<IterDomain*> producer_root = producer->rootDomain();
+
   // If producer has an rfactor root, that's the one that will match the
   // consumer
   if (producer->hasRFactor())
     producer_root = producer->rfactorDomain();
+
+  // Figure out all inputs required to generate the compute_at dimensions
+  std::unordered_set<Val*> all_CA_id_deps = DependencyCheck::getAllValsBetween(
+      std::unordered_set<Val*>(
+          producer->rootDomain().begin(), producer->rootDomain().end()),
+      std::vector<Val*>(producer_CA_ids.begin(), producer_CA_ids.end()));
+
+  // Figure out which root IDs we need:
+  std::unordered_set<Val*> producer_CA_root_ids;
+  for (Val* val : producer_root) {
+    if (all_CA_id_deps.find(val) != all_CA_id_deps.end())
+      producer_CA_root_ids.emplace(val);
+  }
 
   // Track which root axes in consumer we send to replay
   std::unordered_set<IterDomain*> consumer_roots4replay;
@@ -419,7 +428,8 @@ TensorDomain* TransformReplay::replayCasP(
   {
     size_t itc = 0, itp = 0;
     while (itc < consumer_root.size() || itp < producer_root.size()) {
-      if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast()) {
+      if (itc < consumer_root.size() && consumer_root[itc]->isBroadcast() &&
+          (itp > producer_root.size() || !producer_root[itp]->isBroadcast())) {
         itc++;
         continue;
       }
@@ -561,11 +571,11 @@ TensorDomain* TransformReplay::replayCasP(
   TensorDomain* replayed = new TensorDomain(
       consumer->rootDomain(), consumer->rfactorDomain(), new_IDs);
 
-  return replayed;
+  return {replayed, producer_CA_ids.size()};
 }
 
 // replay Producer as Consumer
-TensorView* TransformReplay::replayPasC(
+std::pair<TensorView*, unsigned int> TransformReplay::replayPasC(
     TensorView* producer,
     TensorView* consumer,
     int compute_at_axis) {
@@ -573,26 +583,26 @@ TensorView* TransformReplay::replayPasC(
 
   // tensor view. When this happens, just return thet target view.
   if (producer == consumer)
-    return producer;
+    return {producer, 0};
 
-  TensorDomain* td =
+  std::pair<TensorDomain*, unsigned int> replay =
       replayPasC(producer->domain(), consumer->domain(), compute_at_axis);
-  producer->setDomain(td);
-  return producer;
+  producer->setDomain(replay.first);
+  return {producer, replay.second};
 }
 
-TensorView* TransformReplay::replayCasP(
+std::pair<TensorView*, unsigned int> TransformReplay::replayCasP(
     TensorView* consumer,
     TensorView* producer,
     int compute_at_axis) {
   // If this is a reduction operation, we may call transform_replay on the same
   // tensor view. When this happens, just return thet target view.
   if (consumer == producer)
-    return consumer;
-  TensorDomain* td =
+    return {consumer, 0};
+  std::pair<TensorDomain*, unsigned int> replay =
       replayCasP(consumer->domain(), producer->domain(), compute_at_axis);
-  consumer->setDomain(td);
-  return consumer;
+  consumer->setDomain(replay.first);
+  return {consumer, replay.second};
 }
 
 } // namespace fuser

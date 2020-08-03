@@ -8,7 +8,7 @@ namespace native {
 // is larger than the memory used by all the elements, we'll
 // convert it to dense tensor, otherwise we'll keep the memory
 // format of the output the same as input
-Tensor int_repr_quant_cpu(const Tensor& self) {
+Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(

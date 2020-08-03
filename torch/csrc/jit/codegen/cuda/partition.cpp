@@ -13,7 +13,7 @@ namespace {
 //   1. TensorType
 //   2. on the same device;
 // TODO: update this when codegen can output scalar
-static c10::optional<c10::Device> getDevice(const Value* const value) {
+static c10::optional<c10::Device> getDevice(const Value* value) {
   if (!value->type()->isSubtypeOf(TensorType::get())) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
@@ -21,7 +21,7 @@ static c10::optional<c10::Device> getDevice(const Value* const value) {
   return value->type()->expect<TensorType>()->device();
 }
 
-static c10::optional<c10::Device> getDevice(const Node* const node) {
+static c10::optional<c10::Device> getDevice(const Node* node) {
   auto outputs = node->outputs();
   for (auto output : outputs) {
     auto device = getDevice(output);
@@ -51,25 +51,39 @@ static bool isFusableDevice(const Node* node) {
   return device->is_cuda();
 }
 
-inline bool isFusableNode(const Node* const node) {
+inline bool isFusableNode(const Node* node) {
   // checks if node is compatible with parser:
   // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 
+bool hasReductionOperation(const Node* node) {
+  if (isReductionNode(node)) {
+    return true;
+  }
+  if (node->kind() == prim::CudaFusionGroup) {
+    for (auto n : node->g(attr::Subgraph)->nodes()) {
+      if (hasReductionOperation(n)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 } // namespace
 
-bool isFusableCudaFusionGroup(const Node* const node) {
+bool isFusableCudaFusionGroup(const Node* node) {
   if (isFusableNode(node)) {
     return isFusableDevice(node);
   }
   return false;
 }
 
-bool isFusableCudaFusionGroup(
-    const Node* const fusion,
-    const Node* const node) {
-  if (isFusableCudaFusionGroup(node)) {
+bool isFusableCudaFusionGroup(const Node* fusion, const Node* node) {
+  // TODO: lift the restriction of not fusing producer containing reduction when
+  //       we have proper scheduling.
+  if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node)) {
     // TODO: ensure legit fusion.
     // issue 0: currently codegen doesn't support broadcasting, except in the
     //          form of stride 0.

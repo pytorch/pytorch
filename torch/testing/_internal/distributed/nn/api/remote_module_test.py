@@ -67,10 +67,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
     def world_size(self):  # Override setting in RpcAgentTestFixture
         return 2
 
-    def setUp(self):
-        super().setUp()
-        self._fork_processes()
-
     @staticmethod
     def _create_remote_module_iter(dst_worker_name, modes=None):
         if modes is None:
@@ -106,13 +102,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instancee of <class nn.Module>,",
+            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
             RemoteModule(dst_worker_name, BadModule, args, kwargs)
 
         with self.assertRaisesRegex(
             ValueError,
-            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instancee of <class nn.Module>,",
+            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
             RemoteModule(dst_worker_name, BadModule, args, kwargs)
 

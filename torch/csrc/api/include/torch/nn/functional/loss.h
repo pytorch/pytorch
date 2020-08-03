@@ -157,15 +157,11 @@ inline Tensor binary_cross_entropy(
   auto reduction_enum = enumtype::reduction_get_enum(reduction);
 
   if (target.sizes() != input.sizes()) {
-    TORCH_WARN("Using a target size (", target.sizes(), ") ",
-               "that is different to the input size (", input.sizes(), ") is deprecated. ",
-               "Please ensure they have the same size.");
-  }
-  if (input.numel() != target.numel()) {
     TORCH_CHECK(
       false,
-      "Target and input must have the same number of elements. target nelement (", target.numel(), ") "
-      "!= input nelement (", input.numel(), ")");
+      "Using a target size (", target.sizes(), ") ",
+      "that is different to the input size (", input.sizes(), ") is deprecated. ",
+      "Please ensure they have the same size.");
   }
 
   auto weight_ = weight;

@@ -161,7 +161,7 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 // The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
 // but 2048 for previous architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
-#if __CUDA_ARCH__ >= 750
+#if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
