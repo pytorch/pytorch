@@ -8,7 +8,6 @@ import unittest.mock as mock
 import itertools
 import warnings
 import pickle
-import gc
 from copy import deepcopy
 from itertools import repeat, product
 from functools import reduce
@@ -3736,6 +3735,8 @@ class TestNN(NNTestCase):
 
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
+        import gc
+
         m = torch.nn.LSTM(16, 16, bidirectional=True)
 
         gc.collect()
@@ -6724,6 +6725,21 @@ class TestNN(NNTestCase):
                     gradients = torch.randn_like(out_cpu)
                     out_cpu.backward(gradients)
 
+
+                    # Compare against unvectorized CPU fallback
+                    input_fallback = input_cpu.float().detach_().requires_grad_()
+                    grid_fallback = grid_cpu.float().detach_().requires_grad_()
+                    out_fallback = torch._grid_sampler_2d_cpu_fallback(
+                        input_fallback, grid_fallback,
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
+
+                    out_fallback.backward(gradients.float())
+                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-5, rtol=5e-5)
+                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-5, rtol=5e-5)
+
                     if TEST_CUDA:
                         input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
                         grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
@@ -6806,8 +6822,8 @@ class TestNN(NNTestCase):
                     # test known input on CPU
                     input = torch.arange(1., 11).view(1, 1, 2, 5)
                     grid = torch.tensor(
-                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-10], [0.5, 1.0]],
-                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-10], [1.5, 0.5]]]).view(1, 2, 5, 2)
+                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
+                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]]).view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -6875,6 +6891,12 @@ class TestNN(NNTestCase):
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg="groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
+                    output = torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(output, groundtruth.float(), atol=1e-5, rtol=0)
 
                     # explicit check for gradient edge cases
                     input = torch.arange(0., 5).expand((1, 1, 5, 5)).requires_grad_()
@@ -6923,6 +6945,14 @@ class TestNN(NNTestCase):
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
 
+                    grid.grad.zero_()
+                    torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners).sum().backward()
+                    self.assertEqual(grid.grad, groundtruth)
+
                     # do gradcheck
                     N = random.randint(2, 8)
                     C = random.randint(2, 6)
@@ -6935,10 +6965,24 @@ class TestNN(NNTestCase):
                                                         align_corners=align_corners),
                         (input, grid)))
 
+                    F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners).sum().backward()
+                    input_grad, grid_grad = input.grad, grid.grad
+                    input.grad, grid.grad = None, None
+
+                    torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners).sum().backward()
+                    # Only compare up to float precision
+                    self.assertEqual(input.grad.float(), input_grad.float())
+                    self.assertEqual(grid.grad.float(), grid_grad.float())
+
                     test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
                     if TEST_CUDNN:
                         with cudnn.flags(enabled=False):
                             test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
+
 
     def test_grid_sample_3d(self):
         def test(N, C, D, H, W, mode, padding_mode, align_corners):
@@ -10117,7 +10161,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     32769 * (65536 + 3 * 65536 / 128) *
+                     32769 * (65536 + 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
@@ -10141,14 +10185,19 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
-        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
-            expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
-            actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            expect = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            actual = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     32769 * (65536 + 6 * 65536 / 128) *
+                     32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_backward_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
@@ -10170,27 +10219,27 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
-        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
-            a = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             a.sum().backward()
 
-            b = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             b.sum().backward()
 
             self.assertEqual(a, b)
             self.assertEqual(small_image.grad, large_view.grad)
-
-            # Cleanup memory
-            del a
-            del b
-            gc.collect()
 
             small_image.grad.zero_()
             large_view.grad.zero_()
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     2 * 32769 * (32768 + 3 * 32768 / 128) *
+                     2 * 32769 * (32768 + 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
@@ -10209,14 +10258,19 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
-        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
-            expect = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
-            actual = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            expect = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            actual = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     2 * 32769 * (32768 + 6 * 32768 / 128) *
+                     2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_backward_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
@@ -10236,20 +10290,20 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
-        for mode, align_corners in itertools.product(('nearest', 'bilinear'), (True, False)):
-            a = F.grid_sample(small_image, coords, mode=mode, align_corners=align_corners)
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             a.sum().backward()
 
-            b = F.grid_sample(large_view, coords, mode=mode, align_corners=align_corners)
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
             b.sum().backward()
 
             self.assertEqual(a, b)
             self.assertEqual(small_image.grad, large_view.grad)
-
-            # Cleanup memory
-            del a
-            del b
-            gc.collect()
 
             small_image.grad.zero_()
             large_view.grad.zero_()
