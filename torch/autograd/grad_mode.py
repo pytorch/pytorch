@@ -70,7 +70,7 @@ class no_grad(_DecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
-    def __exit__(self, exc: Any, type: Any, tb: Any):
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         torch.set_grad_enabled(self.prev)
 
 
