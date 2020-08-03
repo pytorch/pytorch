@@ -25,6 +25,8 @@ import functools
 import types
 from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
+import torch
+
 @functools.lru_cache(None)
 def get_ignored_functions():
     """Return public functions that cannot be overrided by __torch_function__
@@ -36,7 +38,6 @@ def get_ignored_functions():
     arguments of these functions are tensors or tensor-likes.
 
     """
-    import torch
     Tensor = torch.Tensor
     return {
         torch.typename,
@@ -198,7 +199,6 @@ def get_testing_overrides():
     # the lambda function procedurally but that is blocked by generating
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
-    import torch
     Tensor = torch.Tensor
     ret = {
         torch.abs: lambda input, out=None: -1,
@@ -1035,7 +1035,6 @@ def has_torch_function(relevant_args):
     True if any of the elements of relevant_args have __torch_function__
     implementations, False otherwise.
     """
-    import torch
     return _is_torch_function_enabled() and any(
         type(a) is not torch.Tensor and
         getattr(a, '__torch_function__', _disabled_torch_function_impl)
@@ -1053,7 +1052,6 @@ def get_overridable_functions():
     to functions in that namespace that can be overrided.
 
     """
-    import torch
     overridable_funcs = collections.defaultdict(list)
     tested_namespaces = [
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
@@ -1107,19 +1105,23 @@ def get_overridable_functions():
 
 @functools.lru_cache(None)
 def get_methods():
-    import torch
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 
-def is_method_property(func):
+def is_tensor_method_or_property(func):
     """
     Returns True if the function passed in is a handler for a
-    method or property belonging to ``Torch.Tensor``, as passed
+    method or property belonging to ``torch.Tensor``, as passed
     into ``__torch_function__``.
 
-    Note
-    ----
-    For properties, their ``__get__`` method must be passed in.
+    .. note::
+       For properties, their ``__get__`` method must be passed in.
+
+    This may be needed, in particular, for the following reasons:
+
+    1. Methods/properties sometimes don't contain a `__module__` slot.
+    2. They require that the first passed-in argument is an instance
+       of ``torch.Tensor``.
     """
     return func in get_methods() or func.__name__ == "__get__"
