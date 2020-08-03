@@ -188,8 +188,8 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
-    // view ops as outputs of differentiable subgraphs can cause incorrect differentiation
-    // for now, do not include them in the subgraph
+    // view ops as outputs of differentiable subgraphs can cause incorrect
+    // differentiation for now, do not include them in the subgraph
     if (isViewOp(node)) {
       return false;
     }
