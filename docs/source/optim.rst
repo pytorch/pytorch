@@ -187,7 +187,7 @@ normalization statistics at the end of training.
 
 SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
-.. _`Averaging Weights Leads to Wider Optima and Better Generalization` https://arxiv.org/abs/1803.05407
+.. _`Averaging Weights Leads to Wider Optima and Better Generalization`: https://arxiv.org/abs/1803.05407
 
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
