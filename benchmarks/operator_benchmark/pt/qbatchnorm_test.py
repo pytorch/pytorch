@@ -38,7 +38,7 @@ class QBatchNormBenchmark(op_bench.TorchBenchmarkBase):
         self.Y_scale = 0.1
         self.Y_zero_point = 0
 
-    def init_input(self, M, N, K, device):
+    def _init(self, M, N, K, device):
         pass
 
     def forward(self):
