@@ -109,6 +109,7 @@ class TestTEFuser(JitTestCase):
         test_fuse(x, y)
         b = test_fuse(x, y)
         warmup_backward(b)
+        b.backward()
 
 
     def _test_fused_abs(self, device='cpu'):

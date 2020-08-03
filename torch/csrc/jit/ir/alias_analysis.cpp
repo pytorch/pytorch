@@ -533,9 +533,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Guard:
       makePointerTo(node->output(), node->inputs().at(0));
       return;
-    case prim::TypeCheck:
-      makePointerTo(node->output(0), node->inputs().at(0));
-      return;
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::Enter:
