@@ -67,6 +67,29 @@ def get_supported_device_types():
     return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class TestQuantizedTensor(TestCase):
+    def _test_tensor_op_helper(self, op):
+        # TODO: support cuda
+        # for device in get_supported_device_types():
+        device = torch.device('cpu')
+        for dtype in [torch.qint8, torch.quint8]:
+            scale = 0.5
+            zero_point = 10
+            numel = 10
+            per_tensor_q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point,
+                                                         device=device, dtype=dtype)
+            # make sure it runs
+            op(per_tensor_q)
+
+            numel = 10
+            ch_axis = 0
+            scales = torch.rand(numel)
+            zero_points = torch.randint(0, 10, size=(numel,))
+            per_channel_q = torch._empty_per_channel_affine_quantized(
+                [numel], scales=scales, zero_points=zero_points, axis=ch_axis, device=device, dtype=dtype)
+            # make sure it runs
+            op(per_channel_q)
+
+
     def test_qtensor(self):
         num_elements = 10
         scale = 1.0
@@ -536,6 +559,10 @@ class TestQuantizedTensor(TestCase):
             q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
             q_repeat = q.repeat(4, 2)
             self.assertEqual(q_ref, q_repeat)
+
+    def test_tensor_compare(self):
+        self._test_tensor_op_helper(torch.max)
+        self._test_tensor_op_helper(torch.min)
 
     def test_qscheme_pickle(self):
         f = Foo()

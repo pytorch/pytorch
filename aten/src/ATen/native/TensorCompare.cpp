@@ -291,8 +291,15 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
-    // TODO: qscheme
-    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
+    // TODO: unify tensor APIs for different qschemes and
+    // add creation functions for qscheme
+    Tensor quantized_int_repr;
+    if (self.qscheme() == at::kPerTensorAffine) {
+      quantized_int_repr = at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point());
+    } else if (self.qscheme() == at::kPerChannelAffine) {
+      quantized_int_repr = at::_make_per_channel_quantized_tensor(max, self.q_per_channel_scales(), self.q_per_channel_zero_points(), self.q_per_channel_axis());
+    }
+    return std::tuple<Tensor, Tensor>(quantized_int_repr, max_indices);
   } else {
     Tensor max = at::empty({0}, self.options());
     return at::native::max_out(max, max_indices, self, dim, keepdim);
@@ -341,7 +348,15 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_quantized()) {
     Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::min_out(min, min_indices, self.int_repr(), dim, keepdim);
-    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
+    // TODO: unify tensor APIs for different qschemes and
+    // add creation functions for qscheme
+    Tensor quantized_int_repr;
+    if (self.qscheme() == at::kPerTensorAffine) {
+      quantized_int_repr = at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point());
+    } else if (self.qscheme() == at::kPerChannelAffine) {
+      quantized_int_repr = at::_make_per_channel_quantized_tensor(min, self.q_per_channel_scales(), self.q_per_channel_zero_points(), self.q_per_channel_axis());
+    }
+    return std::tuple<Tensor, Tensor>(quantized_int_repr, min_indices);
   } else {
     Tensor min = at::empty({0}, self.options());
     return at::native::min_out(min, min_indices, self, dim, keepdim);
