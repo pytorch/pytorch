@@ -574,7 +574,19 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void visit(const IfThenElse* v) override {
     v->condition()->accept(this);
-    if (value_.as<int>()) {
+    bool cond_v;
+    switch (value_.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name: {    \
+    cond_v = value_.as<Type>(); \
+  } break;
+      AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        throw unsupported_dtype();
+    }
+
+    if (cond_v) {
       v->true_value()->accept(this);
     } else {
       v->false_value()->accept(this);

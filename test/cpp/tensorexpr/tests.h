@@ -85,6 +85,7 @@ namespace jit {
   _(Cond01)                                 \
   _(IfThenElse01)                           \
   _(IfThenElse02)                           \
+  _(IfThenElse03)                           \
   _(ATen_cast_Float)                        \
   _(ATennegInt)                             \
   _(ATennegFloat)                           \
