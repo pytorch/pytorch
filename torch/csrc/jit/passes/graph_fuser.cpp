@@ -164,7 +164,8 @@ struct GraphFuser {
       : block_(block),
         aliasDb_(aliasDb),
         callback_(std::move(callback)),
-        kind_(kind) {}
+        kind_(kind),
+        strict_fuser_check_(false) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;

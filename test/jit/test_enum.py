@@ -3,6 +3,7 @@ import sys
 
 import torch
 from enum import Enum
+from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -84,6 +85,30 @@ class TestEnum(JitTestCase):
             scripted_enum_comp(Color.RED, Color.GREEN),
             enum_comp(Color.RED, Color.GREEN))
 
+    def test_enum_comp_diff_classes(self):
+        global Foo, Bar
+
+        class Foo(Enum):
+            ITEM1 = 1
+            ITEM2 = 2
+
+        class Bar(Enum):
+            ITEM1 = 1
+            ITEM2 = 2
+
+        def enum_comp(x: Foo) -> bool:
+            return x == Bar.ITEM1
+
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
+        with torch._jit_internal._disable_emit_hooks():
+            scripted_enum_comp = torch.jit.script(enum_comp)
+
+        self.assertEqual(
+            scripted_enum_comp(Foo.ITEM1),
+            False)
+
+
     def test_heterogenous_value_type_enum_error(self):
         global Color
 
@@ -134,6 +159,108 @@ class TestEnum(JitTestCase):
 
         self.assertEqual(scripted_enum_value(Color.RED), Color.RED.value)
         self.assertEqual(scripted_enum_value(Color.GREEN), Color.GREEN.value)
+
+    def test_enum_as_const(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        @torch.jit.script
+        def enum_const(x: Color) -> bool:
+            if x == Color.RED:
+                return True
+            else:
+                return False
+
+        self.assertEqual(enum_const(Color.RED), True)
+        self.assertEqual(enum_const(Color.GREEN), False)
+
+    def test_non_existent_enum_value(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        def enum_const(x: Color) -> bool:
+            if x == Color.PURPLE:
+                return True
+            else:
+                return False
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "has no attribute 'PURPLE'", "Color.PURPLE"):
+            torch.jit.script(enum_const)
+
+    def test_enum_ivalue_type(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        def is_color_enum(x: Any):
+            if isinstance(x, Color):
+                return True
+            else:
+                return False
+
+        with torch._jit_internal._disable_emit_hooks():
+            scripted_is_color_enum = torch.jit.script(is_color_enum)
+
+        self.assertEqual(scripted_is_color_enum(Color.RED), True)
+        self.assertEqual(scripted_is_color_enum(Color.GREEN), True)
+        self.assertEqual(scripted_is_color_enum(1), False)
+
+    def test_closed_over_enum_constant(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        a = Color
+
+        def closed_over_aliased_type():
+            return a.RED.value
+
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(closed_over_aliased_type)
+
+        self.assertEqual(scripted(), Color.RED.value)
+
+
+        b = Color.RED
+
+        def closed_over_aliased_value():
+            return b.value
+
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(closed_over_aliased_value)
+
+        self.assertEqual(scripted(), Color.RED.value)
+
+    def test_enum_as_module_attribute(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, e: Color):
+                super(TestModule, self).__init__()
+                self.e = e
+
+            def forward(self):
+                return self.e.value
+
+        m = TestModule(Color.RED)
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(m)
+
+        self.assertEqual(scripted(), Color.RED.value)
 
 
 # Tests that Enum support features are properly guarded before they are mature.

@@ -35,7 +35,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 }
 
 Tensor fake_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   test_int = 2;
