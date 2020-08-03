@@ -51,7 +51,7 @@ bool Function::append_operator(
 
   if (model_version == 0x3L &&
       model_version < caffe2::serialize::kProducedBytecodeVersion &&
-      opname == c10::OperatorName("_convolution", "")) {
+      opname == c10::OperatorName("aten::_convolution", "")) {
     fn = [fn](Stack& stack) {
       stack.push_back(true);
       fn(stack);
