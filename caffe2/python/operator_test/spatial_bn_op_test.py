@@ -216,10 +216,14 @@ class TestSpatialBN(serial.SerializedTestCase):
             reduce_size = batch_size * size * size
             saved_mean = np.mean(X, (0, 2, 3))
             saved_var = np.var(X, (0, 2, 3))
+            if reduce_size == 1:
+                unbias_scale = float('inf')
+            else:
+                unbias_scale = reduce_size / (reduce_size - 1)
             running_mean = momentum * running_mean + (
                 1.0 - momentum) * saved_mean
-            running_var = momentum * running_var + (1.0 - momentum) * (
-                reduce_size / (reduce_size - 1)) * saved_var
+            running_var = momentum * running_var + (
+                1.0 - momentum) * unbias_scale * saved_var
             std = np.sqrt(saved_var + epsilon)
             broadcast_shape = (1, C, 1, 1)
             Y = (X - np.reshape(saved_mean, broadcast_shape)) / np.reshape(

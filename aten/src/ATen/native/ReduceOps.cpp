@@ -432,6 +432,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0);
+  TORCH_CHECK(!(p.toDouble() == 2 && self.is_complex()), "norm with p=2 not supported for complex tensors");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -456,6 +457,8 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
 
 static inline Tensor _norm(const Tensor &self, Scalar p) {
   if (self.is_sparse()) {
+    // Sparse tensors need a different implementation because their values
+    // are accessed with a different API than strided tensors
     return at::native_norm(self, p);
   } else {
     TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
@@ -480,8 +483,14 @@ Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArra
 
 static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
-  Tensor result;
-  return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  if (self.is_sparse()) {
+    // Sparse tensors need a different implementation because their values
+    // are accessed with a different API than strided tensors
+    return at::native_norm(self, p, dim, keepdim, opt_dtype);
+  } else {
+    Tensor result;
+    return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+  }
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {

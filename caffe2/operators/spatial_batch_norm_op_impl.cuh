@@ -3,6 +3,8 @@
 
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
+#include <limits>
+
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
@@ -93,8 +95,9 @@ __global__ void ComputeRunningMomentsAndFusedParamCUDAKernel<float>(
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   const float a = 1.0f - momentum;
   const float b = momentum;
-  const float unbias_scale =
-      static_cast<float>(reduce_size) / static_cast<float>(reduce_size - 1);
+  const float unbias_scale = reduce_size == 1
+      ? std::numeric_limits<float>::infinity()
+      : static_cast<float>(reduce_size) / static_cast<float>(reduce_size - 1);
   if (c < C) {
     const float rstd_val = rsqrtf(var[c] + epsilon);
     const float scale_x_rstd = scale[c] * rstd_val;
