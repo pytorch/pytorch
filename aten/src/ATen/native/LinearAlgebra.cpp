@@ -845,7 +845,7 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
-  auto As = _allocate_buffer(A, 5, /*is_zero=*/true);
+  auto As = _allocate_buffer(A, 5);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
 
