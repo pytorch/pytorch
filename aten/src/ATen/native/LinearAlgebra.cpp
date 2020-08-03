@@ -776,6 +776,8 @@ inline Tensor _pin_and_move_memory_if_cuda_input(
     : mem;
 }
 
+// convert a 1D blob to a 2D Tensor of size [1, blob.size()]
+// such that blob.device() == in.device())
 template <typename scalar_t>
 inline Tensor _blob_to_Tensor(
   std::initializer_list<scalar_t> blob,
@@ -783,9 +785,11 @@ inline Tensor _blob_to_Tensor(
 ) {
   // we convert to void* expecitly because begin() returns
   // a pointer to a constant.
+  // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), blob.size()).unsqueeze(0);
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
+    .unsqueeze(0);
   return _pin_and_move_memory_if_cuda_input(tensor, in);
 }
 
@@ -807,23 +811,22 @@ Tensor compute_T2(const Tensor& A) {
 }
 
 // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+template <typename scalar_t>
 Tensor compute_T4(const Tensor& A) {
   // 3 for {I, A, A^2}
   auto As = _allocate_buffer(A, 3);
   _fill_matrix_powers(As, A, 3);
-
+  
   auto As_clone = As.clone(at::MemoryFormat::Preserve);
-  As_clone.select(0, 0).div_(2.0);
-  As_clone.select(0, 1).div_(6.0);
-  As_clone.select(0, 2).div_(24.0);
-  // As_clone.select(0, 1) = I / 2 + A / 6 + A^2 / 24
-  As_clone.select(0, 1).copy_(As_clone.sum(0));
-  // As_clone.select(0, 2) = A^2
-  As_clone.select(0, 2).mul_(24.0);
   at::native::matmul(
+    // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
     As.select(0, 2),
-    As_clone.select(0, 1),
-    As_clone.select(0, 2)
+    // contains A^2
+    As_clone.select(0, 2),
+    // computes (I / 2 + A / 6 + A^2 / 24)
+    at::native::_compute_linear_combination(
+      As_clone, _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+    )
   );
 
   return As.sum(0);
@@ -962,7 +965,7 @@ Tensor compute_T18(const Tensor& A) {
   return res;
 }
 
-template<typename scalar_t>
+template <typename scalar_t>
 void compute_T18_scale_square(
   Tensor& mexp_out,
   const Tensor& a,
@@ -1005,7 +1008,7 @@ Tensor mexp_impl(
       Tensor(*)(const Tensor&),
       total_n_degs - 1> 
     compute_Ts = {
-      compute_T1, compute_T2, compute_T4,
+      compute_T1, compute_T2, compute_T4<scalar_t>,
       compute_T8<scalar_t>, compute_T12<scalar_t>
     };
 
