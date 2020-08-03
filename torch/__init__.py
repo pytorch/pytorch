@@ -523,4 +523,4 @@ from ._vmap_internals import vmap
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
-quantized_gru = torch.ops.aten.quantized_gru§
+quantized_gru = torch.ops.aten.quantized_gru

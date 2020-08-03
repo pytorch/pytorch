@@ -11,7 +11,7 @@ from torch._overrides import (
     has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
-    is_method_property
+    is_tensor_method_or_property
 )
 
 Tensor = torch.Tensor
@@ -325,7 +325,7 @@ def generate_tensor_like_torch_implementations():
         # torch.Tensor method
         wrapped = triggered_wrapper(override)
         HANDLED_FUNCTIONS_WRAPPERS[func] = wrapped
-        if is_method_property(func):
+        if is_tensor_method_or_property(func):
             implements_sub(func)(wrapped)
         else:
             implements_tensor_like(func)(wrapped)
@@ -531,7 +531,7 @@ def generate_tensor_like_override_tests(cls):
 
     def test_generator(func, override):
         # If func corresponds to a torch.Tensor method or property.
-        if is_method_property(func):
+        if is_tensor_method_or_property(func):
             # Generate an instance by using SubTensor,
             def instance_gen():
                 return SubTensor([5])
@@ -548,7 +548,7 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if arg['name'] == 'self' and is_method_property(func):
+                    if arg['name'] == 'self' and is_tensor_method_or_property(func):
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
@@ -620,7 +620,7 @@ def generate_tensor_like_override_tests(cls):
 
             # Unfortunately I couldn't find a way to unify these two cases
             # and there is no way for general descriptors.
-        elif is_method_property(func):
+        elif is_tensor_method_or_property(func):
             module = "Tensor"
         else:
             module = func.__module__
