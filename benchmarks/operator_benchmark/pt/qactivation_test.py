@@ -84,7 +84,7 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.qop = op_func
 
     def forward(self):
-        if self.qop == nnq.functional.hardswish:
+        if self.qop in (nnq.functional.hardswish, nnq.functional.elu):
             return self.qop(self.q_input, scale=self.scale, zero_point=self.zero_point)
         return self.qop(self.q_input)
 
