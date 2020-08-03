@@ -353,14 +353,9 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       if (guard.needs_inputs) {
         std::vector<c10::IValue> stack;
         stack.reserve(sizeof...(Args));
-        auto boxed_all_args = impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
+        impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
 
         guard.before(op.schema().name(), stack, at::sequence_number::peek());
-
-        // if we could convert all the arguments, also pass the stack into the kernel call
-        if (boxed_all_args) {
-          return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
-        }
       } else {
         guard.before(op.schema().name(), at::sequence_number::peek());
       }
