@@ -576,8 +576,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->condition()->accept(this);
     bool cond_v;
     switch (value_.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name: {    \
+#define TYPE_CASE(Type, Name)   \
+  case ScalarType::Name: {      \
     cond_v = value_.as<Type>(); \
   } break;
       AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
