@@ -433,6 +433,8 @@ def get_testing_overrides():
         torch.native_layer_norm: lambda input, weight, bias, M, N, eps: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2: -1,
+        torch.native_norm: lambda input, p=2: -1,
+        torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.ne: lambda input, other, out=None: -1,
         torch.neg: lambda input, out=None: -1,
         torch.nn.functional.adaptive_avg_pool2d: lambda input, output_size: -1,

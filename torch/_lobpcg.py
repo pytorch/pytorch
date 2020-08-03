@@ -377,9 +377,8 @@ class LOBPCG(object):
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            'the number of converged eigenpairs '
-            '(was %s, got %s) cannot decrease' % (prev_count, count))
+        assert count >= prev_count, 'the number of converged eigenpairs ' \
+            '(was {}, got {}) cannot decrease'.format(prev_count, count)
         self.ivars['converged_count'] = count
         self.tvars['rerr'] = rerr
         return count
@@ -723,10 +722,14 @@ class LOBPCG(object):
             if rerr < tau_ortho:
                 break
             if m < U.shape[-1] + V.shape[-1]:
+                # TorchScript needs the class var to be assigned to a local to
+                # do optional type refinement
+                B = self.B
+                assert B is not None
                 raise ValueError(
                     'Overdetermined shape of U:'
                     ' #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold'
-                    .format(self.B.shape[-1], U.shape[-1], V.shape[-1]))
+                    .format(B.shape[-1], U.shape[-1], V.shape[-1]))
         self.ivars['ortho_i'] = i
         self.ivars['ortho_j'] = j
         return U
