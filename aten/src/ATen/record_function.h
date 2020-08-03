@@ -10,12 +10,7 @@
 namespace at {
 
 // Kind of record function scope;
-// workaround for the older GCC versions:
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif
-enum class TORCH_API RecordScope : uint8_t {
+enum class C10_API_ENUM RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
   FUNCTION = 0,
   // TorchScript functions, methods
@@ -24,9 +19,6 @@ enum class TORCH_API RecordScope : uint8_t {
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 } // namespace at
 
