@@ -406,6 +406,8 @@ _(aten, is_sparse) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
+_(aten, isposinf) \
+_(aten, isneginf) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -616,6 +618,7 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, signbit) \
 _(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \

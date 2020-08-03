@@ -303,6 +303,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    signbit
     sin
     sinh
     sqrt
@@ -352,6 +353,8 @@ Comparison Ops
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
     isreal
     kthvalue

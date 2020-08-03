@@ -46,7 +46,7 @@ signature.
 - `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`
   (except when the argument is "inplace"; in this case, it is simply `Tensor&`).
   A trailing `?`, as in `Tensor?`, indicates that the tensor argument is optional
-  and may be omitted by passing an undefined tensor.  When a function takes multiple
+  and may be omitted by passing c10::nullopt.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s).
