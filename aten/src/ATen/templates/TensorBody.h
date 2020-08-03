@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
@@ -47,13 +48,6 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
-
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
