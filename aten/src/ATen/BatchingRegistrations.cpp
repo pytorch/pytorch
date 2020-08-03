@@ -1,5 +1,6 @@
 #include <torch/library.h>
 #include <ATen/VmapTransforms.h>
+#include <ATen/BatchedFallback.h>
 #include <ATen/ATen.h>
 
 namespace at {
@@ -142,12 +143,8 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
-void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
-}
-
 TORCH_LIBRARY_IMPL(_, Batched, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorFallback>());
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
 TORCH_LIBRARY_IMPL(aten, Batched, m) {

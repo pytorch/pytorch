@@ -1,6 +1,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import vmap
+import warnings
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
@@ -116,23 +117,31 @@ class TestVmapAPI(TestCase):
         self.assertEqual(output, x.view(3, 1).expand(3, 5))
 
     def test_unsupported_op_err_msg(self):
-        def foo(x):
-            return torch.cos(x)
+        # Unsupported view op
+        tensor = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, "doesn't work on in-place or view ops"):
+            vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
 
-        x = torch.randn(3)
-        with self.assertRaisesRegex(RuntimeError, 'NYI: Calling aten::cos inside of vmap'):
-            vmap(foo)(x)
+        # We don't support multiple returns yet
+        with self.assertRaisesRegex(RuntimeError, 'multiple returns'):
+            vmap(torch.var_mean)(tensor)
+
+        # The fallback doesn't support TensorList
+        with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
+            vmap(lambda t: torch.stack([t]))(tensor)
+
+        # Don't support non-tensor returns. This is a limitation of vmap;
+        # functions that don't return tensors must be special cased
+        with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
+            vmap(torch.Tensor.item)(tensor)
 
     def test_unsupported_inplace_op_err_msg(self):
         def foo(x):
             return x.cos_()
 
         x = torch.randn(3)
-        # TODO(rzou): Yeah, this error message is pretty bad because the
-        # dispatcher's fallback mechanism doesn't work for ops that don't support
-        # boxing. Fix the error message at some point.
         with self.assertRaisesRegex(
-                RuntimeError, 'Tried to call KernelFunction::call'):
+                RuntimeError, 'Batching rule not implemented'):
             vmap(foo)(x)
 
     def test_nonzero_out_dims(self):
@@ -432,6 +441,63 @@ class TestVmapAPI(TestCase):
         # the following should not throw
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
+
+    def test_fallback_sub(self):
+        # NB: One day we will implement a batching rule for torch.sub.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        x = torch.randn(5, 7, 11)
+        y = torch.randn(5, 7, 11)
+
+        # Test the fallback path raises a warning
+        with warnings.catch_warnings(record=True) as wa:
+            result = vmap(torch.sub)(x, y)
+            self.assertEqual(len(wa), 2)
+            self.assertRegex(str(wa[-1].message),
+                             r'falling back to slow \(for loop and stack\) implementation')
+            self.assertEqual(result, x - y)
+
+        # fallback on torch.sub
+        x = torch.randn(7, 11, 5)
+        y = torch.randn(5, 7, 11)
+        result = vmap(torch.sub, (2, 0))(x, y)
+        self.assertEqual(result, x.permute(2, 0, 1) - y)
+
+        # fallback on torch.sub, nested vmap
+        x = torch.randn(7, 11, 5)
+        y = torch.randn(5, 7, 11)
+        result = vmap(vmap(torch.sub), (2, 0))(x, y)
+        self.assertEqual(result, x.permute(2, 0, 1) - y)
+
+        # big batch size (total 10000)
+        x = torch.randn(100, 10, 10, 5)
+        y = torch.randn(100, 10, 10)
+        result = vmap(vmap(vmap(torch.sub)))(x, y)
+        self.assertEqual(result, x - y.view(100, 10, 10, 1))
+
+    def test_fallback_masked_fill(self):
+        # NB: One day we will implement a batching rule for masked_fill
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        def run_test(batch_size):
+            B0 = batch_size
+            x = torch.randn(B0, 7, 11, 13)
+            dim = 0
+            index = torch.tensor([0, 4, 2])
+            values = torch.randn(B0, 3, 13)
+
+            with warnings.catch_warnings(record=True) as wa:
+                result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
+                self.assertEqual(len(wa), 2)
+                self.assertRegex(str(wa[-1].message),
+                                 r'falling back to slow \(for loop and stack\) implementation')
+                expected = torch.index_add(
+                    x, dim + 1, index, values.view(B0, 3, 1, 13))
+                self.assertEqual(result, expected)
+
+        run_test(batch_size=5)
+        run_test(batch_size=1237)
+
 
 if __name__ == '__main__':
     run_tests()
