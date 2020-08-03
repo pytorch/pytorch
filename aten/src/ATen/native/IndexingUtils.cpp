@@ -1,4 +1,3 @@
-
 #include <ATen/native/IndexingUtils.h>
 
 namespace at { namespace native {

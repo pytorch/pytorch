@@ -6727,6 +6727,13 @@ class TestNN(NNTestCase):
 
 
                     # Compare against unvectorized CPU fallback
+
+                    # NOTE [ grid_sample CPU fallback ]
+                    # grid_sample uses AVX for 2d images, but that requires 32-bit indexing for
+                    # 32-bit floats. So we also have a fallback that is used only for float tensors
+                    # requiring 64-bit indexing. That requires too much memory to run on CI, so we
+                    # also export the fallback and test it here to ensure feature parity with
+                    # the vectorized version.
                     input_fallback = input_cpu.float().detach_().requires_grad_()
                     grid_fallback = grid_cpu.float().detach_().requires_grad_()
                     out_fallback = torch._grid_sampler_2d_cpu_fallback(
@@ -6891,6 +6898,8 @@ class TestNN(NNTestCase):
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg="groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
+
+                    # See NOTE [ grid_sample CPU fallback ]
                     output = torch._grid_sampler_2d_cpu_fallback(
                         input.float(), grid.float(),
                         F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
@@ -6945,6 +6954,7 @@ class TestNN(NNTestCase):
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
 
+                    # See NOTE [ grid_sample CPU fallback ]
                     grid.grad.zero_()
                     torch._grid_sampler_2d_cpu_fallback(
                         input.float(), grid.float(),
@@ -6965,24 +6975,10 @@ class TestNN(NNTestCase):
                                                         align_corners=align_corners),
                         (input, grid)))
 
-                    F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners).sum().backward()
-                    input_grad, grid_grad = input.grad, grid.grad
-                    input.grad, grid.grad = None, None
-
-                    torch._grid_sampler_2d_cpu_fallback(
-                        input.float(), grid.float(),
-                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
-                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
-                        align_corners).sum().backward()
-                    # Only compare up to float precision
-                    self.assertEqual(input.grad.float(), input_grad.float())
-                    self.assertEqual(grid.grad.float(), grid_grad.float())
-
                     test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
                     if TEST_CUDNN:
                         with cudnn.flags(enabled=False):
                             test(N, C, H, W, mode, padding_mode, align_corners=align_corners)
-
 
     def test_grid_sample_3d(self):
         def test(N, C, D, H, W, mode, padding_mode, align_corners):
@@ -10161,6 +10157,9 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_2d(self, device, dtype):
@@ -10203,6 +10202,9 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
     def test_grid_sample_large_index_3d(self, device, dtype):
