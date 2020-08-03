@@ -336,9 +336,9 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
 _cudnn_rnn_cast_reflatten(const Tensor & input,
                           TensorList weight,
                           int64_t weight_stride0,
-                          const Tensor& weight_buf,
+                          const c10::optional<Tensor>& weight_buf_opt,
                           const Tensor& hx,
-                          const Tensor& cx,
+                          const c10::optional<Tensor>& cx,
                           int64_t mode,
                           int64_t hidden_size,
                           int64_t num_layers,
@@ -347,7 +347,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool train,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
-                          const Tensor & dropout_state) {
+                          const c10::optional<Tensor>& dropout_state) {
 #if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 
@@ -360,6 +360,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
 
   Tensor redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
+  const auto& weight_buf = *weight_buf_opt;
   bool needs_cast_and_flatten = (weight_buf.defined() ?
                                  is_eligible(weight_buf) && (weight_buf.scalar_type() != at::kHalf) :
                                  is_eligible(weight[0]) && (weight[0].scalar_type() != at::kHalf));
@@ -486,9 +487,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  // TODO:  prefer m.impl with c10::impl::hacky_wrapper_for_legacy_signatures here??
-  // m.impl(something something c10::impl::hacky_wrapper_for_legacy_signatures "_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
-  m.impl_UNBOXED("_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
+  m.impl("_cudnn_rnn",
+         c10::impl::hacky_wrapper_for_legacy_signatures<std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> (const Tensor &, TensorList, int64_t, const c10::optional<Tensor>&, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t, int64_t, bool, double, bool, bool, IntArrayRef, const c10::optional<Tensor>&)>(TORCH_FN(at::autocast::_cudnn_rnn_cast_reflatten))
+  );
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)

@@ -1289,6 +1289,9 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 
   // TODO:  This can go in _cudnn_rnn, but if so, we should remove weight_buf from _cudnn_rnn's
   // arglist, and schema changes are unpleasant
+  // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
+  // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
+  // instead of a defined or undefined Tensor?
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
 
