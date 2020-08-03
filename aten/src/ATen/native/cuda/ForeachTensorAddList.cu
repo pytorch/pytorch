@@ -166,7 +166,7 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_add_list_kernel_cpu(tensors1, tensors2);
+        return at::native::foreach_add_list_kernel_fallback(tensors1, tensors2);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
@@ -191,7 +191,7 @@ std::vector<Tensor> foreach_tensor_add_list__kernel_cuda(TensorList tensors1, Te
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_add_list__kernel_cpu(tensors1, tensors2);
+        return at::native::foreach_add_list__kernel_fallback(tensors1, tensors2);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
