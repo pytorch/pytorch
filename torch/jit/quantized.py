@@ -332,7 +332,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
         # type: (Tensor, Tuple[int, int, int], str) -> None
         if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     @torch.jit.script_method
     def check_forward_args(self, input, hidden, batch_sizes):

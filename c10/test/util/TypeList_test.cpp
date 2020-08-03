@@ -59,6 +59,15 @@ namespace test_true_for_each_type {
     static_assert(all<std::is_reference, typelist<>>::value, "");
 }
 
+namespace test_true_for_any_type {
+    template<class> class Test;
+    class MyClass {};
+    static_assert(true_for_any_type<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value, "");
+    static_assert(true_for_any_type<std::is_reference, typelist<int&, const float, const MyClass&>>::value, "");
+    static_assert(!true_for_any_type<std::is_reference, typelist<int, const float, const MyClass>>::value, "");
+    static_assert(!true_for_any_type<std::is_reference, typelist<>>::value, "");
+}
+
 namespace test_map {
     class MyClass {};
     static_assert(std::is_same<typelist<>, map_t<std::add_lvalue_reference_t, typelist<>>>::value, "");
