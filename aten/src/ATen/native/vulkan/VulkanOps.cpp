@@ -285,10 +285,13 @@ void avg_pool2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
-VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1) {
-  auto idim = input.dim();
+VulkanTensor transpose(
+    const VulkanTensor& input,
+    const int64_t dim0,
+    const int64_t dim1) {
+  const auto idim = input.dim();
   TORCH_INTERNAL_ASSERT(
-      idim <= 8, "Vulkan transpose is implemented only for dim <= 8");
+      idim <= 6, "Vulkan transpose is implemented only for dim <= 6");
   auto device = context().device();
   struct ConstBlock {
     int32_t istrides[8];
@@ -303,26 +306,22 @@ VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1) {
   VulkanTensor output{osizes};
   output.allocate_storage();
 
-  int32_t idims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  int32_t odims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  for (int i = 0; i < idim; i++) {
-    idims8[8 - idim + i] = isizes[i];
-    odims8[8 - idim + i] = osizes[i];
-  }
-  int32_t istrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  int32_t ostrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  std::array<int32_t, 8> idims8;
+  idims8.fill(1);
+  std::copy(isizes.cbegin(), isizes.cend(), idims8.end() - idim);
+  std::array<int32_t, 8> istrides8;
   for (int i = 6; i >= 0; --i) {
     istrides8[i] = idims8[i + 1] * istrides8[i + 1];
-    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
   }
+
+  std::array<int32_t, 8> odims8 = idims8;
+  std::array<int32_t, 8> ostrides8 = istrides8;
   std::swap(istrides8[8 - idim + dim0], istrides8[8 - idim + dim1]);
 
   ConstBlock cb{};
-  std::copy(
-      std::begin(istrides8), std::end(istrides8), std::begin(cb.istrides));
-  std::copy(
-      std::begin(ostrides8), std::end(ostrides8), std::begin(cb.ostrides));
-  std::copy(std::begin(odims8), std::end(odims8), std::begin(cb.odims));
+  std::copy(istrides8.cbegin(), istrides8.cend(), std::begin(cb.istrides));
+  std::copy(istrides8.cbegin(), istrides8.cend(), std::begin(cb.ostrides));
+  std::copy(odims8.cbegin(), odims8.cend(), std::begin(cb.odims));
   cb.storageOffset = 0;
 
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
@@ -365,12 +364,14 @@ VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1) {
 
 VulkanTensor slice(
     const VulkanTensor& input,
-    int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  auto isizes = input.sizes();
+    const int64_t dim,
+    const int64_t _start,
+    const int64_t _end,
+    const int64_t step) {
+  const auto isizes = input.sizes();
   auto osizes = isizes;
+  auto start = _start;
+  auto end = _end;
   if (start < 0) {
     start += isizes[dim];
   }
@@ -387,25 +388,24 @@ VulkanTensor slice(
   } else if (end >= isizes[dim]) {
     end = isizes[dim];
   }
-  auto len = end - start;
+  const auto len = end - start;
   osizes[dim] = (len + step - 1) / step;
 
   VulkanTensor output{osizes};
   output.allocate_storage();
 
   auto idim = input.dim();
-  int32_t idims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  int32_t odims8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  for (int i = 0; i < idim; i++) {
-    idims8[8 - idim + i] = isizes[i];
-    odims8[8 - idim + i] = osizes[i];
-  }
-  int32_t istrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-  int32_t ostrides8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+  std::array<int32_t, 8> idims8;
+  idims8.fill(1);
+  std::copy(isizes.cbegin(), isizes.cend(), idims8.end() - idim);
+  std::array<int32_t, 8> istrides8;
   for (int i = 6; i >= 0; --i) {
     istrides8[i] = idims8[i + 1] * istrides8[i + 1];
-    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
   }
+
+  std::array<int32_t, 8> odims8 = idims8;
+  std::array<int32_t, 8> ostrides8 = istrides8;
+
   ostrides8[8 - idim + dim] *= step;
   auto storage_offset = start * istrides8[8 - idim + dim];
 
@@ -418,11 +418,9 @@ VulkanTensor slice(
   };
 
   ConstBlock cb{};
-  std::copy(
-      std::begin(istrides8), std::end(istrides8), std::begin(cb.istrides));
-  std::copy(
-      std::begin(ostrides8), std::end(ostrides8), std::begin(cb.ostrides));
-  std::copy(std::begin(odims8), std::end(odims8), std::begin(cb.odims));
+  std::copy(istrides8.cbegin(), istrides8.cend(), std::begin(cb.istrides));
+  std::copy(ostrides8.cbegin(), ostrides8.cend(), std::begin(cb.ostrides));
+  std::copy(odims8.cbegin(), odims8.cend(), std::begin(cb.odims));
   cb.storageOffset = storage_offset;
 
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));

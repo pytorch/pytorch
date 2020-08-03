@@ -37,10 +37,11 @@ class TORCH_API Module {
   const std::vector<at::IValue>& slots() const {
     return object_->slots();
   }
+  const c10::intrusive_ptr<c10::ivalue::Object> _ivalue() const {
+    return object_;
+  }
   const std::vector<at::Tensor> parameters() const;
   const std::map<std::string, at::Tensor> named_parameters() const;
-  void save_data(std::ostream& out) const;
-  void save_data(const std::string& filename) const;
 
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;

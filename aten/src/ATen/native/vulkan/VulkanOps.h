@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanConvolution.h>
 #include <c10/util/Optional.h>
@@ -63,14 +65,17 @@ void avg_pool2d(
     const int padH,
     const int padW);
 
-VulkanTensor transpose(const VulkanTensor& input, int64_t dim0, int64_t dim1);
+VulkanTensor transpose(
+    const VulkanTensor& input,
+    const int64_t dim0,
+    const int64_t dim1);
 
 VulkanTensor slice(
     const VulkanTensor& input,
-    int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step);
+    const int64_t dim,
+    const int64_t start,
+    const int64_t end,
+    const int64_t step);
 
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
@@ -79,7 +84,7 @@ VulkanTensor reshape_copy(
 VulkanTensor cat(
     VulkanTensor& output,
     ArrayRef<VulkanTensor> inputs,
-    int64_t dim);
+    const int64_t dim);
 
 void add(
     VulkanTensor& output,
