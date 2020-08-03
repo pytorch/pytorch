@@ -9,9 +9,8 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename x_t, typename y_t>
-struct AddListFunctor_
-{
+template<typename x_t, typename y_t, template<class> class Op>
+struct AddListFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl) 
@@ -42,7 +41,7 @@ struct AddListFunctor_
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
                     {
-                        r_x[ii] = static_cast<x_t>(r_x[ii]) + static_cast<y_t>(r_y[ii]);
+                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), static_cast<y_t>(r_y[ii]));
                     }
                     // store
                     load_store(x, r_x, i_start , 0);
@@ -68,7 +67,7 @@ struct AddListFunctor_
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
                     {
-                        r_x[ii] = static_cast<x_t>(r_x[ii]) + static_cast<y_t>(r_y[ii]);
+                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), static_cast<y_t>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
@@ -82,9 +81,8 @@ struct AddListFunctor_
         }
 };
 
-template<typename x_t, typename y_t, typename out_t>
-struct AddListFunctor
-{
+template<typename x_t, typename y_t, typename out_t, template<class> class Op>
+struct AddListFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl) 
@@ -119,7 +117,7 @@ struct AddListFunctor
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
                     {
-                        r_out[ii] = static_cast<x_t>(r_x[ii]) + static_cast<y_t>(r_y[ii]);
+                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), static_cast<y_t>(r_y[ii]));
                     }
                     // store
                     load_store(out, r_out, i_start , 0);
@@ -145,7 +143,7 @@ struct AddListFunctor
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
                     {
-                        r_out[ii] = static_cast<x_t>(r_x[ii]) + static_cast<y_t>(r_y[ii]);
+                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), static_cast<y_t>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++)
@@ -161,7 +159,8 @@ struct AddListFunctor
 
 } // namespace
 
-std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
+template<template<class> class Op>
+std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -180,13 +179,14 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_tensor_add_list_kernel_cuda", [&]() {
-        multi_tensor_apply<3>(tensor_lists, AddListFunctor<scalar_t, scalar_t, scalar_t>());
+        multi_tensor_apply<3>(tensor_lists, AddListFunctor<scalar_t, scalar_t, scalar_t, Op>());
     });
 
     return tensor_lists[2];
 }
 
-std::vector<Tensor> foreach_tensor_add_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+template<template<class> class Op>
+std::vector<Tensor> foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -199,10 +199,98 @@ std::vector<Tensor> foreach_tensor_add_list__kernel_cuda(TensorList tensors1, Te
     tensor_lists.emplace_back(std::move(tensors2.vec()));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_tensor_add_list__kernel_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, AddListFunctor_<scalar_t, scalar_t>());
+        multi_tensor_apply<2>(tensor_lists, AddListFunctor_<scalar_t, scalar_t, Op>());
     });
 
     return tensor_lists[0];
+}
+
+std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_add_list_kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op<std::plus>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_add_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_add_list__kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op_<std::plus>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_sub_list_kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op<std::minus>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_sub_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_sub_list__kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op_<std::minus>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_mul_list_kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op<std::multiplies>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_mul_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_mul_list__kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op_<std::multiplies>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_div_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_div_list_kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op<std::divides>(tensors1, tensors2);
+}
+
+std::vector<Tensor> foreach_tensor_div_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+    if (!check_fast_route(tensors1, tensors2)) {
+        return at::native::foreach_div_list__kernel_cpu(tensors1, tensors2);
+    }
+
+    return foreach_tensor_list_op_<std::divides>(tensors1, tensors2);
 }
 
 }} // namespace at::native
