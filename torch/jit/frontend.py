@@ -275,7 +275,7 @@ class WithItemBuilder(Builder):
     def build_withitem(ctx, item):
         lineno = item.context_expr.lineno
         start = item.context_expr.col_offset
-        end = start + len('with')
+        end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
         r = ctx.make_range(lineno, start, end)
 
