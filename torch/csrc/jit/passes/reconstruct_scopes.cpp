@@ -55,7 +55,9 @@ class ReconstructScopesPass {
   void visitBlock(Block* b, const std::string& root_scope_string);
   void visitNode(Node* n, const std::string& root_scope_string);
 
-  std::string getModuleTypeName(const Module& module, const std::string& prefix);
+  std::string getModuleTypeName(
+      const Module& module,
+      const std::string& prefix);
   void constructFunctionToModuleMap(const Module& module);
   void constructRelativeNamesForModules(
       const Module& module,
