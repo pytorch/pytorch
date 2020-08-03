@@ -592,29 +592,6 @@ void insertGuards(
             i, checked_values.at(fusion_group->input(i)));
       }
     }
-
-    // for (size_t i = 0; i < versioning_if->outputs().size(); i++) {
-    //   if (value_types.count(true_block->outputs()[i])) {
-    //     value_types[versioning_if->output(i)] = value_types.at(true_block->outputs()[i]);
-    //     GRAPH_DEBUG(
-    //         "%",
-    //         versioning_if->output(i)->debugName(),
-    //         " -> ",
-    //         *value_types.at(versioning_if->output(i)),
-    //         "\n");
-    //   }
-    //   else {
-    //         GRAPH_DEBUG(
-    //             "No shape info for %",
-    //             versioning_if->output(i)->debugName(),
-    //             "!\n");
-    //         GRAPH_DEBUG(
-    //             "No shape info for %",
-    //             versioning_if->blocks()[0]->outputs()[i]->debugName(),
-    //             "!\n");
-    //   }
-    // }
-
     for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       true_block->registerOutput(fusion_group->output(i));
       false_block->registerOutput(subgraphOutputs[i]);
