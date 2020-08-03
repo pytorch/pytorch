@@ -6,7 +6,7 @@ import functools
 import pprint
 
 from torch.testing._internal.common_utils import TestCase
-from torch._overrides import (
+from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     get_overridable_functions,

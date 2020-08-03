@@ -29,14 +29,13 @@ import torch
 
 @functools.lru_cache(None)
 def get_ignored_functions():
-    """Return public functions that cannot be overrided by __torch_function__
+    """Return public functions that cannot be overridden by __torch_function__
 
     Returns
     -------
     A tuple of functions that are publicly available in the torch API but cannot
-    be overrided with __torch_function__. Mostly this is because none of the
+    be overridden with __torch_function__. Mostly this is because none of the
     arguments of these functions are tensors or tensor-likes.
-
     """
     Tensor = torch.Tensor
     return {
@@ -190,7 +189,6 @@ def get_testing_overrides():
     lambda functions that have the same signature as the real function
     and unconditionally return -1. These lambda functions are useful
     for testing API coverage for a type that defines __torch_function__.
-
     """
     # Every function in the PyTorch API that can be overriden needs an entry
     # in this dict.
@@ -1049,8 +1047,7 @@ def get_overridable_functions():
     Returns
     -------
     A dictionary that maps namespaces that contain overridable functions
-    to functions in that namespace that can be overrided.
-
+    to functions in that namespace that can be overridden.
     """
     overridable_funcs = collections.defaultdict(list)
     tested_namespaces = [
@@ -1104,7 +1101,8 @@ def get_overridable_functions():
     return overridable_funcs
 
 @functools.lru_cache(None)
-def get_methods():
+def get_tensor_methods():
+    """ Returns a set of the overridable methods on ``torch.Tensor`` """
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
@@ -1124,4 +1122,4 @@ def is_tensor_method_or_property(func):
     2. They require that the first passed-in argument is an instance
        of ``torch.Tensor``.
     """
-    return func in get_methods() or func.__name__ == "__get__"
+    return func in get_tensor_methods() or func.__name__ == "__get__"
