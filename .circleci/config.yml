@@ -3113,6 +3113,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3123,6 +3124,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3133,6 +3135,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3233,6 +3236,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3243,6 +3247,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3253,6 +3258,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3293,6 +3299,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3333,6 +3340,7 @@ workflows:
             branches:
               only:
                 - /ci-all\/.*/
+                - master
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/

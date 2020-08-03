@@ -72,17 +72,21 @@ class Conf(object):
                 branches_list=["postnightly"],
             )
         else:
-            if phase in ["upload"]:
-                filter_branch = "nightly"
+            if 'windows' in job_def["name"] and 'cu110' in job_def["name"] and phase in ['build']:
+                filter_branch = r"/ci-all\/.*/"
+                job_def["filters"] = branch_filters.gen_filter_dict(
+                    branches_list=[r"/ci-all\/.*/", r"master"],
+                    tags_list=[branch_filters.RC_PATTERN],
+                )
             else:
-                if 'windows' in job_def["name"] and 'cu110' in job_def["name"] and phase in ['build']:
-                    filter_branch = r"/ci-all\/.*/"
+                if phase in ["upload"]:
+                    filter_branch = "nightly"
                 else:
                     filter_branch = r"/.*/"
-            job_def["filters"] = branch_filters.gen_filter_dict(
-                branches_list=[filter_branch],
-                tags_list=[branch_filters.RC_PATTERN],
-            )
+                job_def["filters"] = branch_filters.gen_filter_dict(
+                    branches_list=[filter_branch],
+                    tags_list=[branch_filters.RC_PATTERN],
+                )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
