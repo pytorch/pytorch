@@ -200,6 +200,12 @@ struct CAFFE2_API TensorIterator {
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
+  // These will throw an error if used with non-quantized tensor
+  double input_scale(int arg=0) const { return operands_[num_outputs_ + arg].tensor.q_scale(); }
+  int64_t input_zero_point(int arg=0) const { return operands_[num_outputs_ + arg].tensor.q_zero_point(); }
+  double output_scale(int arg=0) const { return operands_[arg].tensor.q_scale(); }
+  int64_t output_zero_point(int arg=0) const { return operands_[arg].tensor.q_zero_point(); }
+
   const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
   Tensor& tensor(int arg) { return operands_[arg].tensor; }
 
