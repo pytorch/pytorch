@@ -173,8 +173,7 @@ struct BoxedKernelWrapper<
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
         // op has pushed one or more values onto the stack.
-        Result result = PopResult<Result>::call(stack);
-        return delay_check(result);
+        return delay_check(PopResult<Result>::call(stack));
       },
       [&] {
         // op returns void, boxed kernel has pushed nothing onto stack.
