@@ -4,7 +4,7 @@ if(NOT __NCCL_INCLUDED)
   if(USE_SYSTEM_NCCL)
     # NCCL_ROOT, NCCL_LIB_DIR, NCCL_INCLUDE_DIR will be accounted in the following line.
     find_package(rccl REQUIRED)
-    if(RCCL_FOUND)
+    if(rccl_FOUND)
       message(STATUS "RCCL Found!")
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${PYTORCH_RCCL_LIBRARIES})
