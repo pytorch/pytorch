@@ -207,8 +207,8 @@ void initTreeViewBindings(PyObject* module) {
             range, value ? *value : Expr(Compound::create(TK_NONE, range, {})));
       }));
   py::class_<Raise, Stmt>(m, "Raise")
-      .def(py::init([](const SourceRange& range, Expr* expr) {
-        return Raise::create(range, wrap_maybe(range, expr));
+      .def(py::init([](const SourceRange& range, const Expr& expr) {
+        return Raise::create(range, expr);
       }));
   py::class_<Assert, Stmt>(m, "Assert")
       .def(py::init([](const SourceRange& range, const Expr& test, Expr* msg) {

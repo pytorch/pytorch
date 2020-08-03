@@ -25,6 +25,7 @@ namespace c10 {
 struct IValue;
 struct ClassType;
 struct TupleType;
+struct EnumType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -537,22 +538,20 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
  public:
-  EnumHolder(c10::QualifiedName qualified_class_name, std::string name, IValue value)
-      : qualified_class_name_(std::move(qualified_class_name)),
-        name_(std::move(name)), value_(std::move(value)) {}
+  EnumHolder(std::shared_ptr<EnumType> type, std::string name, IValue value)
+      : type_(std::move(type)), name_(std::move(name)), value_(std::move(value)) {}
 
   bool is(const ivalue::EnumHolder& rhs) {
     return *this == rhs;
   }
 
-  bool operator==(const ivalue::EnumHolder& o) const {
-    return qualified_class_name_ == o.qualifiedClassName() &&
-        name_ == o.name() && value_ == o.value();
-  }
+  friend bool operator==(const ivalue::EnumHolder&lhs, const ivalue::EnumHolder& rhs);
 
-  const std::string& qualifiedClassName() const {
-    return qualified_class_name_.qualifiedName();
-  }
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const EnumHolder& v);
+
+  const std::string qualifiedClassName() const;
 
   const std::string& name() const {
     return name_;
@@ -562,8 +561,12 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
     return value_;
   }
 
+  std::shared_ptr<EnumType> type() const {
+    return type_;
+  }
+
 private:
-  c10::QualifiedName qualified_class_name_;
+  std::shared_ptr<EnumType> type_;
   std::string name_;
   IValue value_;
 };
