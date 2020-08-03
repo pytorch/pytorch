@@ -1,14 +1,14 @@
 import sys
 
 import torch
-from torch._C import _add_docstr
+from torch._C import _add_docstr, _fft  # type: ignore
 
 Tensor = torch.Tensor
 
 # Note: This not only adds the doc strings for the spectral ops, but
 # connects the torch.fft Python namespace to the torch._C._fft builtins.
 
-fft = _add_docstr(torch._C._fft.fft_fft, r"""
+fft = _add_docstr(_fft.fft_fft, r"""
 fft(input) -> Tensor
 
 Computes the one dimensional discrete Fourier transform of :attr:`input`.
