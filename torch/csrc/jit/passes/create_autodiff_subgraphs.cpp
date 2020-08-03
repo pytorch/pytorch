@@ -312,12 +312,7 @@ class SubgraphSlicer {
   c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
-<<<<<<< HEAD
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
-=======
-        aliasDb.moveBeforeTopologicallyValid(producer, consumer);
-    GRAPH_DEBUG("Considering merging ", getHeader(producer), " canMerge = ", canMerge);
->>>>>>> init impl
 
     if (!canMerge) {
       return c10::nullopt;
@@ -342,13 +337,8 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,
     size_t threshold) {
   std::vector<Node*> diff_nodes;
-<<<<<<< HEAD
   AliasDb db(graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
-=======
-  SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
-  GRAPH_DUMP("After autodiff2 : ", graph);
->>>>>>> init impl
   return diff_nodes;
 }
 } // namespace jit
