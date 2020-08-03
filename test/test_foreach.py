@@ -171,7 +171,7 @@ class TestForeach(TestCase):
     def test_div_scalar_same_size_tensors(self, device, dtype):
         if dtype == torch.bool:
             return
-        
+
         if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
             # Integer division of tensors using div or / is no longer supported
             return
@@ -266,7 +266,7 @@ class TestForeach(TestCase):
         for t in res:
             self.assertEqual(t, torch.zeros(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
             size_change += 1
-    
+
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bin_op_list__same_size_tensors(self, device, dtype):
         if dtype == torch.bool:
@@ -332,6 +332,29 @@ class TestForeach(TestCase):
         torch._foreach_add_(tensors1, tensors2)
         self.assertEqual(res, tensors1)
         self.assertEqual(res[0], torch.ones(self.H, self.W, device=device, dtype=torch.float))
+
+    # Unary ops
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_exp(self, device, dtype):
+        tensors = get_test_data(device, dtype)
+
+        res = torch._foreach_exp(tensors)
+        torch._foreach_exp_(tensors)
+
+        for i in range(len(tensors)):
+            self.assertEqual(res[i], tensors[i])
+            self.assertEqual(res[i], torch.exp(torch.ones(self.H, self.W, device=device, dtype=dtype)))
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sqrt(self, device, dtype):
+        tensors = get_test_data(device, dtype)
+
+        res = torch._foreach_sqrt(tensors)
+        torch._foreach_sqrt_(tensors)
+
+        for i in range(len(tensors)):
+            self.assertEqual(res[i], tensors[i])
+            self.assertEqual(res[i], torch.sqrt(torch.ones(self.H, self.W, device=device, dtype=dtype)))
 
 instantiate_device_type_tests(TestForeach, globals())
 
