@@ -7008,11 +7008,6 @@ class TestTorchDeviceType(TestCase):
 
         # in-place
         b = torch.tensor(b_, dtype=dtype, device=device)
-        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-        if self.device_type == 'cuda' and dtype == torch.bfloat16:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
 
         if dtype.is_complex:
             with self.assertRaises(RuntimeError):
