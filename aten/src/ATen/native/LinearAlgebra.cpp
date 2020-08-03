@@ -13,7 +13,6 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/native/FunctionOfAMatrixUtils.h>
 
 namespace at {
 namespace native {
@@ -695,11 +694,6 @@ using array2d = std::array<std::array<scalar_t, COL>, ROW>;
 // we consider 6 Taylor expansions of degree
 // 1, 2, 4, 8, 12, 18
 constexpr int total_n_degs = 6;
-
-// 0! to 4!
-// Introduced to avoid 'magic number's clang-tidy complaints about
-constexpr int fact_array_size = 5;
-constexpr std::array<float, fact_array_size> fact = {1., 1., 2., 6., 24.};
 
 Tensor operator_1_norm(const Tensor& tensor) {
   return std::get<0>(tensor.abs().sum(-2).max(-1));
