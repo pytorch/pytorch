@@ -345,17 +345,42 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_result_type(self, device):
-        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.int, device=device), 1), torch.int)
-        self.assertEqual(torch.result_type(1, torch.tensor(1, dtype=torch.int, device=device)), torch.int)
+        # Tensor against tensor
+        for dtypea in torch.testing.get_all_dtypes():
+            for dtypeb in torch.testing.get_all_dtypes():
+                try:
+                    promoted_dtype = torch.promote_types(dtypea, dtypeb)
+                except RuntimeError:  # undefined promoted type
+                    with self.assertRaises(RuntimeError):
+                        torch.result_type(torch.tensor([0, 1], dtype=dtypea, device=device),
+                                          torch.tensor([1, 0], dtype=dtypeb, device=device))
+                    continue
+                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtypea, device=device),
+                                                   torch.tensor([1, 0], dtype=dtypeb, device=device)), promoted_dtype)
+
+        # Tensor against scalar
+        for dtype in torch.testing.get_all_dtypes():
+            # int scalar
+            if dtype == torch.bool:
+                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1), torch.int64)
+                self.assertEqual(torch.result_type(1, torch.tensor([0, 1], dtype=dtype, device=device)), torch.int64)
+            else:
+                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1), dtype)
+                self.assertEqual(torch.result_type(1, torch.tensor([0, 1], dtype=dtype, device=device)), dtype)
+
+            # float scalar
+            if torch.testing.is_integral(dtype):
+                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1.),
+                                 torch.get_default_dtype())
+                self.assertEqual(torch.result_type(1., torch.tensor([0, 1], dtype=dtype, device=device)),
+                                 torch.get_default_dtype())
+            else:
+                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1.), dtype)
+                self.assertEqual(torch.result_type(1., torch.tensor([0, 1], dtype=dtype, device=device)), dtype)
+
         self.assertEqual(torch.result_type(1, 1.), torch.get_default_dtype())
-        self.assertEqual(torch.result_type(torch.tensor(1, device=device), 1.), torch.get_default_dtype())
-        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long, device=device),
-                         torch.tensor([1, 1], dtype=torch.int, device=device)),
-                         torch.int)
-        self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float, device=device), 1.), torch.float)
-        self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float, device=device),
-                         torch.tensor(1, dtype=torch.double, device=device)),
-                         torch.double)
+        self.assertEqual(torch.result_type(1., 1.), torch.get_default_dtype())
+        self.assertEqual(torch.result_type(1, 1), torch.int64)
 
     @float_double_default_dtype
     def test_can_cast(self, device):
