@@ -49,13 +49,13 @@ class ReconstructScopesPass {
   // users know that the debugging information may be incomplete.
   bool class_types_are_not_unique_;
 
-  std::unordered_map<Function*, ModulePtr> func_to_module;
-  std::unordered_map<ModulePtr, std::string> module_names;
+  std::unordered_map<Function*, ModulePtr> func_to_module_;
+  std::unordered_map<ModulePtr, std::string> module_names_;
 
   void visitBlock(Block* b, const std::string& root_scope_string);
   void visitNode(Node* n, const std::string& root_scope_string);
 
-  std::string getModuleName(const Module& module, const std::string& prefix);
+  std::string getModuleTypeName(const Module& module, const std::string& prefix);
   void constructFunctionToModuleMap(const Module& module);
   void constructRelativeNamesForModules(
       const Module& module,
@@ -72,17 +72,17 @@ void ReconstructScopesPass::constructFunctionToModuleMap(const Module& module) {
   for (const auto& method : module.get_methods()) {
     Function* func_ptr = &method.function();
     if (!class_types_are_not_unique_ &&
-        func_to_module.find(func_ptr) != func_to_module.end()) {
+        func_to_module_.find(func_ptr) != func_to_module_.end()) {
       class_types_are_not_unique_ = true;
     }
-    func_to_module[func_ptr] = module._ivalue();
+    func_to_module_[func_ptr] = module._ivalue();
   }
   for (const Module& m : module.children()) {
     constructFunctionToModuleMap(m);
   }
 }
 
-std::string ReconstructScopesPass::getModuleName(
+std::string ReconstructScopesPass::getModuleTypeName(
     const Module& module,
     const std::string& prefix) {
   std::string moduleType = module.type()->str();
@@ -96,10 +96,10 @@ std::string ReconstructScopesPass::getModuleName(
 void ReconstructScopesPass::constructRelativeNamesForModules(
     const Module& module,
     const std::string& prefix) {
-  module_names[module._ivalue()] = getModuleName(module, prefix);
+  module_names_[module._ivalue()] = getModuleTypeName(module, prefix);
   for (const NameModule& s : module.named_children()) {
     constructRelativeNamesForModules(
-        s.value, module_names[module._ivalue()] + "." + s.name);
+        s.value, module_names_[module._ivalue()] + "." + s.name);
   }
 }
 
@@ -124,15 +124,18 @@ void ReconstructScopesPass::appendSourceRangeInfo(
 std::string ReconstructScopesPass::getScopeString(
     const InlinedCallStackEntry& frame) const {
   Function* f = frame.first;
-  if (!func_to_module.count(f)) {
+  if (!func_to_module_.count(f)) {
     return "<null (no func in the map)>";
   }
-  auto m = func_to_module.at(f);
-  if (!module_names.count(m)) {
+  auto m = func_to_module_.at(f);
+  if (!module_names_.count(m)) {
     return "<null (no module in the map)>";
   }
-  std::string scopeString = module_names.at(m) + "." + f->name();
+  std::string scopeString = module_names_.at(m) + "." + f->name();
 
+  // When class types are not unique, the module information may be
+  // incomplele. In this case, we add source range information,
+  // which can be helpful for deugging purposes.
   if (class_types_are_not_unique_) {
     appendSourceRangeInfo(scopeString, frame);
   }
@@ -169,8 +172,8 @@ void ReconstructScopesPass::visitBlock(
 
 void ReconstructScopesPass::run() {
   GRAPH_DUMP("Graph before reconstructing scope", &graph_);
-  func_to_module.clear();
-  module_names.clear();
+  func_to_module_.clear();
+  module_names_.clear();
 
   constructFunctionToModuleMap(root_module_);
   constructRelativeNamesForModules(root_module_, prefix_);
@@ -184,7 +187,7 @@ void ReconstructScopesPass::run() {
   }
 
   std::string root_scope_string =
-      getModuleName(root_module_, prefix_) + ".forward";
+      getModuleTypeName(root_module_, prefix_) + ".forward";
   visitBlock(graph_.block(), root_scope_string);
   GRAPH_DUMP("Graph after reconstructing scope", &graph_);
 }

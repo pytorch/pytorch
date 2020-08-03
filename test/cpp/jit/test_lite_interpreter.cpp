@@ -316,14 +316,23 @@ void testLiteInterpreterModuleInfoBasic() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    std::string module_info = bc.get_forward_method_debug_info(pc);
-    if (module_info == "<no module info for pc>") {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
       break;
     }
-    if (!module_info.empty()) {
-      module_debug_info_set.insert(module_info);
-    }
-    ++pc;
   }
 
   std::unordered_set<std::string> expected_result({"top(M).forward"});
@@ -343,16 +352,23 @@ void testLiteInterpreterNotSavingModuleInfo() {
 
   size_t pc = 0;
   while (true) {
-    std::string module_info = bc.get_forward_method_debug_info(pc);
-    if (module_info == "<no module info for pc>") {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // AT_ASSERT(module_info.empty());
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      AT_ASSERT(module_info.empty() || module_info == "<no module info>");
+      ++pc;
+    } catch (const std::exception& e) {
       break;
     }
-    AT_ASSERT(module_info.empty());
-    ++pc;
   }
 }
 
-void testLiteInterpreterOneSubmoduleInfo() {
+void testLiteInterpreterOneSubmoduleModuleInfo() {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -372,14 +388,23 @@ void testLiteInterpreterOneSubmoduleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    std::string module_info = bc.get_forward_method_debug_info(pc);
-    if (module_info == "<no module info for pc>") {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
       break;
     }
-    if (!module_info.empty()) {
-      module_debug_info_set.insert(module_info);
-    }
-    ++pc;
   }
 
   std::unordered_set<std::string> expected_result(
@@ -387,7 +412,7 @@ void testLiteInterpreterOneSubmoduleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterTwoSubmodulesInfo() {
+void testLiteInterpreterTwoSubmodulesModuleInfo() {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -413,14 +438,23 @@ void testLiteInterpreterTwoSubmodulesInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    std::string module_info = bc.get_forward_method_debug_info(pc);
-    if (module_info == "<no module info for pc>") {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
       break;
     }
-    if (!module_info.empty()) {
-      module_debug_info_set.insert(module_info);
-    }
-    ++pc;
   }
 
   std::unordered_set<std::string> expected_result(
@@ -454,18 +488,122 @@ void testLiteInterpreterSequentialModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    std::string module_info = bc.get_forward_method_debug_info(pc);
-    if (module_info == "<no module info for pc>") {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
       break;
     }
-    if (!module_info.empty()) {
-      module_debug_info_set.insert(module_info);
-    }
-    ++pc;
   }
 
   std::unordered_set<std::string> expected_result(
       {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterHierarchyModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.B0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward", "top(C).B0(B).forward", "top(C).B0(B).A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.register_module("A1", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.A1.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    // std::string module_info = bc.get_forward_method_debug_info(pc);
+    // if (module_info == "<no module info for pc>") {
+    //   break;
+    // }
+    // if (!module_info.empty()) {
+    //   module_debug_info_set.insert(module_info);
+    // }
+    // ++pc;
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A1(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 

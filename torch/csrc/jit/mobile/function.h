@@ -22,7 +22,7 @@ class Function {
       const std::string& name,
       const std::string& overload_name);
   void set_module_debug_info_list_size(size_t size);
-  void append_module_info(const std::string& module_info, size_t pc);
+  void set_module_info(const std::string& module_info, size_t pc);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 

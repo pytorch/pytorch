@@ -96,9 +96,11 @@ namespace jit {
   _(LiteInterpreterSetState)             \
   _(LiteInterpreterModuleInfoBasic)      \
   _(LiteInterpreterNotSavingModuleInfo)  \
-  _(LiteInterpreterOneSubmoduleInfo)     \
-  _(LiteInterpreterTwoSubmodulesInfo)    \
+  _(LiteInterpreterOneSubmoduleModuleInfo)     \
+  _(LiteInterpreterTwoSubmodulesModuleInfo)    \
   _(LiteInterpreterSequentialModuleInfo) \
+  _(LiteInterpreterHierarchyModuleInfo)  \
+  _(LiteInterpreterDuplicatedClassTypeModuleInfo)  \
   _(TorchbindIValueAPI)                  \
   _(LiteInterpreterDict)                 \
   _(MobileNamedParameters)               \

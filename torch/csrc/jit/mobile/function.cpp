@@ -55,9 +55,12 @@ bool Function::append_operator(
 
 void Function::set_module_debug_info_list_size(size_t size) {
   pc_to_module_debug_info_.resize(size);
+  for (size_t i = 0; i < size; ++i) {
+    pc_to_module_debug_info_[i] = "<no module info>";
+  }
 }
 
-void Function::append_module_info(const std::string& module_info, size_t pc) {
+void Function::set_module_info(const std::string& module_info, size_t pc) {
   TORCH_CHECK(
       pc < pc_to_module_debug_info_.size(),
       "Module debug info index out of boundary.");
@@ -77,9 +80,12 @@ void Function::set_register_size(size_t size) {
 }
 
 std::string Function::get_module_debug_info(size_t pc) {
-  if (pc >= pc_to_module_debug_info_.size()) {
-    return "<no module info for pc>";
-  }
+  // if (pc >= pc_to_module_debug_info_.size()) {
+  //   return "<no module info for pc>";
+  // }
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
   return pc_to_module_debug_info_[pc];
 }
 

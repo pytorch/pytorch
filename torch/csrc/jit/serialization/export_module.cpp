@@ -50,9 +50,15 @@ static IValue Table(
 std::string getModulePath(Node* node) {
   std::string modulePath = node->scopeName();
   size_t end = modulePath.size();
+  // Here we remove the source range information to make the
+  // module debugging information shorter and cleaner.
   if (modulePath[end - 1] == '>') {
     end = modulePath.rfind('<');
+    if (end > 0 && modulePath[end - 1] == '<') {
+      --end;
+    }
   }
+  // We only keep the last function in a callstack.
   size_t start = modulePath.rfind('/', end);
   start = (start != std::string::npos) ? start + 1 : 0;
   return modulePath.substr(start, end - start);

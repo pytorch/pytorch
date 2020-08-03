@@ -159,7 +159,7 @@ void parseMethods(
         std::string module_debug_info = (hasDebugInfo)
             ? module_debug_info_list[X].toString()->string()
             : "";
-        function->append_module_info(module_debug_info, i);
+        function->set_module_info(module_debug_info, i);
       }
     }
 
