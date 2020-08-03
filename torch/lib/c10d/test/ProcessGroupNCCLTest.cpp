@@ -295,7 +295,8 @@ void testAllreduce(const std::string& path, int rank, int size) {
     auto& tensor = tensors[j];
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
-      EXPECT_EQ(data[k], expected);
+      EXPECT_EQ(data[k], expected)
+          << "Allreduce ouputs do not match expected outputs";
     }
   }
 }
@@ -320,7 +321,8 @@ void testBroadcast(const std::string& path, int rank, int size) {
         auto& tensor = tensors[j];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          EXPECT_EQ(data[k], expected);
+          EXPECT_EQ(data[k], expected)
+              << "Broadcast outputs do not match expected outputs";
         }
       }
     }
@@ -348,7 +350,8 @@ void testReduce(const std::string& path, int rank, int size) {
         auto& tensor = tensors[rootTensor];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          EXPECT_EQ(data[k], expected);
+          EXPECT_EQ(data[k], expected)
+              << "Reduce outputs do not match expected outputs";
         }
       }
     }
@@ -372,7 +375,8 @@ void testAllgather(const std::string& path, int rank, int size) {
       auto& tensor = tensors[i][j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
-        EXPECT_EQ(data[k], expected);
+        EXPECT_EQ(data[k], expected)
+            << "Allgather outputs do not match expected outputs";
       }
     }
   }
@@ -397,7 +401,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     auto& tensor = tensors[i];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      EXPECT_EQ(data[j], expected);
+      EXPECT_EQ(data[j], expected) << "ReduceScatter outputs do not match expected outputs!";
     }
   }
 }
