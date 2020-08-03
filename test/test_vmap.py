@@ -524,13 +524,14 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
 
 
 class TestVmapOperators(TestCase):
-    def _vmap_view_test(self, op, inputs, in_dims=0, out_dims=0):
+    def _vmap_test(self, op, inputs, in_dims=0, out_dims=0, check_view=False):
         result = vmap(op, in_dims, out_dims)(*inputs)
         reference_result = reference_vmap(op, inputs, in_dims, out_dims)
         self.assertEqual(result, reference_result)
-        self.assertEqual(result.data_ptr() - result.storage_offset() * result.element_size(),
-                         inputs[0].data_ptr(),
-                         msg="result was not a view of the first input!")
+        if check_view:
+            self.assertEqual(result.data_ptr() - result.storage_offset() * result.element_size(),
+                             inputs[0].data_ptr(),
+                             msg="result was not a view of the first input!")
 
         # Assuming input[0] is a floating-point tensor. Check if the vmap
         # operation propagates the requires_grad flag. Some vmap operators are
@@ -541,6 +542,9 @@ class TestVmapOperators(TestCase):
         inputs_clone[0] = inputs[0].clone().requires_grad_()
         result = vmap(op, in_dims, out_dims)(*inputs_clone)
         self.assertTrue(result.requires_grad)
+
+    def _vmap_view_test(self, *args, **kwargs):
+        self._vmap_test(*args, **kwargs, check_view=True)
 
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
@@ -584,6 +588,31 @@ class TestVmapOperators(TestCase):
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
+    def test_reshape(self):
+        test = self._vmap_test
+        B0, B1, B2 = 7, 11, 13
+        op = torch.reshape
+        test(op, (torch.rand(B0, 2 * 5), [2, 5]), in_dims=(0, None), check_view=True)
+        test(op, (torch.rand(2, B0, 5), [1, 1, 10]), in_dims=(1, None), check_view=False)
+        test(vmap(lambda t: t.reshape([-1])), (torch.rand(B0, B1, 2, 5),), check_view=True)
+        test(vmap(vmap(lambda t: t.reshape([-1]), in_dims=2), in_dims=1),
+             (torch.rand(3, B1, 2, B2, 5, B0),), in_dims=5, check_view=False)
+
+    def test_reshape_as(self):
+        test = self._vmap_test
+        B0, B1, B2 = 7, 11, 13
+        op = torch.Tensor.reshape_as
+        test(op, (torch.rand(B0, 2 * 5), torch.rand(B0, 2, 5)), check_view=True)
+        test(op, (torch.rand(2 * 5), torch.rand(B0, 2, 5)), in_dims=(None, 0), check_view=True)
+        test(op, (torch.rand(B0, 2 * 5), torch.rand(2, 5)), in_dims=(0, None), check_view=True)
+
+        test(op, (torch.rand(2, B0, 5), torch.rand(1, 1, 10)), in_dims=(1, None), check_view=False)
+
+        test(vmap(op), (torch.rand(B0, B1, 2, 5), torch.randn(B0, B1, 10)), check_view=True)
+        test(vmap(vmap(op, in_dims=(2, None)), in_dims=(1, None)),
+             (torch.rand(3, B1, 2, B2, 5, B0), torch.rand(B0, 3 * 2 * 5)),
+             in_dims=(5, 0), check_view=False)
+
     def test_t(self):
         op = torch.t
         test = self._vmap_view_test
@@ -593,6 +622,53 @@ class TestVmapOperators(TestCase):
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
 
+    def test_T_numpy(self):
+        def op(t):
+            return t.T
+
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+        test(op, (torch.rand(B0, 2, 3, 5),))
+        test(op, (torch.rand(B0),))
+        test(op, (torch.rand(2, B0, 3, 5),), in_dims=1)
+        test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
+        test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 3, B2, 5),), in_dims=2)
+
+    def test_view(self):
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+        op = torch.Tensor.view
+
+        # We should error out if the view would produce an incorrect result
+        with self.assertRaises(RuntimeError):
+            vmap(op, in_dims=(1, None))(torch.rand(2, B0, 5), [10])
+
+        test(op, (torch.rand(B0, 2 * 5), [2, 5]), in_dims=(0, None))
+        test(op, (torch.rand(B0, 4, 5), [1, 2, 1, 10]), in_dims=(0, None))
+        test(vmap(lambda t: t.view([-1])), (torch.rand(B0, B1, 2, 5, 3),))
+        test(vmap(vmap(lambda t: t.reshape([-1])), in_dims=1),
+             (torch.rand(B2, B0, B1, 3, 2, 5),), in_dims=1)
+
+    def test_view_as(self):
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+        op = torch.Tensor.view_as
+
+        # We should error out if the view would produce an incorrect result
+        with self.assertRaises(RuntimeError):
+            vmap(op, in_dims=(1, 0))(torch.rand(2, B0, 5), torch.rand(B0, 10))
+
+        test(op, (torch.rand(B0, 2 * 5), torch.rand(B0, 2, 5)))
+        test(op, (torch.rand(2 * 5), torch.rand(B0, 2, 5)), in_dims=(None, 0))
+        test(op, (torch.rand(B0, 2 * 5), torch.rand(2, 5)), in_dims=(0, None))
+
+        test(op, (torch.rand(B0, 4, 5), torch.rand(2, 1, 1, 10)), in_dims=(0, None))
+
+        test(vmap(op), (torch.rand(B0, B1, 2, 5), torch.randn(B0, B1, 10)))
+        test(vmap(vmap(op, in_dims=(0, None)), in_dims=(0, None)),
+             (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
+             in_dims=(2, 0))
 
 if __name__ == '__main__':
     run_tests()
