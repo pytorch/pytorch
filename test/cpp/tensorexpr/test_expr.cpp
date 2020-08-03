@@ -254,6 +254,46 @@ void testExprCompareSelectEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
+void testExprCompareSelectDtypes() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kFloat));
+  std::vector<int> a_buffer(N, 1);
+  std::vector<int> b_buffer(N, 1);
+  std::vector<float> c_buffer(N, 0.0f);
+  std::vector<float> c_ref(N, 3.14f);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto select_expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              FloatImm::make(3.14f),
+              FloatImm::make(2.78f),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  SimpleIREvaluator ir_eval(select_expr, a, b, c);
+  ir_eval(a_buffer, b_buffer, c_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(a_buffer, 1);
+  assertAllEqual(b_buffer, 1);
+  ExpectAllNear(c_buffer, c_ref, 1e-7);
+}
+
 void testExprSubstitute01() {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);

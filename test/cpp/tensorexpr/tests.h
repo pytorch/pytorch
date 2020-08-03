@@ -25,6 +25,7 @@ namespace jit {
   _(ExprDoubleTest)                         \
   _(ExprVectorAdd01)                        \
   _(ExprCompareSelectEQ)                    \
+  _(ExprCompareSelectDtypes)                \
   _(ExprSubstitute01)                       \
   _(ExprMath01)                             \
   _(ExprUnaryMath01)                        \
