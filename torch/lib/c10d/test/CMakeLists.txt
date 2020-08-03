@@ -23,7 +23,7 @@ if(USE_CUDA)
     c10d_add_test(ProcessGroupGlooAsyncTest.cpp c10d c10d_cuda_test gtest_main)
   endif()
   if(USE_C10D_NCCL)
-    c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test)
+    c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test gtest_main)
     c10d_add_test(ProcessGroupNCCLErrorsTest.cpp c10d c10d_cuda_test
         gtest_main)
   endif()
