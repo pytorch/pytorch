@@ -129,4 +129,33 @@ decltype(auto) filter_map(const Mapper& mapper, Args&&... args) {
   return detail::filter_map_<ResultType, num_results>::template call<Condition, Mapper, Args...>(mapper, std::make_index_sequence<num_results>(), std::forward<Args>(args)...);
 }
 
-}}
+
+
+/**
+ * Use tuple_elements to extract a position-indexed subset of elements
+ * from the argument tuple into a result tuple.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
+ *  std::tuple<int, double> result = tuple_elements(t, std::index_sequence<0, 2>());
+ */
+template <class Tuple, size_t... ns>
+constexpr auto tuple_elements(Tuple t, std::index_sequence<ns...>) {
+  return std::tuple<std::tuple_element_t<ns, Tuple>...>(std::get<ns>(t)...);
+}
+
+/**
+ * Use tuple_take to extract the first n elements from the argument tuple
+ * into a result tuple.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
+ *  std::tuple<int, const char*> result = tuple_take<decltype(t), 2>(t);
+ */
+template <class Tuple, size_t n>
+constexpr auto tuple_take(Tuple t) {
+  return tuple_elements(t, std::make_index_sequence<n>{});
+}
+
+} // guts
+} // c10

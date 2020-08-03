@@ -1223,6 +1223,42 @@ void testSimplifyOpaqueTerms() {
   }
 }
 
+void testSimplifySymbolicMinMax() {
+  KernelScope kernel_scope;
+
+  {
+    // Minimum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Min::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 3);
+  }
+
+  {
+    // Maximum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 7);
+  }
+
+  {
+    // Can't simplify multiples because of signedness of variable component.
+    // TODO: maybe we could for unsigned types?
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x * 3, x * 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE(Max, simplified.node());
+  }
+}
+
 void testSimplifyWontReorderFloat() {
   KernelScope kernel_scope;
 
