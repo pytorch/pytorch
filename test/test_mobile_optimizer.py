@@ -1,5 +1,6 @@
 import unittest
 import torch
+import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
@@ -206,6 +207,46 @@ class TestOptimizer(unittest.TestCase):
             bi_module, [(torch.tensor([1]),)], [])
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
+
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
+    def test_optimize_for_mobile_asan(self):
+
+        class Child(nn.Module):
+            def __init__(self):
+                super(Child, self).__init__()
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv2(x)
+                return x
+
+        class Parent(nn.Module):
+            def __init__(self):
+                super(Parent, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.child = Child()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.child(x)
+                x = self.dequant(x)
+                return x
+
+        def _quant_script_and_optimize(model):
+            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            torch.quantization.prepare(model, inplace=True)
+            model(torch.randn(4, 1, 4, 4))
+            torch.quantization.convert(model, inplace=True)
+            model = torch.jit.script(model)
+            model_optim = optimize_for_mobile(model)
+            return model, model_optim
+
+        m, m_optim = _quant_script_and_optimize(Parent())
 
 if __name__ == '__main__':
     unittest.main()
