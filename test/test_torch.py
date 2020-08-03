@@ -16910,7 +16910,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (torch.randn(10, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)),
             (torch.randn((3, 3, 3), device=device, dtype=dtype), torch.randn((3, 3, 3), device=device, dtype=dtype)),
             (torch.randn((10, 1), device=device, dtype=dtype), torch.randn((10, 1), device=device, dtype=dtype).transpose(0, 1)),
-            (torch.ones(10, device=device, dtype=torch.long), torch.randn(10, device=device, dtype=dtype))
+            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.randn(10, device=device, dtype=dtype))
         ]
         for input in inputs:
             actual = torch.hypot(input[0], input[1])
