@@ -390,6 +390,9 @@ public:
   Vec256<T> sin() const {
     return map(std::sin);
   }
+  Vec256<T> sinc() const {
+    return map([](T x) { return x != static_cast<T>(0) ? std::sin(x) / (x) : static_cast<T>(1); });
+  }
   Vec256<T> sinh() const {
     return map(std::sinh);
   }

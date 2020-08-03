@@ -299,11 +299,12 @@ static void sinh_kernel(TensorIterator& iter) {
 }
 
 static void sinc_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinc_cpu", [&]() {
-      cpu_kernel(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinc_cpu", [&]() {
+      cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return (a != scalar_t(0)) 
-            ? std::sin(a * M_PIf) / (a * M_PIf) : scalar_t(1); });
+            ? std::sin(a) / a : scalar_t(1); },
+        [=](Vec256<scalar_t> self_vec){return self_vec.sinc();});
     });
 }
 

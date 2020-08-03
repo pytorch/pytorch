@@ -262,6 +262,9 @@ public:
   Vec256<c10::complex<float>> sin() const {
     return map(std::sin);
   }
+  Vec256<c10::complex<float>> sinc() const {
+    return map(std::sinc);
+  }
   Vec256<c10::complex<float>> sinh() const {
     return map(std::sinh);
   }

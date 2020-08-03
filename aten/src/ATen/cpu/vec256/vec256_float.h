@@ -172,6 +172,9 @@ public:
   Vec256<float> sin() const {
     return Vec256<float>(Sleef_sinf8_u10(values));
   }
+  Vec256<float> sinc() const {
+    return Vec256<float>(Sleef_sinf8_u10(values) / values);
+  }
   Vec256<float> sinh() const {
     return Vec256<float>(Sleef_sinhf8_u10(values));
   }

@@ -365,6 +365,9 @@ public:
   Vec256<float> sin() const {
     return map(std::sin);
   }
+  Vec256<float> sinc() const {
+    return map(std::sinc);
+  }
   Vec256<float> sinh() const {
     return map(std::sinh);
   }

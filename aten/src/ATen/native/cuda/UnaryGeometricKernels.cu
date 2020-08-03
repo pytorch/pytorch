@@ -50,11 +50,18 @@ void cos_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+//void sinc_kernel_cuda(TensorIterator& iter) {
+//#define PI scalar_t{3.14159265358979323846}
+//  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sinc_cuda", [&]() {
+//    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+//      return a != scalar_t{0} ? ::sin(PI * a) / (PI * a) : 1;
+//    });
+//  });
+//}
 void sinc_kernel_cuda(TensorIterator& iter) {
-#define PI scalar_t{3.14159265358979323846}
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sinc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a != scalar_t{0} ? ::sin(PI * a) / (PI * a) : 1;
+      return a != scalar_t{0} ? ::sin(a) / a : 1;
     });
   });
 }

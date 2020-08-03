@@ -164,6 +164,9 @@ public:
   Vec256<double> sin() const {
     return Vec256<double>(Sleef_sind4_u10(values));
   }
+  Vec256<double> sinc() const {
+    return Vec256<double>(Sleef_sind4_u10(values) / values);
+  }
   Vec256<double> sinh() const {
     return Vec256<double>(Sleef_sinhd4_u10(values));
   }

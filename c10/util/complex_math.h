@@ -166,6 +166,15 @@ C10_HOST_DEVICE inline c10::complex<T> atan(const c10::complex<T> &x) {
 // Hyperbolic functions
 
 template<typename T>
+C10_HOST_DEVICE inline c10::complex<T> sinc(const c10::complex<T> &x) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return static_cast<c10::complex<T>>(thrust::sin(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(x)));
+#else
+  return static_cast<c10::complex<T>>(std::sin(static_cast<std::complex<T>>(x)));
+#endif
+}
+
+template<typename T>
 C10_HOST_DEVICE inline c10::complex<T> sinh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::sinh(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(x)));
@@ -233,6 +242,7 @@ using c10_complex_math::tan;
 using c10_complex_math::asin;
 using c10_complex_math::acos;
 using c10_complex_math::atan;
+using c10_complex_math::sinc;
 using c10_complex_math::sinh;
 using c10_complex_math::cosh;
 using c10_complex_math::tanh;
@@ -254,6 +264,7 @@ using c10_complex_math::tan;
 using c10_complex_math::asin;
 using c10_complex_math::acos;
 using c10_complex_math::atan;
+using c10_complex_math::sinc;
 using c10_complex_math::sinh;
 using c10_complex_math::cosh;
 using c10_complex_math::tanh;

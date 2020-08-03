@@ -224,6 +224,9 @@ public:
   Vec256<c10::complex<double>> sin() const {
     return map(std::sin);
   }
+  Vec256<c10::complex<double>> sinc() const {
+    return map(std::sinc);
+  }
   Vec256<c10::complex<double>> sinh() const {
     return map(std::sinh);
   }
