@@ -306,14 +306,7 @@ void testExprIntrinsicsDtypes() {
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto fabs_expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          b,
-          {i},
-          fabs(Load::make(a, {i}, mask)),
-          mask));
+      i, 0, N, Store::make(b, {i}, fabs(Load::make(a, {i}, mask)), mask));
 
   SimpleIREvaluator ir_eval(fabs_expr, a, b);
   ir_eval(a_buffer, b_buffer);
