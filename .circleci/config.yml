@@ -7282,13 +7282,6 @@ workflows:
                 - postnightly
           executor: windows-with-nvidia-gpu
   docker_build:
-    triggers:
-      - schedule:
-          cron: "0 15 * * 0"
-          filters:
-            branches:
-              only:
-                - master
     jobs:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9"
