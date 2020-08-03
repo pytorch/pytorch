@@ -516,11 +516,22 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
     assert all(bdim_size == bdim_sizes[0] for bdim_size in bdim_sizes)
     bdim_size = bdim_sizes[0]
     results = tuple(op(*slice_inputs(inputs, in_dims, i)) for i in range(bdim_size))
-    # reference_vmap only supports functions that return a single Tensor output
-    assert all(isinstance(result, torch.Tensor) for result in results)
+
+    assert len(results) > 0
+    op_has_single_return = not isinstance(results[0], tuple)
+    if op_has_single_return:
+        assert all(isinstance(result, torch.Tensor) for result in results)
+        if isinstance(out_dims, int):
+            out_dims = (out_dims,) * 1
+        return torch.stack(results, dim=out_dims[0])
+
+    assert all(isinstance(result, tuple) for result in results)
+    num_returns = len(results[0])
+    assert all(len(result) == num_returns for result in results)
     if isinstance(out_dims, int):
-        out_dims = (out_dims,) * 1
-    return torch.stack(results, dim=out_dims[0])
+        out_dims = (out_dims,) * num_returns
+    return tuple(torch.stack(result_shards, out_dim)
+                 for result_shards, out_dim in zip(zip(*results), out_dims))
 
 
 class TestVmapOperators(TestCase):
@@ -528,23 +539,42 @@ class TestVmapOperators(TestCase):
         result = vmap(op, in_dims, out_dims)(*inputs)
         reference_result = reference_vmap(op, inputs, in_dims, out_dims)
         self.assertEqual(result, reference_result)
+        op_has_single_return = not isinstance(result, tuple)
+
         if check_view:
-            self.assertEqual(result.data_ptr() - result.storage_offset() * result.element_size(),
-                             inputs[0].data_ptr(),
-                             msg="result was not a view of the first input!")
+            result_as_tuple = (result,) if op_has_single_return else result
+            for output in result_as_tuple:
+                self.assertEqual(output.data_ptr() - output.storage_offset() * output.element_size(),
+                                 inputs[0].data_ptr(),
+                                 msg="result was not a view of the first input!")
 
         # Assuming input[0] is a floating-point tensor. Check if the vmap
-        # operation propagates the requires_grad flag. Some vmap operators are
-        # implemented in a way that assumes that they are composite with respect
-        # to autograd. If the operator ever is changed to not be composite with
-        # respect to autograd, then the following check should fail.
+        # operation propagates the requires_grad flag to the zeroth output.
+        # Some vmap operators are implemented in a way that assumes that
+        # they are composite with respect to autograd. If the operator ever is
+        # changed to not be composite with respect to autograd, then the
+        # following check should fail.
         inputs_clone = list(inputs)
         inputs_clone[0] = inputs[0].clone().requires_grad_()
         result = vmap(op, in_dims, out_dims)(*inputs_clone)
-        self.assertTrue(result.requires_grad)
+        result_as_tuple = (result,) if op_has_single_return else result
+        self.assertTrue(result[0].requires_grad)
 
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
+
+    def test_chunk(self):
+        test = self._vmap_view_test
+        op = torch.chunk
+        B0, B1, B2 = 7, 11, 13
+
+        # tests for torch.split(self, split_size: int, dim)
+        test(op, (torch.rand(B0, 2, 1024), 15, -1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 1024), 9, 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 4, 0),
+             in_dims=(2, None, None))
+        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
@@ -645,6 +675,27 @@ class TestVmapOperators(TestCase):
              (torch.rand(3, B1, 2, B2, 5, B0), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(5, 0), check_view=False)
 
+    def test_split(self):
+        test = self._vmap_view_test
+        op = torch.split
+        B0, B1, B2 = 7, 11, 13
+
+        # tests for torch.split(self, split_size: int, dim)
+        test(op, (torch.rand(B0, 2, 1024), 101, -1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 1024), 130, 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 256, 0),
+             in_dims=(2, None, None))
+        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
+        # tests for torch.split(self, split_size: List[int], dim)
+        test(op, (torch.rand(B0, 2, 1024), [1, 1020, 3], -1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 1024), [100] * 10 + [24], 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), [256] * 3 + [255], 0),
+             in_dims=(2, None, None))
+        test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
     def test_t(self):
         op = torch.t
         test = self._vmap_view_test
@@ -678,6 +729,19 @@ class TestVmapOperators(TestCase):
              (torch.rand(B1, 7, B0, 11), 1, 5, 1), in_dims=(2, None, None, None))
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 7, B0, 11, B2), -1, 2, 4), in_dims=(2, None, None, None))
+
+    def test_unbind(self):
+        test = self._vmap_view_test
+        op = torch.unbind
+        B0, B1, B2 = 7, 11, 13
+
+        test(op, (torch.rand(B0, 2, 1024), -1), in_dims=(0, None))
+        test(op, (torch.rand(B0, 2, 0),))
+        test(op, (torch.rand(2, B0, 7), 0), in_dims=(1, None))
+        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, 1023, B0, 5), 1),
+             in_dims=(2, None))
+        test(vmap(vmap(lambda t: op(t, dim=1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 32, B2),), in_dims=2)
 
     def test_view(self):
         test = self._vmap_view_test
