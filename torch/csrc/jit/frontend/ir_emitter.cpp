@@ -494,6 +494,10 @@ struct Environment {
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"sorted",
            std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
+          // Only AssertionError is bound so that we can use it from emitAssert,
+          // all other exceptions should be resolved at the Python level
+          {"AssertionError",
+           std::make_shared<ExceptionValue>("AssertionError")},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
@@ -1024,7 +1028,7 @@ struct to_ir {
           emitSugaredExpr(expr, 0);
         } break;
         case TK_RAISE:
-          emitRaise(Raise(stmt).range());
+          emitRaise(Raise(stmt));
           break;
         case TK_ASSERT:
           emitAssert(Assert(stmt));
@@ -1838,10 +1842,32 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  void emitRaise(const SourceRange& loc) {
-    const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
-    graph->insert(prim::RaiseException, {string_input}, {}, loc);
+  void emitRaise(const Raise& raise) {
+    auto sv = emitSugaredExpr(raise.expr(), 1);
+    Value* error_message = nullptr;
+
+    if (auto exception_instance =
+            std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
+      // The typical case, an instance of the exception class was thrown:
+      //    raise RuntimeError("error")
+      error_message = exception_instance->getValue();
+    } else if (
+        auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
+      // A bare exception was thrown so add an empty message. e.g.
+      //    raise RuntimeError
+      error_message = insertConstant(*graph, "", raise.range());
+    } else {
+      // The raise was not followed by an exception (i.e. it was something like
+      // `raise "error"` instead of `raise RuntimeError("error")`)
+      throw ErrorReport(raise.range())
+          << "exceptions must derive from BaseException";
+    }
+
+    if (!error_message->type()->isSubtypeOf(StringType::get())) {
+      error_message = graph->insert(aten::str, {error_message});
+    }
+
+    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -1849,8 +1875,20 @@ struct to_ir {
   void emitAssert(const Assert& stmt) {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    // Create an `AssertionError("the_message")` call
+    auto message = (stmt.msg().present())
+        ? stmt.msg().get()
+        : StringLiteral::create(stmt.range(), "");
+    auto callee = Var::create(
+        stmt.range(), Ident::create(stmt.range(), "AssertionError"));
+    auto apply = Apply::create(
+        stmt.range(),
+        callee,
+        List<Expr>::create(stmt.range(), {message}),
+        List<Attribute>::create(stmt.range(), {}));
+
     List<Stmt> false_branch =
-        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range(), apply)});
     emitIfElseBlocks(stmt.range(), cond_value, true_branch, false_branch);
   }
 
