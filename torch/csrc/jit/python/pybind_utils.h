@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -284,6 +285,16 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
+  }
+
+  auto enum_type = py::module::import("enum").attr("Enum");
+  py::bool_ isEnumValue = py::isinstance(input, enum_type);
+  if (py::cast<bool>(isEnumValue)) {
+    auto enum_class = input.attr("__class__");
+    auto enum_type =
+        py::cast<TypePtr>(py::module::import("torch.jit.annotations")
+                              .attr("try_ann_to_type")(enum_class, py::none()));
+    return InferredType(enum_type);
   }
 
   py::bool_ isClass =
@@ -730,16 +741,12 @@ inline IValue toIValue(
     case TypeKind::AnyEnumType:
       break;
     case TypeKind::EnumType:
+      EnumTypePtr enum_type = type->expect<EnumType>();
       py::object py_obj = py::reinterpret_borrow<py::object>(obj);
-      std::string qualified_class_name_str =
-          py::cast<std::string>(py::module::import("torch._jit_internal")
-                                    .attr("_qualified_name")(py_obj));
-      c10::QualifiedName qualified_class_name(qualified_class_name_str);
       std::string name = py::cast<std::string>(obj.attr("name"));
-      IValue value = toIValue(
-          obj.attr("value"), type->cast<EnumType>()->getValueType(), {});
-      auto enum_holder = c10::make_intrusive<c10::ivalue::EnumHolder>(
-          qualified_class_name, name, value);
+      IValue value = toIValue(obj.attr("value"), enum_type->getValueType(), {});
+      auto enum_holder =
+          c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
       return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(

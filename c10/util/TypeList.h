@@ -165,6 +165,21 @@ struct all<Condition, typelist<Types...>>
     static_assert(is_type_condition<Condition>::value, "In typelist::all<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
 };
 
+/**
+ * Returns true iff the type trait is true for any type in the type list
+ * Examples:
+ *   true   ==  true_for_any_type<std::is_reference, typelist<int, const float&&, const MyClass>>::value
+ *   false  ==  true_for_any_type<std::is_reference, typelist<int, const float, MyClass>>::value
+ */
+template<template <class> class Condition, class TypeList> struct true_for_any_type final {
+    static_assert(false_t<TypeList>::value, "In typelist::true_for_any_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+};
+template<template <class> class Condition, class... Types>
+struct true_for_any_type<Condition, typelist<Types...>> final
+: guts::disjunction<Condition<Types>...> {
+    static_assert(is_type_condition<Condition>::value, "In typelist::true_for_any_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
+};
+
 
 /**
  * Maps types of a type list using a type trait
