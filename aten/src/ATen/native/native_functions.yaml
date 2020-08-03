@@ -1479,13 +1479,13 @@
     CPU, CUDA: native_group_norm_backward
 
 # FFT
-- func: fft.fft(Tensor self) -> Tensor
+# NOTE: functions in the fft python_module should have their names start with
+# "fft_" underscore and be bound to the desired Python name in
+# torch/fft/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/fft.h.
+- func: fft_fft(Tensor self) -> Tensor
+  python_module: fft
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU: fft_fft
-    CUDA: fft_fft
-  python_module: fft
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full

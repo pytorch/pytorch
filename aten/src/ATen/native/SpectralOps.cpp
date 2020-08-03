@@ -18,6 +18,7 @@
 
 namespace at { namespace native {
 
+// torch.fft.fft, analogous to NumPy's numpy.fft.fft
 Tensor fft_fft(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
   TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
