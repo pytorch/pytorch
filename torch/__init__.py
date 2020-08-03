@@ -190,7 +190,7 @@ else:
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
-if not _C:
+if False:
     import torch._C as _C
 
 __all__ += [name for name in dir(_C)
