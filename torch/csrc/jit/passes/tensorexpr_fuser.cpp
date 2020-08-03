@@ -305,7 +305,7 @@ c10::optional<Node*> tryMerge(
       consumer_type_info.push_back(value_types.at(consumer->output(idx)));
     } else {
       consumer_type_info.push_back(c10::nullopt);
-      GRAPH_DEBUG("@#$ Didn't find info for producer output %", producer->output(idx)->debugName());
+      GRAPH_DEBUG("Didn't find info for producer output %", producer->output(idx)->debugName());
       TORCH_INTERNAL_ASSERT(!consumer->output(idx)->type()->cast<TensorType>());
     }
   }
@@ -315,7 +315,7 @@ c10::optional<Node*> tryMerge(
     if (value_types.count(producer->output(idx))) {
       producer_outputs_type_info.push_back(value_types.at(producer->output(idx)));
     } else {
-      GRAPH_DEBUG("@#$ Didn't find info for producer output %", producer->output(idx)->debugName());
+      GRAPH_DEBUG("Didn't find info for producer output %", producer->output(idx)->debugName());
       TORCH_INTERNAL_ASSERT(!producer->output(idx)->type()->cast<TensorType>());
       producer_outputs_type_info.push_back(c10::nullopt);
     }
@@ -324,7 +324,7 @@ c10::optional<Node*> tryMerge(
     if (value_types.count(producer->input(idx))) {
       producer_inputs_type_info.push_back(value_types.at(producer->input(idx)));
     } else {
-      GRAPH_DEBUG("@#$ Didn't find info for producer input %", producer->input(idx)->debugName());
+      GRAPH_DEBUG("Didn't find info for producer input %", producer->input(idx)->debugName());
       TORCH_INTERNAL_ASSERT(!producer->input(idx)->type()->cast<TensorType>());
       producer_inputs_type_info.push_back(c10::nullopt);
     }
@@ -375,22 +375,7 @@ c10::optional<Node*> tryMerge(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     auto offset = consumer->outputs().size();
     Node* mergedNode = SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-    
-    
-    TORCH_INTERNAL_ASSERT(producer_outputs_type_info.size() == mergedNode->outputs().size());
     if (mergedNode) {
-      GRAPH_DEBUG("producer outputs size = ", producer_outputs_type_info.size(), " mergedNode = ", mergedNode->outputs().size());
-      GRAPH_DEBUG("mergedNode = ", *mergedNode);
-      // for (size_t idx = 0; idx < mergedNode->outputs().size(); idx++) {
-      //   Value* v = mergedNode->output(idx);
-      //   if (producer_outputs_type_info[idx]) {
-      //     value_types[v] = *producer_outputs_type_info[idx];
-      //     GRAPH_DEBUG("%", v->debugName(), " -> ", *value_types.at(v), "\n");
-      //   } else {
-      //     GRAPH_DEBUG(
-      //         "No shape info for newly created TE group output %", v->debugName(), "!\n");
-      //   }
-      // }
 
       size_t msize = mergedNode->outputs().size();
       auto te_group_graph = te_group->g(attr::Subgraph);
@@ -409,8 +394,6 @@ c10::optional<Node*> tryMerge(
         }
       }
 
-      GRAPH_DEBUG("producer inputs size = ", producer_inputs_type_info.size(), " mergedNode = ", mergedNode->inputs().size());
-      TORCH_INTERNAL_ASSERT(producer_inputs_type_info.size() == mergedNode->inputs().size());
       for (size_t idx = 0; idx < mergedNode->inputs().size(); idx++) {
         Value* v = mergedNode->input(idx);
         if (producer_inputs_type_info[idx]) {
@@ -587,10 +570,7 @@ void insertGuards(
     auto versioning_if = b->owningGraph()->create(
         prim::If, {check_result}, fusion_group->outputs().size());
 
-    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {      
-      if (value_types.count(fusion_group->output(i)) == 0) {
-        GRAPH_DEBUG("@#$ Didn't find info for %", fusion_group->output(i)->debugName());
-      }
+    for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       TORCH_INTERNAL_ASSERT(value_types.count(fusion_group->output(i)) || !fusion_group->output(i)->type()->cast<TensorType>());
       fusion_group->output(i)->replaceAllUsesWith(versioning_if->output(i));
     }
