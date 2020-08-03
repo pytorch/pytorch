@@ -75,7 +75,10 @@ class Conf(object):
             if phase in ["upload"]:
                 filter_branch = "nightly"
             else:
-                filter_branch = r"/.*/"
+                if 'windows' in job_def["name"] and 'cu110' in job_def["name"] and phase in ['build']:
+                    filter_branch = r"/ci-all\/.*/"
+                else:
+                    filter_branch = r"/.*/"
             job_def["filters"] = branch_filters.gen_filter_dict(
                 branches_list=[filter_branch],
                 tags_list=[branch_filters.RC_PATTERN],

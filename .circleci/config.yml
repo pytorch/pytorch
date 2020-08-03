@@ -3112,7 +3112,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3122,7 +3122,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3132,7 +3132,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3232,7 +3232,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3242,7 +3242,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3252,7 +3252,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3292,7 +3292,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
@@ -3332,7 +3332,7 @@ workflows:
           filters:
             branches:
               only:
-                - /.*/
+                - /ci-all\/.*/
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
