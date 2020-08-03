@@ -275,7 +275,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (!py_grad || py_grad == Py_None) {
-    var.grad().reset();
+    var.mutable_grad().reset();
     return 0;
   }
 
@@ -297,7 +297,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
   THPUtils_assertRet(-1, grad.sizes().equals(var.sizes()),
       "assigned grad has data of a different size");
 
-  var.grad() = grad;
+  var.mutable_grad() = grad;
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

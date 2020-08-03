@@ -325,6 +325,33 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="F.elu failed ({} vs {})".format(qY, qY_hat))
 
+
+    """Tests the correctness of the quantized::celu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e2, 1e2, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(scale_max=9.999999747378752e-06)),
+           alpha=st.floats(0.01, 100.0, allow_nan=False, allow_infinity=False))
+    def test_qcelu(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+        output_scale = 0.5
+        output_zero_point = 1
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # calculate CELU(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = torch.nn.functional.celu(dqX, alpha)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
+                                           dtype=torch_type)
+
+        # test regular
+        qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
+        self.assertEqual(qY, qY_hat,
+                         msg="F.celu failed ({} vs {})".format(qY, qY_hat))
+
+
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
@@ -349,13 +376,13 @@ class TestQuantizedOps(TestCase):
                 # In the FP kernel, mean and variance are calculated in floating point.
                 # In the quantized kernel, they are calculated in integer arithmetic.
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do two things to whitelist this failure
+                # expected and acceptable. We do two things to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1791,13 +1818,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1878,13 +1905,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.

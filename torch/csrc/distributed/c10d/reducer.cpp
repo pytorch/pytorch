@@ -1007,7 +1007,7 @@ void Reducer::runGradCallbackForVariable(
     GradCallback&& cb) {
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
-    cb(variable.grad());
+    cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));

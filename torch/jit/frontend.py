@@ -275,13 +275,8 @@ class WithItemBuilder(Builder):
     def build_withitem(ctx, item):
         lineno = item.context_expr.lineno
         start = item.context_expr.col_offset
+        end = start + len('with')
         op_vars = item.optional_vars
-
-        if op_vars:
-            end = op_vars.col_offset + len(op_vars.id)
-        else:
-            end = item.context_expr.end_col_offset
-
         r = ctx.make_range(lineno, start, end)
 
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)

@@ -62,13 +62,14 @@ def udf_with_torch_ops(device=-1):
 # Events (operator invocations) that are expected to be ran as part of the above
 # function.
 EXPECTED_REMOTE_EVENTS = [
-    "ones",
-    "ones",
-    "add",
-    "mul",
-    "relu",
-    "threshold",
-    "sigmoid",
+    "aten::ones",
+    "aten::ones",
+    "aten::add",
+    "aten::mul",
+    "aten::relu",
+    "aten::threshold",
+    "aten::sigmoid",
+    "aten::sigmoid",
 ]
 
 
@@ -921,6 +922,16 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
+    def test_all_gather(self):
+        info = rpc.get_worker_info()
+        results = rpc.api._all_gather(info.id)
+        expected = {}
+        for info in rpc._get_current_rpc_agent().get_worker_infos():
+            expected[info.name] = info.id
+
+        self.assertEqual(expected, results)
+
+    @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
         self._run_uneven_workload()
@@ -1049,6 +1060,8 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual([], event.kernels)
                 self.assertEqual(0, event.cuda_time)
             else:
+                if event.node_id == 1:
+                    continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 self.assertGreater(event.cuda_time_total, 0)
                 self.assertEqual(1, len(event.kernels))
@@ -1059,6 +1072,17 @@ class RpcTest(RpcAgentTestFixture):
                     self.assertEqual(kernel.device, 1)
 
                 self.assertGreater(event.cuda_time, 0)
+
+        # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
+        # events.
+        REMOTE_OP_STR = "#remote_op: "
+
+        def get_name(event):
+            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
+
+        remote_events = [event for event in function_events if event.is_remote]
+        remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
+        self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
 
     @dist_init
     def test_profiler_export_trace(self):
@@ -1231,8 +1255,8 @@ class RpcTest(RpcAgentTestFixture):
             for event in events
             if event.is_remote
         }
-        self.assertTrue("mul" in remote_events)
-        remote_mul_event = remote_events["mul"]
+        self.assertTrue("aten::mul" in remote_events)
+        remote_mul_event = remote_events["aten::mul"]
         self.assertEqual(remote_mul_event.node_id, dst)
         self.check_profiling_info(
             worker_name(self.rank),
@@ -1453,9 +1477,9 @@ class RpcTest(RpcAgentTestFixture):
         outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
-        self._assert_top_level_events(inner_events, ['sub'])
+        self._assert_top_level_events(inner_events, ['aten::sub'])
         outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
-        self._assert_top_level_events(outer_events, ['add', 'sub'])
+        self._assert_top_level_events(outer_events, ['aten::add', 'aten::sub'])
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
@@ -3091,6 +3115,21 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.remote(dst, fail_on_fut, args=(fut,))
 
+    @dist_init
+    def test_future_done(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut = rpc.rpc_async(dst, torch.add, args=(torch.zeros(2), 1))
+        fut.wait()
+        self.assertTrue(fut.done())
+
+    @dist_init
+    def test_future_done_exception(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut = rpc.rpc_async(dst, raise_func)
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            fut.wait()
+        self.assertTrue(fut.done())
+
     def _test_future_cb(self, func):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
@@ -3218,7 +3257,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_async_class_method(self):
-        print(dir(AsyncExecutionClass.class_async_add))
         self._test_async_function(AsyncExecutionClass.class_async_add)
 
     @dist_init
@@ -3345,6 +3383,8 @@ class RpcTest(RpcAgentTestFixture):
         # Test PG
         dist.barrier()
 
+        rpc.shutdown()
+
     @dist_init(setup_rpc=False)
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
@@ -3369,6 +3409,8 @@ class RpcTest(RpcAgentTestFixture):
 
         # Test PG
         dist.barrier()
+
+        rpc.shutdown()
 
     @dist_init
     def test_wait_all_with_exception(self):
@@ -3507,13 +3549,6 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         args = (2,)
         self._test_remote_message_dropped_timeout(func, args, dst=0)
 
-    @dist_init(faulty_messages=[], messages_to_delay={})
-    def test_owner_rref(self):
-        if self.rank != 0:
-            return
-        rref = rpc.remote(worker_name(0), torch.add, args=(1, 1))
-        rref.to_here()
-
     def _test_remote_message_delay_timeout(self, func, args, dst=None):
         if self.rank != 0:
             return
@@ -3549,16 +3584,14 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
                 # to_here() should raise timeout error, since it does not know about the
                 # status of rpc.remote().
                 slow_rref.to_here(0.001)
-        # Note: UserRRef will try to send out a RRefUserDelete, but will not find it on the owner.
-        # later, the owner will process the RRef creation, and time out
-        # waiting for the delete messages.
-        # Therefore, we wait until we get notification that pending owners have been confirmed
-        # before sending out RRefUserDeletes.
+        # Note: If we proceed with shutdown, UserRRef will send out a RRefUserDelete
+        # but this can be a noop since it may not exist on the owner yet. Later,
+        # the owner can process the RRef creation and wait for the delete message,
+        # thus leading to a timeout.
+        # Therefore, we wait until we get notification that pending owners have
+        # been confirmed before sending out RRefUserDeletes.
         if dst_rank != self.rank:
             wait_until_owners_and_forks_on_rank(2, 2, rank=dst_rank)
-        else:
-            # 1 owner, fork deleted
-            wait_until_owners_and_forks_on_rank(1, 0, rank=dst_rank)
 
     @dist_init(faulty_messages=[], messages_to_delay={"PYTHON_REMOTE_CALL": 2})
     def test_udf_remote_message_delay_timeout(self):

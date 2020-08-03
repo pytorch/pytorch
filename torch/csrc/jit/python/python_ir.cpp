@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -786,6 +787,13 @@ void initPythonIRBindings(PyObject* module_) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); });
+  py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
+      .def(py::init([](const std::string& qualified_name, TypePtr value) {
+        return EnumType::create(
+            c10::QualifiedName(qualified_name),
+            std::move(value),
+            get_python_cu());
+      }));
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
@@ -808,7 +816,10 @@ void initPythonIRBindings(PyObject* module_) {
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
-      .def_readonly("offset", &Use::offset);
+      .def_readonly("offset", &Use::offset)
+      .def("isAfter", [](Use& self, Use& other_use) {
+        return isBeforeOrAfter(self, other_use, false);
+      });
 }
 } // namespace jit
 } // namespace torch

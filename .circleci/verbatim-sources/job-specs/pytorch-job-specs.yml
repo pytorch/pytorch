@@ -31,7 +31,7 @@ jobs:
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -81,6 +81,7 @@ jobs:
         no_output_timeout: "90m"
         command: |
           set -e
+          export PYTHONUNBUFFERED=1
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
@@ -106,7 +107,7 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
             hostname
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -118,7 +119,6 @@ jobs:
           # See https://circleci.com/docs/2.0/env-vars/#using-parameters-and-bash-environment
           echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
           echo "export id=$id" >> $BASH_ENV
-          echo "export COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}" >> $BASH_ENV
     - run:
         name: Check for no AVX instruction by default
         no_output_timeout: "20m"
@@ -146,12 +146,24 @@ jobs:
         command: |
           set -e
 
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          ${PARALLEL_FLAGS}
+          source ./workspace/env
+          cd workspace
+          EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
+          elif [[ ${BUILD_ENVIRONMENT} == *caffe2* ]]; then
+            echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
+            echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           fi
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -161,12 +173,6 @@ jobs:
           echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          echo "Stopping current container"
-          docker container stop $id
-          echo "Pruning stopped containers"
-          docker container prune -f
-          echo "Deleting the image"
-          docker image rm ${COMMIT_DOCKER_IMAGE}
         when: always
     - store_test_results:
         path: test-reports
@@ -191,10 +197,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.13"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -204,12 +210,6 @@ jobs:
     executor: <<parameters.executor>>
     steps:
       - checkout
-      - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -262,10 +262,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.13"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -277,12 +277,6 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
-      - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m

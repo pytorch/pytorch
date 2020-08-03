@@ -106,7 +106,7 @@ jit_sources_common = [
 
 libtorch_sources_common = core_sources_common + jit_sources_common
 
-core_sources_full = [
+core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -122,6 +122,13 @@ core_sources_full = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/jit/frontend/name_mangler.cpp",
+    "torch/csrc/jit/ir/type_hashing.cpp",
+    "torch/csrc/jit/serialization/pickler.cpp",
+    "torch/csrc/jit/serialization/type_name_uniquer.cpp",
+]
+
+core_sources_full = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -140,7 +147,6 @@ core_sources_full = [
     "torch/csrc/jit/frontend/exit_transforms.cpp",
     "torch/csrc/jit/frontend/inline_loop_condition.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",
-    "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/frontend/parser.cpp",
     "torch/csrc/jit/frontend/schema_matching.cpp",
     "torch/csrc/jit/frontend/script_type_parser.cpp",
@@ -154,7 +160,6 @@ core_sources_full = [
     "torch/csrc/jit/ir/node_hashing.cpp",
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
-    "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
@@ -225,10 +230,8 @@ core_sources_full = [
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
-    "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
-    "torch/csrc/jit/serialization/type_name_uniquer.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
@@ -254,7 +257,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full)
+libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -313,12 +316,13 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/mobile/export.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
-    "torch/csrc/jit/mobile/register_mobile_autograd.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
@@ -479,6 +483,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
@@ -565,6 +570,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_class_type.cpp",
         "test/cpp/jit/test_code_template.cpp",
         "test/cpp/jit/test_constant_pooling.cpp",
+        "test/cpp/jit/test_cleanup_passes.cpp",
         "test/cpp/jit/test_create_autodiff_subgraphs.cpp",
         "test/cpp/jit/test_custom_class.cpp",
         "test/cpp/jit/test_custom_operators.cpp",
@@ -579,6 +585,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "test/cpp/jit/test_irparser.cpp",
         "test/cpp/jit/test_jit_type.cpp",
         "test/cpp/jit/test_lite_interpreter.cpp",
+        "test/cpp/jit/test_lite_trainer.cpp",
         "test/cpp/jit/test_misc.cpp",
         "test/cpp/jit/test_mobile_type_parser.cpp",
         "test/cpp/jit/test_module_api.cpp",

@@ -7,7 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 
 
@@ -31,6 +31,10 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+
+    @staticmethod
+    def is_test_phase(phase):
+        return "test" in phase
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -64,8 +68,7 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        image_path = gen_docker_image_path(base_build_env_name,
-                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
+        image_path = gen_docker_image_path(base_build_env_name)
         return miniutils.quote(image_path)
 
     def get_build_job_name_pieces(self, build_or_test):
@@ -84,9 +87,9 @@ class Conf:
         build_env_name = "-".join(map(str, build_job_name_pieces))
         parameters["build_environment"] = miniutils.quote(build_env_name)
         parameters["docker_image"] = self.gen_docker_image_path()
-        if phase == "test" and self.gpu_resource:
+        if Conf.is_test_phase(phase) and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
-        if phase == "test":
+        if Conf.is_test_phase(phase):
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
@@ -101,7 +104,7 @@ class Conf:
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
 
-        if phase == "test":
+        if Conf.is_test_phase(phase):
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -133,16 +136,29 @@ class HiddenConf(object):
     def gen_build_name(self, _):
         return self.name
 
+class DocPushConf(object):
+    def __init__(self, name, parent_build=None):
+        self.name = name
+        self.parent_build = parent_build
+
+    def gen_workflow_job(self, phase):
+        return {
+            "pytorch_doc_push": {
+                "name": self.name,
+                "requires": [self.parent_build],
+                "context": "org-member",
+                "filters": gen_filter_dict(branches_list=["nightly"])
+            }
+        }
 
 # TODO Convert these to graph nodes
 def gen_dependent_configs(xenial_parent_config):
 
     extra_parms = [
         (["multigpu"], "large"),
-        (["NO_AVX2"], "medium"),
-        (["NO_AVX", "NO_AVX2"], "medium"),
+        (["nogpu", "NO_AVX2"], None),
+        (["nogpu", "NO_AVX"], None),
         (["slow"], "medium"),
-        (["nogpu"], None),
     ]
 
     configs = []
@@ -167,9 +183,12 @@ def gen_dependent_configs(xenial_parent_config):
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
-    for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push", "pytorch_doc_test"]:
-        configs.append(HiddenConf(x, parent_build=xenial_parent_config))
+    for x in ["pytorch_python_doc_build", "pytorch_cpp_doc_build"]:
+        conf = HiddenConf(x, parent_build=xenial_parent_config)
+        configs.append(conf)
+        configs.append(DocPushConf(x.replace("build", "push"), x))
 
+    configs.append(HiddenConf("pytorch_doc_test", parent_build=xenial_parent_config))
     return configs
 
 
@@ -216,6 +235,7 @@ def instantiate_configs():
 
         elif compiler_name == "rocm":
             rocm_version = fc.find_prop("compiler_version")
+            restrict_phases = ["build", "test1", "test2", "caffe2_test"]
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")
@@ -235,6 +255,7 @@ def instantiate_configs():
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
+                restrict_phases = ["build", "test1", "test2"]
 
         if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
@@ -311,7 +332,7 @@ def get_workflow_jobs():
         for phase in phases:
 
             # TODO why does this not have a test?
-            if phase == "test" and conf_options.cuda_version == "10":
+            if Conf.is_test_phase(phase) and conf_options.cuda_version == "10":
                 continue
 
             x.append(conf_options.gen_workflow_job(phase))

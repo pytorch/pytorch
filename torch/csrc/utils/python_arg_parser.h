@@ -147,6 +147,7 @@ struct PythonArgs {
   inline bool has_torch_function();
   inline std::string get_func_name();
   inline at::Tensor tensor(int i);
+  inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Tensor> tensorlist(int i);
@@ -197,7 +198,7 @@ private:
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args);
+  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -249,6 +250,15 @@ inline at::Tensor PythonArgs::tensor(int i) {
   return tensor_slow(i);
 }
 
+inline c10::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
+  at::Tensor t = tensor(i);
+  if (t.defined()) {
+    return t;
+  } else {
+    return c10::nullopt;
+  }
+}
+
 inline at::Scalar PythonArgs::scalar(int i) {
   if (!args[i]) return signature.params[i].default_scalar;
   return scalar_slow(i);
@@ -272,10 +282,8 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;
@@ -293,10 +301,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;

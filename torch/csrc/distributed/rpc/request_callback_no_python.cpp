@@ -279,7 +279,14 @@ void RequestCallbackNoPython::processRpc(
       // avoid copy. If the underlying code runs with a continuation, runAsync()
       // below will std::move the appropriate portion of the stack.
       TypePtr returnType = getScriptRemoteCallType(scriptRemoteCall);
-      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      c10::intrusive_ptr<OwnerRRef> ownerRRef;
+      if (rrefId == forkId) {
+        // Creating an owner RRef on self, should already exist in owners map
+        ownerRRef =
+            ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
+      } else {
+        ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      }
 
       auto& stack = scriptRemoteCall.stackRef();
       processScriptRemoteCall(

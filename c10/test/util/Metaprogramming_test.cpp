@@ -217,4 +217,41 @@ namespace test_filter_map {
     }
 }
 
+namespace test_tuple_elements {
+  // note: not testing empty selection, as some compilers will raise
+  // "parameter set but not used" in tuple_elements(). a good example
+  // of the friction that comes with using these tools
+
+  TEST(MetaprogrammingTest, TupleElements_subsetSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2>());
+    auto z = std::make_tuple(0, 2.0);
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleElements_reorderSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2, 1>());
+    auto z = std::make_tuple(0, 2.0, "HEY");
+    EXPECT_EQ(y, z);
+  }
+}
+
+namespace test_tuple_take {
+  // note: not testing empty prefix, see note on empty selection above.
+
+  TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 2>(x);
+    auto z = std::make_tuple(0, "HEY");
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 3>(x);
+    EXPECT_EQ(x, y);
+  }
+}
+
 }
