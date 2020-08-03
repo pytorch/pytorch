@@ -222,11 +222,7 @@ jobs:
           name: Install Cudnn
           command : |
             if [[ "${USE_CUDA}" == "1" ]]; then
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-11.0-windows-x64-v8.0.2.39.zip
-              7z x cudnn-11.0-windows-x64-v8.0.2.39.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.0/"
-              rm -rf cudnn
-              rm -f cudnn-11.0-windows-x64-v8.0.2.39.zip
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Build
@@ -284,18 +280,18 @@ jobs:
           no_output_timeout: 30m
           command: |
             if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              .circleci/scripts/windows_cuda_install.sh
-              .circleci/scripts/driver_update.bat
+              if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/windows_cuda_install.sh
+              fi
+              if [[ "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/driver_update.bat
+              fi
             fi
       - run:
           name: Install Cudnn
           command : |
             if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-11.0-windows-x64-v8.0.2.39.zip
-              7z x cudnn-11.0-windows-x64-v8.0.2.39.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.0/"
-              rm -rf cudnn
-              rm -f cudnn-11.0-windows-x64-v8.0.2.39.zip
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Test
