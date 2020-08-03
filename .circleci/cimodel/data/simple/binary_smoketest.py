@@ -120,7 +120,7 @@ WORKFLOW_DATA = [
     ),
     SmoketestJob(
         "binary_windows_build",
-        ["wheel", "3.7", "cu102"],
+        ["wheel", "3.7", "cu110"],
         None,
         "binary_windows_wheel_3_7_cu110_build",
         is_master_only=True,
@@ -144,9 +144,9 @@ WORKFLOW_DATA = [
     ),
     SmoketestJob(
         "binary_windows_test",
-        ["wheel", "3.7", "cu102"],
+        ["wheel", "3.7", "cu110"],
         None,
-        "binary_windows_wheel_3_7_cu102_test",
+        "binary_windows_wheel_3_7_cu110_test",
         is_master_only=True,
         requires=["binary_windows_wheel_3_7_cu110_build"],
         extra_props={

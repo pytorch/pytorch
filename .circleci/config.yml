@@ -6908,7 +6908,7 @@ workflows:
           build_environment: libtorch 3.7 cpu release
           name: binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_build:
-          build_environment: wheel 3.7 cu102
+          build_environment: wheel 3.7 cu110
           filters:
             branches:
               only:
@@ -6927,7 +6927,7 @@ workflows:
           requires:
             - binary_windows_libtorch_3_7_cpu_release_build
       - binary_windows_test:
-          build_environment: wheel 3.7 cu102
+          build_environment: wheel 3.7 cu110
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -6935,7 +6935,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: binary_windows_wheel_3_7_cu102_test
+          name: binary_windows_wheel_3_7_cu110_test
           requires:
             - binary_windows_wheel_3_7_cu110_build
       - binary_linux_test:
