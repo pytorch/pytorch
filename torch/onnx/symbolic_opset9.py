@@ -1495,9 +1495,11 @@ def scalar_tensor(g, scalar, dtype, *options):
 
 def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
-    if dtype is None:
-        dtype = 4  # int64
     if sym_help._is_packed_list(data):
+        for t in sym_help._unpack_list(data):
+            if dtype is None:
+                dtype = sym_help._maybe_get_const(t, 't').type().scalarType()
+                dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
         input_list = list()   
         for t in sym_help._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
@@ -1505,6 +1507,10 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
             t = g.op("Cast", t, to_i=sym_help.scalar_type_to_onnx[dtype])
             input_list.append(t)    
         return g.op("Concat", *input_list, axis_i=0)
+    else:
+        if dtype is None:
+            dtype = sym_help._maybe_get_const(data, 't').type().scalarType()
+            dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 
 @parse_args('v', 'i', 'v', 'v', 'v')
