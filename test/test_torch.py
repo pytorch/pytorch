@@ -13694,7 +13694,6 @@ class TestTorchDeviceType(TestCase):
             ("exponential_", ()),
             ("geometric_", (0.5,)),
             ("normal_", ()),
-            ("fill_", (1.,)),
         )
 
         x = torch.rand((1, 3)).expand((3, 3))

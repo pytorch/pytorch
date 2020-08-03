@@ -29,7 +29,12 @@ Tensor& fill_out(Tensor& self, Scalar value) {
         fill_fast<scalar_t>(self, value);});
      return self;
   }
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
+    .check_all_same_dtype(false)
+    .add_output(self)
+    .resize_outputs(false)
+    .build();
   fill_stub(iter.device_type(), iter, value);
   return self;
 }
