@@ -10511,10 +10511,12 @@ class TestNNDeviceType(NNTestCase):
 
     def _embedding_bag_reference_impl(self, input, weight, offsets=None, mode='sum',
                                       per_sample_weights=None, include_last_offset=False):
-        assert mode == 'sum'
+        assert mode == 'sum' or per_sample_weights is None
         assert offsets is not None
         if per_sample_weights is None:
-            per_sample_weights = torch.ones(input.size())
+            per_sample_weights = torch.ones(input.size()).to(
+                dtype=weight.dtype, device=weight.device
+            )
         assert input.numel() == per_sample_weights.numel()
 
         bags = []
@@ -10524,7 +10526,20 @@ class TestNNDeviceType(NNTestCase):
                 offset = offsets[index]
                 next_offset = offsets[index + 1]
                 length = next_offset - offset
-                bags.append(embeddings.narrow(0, offset, length).sum(0))
+                if length == 0:
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
+                else:
+                    if mode == 'sum':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0))
+                    elif mode == 'mean':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0).div(length))
+                    else:
+                        assert mode == 'max'
+                        bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         else:
             for index, offset in enumerate(offsets):
                 if index + 1 < len(offsets):
@@ -10532,7 +10547,20 @@ class TestNNDeviceType(NNTestCase):
                 else:
                     next_offset = len(input)
                 length = next_offset - offset
-                bags.append(embeddings.narrow(0, offset, length).sum(0))
+                if length == 0:
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
+                else:
+                    if mode == 'sum':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0))
+                    elif mode == 'mean':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0).div(length))
+                    else:
+                        assert mode == 'max'
+                        bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device):
@@ -10572,20 +10600,25 @@ class TestNNDeviceType(NNTestCase):
             test_per_sample_weights(mode, dtype, trainable)
 
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device):
-        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, include_last_offset):
+        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, include_last_offset, has_weight=True):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtype, device=device)
             es.weight.data.copy_(
                 torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
-            if include_last_offset is True and mode == 'sum':
+            if include_last_offset:
                 offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=torch.long)), 0)
 
-            per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
-                                      .requires_grad_(trainable_scale)
-            ref_per_sample_weights = \
-                per_sample_weights.detach().requires_grad_(trainable_scale)
+            if has_weight:
+                per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
+                                          .requires_grad_(trainable_scale)
+                ref_per_sample_weights = \
+                    per_sample_weights.detach().requires_grad_(trainable_scale)
+            else:
+                per_sample_weights = None
+                ref_per_sample_weights = None
+
             reference_weights = es.weight.detach().requires_grad_()
 
             expected = self._embedding_bag_reference_impl(
@@ -10598,7 +10631,7 @@ class TestNNDeviceType(NNTestCase):
             expected.backward(grad)
             self.assertEqual(es.weight.grad, reference_weights.grad,
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)
-            if trainable_scale:
+            if has_weight and trainable_scale:
                 self.assertEqual(per_sample_weights.grad, ref_per_sample_weights.grad,
                                  atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
@@ -10606,11 +10639,15 @@ class TestNNDeviceType(NNTestCase):
             dtypes = (torch.float, torch.double, torch.half)
         else:
             dtypes = (torch.float, torch.double)
-        modes = ('sum',)
         trainable_scale = (True, False)
         include_last_offset = (True, False)
-        for dtype, mode, trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
-            test_per_sample_weights_new_offsets(mode, dtype, trainable, include_last_offset)
+        modes = (('sum', False), ('sum', True), ('max', False), ('mean', False))
+        for dtype, (mode, has_weight), trainable, include_last_offset in itertools.product(
+            dtypes, modes, trainable_scale, include_last_offset
+        ):
+            test_per_sample_weights_new_offsets(
+                mode, dtype, trainable, include_last_offset, has_weight
+            )
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
