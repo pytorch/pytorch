@@ -316,14 +316,6 @@ void testLiteInterpreterModuleInfoBasic() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
@@ -352,12 +344,6 @@ void testLiteInterpreterNotSavingModuleInfo() {
 
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // AT_ASSERT(module_info.empty());
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       AT_ASSERT(module_info.empty() || module_info == "<no module info>");
@@ -388,14 +374,6 @@ void testLiteInterpreterOneSubmoduleModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
@@ -438,14 +416,6 @@ void testLiteInterpreterTwoSubmodulesModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
@@ -488,14 +458,6 @@ void testLiteInterpreterSequentialModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
@@ -538,14 +500,6 @@ void testLiteInterpreterHierarchyModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
@@ -583,14 +537,6 @@ void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
-    // std::string module_info = bc.get_forward_method_debug_info(pc);
-    // if (module_info == "<no module info for pc>") {
-    //   break;
-    // }
-    // if (!module_info.empty()) {
-    //   module_debug_info_set.insert(module_info);
-    // }
-    // ++pc;
     try {
       std::string module_info = bc.get_forward_method_debug_info(pc);
       if (!module_info.empty() && module_info != "<no module info>") {
