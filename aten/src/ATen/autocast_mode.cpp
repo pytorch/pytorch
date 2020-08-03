@@ -486,8 +486,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  // Do I need c10::impl::hacky_wrapper_for_legacy_signatures here??
-  m.impl("_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
+  // TODO:  prefer m.impl with c10::impl::hacky_wrapper_for_legacy_signatures here??
+  // m.impl(something something c10::impl::hacky_wrapper_for_legacy_signatures "_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
+  m.impl_UNBOXED("_cudnn_rnn", &_cudnn_rnn_cast_reflatten);
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
