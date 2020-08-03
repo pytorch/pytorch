@@ -70,7 +70,7 @@ _gradle_home=/opt/gradle
 sudo rm -rf $gradle_home
 sudo mkdir -p $_gradle_home
 
-curl -Os --retry 3 $_https_amazon_aws/gradle-${GRADLE_VERSION}-bin.zip
+curl --silent --output /tmp/gradle.zip --retry 3 $_https_amazon_aws/gradle-${GRADLE_VERSION}-bin.zip
 
 sudo unzip -q /tmp/gradle.zip -d $_gradle_home
 rm /tmp/gradle.zip
