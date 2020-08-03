@@ -10161,45 +10161,9 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     32769 * (65536 + 65536 / 128) *
-                     torch.tensor([], dtype=dtype).element_size())
-    def test_grid_sample_large_index_2d(self, device, dtype):
-        # Test 64-bit indexing with grid_sample (gh-41656)
-        # Try accessing the corners, there should be no segfault
-        coords = torch.tensor([[[-1., -1.],
-                                [+1., -1.]],
-
-                               [[-1., +1.],
-                                [+1., +1.]]], device=device, dtype=dtype)
-        coords = coords.expand(1, 2, 2, 2)
-        im = torch.zeros([1, 1, 32769, 65536], device=device, dtype=dtype)
-
-        result = F.grid_sample(im, coords, align_corners=False)
-        self.assertEqual(result, torch.zeros((1, 1, 2, 2), device=device, dtype=dtype))
-
-        # Compare sampling with large strides to the same op on a contiguous tensor
-        coords = torch.rand(1, 4, 4, 2, device=device, dtype=dtype)
-        large_view = im[..., 127::128]
-        small_image = torch.rand_like(large_view)
-        large_view[...] = small_image
-        self.assertTrue(
-            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
-            msg="View must use 64-bit indexing")
-        for mode, padding_mode, align_corners in itertools.product(
-                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
-            expect = F.grid_sample(
-                small_image, coords, mode=mode,
-                padding_mode=padding_mode, align_corners=align_corners)
-            actual = F.grid_sample(
-                large_view, coords, mode=mode,
-                padding_mode=padding_mode, align_corners=align_corners)
-            self.assertEqual(expect, actual)
-
-    @dtypes(torch.float, torch.double)
-    @largeTensorTest(lambda self, device, dtype:
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
-    def test_grid_sample_backward_large_index_2d(self, device, dtype):
+    def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
         coords = torch.tensor([[[-1., -1.],
@@ -10239,40 +10203,9 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @largeTensorTest(lambda self, device, dtype:
-                     2 * 32769 * (32768 + 32768 / 128) *
-                     torch.tensor([], dtype=dtype).element_size())
-    def test_grid_sample_large_index_3d(self, device, dtype):
-        # Test 64-bit indexing with grid_sample (gh-41656)
-        # Try accessing the corners, there should be no segfault
-        coords = torch.full((1, 2, 2, 2, 3), 1., device=device, dtype=dtype)
-        im = torch.zeros([1, 1, 2, 32769, 32768], device=device, dtype=dtype)
-
-        result = F.grid_sample(im, coords, align_corners=False)
-        self.assertEqual(result, torch.zeros((1, 1, 2, 2, 2), device=device, dtype=dtype))
-
-        # Compare sampling with large strides to the same op on a contiguous tensor
-        coords = torch.rand(1, 1, 4, 4, 3, device=device, dtype=dtype)
-        large_view = im[..., 127::128]
-        small_image = torch.rand_like(large_view)
-        large_view[...] = small_image
-        self.assertTrue(
-            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
-            msg="View must use 64-bit indexing")
-        for mode, padding_mode, align_corners in itertools.product(
-                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
-            expect = F.grid_sample(
-                small_image, coords, mode=mode,
-                padding_mode=padding_mode, align_corners=align_corners)
-            actual = F.grid_sample(
-                large_view, coords, mode=mode,
-                padding_mode=padding_mode, align_corners=align_corners)
-            self.assertEqual(expect, actual)
-
-    @dtypes(torch.float, torch.double)
-    @largeTensorTest(lambda self, device, dtype:
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
-    def test_grid_sample_backward_large_index_3d(self, device, dtype):
+    def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
         coords = torch.full((1, 2, 2, 2, 3), 1., device=device, dtype=dtype)
