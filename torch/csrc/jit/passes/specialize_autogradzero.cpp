@@ -76,7 +76,7 @@ private:
     auto value_map = [](Value* v) { return v; };
     auto true_block = vif->addBlock();
     auto false_block = vif->addBlock();
-    // a block to optimize by this pass
+    // we will optimize true_block
     true_block->cloneFrom(g.block(), value_map);
     replaceBlockInputsWithGraph(&g, true_block);
     false_block->cloneFrom(g.block(), value_map);
