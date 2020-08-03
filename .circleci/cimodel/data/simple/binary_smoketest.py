@@ -122,7 +122,7 @@ WORKFLOW_DATA = [
         "binary_windows_build",
         ["wheel", "3.7", "cu102"],
         None,
-        "binary_windows_wheel_3_7_cu102_build",
+        "binary_windows_wheel_3_7_cu110_build",
         is_master_only=True,
     ),
 
@@ -148,7 +148,7 @@ WORKFLOW_DATA = [
         None,
         "binary_windows_wheel_3_7_cu102_test",
         is_master_only=True,
-        requires=["binary_windows_wheel_3_7_cu102_build"],
+        requires=["binary_windows_wheel_3_7_cu110_build"],
         extra_props={
             "executor": "windows-with-nvidia-gpu",
         },
