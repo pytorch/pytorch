@@ -52,7 +52,7 @@ _android_home=/opt/android/sdk
 
 rm -rf $_android_home
 sudo mkdir -p $_android_home
-curl --silent --show-error --location --fail --retry 3 --output /tmp/android-sdk-linux.zip $_https_amazon_aws/android-sdk-linux.zip
+curl --silent --show-error --location --fail --retry 3 --output /tmp/android-sdk-linux.zip $_https_amazon_aws/android-sdk-linux-tools3859397-build-tools2803-2902-platforms28-29.zip
 sudo unzip -q $_tmp_sdk_zip -d $_android_home
 rm $_tmp_sdk_zip
 
