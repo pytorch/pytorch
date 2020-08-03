@@ -9,7 +9,7 @@
 TEST(FFTTest, fft) {
   #ifdef _WIN32
     auto t = torch::randn(128, torch::dtype(torch::kComplexDouble));
-    torch::fft:fft(t);
+    torch::fft::fft(t);
   #else
     auto t = torch::tensor({
       1.00000000e+00+0.00000000e+00j,  7.07106781e-01+7.07106781e-01j,
