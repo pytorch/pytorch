@@ -26,9 +26,14 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
 bool check_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
+  auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
     if (t.dtype() != expected_dtype) {
+      return false;
+    }
+
+    if (t.device() != expected_device) {
       return false;
     }
 
@@ -41,7 +46,7 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
     }
 
     if ((at::isIntegralType(t.scalar_type(), true) && scalar.isFloatingPoint()) || 
-        (t.scalar_type() == at::kBool && scalar.isIntegral())) {
+        t.scalar_type() == at::kBool) {
      return false;
     }
   }

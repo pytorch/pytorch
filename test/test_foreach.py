@@ -3,8 +3,6 @@ import torch.cuda
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 
-devices = (torch.device('cpu'), torch.device('cuda:0'))
-
 class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_same_size_tensors(self, device, dtype):

@@ -75,13 +75,13 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Sc
     TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
     if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_add_scalar_kernel_cpu(tensors, scalar);
+        return at::native::foreach_add_scalar_kernel_fallback(tensors, scalar);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
-    for (int i = 0; i < tensors.size(); i++) {
-        vec_res.emplace_back(at::native::empty_like(tensors[i]));
+    for (const auto& t: tensors) {
+        vec_res.emplace_back(at::native::empty_like(t));
     }
 
     tensor_lists.emplace_back(std::move(tensors.vec()));

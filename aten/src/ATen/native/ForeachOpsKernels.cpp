@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 namespace at { namespace native {
 
-std::vector<Tensor> foreach_add_scalar_kernel_cpu(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
   std::vector<Tensor> result;

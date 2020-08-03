@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/ForeachUtils.cuh>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 
@@ -34,14 +35,15 @@ void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     T callable,
     ArgTypes... args) {
-        TORCH_CHECK(tensor_lists.size() == depth, "Amount of tensor lists has to match the depth.");
+        TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
+        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
 
-        int n_tensors = tensor_lists[0].size();
+        size_t n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;
 
         int loc_block_info = 0;
         int loc_tensor_info = 0;
-        for(int t = 0; t < n_tensors; t++) {
+        for(size_t t = 0; t < n_tensors; t++) {
             tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
