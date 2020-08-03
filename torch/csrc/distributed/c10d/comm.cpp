@@ -4,6 +4,7 @@
 
 #include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -77,6 +78,49 @@ void broadcast_coalesced(
     in_flight.front().finish();
     in_flight.pop_front();
   }
+}
+
+GradBucket::GradBucket(std::vector<at::Tensor> tensors)
+    : tensors_(std::move(tensors)){};
+
+const std::vector<at::Tensor>& GradBucket::getTensors() {
+  return tensors_;
+}
+
+PythonCommHook::PythonCommHook(py::object state, py::object hook)
+    : state_(std::move(state)), hook_(std::move(hook)){};
+
+c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
+    const GradBucket& bucket) {
+  py::gil_scoped_acquire acquire;
+
+  py::object py_fut = hook_(state_, bucket);
+
+  try {
+    return py_fut.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
+  } catch (const py::cast_error& e) {
+    auto type = py_fut.get_type();
+    auto errMsg = c10::str(
+        e.what(),
+        ". DDP communication hook's callback must return a "
+        "torch.futures.Future object, but got ",
+        type.attr("__module__").cast<std::string>(),
+        ".",
+        type.attr("__qualname__").cast<std::string>());
+    throw std::runtime_error(errMsg);
+  }
+}
+
+std::vector<at::Tensor> PythonCommHook::processFuture(
+    c10::IValue future_value) {
+  // Since we have a Python hook, future_value is a PyObject. Therefore, we
+  // first convert it to an IValue that contains a TensorVector.
+  py::object obj =
+      py::reinterpret_borrow<py::object>(future_value.toPyObject());
+  auto value =
+      torch::jit::toIValue(obj, c10::ListType::create(c10::TensorType::get()));
+
+  return value.toTensorVector();
 }
 
 } // namespace c10d

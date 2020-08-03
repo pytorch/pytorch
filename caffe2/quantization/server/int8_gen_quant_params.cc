@@ -15,6 +15,16 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(Int8GenQuantParams)
     .NumInputs(2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape X = in[0];
+      X.clear_dims();
+      X.add_dims(1);
+      out.emplace_back(std::move(X));
+      out[0].set_data_type(TensorProto_DataType_FLOAT);
+      return out;
+    })
     .Input(
         0,
         "X",

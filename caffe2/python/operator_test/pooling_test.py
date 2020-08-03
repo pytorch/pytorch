@@ -126,8 +126,8 @@ class TestPooling(hu.HypothesisTestCase):
                         batch_size, order, op_type, engine, gc, dc):
         assume(pad < kernel)
         assume(size + pad + pad >= kernel)
-        # Currently MIOpen Pooling only supports 2d pooling
-        if hiputl.run_in_hip(gc, dc):
+        # Currently MIOpen Pooling only supports pooling with NCHW order.
+        if hiputl.run_in_hip(gc, dc) and (workspace.GetHIPVersion() < 303 or  order == "NHWC"):
             assume(engine != "CUDNN")
         # some case here could be calculated with global pooling, but instead
         # calculated with general implementation, slower but should still
@@ -162,8 +162,8 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     def test_global_pooling_3d(self, kernel, size, input_channels,
                                batch_size, order, op_type, engine, gc, dc):
-        # Currently MIOpen Pooling only supports 2d pooling
-        if hiputl.run_in_hip(gc, dc):
+        # Currently MIOpen Pooling only supports pooling with NCHW order.
+        if hiputl.run_in_hip(gc, dc) and (workspace.GetHIPVersion() < 303 or  order == "NHWC"):
             assume(engine != "CUDNN")
         # pad and stride ignored because they will be inferred in global_pooling
         op = core.CreateOperator(

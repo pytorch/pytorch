@@ -497,7 +497,7 @@ Tensor batch_norm(
     auto out = input.clone();
     if (weight.defined()) out = out * weight[0];
     if (bias.defined()) out = out + bias[0];
-    return out; 
+    return out;
   }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));

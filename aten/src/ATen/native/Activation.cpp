@@ -181,15 +181,35 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
+Tensor silu(const Tensor& self) {
+  return self * at::sigmoid(self);
+}
+
+Tensor& silu_(Tensor& self) {
+  return self.mul_(at::sigmoid(self));
+}
+
+Tensor& silu_out(Tensor& result, const Tensor& self) {
+  return at::mul_out(result, self, at::sigmoid(self));
+}
+
+Tensor silu_backward(const Tensor& grad, const Tensor& self) {
+  auto self_sigmoid = at::sigmoid(self);
+  return grad * (self_sigmoid * (1 + self * (1 - self_sigmoid)));
+}
 
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(

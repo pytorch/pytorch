@@ -1553,7 +1553,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -1643,7 +1643,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -2059,7 +2059,7 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
-  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::dtype(torch::kFloat).requires_grad(true));
@@ -3188,6 +3188,7 @@ namespace detail {
     std::mt19937 generator(device());
     std::uniform_int_distribution<int> d_2_10(2, 10);
     std::uniform_int_distribution<int> d_3_10(3, 10);
+    bool registration_checked = false;
     for (int i = 0; i < 100; i++) {
       const auto batch_sz = d_2_10(generator);
       const auto seq_len = d_2_10(generator);
@@ -3200,6 +3201,9 @@ namespace detail {
       } else {
         std::uniform_int_distribution<int> d(5, 20);
         kv_dim = d(generator);
+        while (kv_dim == d_model) {
+          kv_dim = d(generator);
+        }
       }
       std::vector<int64_t> dims {batch_sz, seq_len, kv_dim};
       torch::Tensor saved_k;
@@ -3237,6 +3241,27 @@ namespace detail {
           .kdim(kv_dim)
           .vdim(kv_dim);
       const auto multihead_attn_module = MultiheadAttention(options);
+
+      if (!registration_checked) {
+        // make sure parameters are all registered correctly
+        auto named_parameters = multihead_attn_module->named_parameters();
+        if (same_embed_dim) {
+          ASSERT_TRUE(named_parameters.contains("in_proj_weight"));
+        }
+        else {
+          ASSERT_TRUE(named_parameters.contains("q_proj_weight"));
+          ASSERT_TRUE(named_parameters.contains("k_proj_weight"));
+          ASSERT_TRUE(named_parameters.contains("v_proj_weight"));
+        }
+        if (add_bias_kv) {
+          ASSERT_TRUE(named_parameters.contains("bias_k"));
+          ASSERT_TRUE(named_parameters.contains("bias_v"));
+        }
+        // make sure sub modules are all registered correctly
+        auto submodules = multihead_attn_module->named_children();
+        ASSERT_TRUE(submodules.contains("out_proj"));
+        registration_checked = true;
+      }
 
       torch::Tensor bias_k;
       torch::Tensor bias_v;
@@ -3768,10 +3793,10 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   auto crossmaplrn2d = CrossMapLRN2d(3);
   auto output = crossmaplrn2d(input);
   output.sum().backward();
-  
+
   ASSERT_TRUE(input.grad().allclose(grad_expected));
   ASSERT_TRUE(output.allclose(expected));
-  
+
   /// size change
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
   output = crossmaplrn2d(input);

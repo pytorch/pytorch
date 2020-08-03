@@ -60,7 +60,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time before :func:`forward` is invoked.
     It should have the following signature::
@@ -92,7 +92,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time after :func:`forward` has computed an output.
     It should have the following signature::
@@ -124,7 +124,7 @@ def register_module_backward_hook(
 
     .. warning ::
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
         The current implementation will not have the presented behavior
         for complex :class:`Module` that perform many operations.
@@ -181,6 +181,10 @@ class Module:
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
+
+    :ivar training: Boolean represents whether this module is in training or
+                    evaluation mode.
+    :vartype training: bool
     """
 
     dump_patches: bool = False
@@ -234,7 +238,7 @@ class Module:
     """
     forward: Callable[..., Any] = _forward_unimplemented
 
-    def register_buffer(self, name: str, tensor: Tensor, persistent: bool = True) -> None:
+    def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
@@ -286,7 +290,7 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-    def register_parameter(self, name: str, param: Parameter) -> None:
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
@@ -325,7 +329,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: 'Module') -> None:
+    def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -692,9 +696,9 @@ class Module:
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        recording_scopes = torch.jit._trace_module_map is not None
+        recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
             if name:
                 cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
@@ -754,6 +758,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_non_persistent_buffers_set' not in self.__dict__:
+            self._non_persistent_buffers_set = set()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -977,7 +983,7 @@ class Module:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
                                       'whose dimensions in the checkpoint are {}, '
-                                      'an exception occured : {}.'
+                                      'an exception occurred : {}.'
                                       .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
@@ -1317,7 +1323,10 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                p.grad.detach_()
+                if p.grad.grad_fn is not None:
+                    p.grad.detach_()
+                else:
+                    p.grad.requires_grad_(False)
                 p.grad.zero_()
 
     def share_memory(self: T) -> T:
@@ -1329,7 +1338,7 @@ class Module:
     def extra_repr(self) -> str:
         r"""Set the extra representation of the module
 
-        To print customized extra information, you should reimplement
+        To print customized extra information, you should re-implement
         this method in your own modules. Both single-line and multi-line
         strings are acceptable.
         """

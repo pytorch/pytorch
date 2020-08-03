@@ -1246,7 +1246,7 @@ class TestTensorExprFuser(BaseTestClass):
         scripted(a, b)
         cx = CudaCodeGenExecuted()
         scripted(a, b)
-        assert cx.elapsed_value() == 1
+        assert cx.elapsed_value() == 0
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_multi_rand(self):

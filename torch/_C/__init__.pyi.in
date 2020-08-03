@@ -2,10 +2,11 @@
 
 import torch
 from torch import Tensor
-from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar, Type
+from typing import (Any, BinaryIO, Callable, ContextManager, Iterator, List, NamedTuple,
+                    Optional, overload, Sequence, Tuple, TypeVar, Type, Union)
 from torch._six import inf
 
-from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number, Device
+from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
 
 import builtins
 
@@ -33,7 +34,16 @@ class device:
 
 # Defined in torch/csrc/Size.cpp
 class Size(Tuple[_int, ...]):
-    # TODO: numel, __reduce__
+    # TODO: __reduce__
+
+    @overload
+    def __getitem__(self: Size, key: _int) -> _int: ...
+
+    @overload
+    def __getitem__(self: Size, key: slice) -> Size: ...
+
+    def numel(self: Size) -> _int: ...
+
     ...
 
 # Defined in torch/csrc/Dtype.cpp
@@ -49,6 +59,7 @@ class iinfo:
     bits: _int
     min: _int
     max: _int
+    dtype: str
 
     def __init__(self, dtype: _dtype) -> None: ...
 
@@ -58,6 +69,8 @@ class finfo:
     max: _float
     eps: _float
     tiny: _float
+    resolution: _float
+    dtype: str
 
     @overload
     def __init__(self, dtype: _dtype) -> None: ...
@@ -90,9 +103,6 @@ class qscheme: ...
 # Defined in torch/csrc/utils/tensor_qschemes.cpp
 per_tensor_affine: qscheme = ...
 
-# Defined in torch/csrc/generic/Storage.cpp
-class Storage: ...
-
 # Defined in torch/csrc/autograd/python_function.cpp
 class _FunctionBase(object):
     ...
@@ -108,6 +118,15 @@ class _LegacyVariableBase(object):
     ) -> None: ...
 
 # Defined in torch/csrc/jit/python/init.cpp
+class Future(object):
+  def __init__(self) -> None: ...
+  def done(self) -> _bool: ...
+  def wait(self) -> Any: ...
+  def then(self, callback: Callable) -> Future: ...
+  def set_result(self, result: Any) -> None: ...
+
+
+def _collect_all(futures: List[Future]) -> Future: ...
 def _jit_get_operation(op_name: str) -> Callable: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule') -> 'torch.jit.ScriptModule': ...
 
@@ -169,6 +188,24 @@ class FileCheck(object):
     # TODO
     ...
 
+# Defined in torch/csrc/jit/python/init.cpp
+class PyTorchFileReader(object):
+    @overload
+    def __init__(self, name: str) -> None: ...
+    @overload
+    def __init__(self, buffer: BinaryIO) -> None: ...
+    def get_record(self, name: str) -> bytes: ...
+    ...
+
+class PyTorchFileWriter(object):
+    @overload
+    def __init__(self, name: str) -> None: ...
+    @overload
+    def __init__(self, buffer: BinaryIO) -> None: ...
+    def write_record(self, name: str, data: bytes, size: _int) -> None: ...
+    def write_end_of_file(self) -> None: ...
+    ...
+
 # Defined in torch/csrc/Generator.cpp
 class Generator(object):
     device: _device
@@ -217,7 +254,10 @@ class _TensorBase(object):
     layout: _layout
     real: Tensor
     imag: Tensor
-    _version: _bool
+    T: Tensor
+    _version: _int
+    _base: Optional[Tensor]
+    grad_fn: Any
     ${tensor_method_hints}
 
 # Defined in torch/csrs/cuda/Module.cpp

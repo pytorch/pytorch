@@ -444,7 +444,7 @@ TORCH_CUDA_API std::ostream& operator<<(
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ParallelType ptype) {
-  return out << parallel_type2string(ptype);
+  return out << stringifyThread(ptype);
 }
 
 TORCH_CUDA_API std::ostream& operator<<(
@@ -471,11 +471,30 @@ std::string stringifyThreadSize(const ParallelType ptype) {
   return thread_size2string(ptype);
 }
 
+std::string stringifyThread(const ParallelType ptype) {
+  return parallel_type2string(ptype);
+}
+
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>& cast) {
   const char* str = supported_casts2string(cast);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
+}
+
+size_t dataTypeSize(DataType type) {
+  switch (type) {
+    case DataType::Bool:
+      return sizeof(bool);
+    case DataType::Float:
+      return 4;
+    case DataType::Half:
+      return 2;
+    case DataType::Int:
+      return 4;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
+  }
 }
 
 } // namespace fuser

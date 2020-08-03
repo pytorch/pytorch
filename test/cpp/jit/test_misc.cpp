@@ -737,16 +737,17 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   for (const auto& input : inputs) {
     const auto& fn = std::get<0>(input);
     const auto& sizes = std::get<1>(input);
+
     if (fn == "test") {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "pow") {
+    } else if (fn == "aten::pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn == "mul") {
+    } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
@@ -1234,21 +1235,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -2047,6 +2044,45 @@ void testFutures() {
     ASSERT_EQ(c4->value().toInt(), 7);
     s2->markCompleted(1);
     ASSERT_EQ(c4->value().toInt(), 7);
+  }
+}
+
+void testTLSFutureCallbacks() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  // test running callbacks with propagation of TLS state.
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
+    t.join();
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+          profilerEnabledCb();
+          return at::IValue(1);
+        }),
+        IntType::get());
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    t.join();
+    s2->wait();
+    torch::autograd::profiler::disableProfiler();
   }
 }
 

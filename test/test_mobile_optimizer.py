@@ -58,8 +58,9 @@ class TestOptimizer(unittest.TestCase):
                 o = F.conv2d(x, self.conv_weight, self.conv_bias,
                              self.strides, self.paddings, self.dilations, self.groups)
                 o = F.relu(o)
-                o = o.permute([0, 2, 3, 1])
-                o = F.linear(o, self.linear_weight, self.linear_bias)
+                x = o.permute([0, 2, 3, 1])
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                o = o + x
                 return F.relu(o)
 
         class BNTestModule(torch.nn.Module):
@@ -90,6 +91,9 @@ class TestOptimizer(unittest.TestCase):
                    .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
                    .check_not("prepacked::linear_clamp_prepack") \
                    .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
+                   .check_not("aten::add(") \
+                   .check_not("aten::relu(") \
+                   .check_count("aten::add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
@@ -108,7 +112,7 @@ class TestOptimizer(unittest.TestCase):
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
-        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 13)
+        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
@@ -126,6 +130,31 @@ class TestOptimizer(unittest.TestCase):
                    .run(str(get_forward_graph(no_bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+
+        class MyPreserveMethodsTest(torch.nn.Module):
+            def __init__(self):
+                super(MyPreserveMethodsTest, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+
+            def forward(self, x):
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                return F.relu(o)
+
+            @torch.jit.export
+            def preserveThis(self):
+                pass
+
+        preserve_method_module = MyPreserveMethodsTest()
+        m = torch.jit.script(preserve_method_module)
+        m.eval()
+        opt_m = optimize_for_mobile(m)
+        no_preserveThis = getattr(opt_m, "preserveThis", None)
+        self.assertEqual(no_preserveThis, None)
+        opt_m = optimize_for_mobile(m, preserved_methods=["preserveThis"])
+        preserveThis = getattr(opt_m, "preserveThis", None)
+        self.assertNotEqual(preserveThis, None)
+
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
