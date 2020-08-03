@@ -778,6 +778,7 @@ inline Tensor _pin_and_move_memory_if_cuda_input(
 
 // convert a 1D blob to a 2D Tensor of size [1, blob.size()]
 // such that blob.device() == in.device())
+// designed to be used with _compute_linear_combination
 template <typename scalar_t>
 inline Tensor _blob_to_Tensor(
   std::initializer_list<scalar_t> blob,
@@ -844,12 +845,43 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
-  const auto& I = at::eye(A.size(-1), A.options()).expand_as(A);
-  const auto& A2 = at::matmul(A, A);
-  const auto& A4 = at::matmul(A2, x1 * A + x2 * A2);
-  const auto& A8 = at::matmul(x3 * A2 + A4,
-    x4 * I + x5 * A + x6 * A2 + x7 * A4);
-  return I + A + y2 * A2 + A8;
+  auto As = _allocate_buffer(A, 5, /*is_zero=*/true);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+
+  // A4 =  A2 * (x1 * A + x2 * A2)
+  at::native::matmul(
+    // output for A4
+    As.select(0, 3),
+    // As.select(0, 2) = A^2
+    As.select(0, 2),
+    at::native::_compute_linear_combination(
+      // extract {A, A^2} from As
+      As.narrow(0, 1, 2),
+      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+    )
+  );
+
+  // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
+  at::native::matmul(
+    // output for A8
+    As.select(0, 4),
+    // x3 * A2 + A4
+    at::native::_compute_linear_combination(
+      As.narrow(0, 2, 2),
+      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+    ),
+    at::native::_compute_linear_combination(
+      As.narrow(0, 0, 4),
+      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+    )
+  );
+
+  // return I + A + y2 * A2 + A8;
+  return at::native::_compute_linear_combination(
+    As,
+    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  );
 }
 
 template <typename scalar_t>
