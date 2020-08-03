@@ -23,7 +23,7 @@
 /*
  * This file defines the base IR structure. Any IR node in this system will
  * inherit from one of the following classes: Statement, Expr, Val,
- * IRInputOutput IR is any information that the code generation stack may need
+ * IrInputOutput IR is any information that the code generation stack may need
  * for analysis. By analysis we're refering to anything done in response to a
  * user facing call of this stack. This could be careful tracking of user calls,
  * and any transformation including optimizing transformations, user declared
@@ -38,13 +38,14 @@ using StmtNameType = unsigned int;
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
     std::numeric_limits<unsigned int>::max();
 
-struct Fusion;
-struct FusionGuard;
-struct Expr;
-struct Val;
-struct UnaryOp;
-struct BinaryOp;
-struct IterDomain;
+class Fusion;
+class FusionGuard;
+class Expr;
+class Val;
+class UnaryOp;
+class BinaryOp;
+class IterDomain;
+class IrCloner;
 
 /*
  * Statement is the highest level node representation. Everything that is
@@ -57,7 +58,15 @@ struct IterDomain;
  * Basically beinng able to succienctly traverse down the inhereitance stack of
  * a Statment at runtime. This is currently implemented in dispatch.h
  */
-struct TORCH_CUDA_API Statement {
+class TORCH_CUDA_API Statement {
+  friend void swap(Fusion&, Fusion&) noexcept;
+
+ public:
+  Statement() = default;
+
+  // Cloning constructor
+  Statement(const Statement* src, IrCloner* ir_cloner);
+
   virtual ~Statement() = default;
 
   // Dispatch functions, definitions in dispatch.cpp
@@ -71,21 +80,21 @@ struct TORCH_CUDA_API Statement {
   static Statement* mutatorDispatch(T mutator, Statement*);
 
   // Accessor functions to types. Vals always have a DataType, Exprs never do
-  virtual c10::optional<ValType> getValType() const noexcept {
+  virtual c10::optional<ValType> getValType() const {
     return c10::nullopt;
   }
   virtual c10::optional<DataType> getDataType() const {
     return c10::nullopt;
   }
-  virtual c10::optional<ExprType> getExprType() const noexcept {
+  virtual c10::optional<ExprType> getExprType() const {
     return c10::nullopt;
   }
 
   // Short cut to figure out if it is a value/expression
-  bool isVal() const noexcept {
+  bool isVal() const {
     return getValType() != c10::nullopt;
   }
-  bool isExpr() const noexcept {
+  bool isExpr() const {
     return getExprType() != c10::nullopt;
   }
 
@@ -119,12 +128,12 @@ struct TORCH_CUDA_API Statement {
   }
 
   // Return the fusion this statement belongs to
-  Fusion* fusion() const noexcept {
+  Fusion* fusion() const {
     return fusion_;
   }
 
   // Return the int that represents its name
-  StmtNameType name() const noexcept {
+  StmtNameType name() const {
     return name_;
   }
 
@@ -141,6 +150,8 @@ struct TORCH_CUDA_API Statement {
   bool sameAs(const Statement* const other) const {
     return this == other;
   }
+
+  void print() const;
 
  protected:
   StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
@@ -165,13 +176,16 @@ struct TORCH_CUDA_API Statement {
  *     - Accessor functions for members
  *     - Must call Val constructor, Val constructor registers with fusion
  *     - Implementation of bool sameAs(...)
+ *     - Must implement a "cloning" constructor, ex.
+ *        Int::Int(const Int* src, IrCloner* ir_cloner)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.cpp
- * 4) Printing functions should be added to ir_iostream.h/.cpp
+ * 4a) Printing functions should be added to ir_iostream.h/.cpp
+ * 4b) Graphviz generation must be added to ir_graphviz.h/.cpp
  * 5) An enum value must be added to ValType in type.h
  * 6) A string entry must be added in val_type_string_map
  */
-struct TORCH_CUDA_API Val : public Statement {
+class TORCH_CUDA_API Val : public Statement {
  public:
   virtual ~Val() = default;
 
@@ -182,9 +196,12 @@ struct TORCH_CUDA_API Val : public Statement {
   // to throw, fusion's destructor will get called, but the pointer to this Val
   // will be invalid. When fusion tries to delete this value it will cause a seg
   // fault, instead of showing the thrown error.
-  Val(ValType _vtype,
+  explicit Val(
+      ValType _vtype,
       DataType _dtype = DataType::Null,
       bool register_val = true);
+
+  Val(const Val* src, IrCloner* ir_cloner);
 
   // TODO: Values are unique and not copyable
   Val(const Val& other) = delete;
@@ -193,7 +210,7 @@ struct TORCH_CUDA_API Val : public Statement {
   Val(Val&& other) = delete;
   Val& operator=(Val&& other) = delete;
 
-  c10::optional<ValType> getValType() const noexcept override {
+  c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
@@ -244,13 +261,12 @@ struct TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-// TODO: We should use this for the following:
-//    Fusion
-//    IfThenElse
-//    ForLoop
-struct TORCH_CUDA_API Scope {
+class TORCH_CUDA_API Scope {
  public:
-  const std::vector<Expr*>& exprs() const noexcept {
+  Scope() = default;
+  Scope(const Scope* src, IrCloner* ir_cloner);
+
+  const std::vector<Expr*>& exprs() const {
     return exprs_;
   }
 
@@ -274,6 +290,14 @@ struct TORCH_CUDA_API Scope {
     return exprs_.size();
   }
 
+  auto& operator[](size_t i) {
+    return exprs_[i];
+  }
+
+  auto& operator[](size_t i) const {
+    return exprs_[i];
+  }
+
   // Insert expr before ref
   void insert_before(Expr* ref, Expr* expr);
 
@@ -290,72 +314,6 @@ struct TORCH_CUDA_API Scope {
 
  private:
   std::vector<Expr*> exprs_;
-};
-
-/*
- * IRInputOutput is a function on Vals. Has inputs and outputs that are all
- * Vals. It is used for anything that connects values and therefore would be
- * used during dependency analysis. Typically classes that inherit from
- * IRInputOutput will do so by inheriting from Exprs. Expr's are expected for
- * most dependency based operations like IterVisitor, or DependencyCheck.
- *
- * Examples:
- *   binary operations on tensors, scalar values, or a combination, a thread all
- *   reduce, for loops
- */
-struct TORCH_CUDA_API IRInputOutput {
-  virtual ~IRInputOutput() = default;
-
-  // Returns if Val is an input or output of this IRInputOutput instance
-  bool hasInput(const Val* const input) const;
-  bool hasOutput(const Val* const output) const;
-
-  // Input/output accessors
-  void addInputAt(std::deque<Val*>::size_type pos, Val* input) {
-    inputs_.insert(inputs_.begin() + pos, input);
-  }
-
-  void addOutputAt(std::deque<Val*>::size_type pos, Val* output) {
-    outputs_.insert(outputs_.begin() + pos, output);
-  }
-
-  const std::deque<Val*>& inputs() const noexcept {
-    return inputs_;
-  }
-  const std::deque<Val*>& outputs() const noexcept {
-    return outputs_;
-  }
-
-  Val* input(std::deque<Val*>::size_type idx) const {
-    return inputs_[idx];
-  }
-  Val* output(std::deque<Val*>::size_type idx) const {
-    return outputs_[idx];
-  }
-
-  void addInput(Val* input) {
-    inputs_.push_back(input);
-  }
-  void addOutput(Val* output) {
-    outputs_.push_back(output);
-  }
-
-  void replaceInput(Val* replace, Val* with);
-  void replaceOutput(Val* replace, Val* with);
-
-  void removeInput(Val* val);
-  void removeOutput(Val* val);
-
-  std::deque<Val*>::size_type nInputs() const noexcept {
-    return inputs_.size();
-  }
-  std::deque<Val*>::size_type nOutputs() const noexcept {
-    return outputs_.size();
-  }
-
- protected:
-  std::deque<Val*> inputs_;
-  std::deque<Val*> outputs_;
 };
 
 /*
@@ -396,11 +354,12 @@ struct TORCH_CUDA_API IRInputOutput {
  * 6) An enum value must be added to ExprType in type.h 7) A string
  *  entry must be added in expr_type_string_map
  */
-struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
+class TORCH_CUDA_API Expr : public Statement {
  public:
-  virtual ~Expr() = default;
   Expr() = delete;
-  Expr(ExprType _type);
+  explicit Expr(ExprType _type);
+  Expr(const Expr* src, IrCloner* ir_cloner);
+  virtual ~Expr() = default;
 
   Expr(const Expr& other) = delete;
   Expr& operator=(const Expr& other) = delete;
@@ -408,24 +367,31 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
   Expr(Expr&& other) = delete;
   Expr& operator=(Expr&& other) = delete;
 
-  c10::optional<ExprType> getExprType() const noexcept override {
-    return type_;
-  }
-  ExprType type() const noexcept {
+  c10::optional<ExprType> getExprType() const override {
     return type_;
   }
 
-  bool sameAs(const Expr* const other) const {
-    if (getExprType() != other->getExprType())
-      return false;
-    if (inputs().size() != other->inputs().size() ||
-        outputs().size() != other->outputs().size())
-      return false;
-    for (size_t i = 0; i < inputs().size(); i++) {
-      if (!input(i)->sameAs(other->input(i)))
-        return false;
-    }
-    return true;
+  ExprType type() const {
+    return type_;
+  }
+
+  bool sameAs(const Expr* const other) const;
+
+  // Input/output accessors
+  const auto& inputs() const {
+    return inputs_;
+  }
+
+  const auto& outputs() const {
+    return outputs_;
+  }
+
+  auto input(size_t index) const {
+    return inputs_[index];
+  }
+
+  auto output(size_t index) const {
+    return outputs_[index];
   }
 
   // Dispatch functions, definitions in dispatch.cpp
@@ -438,8 +404,19 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
   template <typename T>
   static Statement* mutatorDispatch(T mutator, Expr*);
 
+ protected:
+  void addInput(Val* input) {
+    inputs_.push_back(input);
+  }
+
+  void addOutput(Val* output) {
+    outputs_.push_back(output);
+  }
+
  private:
-  ExprType type_;
+  ExprType type_ = ExprType::Invalid;
+  std::vector<Val*> inputs_;
+  std::vector<Val*> outputs_;
 };
 
 } // namespace fuser

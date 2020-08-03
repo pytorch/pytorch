@@ -76,6 +76,28 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+    if(NNPACK_CUSTOM_THREADPOOL)
+      target_compile_definitions(
+        nnpack PRIVATE
+        pthreadpool_t=legacy_pthreadpool_t
+        pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
+        pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
+        pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
+        pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
+        pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
+        pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
+        pthreadpool_create=legacy_pthreadpool_create
+        pthreadpool_destroy=legacy_pthreadpool_destroy
+        pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
+        pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
+        pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
+        pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
+        pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
+        pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
+        pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
+        pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
+    endif()
   endif()
 
   set(NNPACK_FOUND TRUE)

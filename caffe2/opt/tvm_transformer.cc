@@ -156,20 +156,15 @@ void TvmTransformer::transform(
   std::unordered_set<std::string> weights(
       weight_names.begin(), weight_names.end());
 
-  // SSA Rewrite the net
-  auto shape_hints_mapped =
-      ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
-
-  // Populate shape info
-  Workspace mapped_ws(ws, input_mapping_);
+  // input_shape_hints should only contain shapes of inputs and not activations
   ShapeInfoMap shape_hints;
   if (!opts_.profiling_based_jit) {
-    shape_hints = inferShapes(
-        &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
+    shape_hints =
+        inferShapes(ws, pred_net, input_shape_hints, opts_.bound_shape_spec);
   }
 
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pbtxt");
+    dumpNet(*pred_net, shape_hints, "debug_net.pbtxt");
   }
 
   // We are ready to transform the net

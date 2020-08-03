@@ -17,6 +17,10 @@ if is_available() and not torch._C._rpc_init():
 
 if is_available():
     from . import api, backend_registry, functions, _set_profiler_node_id
+    from . import (
+        _enable_jit_rref_pickle,
+        _disable_jit_rref_pickle,
+    )  # noqa: F401
     from .api import *  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (

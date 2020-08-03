@@ -81,6 +81,10 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 #define TR2_OPTIONAL_HOST_CONSTEXPR constexpr
 #endif
 
+// Sphinx chokes on static_addressof, so exclude it from Doxygen
+// generation.  See https://github.com/sphinx-doc/sphinx/issues/7944
+// \cond
+
 namespace detail_ {
 
 // VS doesn't handle constexpr well, so we need to skip these stuff.
@@ -125,6 +129,8 @@ constexpr U convert(U v) {
 }
 
 } // namespace detail_
+
+// \endcond
 
 constexpr struct trivial_init_t {
 } trivial_init{};

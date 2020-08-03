@@ -4,6 +4,9 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
+import contextlib
+import collections
+import enum
 import inspect
 import weakref
 import warnings
@@ -123,6 +126,8 @@ def createResolutionCallbackFromFrame(frames_up=0):
                 return f_locals[key]
             elif key in f_globals:
                 return f_globals[key]
+            elif key in dir(builtins):
+                return getattr(builtins, key)
 
     return createResolutionCallbackFromEnv(env())
 
@@ -226,7 +231,13 @@ def createResolutionCallbackForClassMethods(cls):
     for fn in fns:
         captures.update(get_closure(fn))
 
-    return lambda key: captures.get(key, None)
+    def lookup_in_class(key):
+        if key in captures:
+            return captures[key]
+        else:
+            return getattr(builtins, key, None)
+
+    return lookup_in_class
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
@@ -722,7 +733,15 @@ def _qualified_name(obj):
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
-    name = obj.__name__
+    if getattr(obj, "__name__", None):
+        name = obj.__name__
+    # Enum classes do not have `__name__` attr, instead they have `name`.
+    elif isinstance(obj, enum.Enum):
+        name = obj.name
+    else:
+        raise RuntimeError("Could not get name of python class object")
+
+
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
 
@@ -767,3 +786,50 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
+
+
+def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
+    return boolean_dispatched.get(fn)
+
+
+def _get_named_tuple_properties(obj):
+    assert issubclass(obj, tuple) and hasattr(obj, '_fields')
+    fields = list(obj._fields)
+    annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
+            annotations.append(the_type)
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return type(obj).__name__, fields, annotations
+
+
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
+    return TupleType(*t)
+
+
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
+
+def _is_exception(obj):
+    if not inspect.isclass(obj):
+        return False
+    return issubclass(obj, Exception)

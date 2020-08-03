@@ -135,6 +135,7 @@ UPTOb( bool  , equal    , (const Tensor &A, const Tensor &B) )
 UPTOb( Tensor, cat      , (TensorList    A, int64_t       B) )
 UPTOb( Tensor, cat      , (TensorList    A, Dimname       B) )
 UPTOb( Tensor, _cat     , (TensorList    A, int64_t       B) )
+UPTOd( Tensor, index_put, (const Tensor &A, TensorList    B, const Tensor &         C, bool          D) )
 UPTOb( Tensor, stack    , (TensorList    A, int64_t       B) )
 
 #undef UPTOa

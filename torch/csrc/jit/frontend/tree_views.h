@@ -645,15 +645,11 @@ struct Raise : public Stmt {
   explicit Raise(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_RAISE);
   }
-  Maybe<Expr> expr() const {
-    return Maybe<Expr>(subtree(0));
+  Expr expr() const {
+    return Expr(subtree(0));
   }
-  static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
+  static Raise create(const SourceRange& range, const Expr& expr) {
     return Raise(Compound::create(TK_RAISE, range, {expr}));
-  }
-  static Raise create(const SourceRange& range) {
-    return Raise(
-        Compound::create(TK_RAISE, range, {Maybe<Expr>::create(range)}));
   }
 };
 

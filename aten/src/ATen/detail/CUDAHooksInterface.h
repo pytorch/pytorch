@@ -121,6 +121,10 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
+  virtual Allocator* getCUDADeviceAllocator() const {
+    TORCH_CHECK(false, "CUDADeviceAllocator requires CUDA. ", CUDA_HELP);
+  }
+
   virtual bool compiledWithCuDNN() const {
     return false;
   }

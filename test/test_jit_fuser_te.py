@@ -59,7 +59,7 @@ def warmup_forward(f, *args):
     return results
 
 
-class TestFuser(JitTestCase):
+class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -507,7 +507,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
-    @torch.jit._disable_emit_hooks_decorator
+    @torch._jit_internal._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):

@@ -230,7 +230,7 @@ def get_dir():
     If :func:`~torch.hub.set_dir` is not called, default path is ``$TORCH_HOME/hub`` where
     environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
     ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
-    filesytem layout, with a default value ``~/.cache`` if the environment
+    filesystem layout, with a default value ``~/.cache`` if the environment
     variable is not set.
     """
     # Issue warning to move data if old env is set

@@ -120,8 +120,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vec256(Args... vals) {
-    values = { vals... };
+  Vec256(Args... vals) : values{vals...}{
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {

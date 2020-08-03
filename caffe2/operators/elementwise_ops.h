@@ -414,27 +414,27 @@ struct SignFunctor {
 
 // Forward-only Binary Functors.
 #define C10_DECLARE_FORWARD_ONLY_BINARY_FUNCTOR(FunctorName) \
-  template <class Context>                                  \
-  struct FunctorName##Functor {                             \
-    template <typename TIn, typename TOut>                  \
-    bool Forward(                                           \
-        const std::vector<int>& A_dims,                     \
-        const std::vector<int>& B_dims,                     \
-        const TIn* A,                                       \
-        const TIn* B,                                       \
-        TOut* C,                                            \
-        Context* context) const {                           \
-      math::FunctorName(                                    \
-          A_dims.size(),                                    \
-          A_dims.data(),                                    \
-          B_dims.size(),                                    \
-          B_dims.data(),                                    \
-          A,                                                \
-          B,                                                \
-          C,                                                \
-          context);                                         \
-      return true;                                          \
-    }                                                       \
+  template <class Context>                                   \
+  struct FunctorName##Functor {                              \
+    template <typename TIn, typename TOut>                   \
+    bool Forward(                                            \
+        const std::vector<int>& A_dims,                      \
+        const std::vector<int>& B_dims,                      \
+        const TIn* A,                                        \
+        const TIn* B,                                        \
+        TOut* C,                                             \
+        Context* context) const {                            \
+      math::FunctorName(                                     \
+          A_dims.size(),                                     \
+          A_dims.data(),                                     \
+          B_dims.size(),                                     \
+          B_dims.data(),                                     \
+          A,                                                 \
+          B,                                                 \
+          C,                                                 \
+          context);                                          \
+      return true;                                           \
+    }                                                        \
   };
 
 // Compare functors.

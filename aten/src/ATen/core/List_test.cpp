@@ -1082,3 +1082,9 @@ TEST(ListTest_NonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) 
 
   EXPECT_FALSE(list1.is(list2));
 }
+
+TEST(ListTest, canAccessStringByReference) {
+  List<std::string> list({"one", "two"});
+  const std::string& str = list[1].toStringRef();
+  EXPECT_EQ("two", str);
+}

@@ -69,8 +69,7 @@ class Conf(object):
                 "update_s3_htmls",
             ]
             job_def["filters"] = branch_filters.gen_filter_dict(
-                branches_list=["nightly"],
-                tags_list=[branch_filters.RC_PATTERN],
+                branches_list=["postnightly"],
             )
         else:
             if phase in ["upload"]:
@@ -154,27 +153,14 @@ def get_nightly_uploads():
     return mylist
 
 def get_post_upload_jobs():
-    """Generate jobs to update HTML indices and report binary sizes"""
-    configs = gen_build_env_list(False)
-    common_job_def = {
-        "context": "org-member",
-        "filters": branch_filters.gen_filter_dict(
-            branches_list=["nightly"],
-            tags_list=[branch_filters.RC_PATTERN],
-        ),
-        "requires": [],
-    }
-    for conf in configs:
-        upload_job_name = conf.gen_build_name(
-            build_or_test="upload",
-            nightly=True
-        )
-        common_job_def["requires"].append(upload_job_name)
     return [
         {
             "update_s3_htmls": {
                 "name": "update_s3_htmls",
-                **common_job_def,
+                "context": "org-member",
+                "filters": branch_filters.gen_filter_dict(
+                    branches_list=["postnightly"],
+                ),
             },
         },
     ]

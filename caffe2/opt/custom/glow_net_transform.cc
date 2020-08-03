@@ -19,6 +19,11 @@ C10_DEFINE_bool(
     "For test purpose only. Build a dummy net just to test the functionality");
 
 C10_DEFINE_bool(
+    enforce_fp32_inputs_into_fp16,
+    false,
+    "Whether to enforce fp32 to fp16 conversion for external inputs.");
+
+C10_DEFINE_bool(
     merge_fp32_inputs_into_fp16,
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
@@ -139,6 +144,7 @@ void onnxifi(
   opts.adjust_batch = FLAGS_onnxifi_adjust_batch;
   opts.min_ops = FLAGS_onnxifi_min_ops;
   opts.load_model_by_blob = load_model_by_blob;
+  opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.loop_test = FLAGS_onnxifi_loop_test_mode;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;

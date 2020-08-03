@@ -25,6 +25,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
+  {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
@@ -66,7 +67,7 @@ static const std::unordered_map<std::string, std::vector<std::string>> numpy_com
 // overloads and binding to the Tensor overload with a number of a different
 // type will trigger a type error.
 //
-// If you modify this, you will need to adjust the blacklist in
+// If you modify this, you will need to adjust the blocklist in
 // tools/pyi/gen_pyi.py (and add hardcoded signatures for these
 // functions.)
 static bool should_allow_numbers_as_tensors(const std::string& name) {
@@ -253,17 +254,30 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
   }
 }
 
-auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool
+static auto check_tensor_or_overload(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool {
+  if (THPVariable_CheckExact(obj)) {
+    // torch.Tensor instances (not subclasses)
+    return true;
+  }
+
+  if (check_has_torch_function(obj)) {
+    // tensor subclasses and unrelated objects with __torch_function__
+    append_overloaded_arg(overloaded_args, obj);
+    return true;
+  } else if (THPVariable_Check(obj)) {
+    // tensor subclasses without __torch_function__
+    return true;
+  }
+
+  return false;
+}
+
+// argnum is needed for raising the TypeError, it's used in the error message.
+auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      if (THPVariable_CheckExact(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        if (check_has_torch_function(obj)) {
-          append_overloaded_arg(overloaded_args, obj);
-        }
+      if (check_tensor_or_overload(obj, overloaded_args)) {
         return true;
       }
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
@@ -302,7 +316,21 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: {
+      auto tuple = six::isTuple(obj);
+      if (!(tuple || PyList_Check(obj))) {
+        return false;
+      }
+      auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+      for (auto idx = 0; idx < size; idx++) {
+        PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+        if (!check_tensor_or_overload(iobj, overloaded_args)) {
+          throw TypeError("expected Tensor as element %d in argument %d, but got %s",
+                          idx, argnum, Py_TYPE(iobj)->tp_name);
+        }
+      }
+      return true;
+    }
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
@@ -310,6 +338,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
+    case ParameterType::FLOAT_LIST: return (PyTuple_Check(obj) || PyList_Check(obj));
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -334,6 +363,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
+    case ParameterType::FLOAT_LIST: return "tuple of floats";
     case ParameterType::GENERATOR: return "torch.Generator";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
@@ -418,6 +448,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
+    }
+  } else if (type_ == ParameterType::FLOAT_LIST) {
+    if (str != "None") {
+      throw std::runtime_error("Defaults not supported for float[]");
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
@@ -676,14 +710,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args)) {
+    } else if (param.check(obj, this->overloaded_args, i)) {
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
-    } else if (check_has_torch_function(obj)) {
-      append_overloaded_arg(overloaded_args, obj);
-      dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter

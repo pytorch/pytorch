@@ -793,7 +793,17 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
-void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
+void qelu_kernel(
+    const Tensor& qx,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    Tensor& qy) {
+  // scale and input_scale arguments refer to a generalized ELU formula
+  // if x >= 0, ELU(x) = x * scale
+  // if x <= 0, ELU(x) = (exp(x * input_scale) - 1) * scale
+  // in the normal ELU formula, both are equal to 1
+  // they are NOT related to the quantization scale term
 
   int64_t i_zp = qx.q_zero_point();
   float i_scale = qx.q_scale();
@@ -805,6 +815,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
   float inv_o_scale = 1.0 / o_scale;
 
   float alpha_float = alpha.to<float>();
+  float scale_coef = scale.to<float>();
+  float input_scale_coef = input_scale.to<float>();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qelu_kernel", [&] {
 
@@ -817,6 +829,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
     Vec alpha_vec = Vec(alpha_float);
+    Vec scale_coef_vec = Vec(scale_coef);
+    Vec input_scale_coef_vec = Vec(input_scale_coef);
     Vec i_scale_vec = Vec(i_scale);
     Vec i_zero_point_vec = Vec((float)i_zp);
     Vec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
@@ -828,8 +842,9 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
         const auto x = at::native::dequantize_val(i_scale, i_zp, value_qx);
         // ELU
         const auto y = x >= 0
-          ? x
-          : (alpha_float * (std::exp(x) - 1));
+          ? x * scale_coef
+          : ((std::exp(x * input_scale_coef) - 1) * alpha_float * scale_coef);
+
         // quantize
         return at::native::quantize_val<scalar_t>(o_scale, o_zp, y);
       },
@@ -846,6 +861,7 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
 
             Vec dx_vec_copy_neg_elu = dx_vec_vec[idx] * one_vec;
             // calculate the negative part of ELU on the copy
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
@@ -853,6 +869,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
             dx_vec_vec[idx] = Vec::blendv(dx_vec_copy_neg_elu, dx_vec_vec[idx],
                                         dx_vec_vec[idx] > zero_vec);
           }
+
+          dx_vec_vec[idx] = dx_vec_vec[idx] * scale_coef_vec;
         }
         // quantize
         return qVec::quantize(dx_vec_vec, o_scale, o_zp, inv_o_scale);
@@ -2030,6 +2048,53 @@ void fake_quantize_grad_tensor_kernel(
   });
 }
 
+void fake_quantize_learnable_scale_grad_tensor_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  float grad_small = quant_min - zero_point;
+  float grad_big = quant_max - zero_point;
+  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on scale.
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    if (xq == quant_min) {
+      return dy * grad_small;
+    } else if (xq == quant_max) {
+      return dy * grad_big;
+    }
+    float x_fq = static_cast<float>((xq - zero_point) * scale);
+    return dy * (x_fq - x) * inv_scale;
+  });
+}
+
+void fake_quantize_learnable_zero_point_grad_tensor_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on zero point.
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    if (xq == quant_min || xq == quant_max) {
+      return dy * (-1) * scale;
+    }
+    return 0;
+  });
+}
+
 void fake_quant_per_channel_cpu(
     TensorIterator& iter,
     int64_t quant_min,
@@ -2058,6 +2123,53 @@ void fake_quant_grad_per_channel_cpu(
             static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
         return dy * (xq >= quant_min && xq <= quant_max);
       });
+}
+
+void fake_quantize_learnable_scale_grad_channel_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  float grad_small = quant_min - zero_point;
+  float grad_big = quant_max - zero_point;
+  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    float x_fq = static_cast<float>((xq - zero_point) * scale);
+    if (xq == quant_min) {
+      return dy * grad_small;
+    } else if (xq == quant_max) {
+      return dy * grad_big;
+    }
+    return dy * (x_fq - x) * inv_scale;
+  });
+}
+
+void fake_quantize_learnable_zero_point_grad_channel_kernel(
+    Tensor& input_grad,
+    const Tensor& input,
+    const Tensor& output_grad,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / scale;
+  auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
+  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
+  cpu_kernel(iter_zero_point, [&](float x, float dy) -> float {
+    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+    xq = std::max(std::min(xq, quant_max), quant_min);
+    if (xq == quant_min || xq == quant_max) {
+      return dy * (-1) * scale;
+    }
+    return 0;
+  });
 }
 
 // Assumes X is composed of M groups of N elements. Normalizes each of the
@@ -2518,8 +2630,12 @@ REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub, &fake_quantize_learnable_scale_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub, &fake_quantize_learnable_zero_point_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &fake_quantize_learnable_scale_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &fake_quantize_learnable_zero_point_grad_channel_kernel);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);

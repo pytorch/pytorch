@@ -41,9 +41,8 @@ RegisterOperators reg({
     Operator(
         prim::CudaFusionGroup,
         [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
-            fuser::cuda::runFusionGroup(node, stack);
-            return 0;
+          return [node](Stack* stack) {
+            fuser::cuda::runFusionGroup(node, *stack);
           };
         },
         c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
