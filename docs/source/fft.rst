@@ -1,5 +1,6 @@
 .. role:: hidden
     :class: hidden-section
+    :noindex:
 
 torch.fft
 =========
