@@ -41,13 +41,9 @@ namespace{
   }
 }
 
-// Comment the anonymous namespace so that the generated functions
-// can be accessed from outside of the files (register_mobile_autograd.cpp).
-// Later when we merge the mobile op registration the anonymous namespace
-// will be restored.
-// namespace {
+namespace {
 ${type_derived_method_definitions}
-// }
+}
 }
 
 namespace {

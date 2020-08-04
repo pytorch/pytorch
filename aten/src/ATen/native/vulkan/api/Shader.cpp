@@ -9,31 +9,21 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Factory::Factory(const VkDevice device)
- : device_(device) {
+Shader::Descriptor::Descriptor(const Source& source)
+ : type(Type::Source),
+   // Intentionally zero initialize the uion.
+   shader{.binary = {}} {
+    shader.source = source;
 }
 
-typename Shader::Factory::Handle Shader::Factory::operator()(const Descriptor& descriptor) const {
-  const VkShaderModuleCreateInfo shader_module_create_info{
-    VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-    nullptr,
-    0u,
-    descriptor.count * sizeof(uint32_t),
-    descriptor.code,
-  };
-
-  VkShaderModule shader_module{};
-  VK_CHECK(vkCreateShaderModule(device_, &shader_module_create_info, nullptr, &shader_module));
-
-  return Handle{
-    shader_module,
-    Deleter(device_),
-  };
+Shader::Descriptor::Descriptor(const Binary& binary)
+ : type(Type::Binary),
+   shader{.binary = binary} {
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 
-struct Shader::Cache::Compiler final {
+struct Shader::Factory::Compiler final {
   shaderc::Compiler context;
   shaderc::CompileOptions options;
 
@@ -49,7 +39,7 @@ struct Shader::Cache::Compiler final {
   #endif /* DEBUG */
   }
 
-  std::vector<uint32_t> compile(const char* const source) {
+  std::vector<const uint32_t> compile(const char* const source) const {
     const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
         source,
         ::strlen(source),
@@ -63,48 +53,70 @@ struct Shader::Cache::Compiler final {
         "Shader compilation error: ",
         result.GetErrorMessage());
 
-    return std::vector<uint32_t>(result.cbegin(), result.cend());
+    return std::vector<const uint32_t>(result.cbegin(), result.cend());
   }
 };
 
 #else
 
-struct Shader::Cache::Compiler final {
-  std::vector<uint32_t> compile(const char* const /* source */) {
-    return std::vector<uint32_t>{};
+struct Shader::Factory::Compiler final {
+  std::vector<const uint32_t> compile(const char* const /* source */) const {
+    return std::vector<const uint32_t>{};
   }
 };
 
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-Shader::Cache::Cache(const VkDevice device)
- : compiler_(new Compiler),
-   cache_(Factory(device)) {
+Shader::Factory::Factory(const VkDevice device)
+ : device_(device),
+   compiler_(new Compiler) {
 }
 
-Shader::Cache::~Cache() = default;
+// std::unique_ptr requires its template parameter to be fully defined.
+// For that reason pimpl through unique_ptr requires the definition of
+// the [default] constructor and assignment to show up after impl is
+// fully defined.
 
-VkShaderModule Shader::Cache::retrieve(
-    const char* const key,
-    const char* const source) {
-  const VkShaderModule shader_module = cache_.retrieve(key);
-  if (VK_NULL_HANDLE != shader_module) {
-    return shader_module;
+Shader::Factory::Factory(Factory&&) = default;
+Shader::Factory& Shader::Factory::Factory::operator=(Factory&&) = default;
+Shader::Factory::~Factory() = default;
+
+typename Shader::Factory::Handle Shader::Factory::operator()(
+    const Descriptor& descriptor) const {
+  std::vector<const uint32_t> binary;
+
+  const uint32_t* code = nullptr;
+  uint32_t count = 0u;
+
+  if (Descriptor::Type::Source == descriptor.type) {
+    binary = compiler_->compile(descriptor.shader.source.code);
+    code = binary.data();
+    count = binary.size();
+  }
+  else if (Descriptor::Type::Binary == descriptor.type) {
+    code = descriptor.shader.binary.code;
+    count = descriptor.shader.binary.count;
+  }
+  else {
+    TORCH_INTERNAL_ASSERT(false, "Invalid descriptor type!");
   }
 
-  const std::vector<uint32_t> binary = compiler_->compile(source);
-  const Descriptor descriptor{
-      binary.data(),
-      binary.size()
+  const VkShaderModuleCreateInfo shader_module_create_info{
+    VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+    nullptr,
+    0u,
+    count * sizeof(uint32_t),
+    code,
   };
 
-  return retrieve(key, &descriptor);
-}
+  VkShaderModule shader_module{};
+  VK_CHECK(vkCreateShaderModule(
+      device_, &shader_module_create_info, nullptr, &shader_module));
 
-VkShaderModule Shader::Cache::retrieve(
-    const char* const key,
-    const Descriptor* const descriptor) {
-  return cache_.retrieve(key, descriptor);
+  return Handle{
+    shader_module,
+    Deleter(device_),
+  };
 }
 
 } // namespace api

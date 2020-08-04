@@ -95,7 +95,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // unqualified "hash" function call. However the
           // argument-dependent lookup for the function "hash" doesn't get
           // triggered in this context because it conflicts with the struct
-          // torch::hash, so  we need to use the qualified name
+          // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
           .def("__repr__", [](const WorkerInfo& workerInfo) {

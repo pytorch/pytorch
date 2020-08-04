@@ -7,66 +7,48 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-template<typename Key, typename Value, typename Factory>
+template<typename Factory>
 class Cache final {
  public:
-  Cache() = delete;
   explicit Cache(Factory factory);
-  Cache(const Cache&) = delete;
-  Cache& operator=(const Cache&) = delete;
-  Cache(Cache&&) = default;
-  Cache& operator=(Cache&&) = default;
   ~Cache() = default;
 
+  // Factory must have the following symbols defined.
+
   typedef typename Factory::Descriptor Descriptor;
+  typedef typename Factory::Handle Handle;
+  typedef typename Factory::Hasher Hasher;
 
   // Create or retrieve a resource.
   //
-  // If descriptor is null, this operation is a simple cache lookup and returns
-  // the Value corresponding to Key if present in the cache, or a default-constructed
-  // Value otherwise, which in the case of Vulkan objects, can be conveniently compared
-  // against VK_NULL_HANDLE in case the intended behavior is to check the presence of
-  // an item in the cache.
-  //
-  // On the other hand, if descriptor is not null, this operation is a cache lookup
-  // in addition to a resource construction using the provided Factory if and only if
-  // the resource is not already present in the cache.  Regardless, this function
-  // returns  with the already present, or newly created item, available in the cache
-  // for future use.
+  // This operation is a simple cache lookup and returns the Handle corresponding
+  // to the descriptor if the object is already present in the cache.  Otherwise,
+  // Factory is used to create the object, after which point the object is added
+  // to the cache.  Regardless, this function returns with the object in the cache.
 
-  Value retrieve(Key key, const Descriptor* descriptor = nullptr);
+  Handle retrieve(const Descriptor& descriptor);
 
  private:
   struct Configuration final {
-    static constexpr uint32_t kReserve = 16u;
+    static constexpr uint32_t kReserve = 64u;
   };
 
   Factory factory_;
-  ska::flat_hash_map<Key, Handle<Value, typename Factory::Deleter>> cache_;
-
- private:
-  static_assert(
-      std::is_default_constructible<Value>::value,
-      "Value must be default constructible.");
+  ska::flat_hash_map<Descriptor, Handle, Hasher> cache_;
 };
 
-template<typename Key, typename Value, typename Factory>
-inline Cache<Key, Value, Factory>::Cache(Factory factory)
+template<typename Factory>
+inline Cache<Factory>::Cache(Factory factory)
   : factory_(std::move(factory)) {
     cache_.reserve(Configuration::kReserve);
 }
 
-template<typename Key, typename Value, typename Factory>
-inline Value Cache<Key, Value, Factory>::retrieve(
-    const Key key,
-    const Descriptor* const descriptor) {
-  auto iterator = cache_.find(key);
+template<typename Factory>
+inline typename Cache<Factory>::Handle Cache<Factory>::retrieve(
+    const Descriptor& descriptor) {
+  auto iterator = cache_.find(descriptor);
   if (cache_.cend() == iterator) {
-    if (!descriptor) {
-      return Value{};
-    }
-
-    iterator = cache_.insert({key, factory_(*descriptor)}).first;
+    iterator = cache_.insert({descriptor, factory_(*descriptor)}).first;
   }
 
   return iterator->second.get();
