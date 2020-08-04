@@ -49,7 +49,7 @@ class PoolTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **mu.gcs)
+           **mu.gcs_cpu_ideep)
     def test_int8_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
                          method, gc, dc):

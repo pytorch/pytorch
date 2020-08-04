@@ -255,7 +255,8 @@ std::vector<float> generate_requantization_scales(
     requant_scales.resize(num_output_channels_padded);
   }
   for (int i = 0; i < num_output_channels_padded; ++i) {
-    requant_scales[i] = weight_scales_data[i] * input_scale / output_scale;
+    auto inverse_output_scale = 1.f /output_scale;
+    requant_scales[i] = (weight_scales_data[i] * input_scale) * inverse_output_scale;
     TORCH_CHECK(
         (requant_scales[i] > 0.0f && std::isnormal(requant_scales[i])),
         "failed to create op with requantization scale: ",

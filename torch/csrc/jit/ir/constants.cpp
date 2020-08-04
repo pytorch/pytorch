@@ -20,7 +20,8 @@ bool insertableTensor(const at::Tensor& ten) {
 
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
-      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice() ||
+      ivalue.isEnum()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -37,7 +38,6 @@ bool insertableIValue(const IValue& ivalue) {
       return insertableIValue(tup_elem);
     });
   }
-
   if (ivalue.isGenericDict()) {
     const auto& dict = ivalue.toGenericDict();
     return std::all_of(dict.begin(), dict.end(), [](const auto& entry) {
@@ -123,6 +123,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isGenericDict() && insertableIValue(val)) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
+  } else if (val.isEnum()) {
+    n->ival_(attr::value, val);
+    n->output()->setType(val.type());
   } else {
     n->destroy();
     return c10::nullopt;
@@ -178,6 +181,9 @@ c10::optional<IValue> toIValue(const Value* v) {
     return d;
   } else if (node->mustBeNone()) {
     return IValue();
+  } else if (type->cast<EnumType>()) {
+    const auto& enum_val = node->ival(attr::value);
+    return enum_val;
   } else {
     std::stringstream ss;
     ss << "constant literal not supported for: " << type->str();

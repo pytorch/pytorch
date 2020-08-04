@@ -138,6 +138,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # This test has been flaky in ROCm CI (but note the tests are
   # cpu-only so should be unrelated to ROCm)
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/blobs_queue_db_test.py")
+  # This test is skipped on Jenkins(compiled without MKL) and otherwise known flaky
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/convfusion_op_test.py")
+  # This test is skipped on Jenkins(compiled without MKL) and causing segfault on Circle
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/pool_op_test.py")
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
