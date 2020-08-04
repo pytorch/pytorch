@@ -549,6 +549,7 @@ class NormalizationTestModel(torch.nn.Module):
         self.instance_norm1d = torch.nn.InstanceNorm1d(8)
         self.instance_norm2d = torch.nn.InstanceNorm2d(8)
         self.instance_norm3d = torch.nn.InstanceNorm3d(8)
+        self.bn_1d = torch.nn.BatchNorm1d(8)
 
     def forward(self, x):
         x = self.quant(x)
@@ -558,6 +559,7 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))
+        x = self.bn_1d(x.squeeze(-1).squeeze(-1))
         return x
 
 class NestedModel(torch.nn.Module):
