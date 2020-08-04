@@ -9,16 +9,20 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Descriptor::Descriptor(const Source& source)
- : type(Type::Source),
-   // Intentionally zero initialize the uion.
-   shader{.binary = {}} {
-    shader.source = source;
+Shader::Descriptor::Descriptor(const char* const glsl)
+ : type(Type::Source) {
+  shader.source = {
+    glsl,
+    0u,
+  };
 }
 
-Shader::Descriptor::Descriptor(const Binary& binary)
- : type(Type::Binary),
-   shader{.binary = binary} {
+Shader::Descriptor::Descriptor(const uint32_t* const code, const uint32_t size)
+ : type(Type::Binary) {
+  shader.binary = {
+    code,
+    size,
+  };
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
@@ -86,16 +90,16 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
   std::vector<const uint32_t> binary;
 
   const uint32_t* code = nullptr;
-  uint32_t count = 0u;
+  uint32_t size = 0u;
 
   if (Descriptor::Type::Source == descriptor.type) {
-    binary = compiler_->compile(descriptor.shader.source.code);
+    binary = compiler_->compile(descriptor.shader.source.glsl);
     code = binary.data();
-    count = binary.size();
+    size = sizeof(uint32_t) * binary.size();
   }
   else if (Descriptor::Type::Binary == descriptor.type) {
-    code = descriptor.shader.binary.code;
-    count = descriptor.shader.binary.count;
+    code = descriptor.shader.binary.spirv;
+    size = descriptor.shader.binary.size;
   }
   else {
     TORCH_INTERNAL_ASSERT(false, "Invalid descriptor type!");
@@ -105,7 +109,7 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
     VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
     nullptr,
     0u,
-    count * sizeof(uint32_t),
+    size,
     code,
   };
 
