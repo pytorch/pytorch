@@ -3,7 +3,7 @@ C++
 .. Note::
     If you are looking for the PyTorch C++ API docs, directly go `here <https://pytorch.org/cppdocs/>`__.
 
-PyTorch provides several features for working with C++, and it’s best to choose from them based on your needs. At a high level, the following support is available:
+PyTorch provides several features for working with C++, and it’s best to choose from them based on your needs. At a higher level, the following support is available:
 
 TorchScript C++ API
 --------------------
