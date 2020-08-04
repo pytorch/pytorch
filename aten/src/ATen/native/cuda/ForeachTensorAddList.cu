@@ -171,8 +171,8 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
-    for (int i = 0; i < tensors1.size(); i++) {
-        vec_res.emplace_back(at::native::empty_like(tensors1[i]));
+    for (const auto& t: tensors1) {
+        vec_res.emplace_back(at::native::empty_like(t));
     }
 
     tensor_lists.emplace_back(std::move(tensors1.vec()));

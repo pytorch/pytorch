@@ -71,7 +71,7 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scala
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
   std::vector<Tensor> result;
-  for (auto& t: tensors) {
+  for (auto& t : tensors) {
     auto temp = t.add(scalar);
     result.emplace_back(temp);
   }
@@ -82,7 +82,7 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scala
 std::vector<Tensor> foreach_add_scalar__kernel_fallback(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
-  for (auto& t: tensors) {
+  for (auto& t : tensors) {
     t.add_(scalar);
   }
 
