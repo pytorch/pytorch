@@ -602,6 +602,7 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+        return self
 
     def _register_comm_hook(self, state: object, hook: callable):
         r"""
@@ -685,7 +686,10 @@ class DistributedDataParallel(Module):
                         # to zero the grads on all model replicas as well.
                         # This snippet is copied from torch.optim.Optimizer.
                         if param.grad is not None:
-                            param.grad.detach_()
+                            if param.grad.grad_fn is not None:
+                                param.grad.detach_()
+                            else:
+                                param.grad.requires_grad_(False)
                             param.grad.zero_()
 
             # module buffer sync

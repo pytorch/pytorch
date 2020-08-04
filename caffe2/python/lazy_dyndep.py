@@ -6,7 +6,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import os
-from caffe2.python import core, dyndep
+from caffe2.python import dyndep, lazy
 
 
 def RegisterOpsLibrary(name):
@@ -81,4 +81,4 @@ def _import_lazy():
         finally:
             _LAZY_IMPORTED_DYNDEPS.remove(name)
 
-core.RegisterLazyImport(_import_lazy)
+lazy.RegisterLazyImport(_import_lazy)

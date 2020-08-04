@@ -84,16 +84,16 @@ void _fake_quantize_grad_learnable_scale_tensor_kernel_cuda(
 
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   gpu_kernel(iter,
-    [=] GPU_LAMBDA (float x, float dx) -> float {
+    [=] GPU_LAMBDA (float x, float dy) -> float {
       int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
       xq = std::max(std::min(xq, quant_max), quant_min);
       if (xq == quant_min) {
-        return dx * grad_small;
+        return dy * grad_small;
       } else if (xq == quant_max) {
-        return dx * grad_big;
+        return dy * grad_big;
       }
       float x_fq = static_cast<float>((xq - zero_point) * scale);
-      return dx * (x_fq - x) * inv_scale;
+      return dy * (x_fq - x) * inv_scale;
     });
 }
 
@@ -109,11 +109,11 @@ void _fake_quantize_grad_learnable_zero_point_tensor_kernel_cuda(
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   gpu_kernel(iter,
-    [=] GPU_LAMBDA (float x, float dx) -> float {
+    [=] GPU_LAMBDA (float x, float dy) -> float {
       int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
       xq = std::max(std::min(xq, quant_max), quant_min);
       if (xq == quant_min || xq == quant_max) {
-        return dx * (-1) * scale;
+        return dy * (-1) * scale;
       }
       return 0;
     });
@@ -165,16 +165,16 @@ void _fake_quantize_grad_learnable_scale_channel_kernel_cuda(
 
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   gpu_kernel(iter,
-    [=] GPU_LAMBDA (float x, float dx) -> float {
+    [=] GPU_LAMBDA (float x, float dy) -> float {
       int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
       xq = std::max(std::min(xq, quant_max), quant_min);
       float x_fq = static_cast<float>((xq - zero_point) * scale);
       if (xq == quant_min) {
-        return dx * grad_small;
+        return dy * grad_small;
       } else if (xq == quant_max) {
-        return dx * grad_big;
+        return dy * grad_big;
       }
-      return dx * (x_fq - x) * inv_scale;
+      return dy * (x_fq - x) * inv_scale;
     });
 }
 
@@ -190,11 +190,11 @@ void _fake_quantize_grad_learnable_zero_point_channel_kernel_cuda(
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   gpu_kernel(iter,
-    [=] GPU_LAMBDA (float x, float dx) -> float {
+    [=] GPU_LAMBDA (float x, float dy) -> float {
       int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
       xq = std::max(std::min(xq, quant_max), quant_min);
       if (xq == quant_min || xq == quant_max) {
-        return dx * (-1) * scale;
+        return dy * (-1) * scale;
       }
       return 0;
     });
