@@ -12,7 +12,7 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scala
   return result;
 }
 
-std::vector<Tensor> foreach_add_scalar__kernel_cpu(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_add_scalar__kernel_fallback(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
   for (int i = 0; i < tensors.size(); i++) {

@@ -153,7 +153,7 @@ std::vector<Tensor> foreach_tensor_add_scalar__kernel_cuda(TensorList tensors, S
     TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
     if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_add_scalar__kernel_cpu(tensors, scalar);
+        return at::native::foreach_add_scalar__kernel_fallback(tensors, scalar);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
