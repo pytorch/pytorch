@@ -726,6 +726,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.sin(torch.add(x, y))
             return c
 
+        def test_sinc(x, y):
+            c = torch.sinc(torch.add(x, y))
+            return c
+
         def test_asin(x, y):
             c = torch.asin(torch.add(x, y))
             return c

@@ -915,6 +915,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('sigmoid'),
             fn_method_and_inplace('sign'),
             fn_method_and_inplace('sin'),
+            fn_method_and_inplace('sinc')
             fn_method_and_inplace('sinh'),
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),

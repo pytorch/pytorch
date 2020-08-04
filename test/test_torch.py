@@ -6110,7 +6110,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
         self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
 
-        # exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
+        # sinc, exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
+        self.assertEqual((), torch.sinc(zero_d).shape)
         self.assertEqual((), torch.exp(zero_d).shape)
         self.assertEqual((), torch.cos(zero_d).shape)
         self.assertEqual((), torch.cosh(zero_d).shape)
@@ -6123,6 +6124,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.erf(zero_d).shape)
         self.assertEqual((), torch.erfc(zero_d).shape)
         self.assertEqual((), torch.reciprocal(zero_d).shape)
+        self.assertEqual((1,), torch.sinc(one_d).shape)
         self.assertEqual((1,), torch.exp(one_d).shape)
         self.assertEqual((1,), torch.cos(one_d).shape)
         self.assertEqual((1,), torch.cosh(one_d).shape)
@@ -13800,6 +13802,8 @@ class TestTorchDeviceType(TestCase):
             ("rsqrt", positives, True, True, 'cuda'),
             ("sin", doubles, True, True, 'cpu'),
             ("sin", doubles, True, True, 'cuda'),
+            ("sinc", doubles, True, True, 'cpu'),
+            ("sinc", doubles, True, True, 'cuda'),
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
@@ -14946,6 +14950,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.sign_(),
                 lambda x, y: x.sin(),
                 lambda x, y: x.sin_(),
+                lambda x, y: x.sinc(),
+                lambda x, y: x.sinc_(),
                 lambda x, y: x.sinh(),
                 lambda x, y: x.sinh_(),
                 lambda x, y: x.sqrt(),
@@ -19742,6 +19748,7 @@ tensor_op_tests = [
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('sinc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -19930,6 +19937,7 @@ class _TorchMathTestMeta(object):
         self.replace_inf_with_nan = replace_inf_with_nan
 
 torch_op_tests = [_TorchMathTestMeta('sin'),
+                  _TorchMathTestMeta('sinc'),
                   _TorchMathTestMeta('asin', reffn='arcsin'),
                   _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
