@@ -154,7 +154,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
-
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
@@ -165,14 +164,12 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_prepare_division_for_onnx(graph)
 
         torch._C._jit_pass_onnx_remove_print(graph)
-
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
             torch.onnx.symbolic_helper._quantized_ops.clear()
             # Unpack quantized weights for conv and linear ops and insert into graph.
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
-
             # Insert permutes before and after each conv op to ensure correct order.
             torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -348,9 +345,10 @@ def _model_to_jit_graph(model, args, _retain_param_name, update_jit_scripting_pa
                 method_graph.eraseInput(0)  # Remove 'self' from model inputs
                 params = []
 
-                torch._C._jit_pass_onnx_preprocess(graph)
-                torch._C._jit_pass_remove_mutation(graph)
+                torch._C._jit_pass_onnx_preprocess(method_graph)
+                torch._C._jit_pass_remove_mutation(method_graph)
 
+            torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(method_graph)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(method_graph, tuple(in_vars), False, False)
         except AttributeError:
@@ -374,7 +372,6 @@ def _model_to_jit_graph(model, args, _retain_param_name, update_jit_scripting_pa
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
         torch._C._jit_pass_onnx_function_substitution(graph)
-
     return graph, params, torch_out
 
 

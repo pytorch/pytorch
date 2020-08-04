@@ -965,6 +965,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SizeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2710,7 +2711,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
-    @enableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
