@@ -148,7 +148,7 @@ struct ExitTransformer {
     registerBlockOutputs(if_view.elseBlock(), false_outs);
     for (size_t i = 0; i < true_outs.size(); ++i) {
       auto out_type =
-          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type());
+          unifyTypes(true_outs.at(i)->type(), false_outs.at(i)->type(), /*default_to_any+*/true);
       n->addOutput()->setType(*out_type);
     }
   }

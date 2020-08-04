@@ -37,7 +37,7 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
-    print('CUDA not available, skipping tests')
+    print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
 TEST_MAGMA = TEST_CUDA
