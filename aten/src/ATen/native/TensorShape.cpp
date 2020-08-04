@@ -1531,6 +1531,44 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+  // unflatten is implemented only as a python method on tensor right now.
+  // The following asserts should be checked by the python method.
+  TORCH_INTERNAL_ASSERT(sizes.size() > 0);
+  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
+
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  int64_t numel = 1;
+  for (auto i : sizes) numel *= i;
+  TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ", 
+      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+
+  auto shape = self.sizes().vec();
+  shape.erase(shape.begin() + dim);
+  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.reshape(shape);
+  }
+
+  if (names) {
+    auto outnames = self.names().vec();
+    outnames.erase(outnames.begin() + dim);
+    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
+    at::internal_set_names_inplace(result, outnames);
+  }
+
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }

@@ -1,6 +1,6 @@
 from .module import Module
 
-from typing import Union
+from typing import Iterable, Tuple, Union
 from torch import Tensor
 from torch import Size
 
@@ -47,22 +47,22 @@ class Flatten(Module):
 
 class Unflatten(Module):
     r"""
-    Unflattens a tensor into another tensor of a desired shape. For use with :class:`~nn.Sequential`.
+    Unflattens a tensor dim expanding it to a desired shape. For use with :class:`~nn.Sequential`.
 
-    * :attr:`dim` specifies the dimension of the input tensor to be flattened, and it can 
+    * :attr:`dim` specifies the dimension of the input tensor to be unflattened, and it can 
       be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
 
-    * :attr:`unflattened_size` is the size of the unflattened dimension of the tensor and it can be a
-      `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
-      :attr:`dim` is an `int`.
+    * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be a
+      `NamedShape` (iterable of ``(name, size)`` tuples) if :attr:`dim` is `str` or a `tuple` of
+      ints as well as `torch.Size` if :attr:`dim` is an `int`.
 
     Shape:
         - Input: :math:`(N, *dims)`
         - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
 
     Args:
-        dim (Union[int, str]): Dimension to be flattened
-        unflattened_size (Union[tuple, torch.Size]): Size of the output tensor
+        dim (Union[int, str]): Dimension to be unflattened
+        unflattened_size (Union[NamedShape, torch.Size]): New shape of the unflattened dimension
 
     Examples:
         >>> input = torch.randn(2, 50)
@@ -91,18 +91,21 @@ class Unflatten(Module):
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
-    __constants__ = ['dim', 'unflattened_size']
-    dim: Union[int, str]
-    unflattened_size: Union[tuple, Size]
+    NamedShape = Iterable[Tuple[str, int]]
 
-    def __init__(self, dim: Union[int, str], unflattened_size: Union[tuple, Size]) -> None:
+    __constants__ = ['dim', 'unflattened_size']
+    dim: Union[str, int]
+    unflattened_size: Union[NamedShape, Size]
+
+    def __init__(self, dim: Union[str, int], unflattened_size: Union[NamedShape, Size]) -> None:
         super(Unflatten, self).__init__()
+
         if isinstance(dim, int):
             self._require_tuple_int(unflattened_size)
-            self.named = False
-        else:
+        elif isinstance(dim, str):
             self._require_tuple_tuple(unflattened_size)
-            self.named = True
+        else:
+            raise TypeError("invalid argument type for dim parameter")
 
         self.dim = dim
         self.unflattened_size = unflattened_size
@@ -127,17 +130,7 @@ class Unflatten(Module):
         raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
 
     def forward(self, input: Tensor) -> Tensor:
-        if self.named:
-            return input.unflatten(self.dim, self.unflattened_size)
-        else:
-            dim = int(self.dim)
-            if dim < 0:
-                dim += input.dim()
-            inp_size = list(input.size())
-            new_size = inp_size[:dim] + list(self.unflattened_size) + inp_size[dim + 1:]
-            return input.view(new_size)
+        return input.unflatten(self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
-        return 'dim={}, unflattened_size={}'.format(
-            self.dim, self.unflattened_size
-        )
+        return 'dim={}, unflattened_size={}'.format(self.dim, self.unflattened_size)

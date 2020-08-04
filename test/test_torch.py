@@ -2463,6 +2463,11 @@ class AbstractTestCases:
                 with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
                     src.flatten(2, 0)
 
+        def test_unflatten(self):
+            self.assertEqual(torch.tensor([]).unflatten(0, (0, 1, 0)), torch.empty(0, 1, 0))
+            self.assertEqual(torch.tensor([1]).unflatten(0, (1, 1)), torch.tensor([[1]]))
+            self.assertEqual(torch.tensor([[1, 2, 3, 4]]).unflatten(1, (2, 2)), torch.tensor([[[1, 2], [3, 4]]]))
+
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
             m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
