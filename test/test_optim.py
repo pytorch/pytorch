@@ -16,6 +16,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1883,6 +1884,30 @@ class TestSWAUtils(TestCase):
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
 
+
+# Device-generic tests. Instantiated below and not run directly.
+class TestOptimDeviceType(TestCase):
+
+    # see https://github.com/pytorch/pytorch/issues/42364
+    def test_adamax_step(self, device):
+        shape = (2, 3, 4, 5)
+
+        class ModuleWithNonContigWeights(torch.nn.Module):
+            def __init__(self):
+                super(ModuleWithNonContigWeights, self).__init__()
+                self.weight = torch.nn.Parameter(torch.randn(shape, device=device)
+                                                 .to(memory_format=torch.channels_last))
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return input * self.weight
+
+        m = ModuleWithNonContigWeights()
+        input = torch.randn(shape, device=device, requires_grad=True)
+        m(input).sum().backward()
+        adamax = torch.optim.Adamax(m.parameters())
+        adamax.step()
+
+instantiate_device_type_tests(TestOptimDeviceType, globals())
 
 if __name__ == '__main__':
     run_tests()

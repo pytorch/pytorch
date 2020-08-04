@@ -80,7 +80,10 @@ class Adamax(Optimizer):
                     exp_inf.mul_(beta2).unsqueeze(0),
                     grad.abs().add_(eps).unsqueeze_(0)
                 ], 0)
-                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+                # workaround https://github.com/pytorch/pytorch/issues/42364
+                exp_inf_indices_tmp = torch.empty_strided(exp_inf.shape, exp_inf.stride(),
+                                                          device=exp_inf.device, dtype=torch.long)
+                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf_indices_tmp))
 
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction
