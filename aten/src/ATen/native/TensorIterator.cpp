@@ -199,6 +199,12 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     common_dtype_ = compute_common_dtype();
   }
 
+  // Promotes common dtype to the default float scalar type, if needed
+  if (config.promote_integer_inputs_to_float_ &&
+      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+    common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
+  }
+
   // Reviews operands (2/2)
   //   - sets metadata for undefined outputs
   //   - checks that all tensors are on the same device, if requested
@@ -717,9 +723,10 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     .build();
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
+TensorIterator TensorIterator::nullary_op(Tensor& out, bool check_mem_overlap) {
   return TensorIteratorConfig()
     .check_all_same_dtype(false)
+    .set_check_mem_overlap(check_mem_overlap)
     .add_output(out)
     // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
     .resize_outputs(false)
