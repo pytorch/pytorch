@@ -1386,10 +1386,18 @@ class AbstractTestCases:
                 self.assertEqual(len(w), 1)
 
         def test_arange(self):
-            res1 = torch.arange(0, 1)
+            res = torch.tensor(range(10000))
+            res1 = torch.arange(0, 10000)  # Use a larger number so vectorized code can be triggered
             res2 = torch.tensor([], dtype=torch.int64)
-            torch.arange(0, 1, out=res2)
-            self.assertEqual(res1, res2, atol=0, rtol=0)
+            torch.arange(0, 10000, out=res2)
+            self.assertEqual(res, res1, atol=0, rtol=0)
+            self.assertEqual(res, res2, atol=0, rtol=0)
+
+            # Vectorization on non-contiguous tensors
+            res = torch.rand(3, 3, 300000).to(torch.int64)
+            res = res.permute(2, 0, 1)
+            torch.arange(0, 300000 * 3 * 3, out=res)
+            self.assertEqual(res.flatten(), torch.arange(0, 300000 * 3 * 3))
 
             # Check arange with only one argument
             res1 = torch.arange(10)
@@ -3403,6 +3411,9 @@ class AbstractTestCases:
             g2_normal = q.normal_(generator=g2)
             self.assertEqual(g1_normal, g2_normal)
 
+        def test_invalid_generator_raises(self):
+            self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
+
         def test_sobolengine_unscrambled_lowdim(self):
             engine_1d = torch.quasirandom.SobolEngine(1)
             expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
@@ -5322,6 +5333,16 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
+    #   throws the correct error message
+    @onlyCUDA
+    def test_cross_device_inplace_error_msg(self, device):
+        a = torch.tensor(2.)
+        b = torch.tensor(2., device=device)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Expected all tensors to be on the same device"):
+            a += b
 
     @onlyOnCPUAndCUDA
     def test_out_resize_warning(self, device):
@@ -10091,32 +10112,106 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_norm(self, device):
-        # full reduction
-        x = torch.randn(25, device=device)
-        xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf, -inf]:
-            res = x.norm(p).item()
-            expected = np.linalg.norm(xn, p)
-            self.assertEqual(res, expected, atol=1e-5, rtol=0, msg="full reduction failed for {}-norm".format(p))
+        def gen_error_message(input_size, p, keepdim, dim=None):
+            return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
+                input_size, p, keepdim, dim)
 
-        # one dimension
-        x = torch.randn(25, 25, device=device)
-        xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf, -inf]:
-            res = x.norm(p, 1).cpu()
-            expected = np.linalg.norm(xn, p, 1)
-            self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
+        for keepdim in [False, True]:
+            # full reduction
+            x = torch.randn(25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 2, 3, 4, inf, -inf, -1, -2, -3, 1.5]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                self.assertEqual(res, expected, atol=1e-5, rtol=0, msg=gen_error_message(x.size(), p, keepdim))
 
-        # matrix norm
-        for p in ['fro', 'nuc']:
-            res = x.norm(p).cpu()
-            expected = np.linalg.norm(xn, p)
-            self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
+            # one dimension
+            x = torch.randn(25, 25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 2, 3, 4, inf, -inf, -1, -2, -3]:
+                dim = 1
+                res = x.norm(p, dim, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, dim, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim, dim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
 
-        # larger tensor sanity check
-        self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
+            # matrix norm
+            for p in ['fro', 'nuc']:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            # zero dimensions
+            x = torch.randn((), device=device)
+            xn = x.cpu().numpy()
+            res = x.norm(keepdim=keepdim).cpu()
+            expected = np.linalg.norm(xn, keepdims=keepdim)
+            msg = gen_error_message(x.size(), None, keepdim)
+            self.assertEqual(res.shape, expected.shape, msg=msg)
+            self.assertEqual(res, expected, msg=msg)
+
+            # larger tensor sanity check
+            self.assertEqual(
+                2 * torch.norm(torch.ones(10000), keepdim=keepdim),
+                torch.norm(torch.ones(40000), keepdim=keepdim))
+
+            # matrix norm with non-square >2-D tensors, all combinations of reduction dims
+            x = torch.randn(5, 6, 7, 8, device=device)
+            xn = x.cpu().numpy()
+            for p in ['fro', 'nuc']:
+                for dim in product(*[list(range(4))] * 2):
+                    if dim[0] == dim[1]:
+                        continue
+                    res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim, dim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_norm_complex(self, device):
+        def gen_error_message(input_size, p, keepdim, dim=None):
+            return "complex norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
+                input_size, p, keepdim, dim)
+
+        if device == 'cpu':
+            for keepdim in [False, True]:
+                # vector norm
+                x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
+                xn = x.cpu().numpy()
+                for p in [0, 1, 3, inf, -1, -2, -3, -inf]:
+                    res = x.norm(p, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+                # matrix norm
+                x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
+                xn = x.cpu().numpy()
+                for p in ['nuc']:
+                    res = x.norm(p, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+            # TODO: remove error test and add functionality test above when 2-norm support is added
+            with self.assertRaisesRegex(RuntimeError, r'norm with p=2 not supported for complex tensors'):
+                x = torch.randn(2, device=device, dtype=torch.complex64).norm(p=2)
+
+            # TODO: remove error test and add functionality test above when frobenius support is added
+            with self.assertRaisesRegex(RuntimeError, r'frobenius norm not supported for complex tensors'):
+                x = torch.randn(2, 2, device=device, dtype=torch.complex64).norm(p='fro')
+
+        elif device == 'cuda':
+            with self.assertRaisesRegex(RuntimeError, r'"norm_cuda" not implemented for \'ComplexFloat\''):
+                (1j * torch.randn(25)).norm()
 
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -16813,7 +16908,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gcd(self, device, dtype):
         # Tests gcd(0, 0), gcd(0, a) cases
@@ -16823,12 +16918,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.gcd([0, 10, 0], [0, 0, 10])
         self.assertEqual(actual, expected)
 
-        # Compares with NumPy
-        a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
-        b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
-        actual = torch.gcd(a, b)
-        expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
+        if dtype == torch.uint8:
+            # Test unsigned integers with potential sign issues (i.e., uint8 with value >= 128)
+            a = torch.tensor([190, 210], device=device, dtype=dtype)
+            b = torch.tensor([190, 220], device=device, dtype=dtype)
+            actual = torch.gcd(a, b)
+            expected = torch.tensor([190, 10], device=device, dtype=dtype)
+        else:
+            # Compares with NumPy
+            a = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+            b = torch.randint(-20, 20, (1024,), device=device, dtype=dtype)
+            actual = torch.gcd(a, b)
+            expected = np.gcd(a.cpu().numpy(), b.cpu().numpy())
+            self.assertEqual(actual, expected)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.int16, torch.int32, torch.int64)
