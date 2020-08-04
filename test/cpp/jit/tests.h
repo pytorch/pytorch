@@ -41,6 +41,7 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
+  _(CleanUpPasses)                     \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
@@ -74,6 +75,7 @@ namespace jit {
   _(ClassDerive)                       \
   _(SaveLoadTorchbind)                 \
   _(ModuleInterfaceSerialization)      \
+  _(ModuleCloneWithModuleInterface)    \
   _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
@@ -96,6 +98,8 @@ namespace jit {
   _(TorchbindIValueAPI)                \
   _(LiteInterpreterDict)               \
   _(MobileNamedParameters)             \
+  _(MobileSaveLoadData)                \
+  _(LiteSGD)                           \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)

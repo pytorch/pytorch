@@ -54,6 +54,7 @@ TESTS = [
     'test_vulkan',
     'test_quantization',
     'test_sparse',
+    'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
     'test_torch',
@@ -91,7 +92,7 @@ TESTS = [
     'distributed/test_ddp_under_dist_autograd',
 ]
 
-WINDOWS_BLACKLIST = [
+WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -106,7 +107,7 @@ WINDOWS_BLACKLIST = [
     'distributed/test_ddp_under_dist_autograd',
 ]
 
-ROCM_BLACKLIST = [
+ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
@@ -126,7 +127,7 @@ ROCM_BLACKLIST = [
     'test_openmp',
 ]
 
-RUN_PARALLEL_BLACKLIST = [
+RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
     'test_expecttest',
     'test_jit_disabled',
@@ -216,25 +217,45 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def run_test(executable, test_module, test_directory, options, *extra_unittest_args):
+def get_executable_command(options, allow_pytest):
+    if options.coverage:
+        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
+    else:
+        executable = [sys.executable]
+    if options.pytest:
+        if allow_pytest:
+            executable += ['-m', 'pytest']
+        else:
+            print_to_stderr('Pytest cannot be used for this test. Falling back to unittest.')
+    return executable
+
+
+def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
-    if test_module in RUN_PARALLEL_BLACKLIST:
+    if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
+    if extra_unittest_args:
+        assert isinstance(extra_unittest_args, list)
+        unittest_args.extend(extra_unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
+    argv = [test_module + '.py'] + unittest_args
 
-    command = executable + argv
+    # Extra arguments are not supported with pytest
+    executable = get_executable_command(options, allow_pytest=not extra_unittest_args)
+
+    command = (launcher_cmd or []) + executable + argv
+    print_to_stderr('Executing {} ... [{}]'.format(command, datetime.now()))
     return shell(command, test_directory)
 
 
-def test_cuda_primary_ctx(executable, test_module, test_directory, options):
-    return run_test(executable, test_module, test_directory, options, '--subprocess')
+def test_cuda_primary_ctx(test_module, test_directory, options):
+    return run_test(test_module, test_directory, options, extra_unittest_args=['--subprocess'])
 
 
-def _test_cpp_extensions_aot(executable, test_module, test_directory, options, use_ninja):
+def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
     if use_ninja:
         try:
             cpp_extension.verify_ninja_availability()
@@ -275,22 +296,22 @@ def _test_cpp_extensions_aot(executable, test_module, test_directory, options, u
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
-        return run_test(executable, test_module, test_directory, options)
+        return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_cpp_extensions_aot_ninja(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot', test_directory,
+def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
+    return _test_cpp_extensions_aot('test_cpp_extensions_aot', test_directory,
                                     options, use_ninja=True)
 
 
-def test_cpp_extensions_aot_no_ninja(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot',
+def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
+    return _test_cpp_extensions_aot('test_cpp_extensions_aot',
                                     test_directory, options, use_ninja=False)
 
 
-def test_distributed(executable, test_module, test_directory, options):
+def test_distributed(test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(
@@ -326,13 +347,12 @@ def test_distributed(executable, test_module, test_directory, options):
                             'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt]
 
-                    return_code = run_test(mpiexec, test_module,
-                                           test_directory, options)
+                    return_code = run_test(test_module, test_directory, options,
+                                           launcher_cmd=mpiexec)
                 else:
-                    return_code = run_test(executable, test_module, test_directory,
-                                           options)
+                    return_code = run_test(test_module, test_directory, options)
                 if return_code != 0:
                     return return_code
             finally:
@@ -421,9 +441,9 @@ def parse_args():
              ' where you want to run all tests, but care more about some set, '
              'e.g. after making a change to a specific component')
     parser.add_argument(
-        '--ignore-win-blacklist',
+        '--ignore-win-blocklist',
         action='store_true',
-        help='always run blacklisted windows tests')
+        help='always run blocklisted windows tests')
     parser.add_argument(
         '--determine-from',
         help='File of affected source filenames to determine which tests to run.')
@@ -437,16 +457,6 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
-
-
-def get_executable_command(options):
-    if options.coverage:
-        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
-    else:
-        executable = [sys.executable]
-    if options.pytest:
-        executable += ['-m', 'pytest']
-    return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
@@ -515,19 +525,19 @@ def get_selected_tests(options):
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
-    if sys.platform == 'win32' and not options.ignore_win_blacklist:
+    if sys.platform == 'win32' and not options.ignore_win_blocklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
-            WINDOWS_BLACKLIST.append('cpp_extensions_aot_no_ninja')
-            WINDOWS_BLACKLIST.append('cpp_extensions_aot_ninja')
-            WINDOWS_BLACKLIST.append('cpp_extensions_jit')
-            WINDOWS_BLACKLIST.append('jit')
-            WINDOWS_BLACKLIST.append('jit_fuser')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_aot_no_ninja')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_aot_ninja')
+            WINDOWS_BLOCKLIST.append('cpp_extensions_jit')
+            WINDOWS_BLOCKLIST.append('jit')
+            WINDOWS_BLOCKLIST.append('jit_fuser')
 
-        selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
+        selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, 'on Windows')
 
     elif TEST_WITH_ROCM:
-        selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
+        selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
 
@@ -665,8 +675,6 @@ def determine_target(test, touched_files, options):
 
 def main():
     options = parse_args()
-    executable = get_executable_command(options)  # this is a list
-    print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -702,7 +710,7 @@ def main():
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test, run_test)
-        return_code = handler(executable, test_module, test_directory, options)
+        return_code = handler(test_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:

@@ -99,6 +99,13 @@ TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 
+// Check if `use` is a CallFunction of name `func_name` and if value
+// `v` is the nth argument (if provided) of the function
+bool matchCallFuncToUse(
+    const Use& use,
+    const std::string& func_name,
+    c10::optional<int> nth_arg);
+
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
@@ -114,7 +121,16 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
+// TODO: refactor all current uses of this function to the Opt one
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
+
+// Given an CallMethod node, get the module instance corresponding
+// to the instance Value if the instance is a module, otherwise return
+// c10::nullopt
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self);
 
 // ==================== filter functions for matches ==============
 // filter to check Value `vname` is a constant of int value `value`
@@ -168,16 +184,5 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-bool is_half_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
-
-bool is_float_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
-
-bool is_false_value(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap);
 } // namespace jit
 } // namespace torch
