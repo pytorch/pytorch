@@ -15389,6 +15389,88 @@ class TestTorchDeviceType(TestCase):
         self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
         self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_maximum_minimum_int_and_bool(self, device, dtype):
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_vals = (2, 3, 4, -2)
+        b_vals = (-1, 5, 2, 0)
+
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
+            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            numpy_result = numpy_op(a_np, b_np)
+
+            self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
+            self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_maximum_minimum_float(self, device, dtype):
+        # np.maximum and np.minimum functions compare input arrays element-wisely.
+        # if one of the elements being compared is a NaN, then that element is returned.
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_vals = (float('inf'), -float('inf'), 2.0, float('nan'), -1.0, float('nan'))
+        b_vals = (1, float('nan'), 2.1, float('inf'), -float('inf'), float('nan'))
+
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
+            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+            # Manual check here as numpy does not support bfloat16
+            if dtype == torch.bfloat16:
+                if torch_op == torch.maximum:
+                    target_vals = (float('inf'), float('nan'), 2.1, float('nan'), -1.0, float('nan'))
+                else:
+                    target_vals = (1, float('nan'), 2.0, float('nan'), -float('inf'), float('nan'))
+                target_tensor = torch.tensor(target_vals, device=device, dtype=dtype)
+                self.assertEqual(tensor_result, target_tensor)
+                self.assertEqual(out, target_tensor)
+            else:
+                a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+                b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+                numpy_result = numpy_op(a_np, b_np)
+                self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
+                self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    def test_maximum_minimum_complex(self, device, dtype):
+        # complex NaNs are defined as at least one of the real or imaginary parts being a NaN
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_vals = (
+            complex(float('inf'), 1), complex(2, 1), complex(float('inf'), float('inf')),
+            complex(1, float('nan')), complex(float('nan'), float('nan'))
+        )
+        b_vals = (
+            complex(float('inf'), float('inf')), complex(2, 2), complex(float('nan'), 1),
+            complex(-float('inf'), -float('inf')), complex(1, 1)
+        )
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
+            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            numpy_result = numpy_op(a_np, b_np)
+
+            self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
+            self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+
     def test_bincount(self, device):
         # negative input throws
         with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):

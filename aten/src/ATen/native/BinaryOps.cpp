@@ -792,8 +792,8 @@ Tensor min(const Tensor& self, const Tensor& other) {
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::comparison_op(result, self, other,
-                                            /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
   maximum_stub(iter.device_type(), iter);
   return result;
 }
@@ -804,8 +804,8 @@ Tensor maximum(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::comparison_op(result, self, other,
-                                            /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
   minimum_stub(iter.device_type(), iter);
   return result;
 }
