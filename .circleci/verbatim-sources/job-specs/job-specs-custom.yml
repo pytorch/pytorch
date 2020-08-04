@@ -2,6 +2,10 @@
     resource_class: medium
     machine:
       image: ubuntu-1604:201903-01
+    parameters:
+      branch:
+        type: string
+        default: "master"
     steps:
     - attach_workspace:
         at: /tmp/workspace
@@ -18,7 +22,7 @@
         name: Docs push
         command: |
           pushd /tmp/workspace
-          git push -u origin master
+          git push -u origin "<< parameters.branch >>"
 
   pytorch_python_doc_build:
     environment:
