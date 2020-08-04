@@ -134,7 +134,6 @@ WORKFLOW_DATA = [
     WindowsJob(1, VcSpec(2019), None, master_only_pred=TruePred),
     WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
     WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
-    WindowsJob(1, VcSpec(2019), CudaVersion(11, 0), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 
