@@ -528,6 +528,19 @@ void testIfThenElse02() {
   ASSERT_EQ(eval.value<float>(), 2.0f);
 }
 
+void testIfThenElse03() {
+  KernelScope kernel_scope;
+  ExprHandle v =
+      ifThenElse(BoolImm::make(false), ExprHandle(1.0f), ExprHandle(2.0f));
+
+  std::ostringstream oss;
+  oss << v;
+  ASSERT_EQ(oss.str(), "IfThenElse(0, 1.f, 2.f)");
+
+  SimpleIRExprEval eval(v);
+  ASSERT_EQ(eval.value<float>(), 2.0f);
+}
+
 void testStmtClone() {
   KernelScope kernel_scope;
   const int N = 16;
