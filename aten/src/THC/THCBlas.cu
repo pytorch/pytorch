@@ -139,24 +139,6 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 #  define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
-{
-  checkCuda90Bug((int)m, (int)n, (int)k);
-  at::cuda::blas::gemm<at::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-}
-
-#ifdef __HIP_PLATFORM_HCC__
-void THCudaBlas_Bgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::BFloat16 alpha, at::BFloat16 *a, int64_t lda, at::BFloat16 *b, int64_t ldb, at::BFloat16 beta, at::BFloat16 *c, int64_t ldc)
-{
-  at::cuda::blas::gemm<at::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-}
-#endif
-
-void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
-{
-  at::cuda::blas::gemm<double>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-}
-
 #if CUDA_VERSION >= 9010  || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
@@ -189,7 +171,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
   // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-#endif  // CUDA_VERSION < 11000 
+#endif  // CUDA_VERSION < 11000
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
@@ -344,4 +326,3 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (int)batchCount));
 }
 #endif
-

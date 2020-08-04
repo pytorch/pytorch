@@ -394,42 +394,6 @@
 ]]
 [[
 [[
-  name: _th_bmm
-  cuda_bfloat16: True
-  cname: baddbmm
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - argument 0
-    - THTensor* self
-    - THTensor* mat2
-    - CONSTANT AS_REAL(0)
-    - CONSTANT AS_REAL(1)
-]]
-[[
-  name: _th_baddbmm
-  cuda_bfloat16: True
-  cname: baddbmm
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-    - THTensor* batch1
-    - THTensor* batch2
-    - real beta
-    - real alpha
-]]
-[[
   name: _th_gels
   cname: gels
   types:

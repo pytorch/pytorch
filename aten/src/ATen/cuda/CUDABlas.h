@@ -50,6 +50,46 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
+// cublasStatus_t cublasHgemmBatched(cublasHandle_t handle,
+//                                   cublasOperation_t transa,
+//                                   cublasOperation_t transb,
+//                                   int m, int n, int k,
+//                                   const __half           *alpha,
+//                                   const __half           *Aarray[], int lda,
+//                                   const __half           *Barray[], int ldb,
+//                                   const __half           *beta,
+//                                   __half           *Carray[], int ldc,
+//                                   int batchCount)
+
+#define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
+      const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, Dtype beta, \
+      Dtype *c, int64_t ldc, int64_t num_batches
+
+template <typename Dtype>
+inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::bgemm: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
+template <>
+void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
+#endif
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
+#endif
+template <>
+void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
+// #ifdef __HIP_PLATFORM_HCC__
+// template <>
+// void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+// #endif
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMV_ARGTYPES(Dtype)                                         \

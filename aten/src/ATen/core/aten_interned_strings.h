@@ -141,8 +141,6 @@ _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_median) \
@@ -672,7 +670,6 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
-_(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
