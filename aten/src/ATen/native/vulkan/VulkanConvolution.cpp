@@ -73,9 +73,11 @@ ContextConv2D create(
       groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
                   : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
-      // TODO: Are we sure these tensors will always come into this fucntion with the
-      // the dimensions expected below? What if they don't?  This may trigger a segfault.
-      // TODO: If we need TORCH_CHECK(available()) calls here as a sanity check, add it.
+      // TODO: Are we sure these tensors will always come into this fucntion
+      // with the the dimensions expected below? What if they don't?  This may
+      // trigger a segfault.
+      // TODO: If we need TORCH_CHECK(available()) calls here as a sanity check,
+      // add it.
       {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},

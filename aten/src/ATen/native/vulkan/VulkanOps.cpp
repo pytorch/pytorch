@@ -82,7 +82,6 @@ VulkanTensor reshape_copy(
   input.sync_image_to_buffer();
 
   VulkanTensor output{shape};
-  output.allocate_storage();
   copy_buffer_to_buffer(
       *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
   return output;
