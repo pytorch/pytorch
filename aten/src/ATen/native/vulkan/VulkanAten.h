@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/ATen.h>
 
 namespace at {
@@ -29,6 +31,10 @@ at::Tensor vulkan_convolution_prepacked(
     int64_t groups,
     const float output_min,
     const float output_max);
+
+at::Tensor vulkan_adaptive_avg_pool2d(
+    const at::Tensor& input,
+    IntArrayRef output_size);
 
 } // namespace native
 } // namespace at

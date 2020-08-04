@@ -281,13 +281,6 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.5.1
     ;;
-  pytorch-linux-bionic-py3.7-conda)
-    ANACONDA_PYTHON_VERSION=3.7
-    PROTOBUF=yes
-    DB=yes
-    CONDA_COMPILER=yes
-    CUDA_VERSION=10.2
-    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
