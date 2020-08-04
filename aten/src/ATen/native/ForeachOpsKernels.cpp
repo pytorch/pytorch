@@ -113,4 +113,76 @@ std::vector<Tensor> foreach_add_list__kernel_fallback(TensorList tensors1, Tenso
   return tensors1.vec();
 }
 
+std::vector<Tensor> foreach_sub_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors1.size(); i++) {
+    auto temp = tensors1[i].sub(tensors2[i]);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_sub_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  for (int i = 0; i < tensors1.size(); i++) {
+    tensors1[i].sub_(tensors2[i]);
+  }
+
+  return tensors1.vec();
+}
+
+std::vector<Tensor> foreach_mul_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors1.size(); i++) {
+    auto temp = tensors1[i].mul(tensors2[i]);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_mul_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  for (int i = 0; i < tensors1.size(); i++) {
+    tensors1[i].mul_(tensors2[i]);
+  }
+
+  return tensors1.vec();
+}
+
+std::vector<Tensor> foreach_div_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors1.size(); i++) {
+    auto temp = tensors1[i].div(tensors2[i]);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_div_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+
+  for (int i = 0; i < tensors1.size(); i++) {
+    tensors1[i].div_(tensors2[i]);
+  }
+
+  return tensors1.vec();
+}
+
 }} // namespace at::native
