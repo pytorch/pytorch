@@ -3875,10 +3875,12 @@ def _pad_circular(input, padding):
     paddable_shape = shape[2:]
     ndim = len(paddable_shape)
 
-    # Only supports wrapping around once
     for a, size in enumerate(paddable_shape):
+        # Only supports wrapping around once
         assert padding[-(a * 2 + 1)] <= size
         assert padding[-(a * 2 + 2)] <= size
+        # Negative padding should not result in negative sizes
+        assert (padding[-(a * 2 + 1)] + padding[-(a * 2 + 2)] + size) >= 0
 
     # Get shape of padded array
     padded_shape = shape[:2]
