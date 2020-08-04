@@ -421,6 +421,11 @@ class ProcessGroupNCCLTest: public ::testing::Test {
     LOG(INFO) << "Multi-node world size: " << size_ << " rank: " << rank_;
   }
 
+  void TearDown() override {
+    // Reset NCCL_BLOCKING_WAIT environment variable after each run.
+    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "0", 1) == 0);
+  }
+
   bool skipTest() {
     // Skip tests if CUDA is not available.
     if (!at::cuda::is_available()) {
