@@ -661,7 +661,14 @@ class Tensor(torch._C._TensorBase):
             sizes (Union[Iterable[Tuple[str, int]], torch.Size]): New shape of the unflattened dimension
 
         Examples:
-            TODO
+            >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
+            torch.Size([3, 2, 2, 1])
+            >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
+            tensor([[[-1.1772,  0.0180],
+                    [ 0.2412,  0.1431]],
+
+                    [[-1.1819, -0.8899],
+                    [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
 
         .. warning::
             The named tensor API is experimental and subject to change.
