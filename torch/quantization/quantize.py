@@ -80,6 +80,11 @@ def _observer_forward_pre_hook(self, input):
     # Returning nothing is Ok, Module._call_impl will intrepret this
     # as the pre_hook making no changes to the input, as desired
 
+def register_activation_post_process_hook(module):
+    assert hasattr(module, 'activation_post_process'), \
+        'Expect activation_post_process attribut already attached to the module'
+    return module.register_forward_hook(_observer_forward_hook)
+
 def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
     r"""Add observer for the leaf child of the module.
 
@@ -113,7 +118,7 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
-                child.register_forward_hook(_observer_forward_hook)
+                register_activation_post_process_hook(child)
 
                 # Attaching prehook
                 if prehook is not None:
@@ -133,7 +138,7 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
         module.add_module('activation_post_process', activation)
         # Register observer as the first entry in the hook list
         # All post forward hooks are preserved and will be executed after the observer before convert
-        handle = module.register_forward_hook(_observer_forward_hook)
+        handle = register_activation_post_process_hook(module)
         module._forward_hooks.move_to_end(handle.id, last=False)
 
         # Attaching prehook

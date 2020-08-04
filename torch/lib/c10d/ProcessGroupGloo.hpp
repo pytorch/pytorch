@@ -13,7 +13,7 @@
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
 
-#include <torch/csrc/utils/hash.h>
+#include <c10/util/hash.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>

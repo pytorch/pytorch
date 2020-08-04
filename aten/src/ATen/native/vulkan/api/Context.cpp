@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
 
+#include <ATen/native/vulkan/api/Cache.h>
+
 #include <sstream>
 
 namespace at {
@@ -250,7 +252,7 @@ Context::Context(const bool enable_validation_layers)
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
       device_(create_device(physical_device(), compute_queue_family_index_), &VK_DELETER(Device)),
       queue_(acquire_queue(device(), compute_queue_family_index_)),
-      shader_cache_(device()) {
+      shader_cache_(std::move(Shader::Factory(device()))) {
 }
 
 Context* initialize() {

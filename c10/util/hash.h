@@ -3,7 +3,7 @@
 #include <functional>
 #include <vector>
 
-namespace torch {
+namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
 //
@@ -36,12 +36,12 @@ inline size_t hash_combine(size_t seed, size_t value) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// torch::hash implementation
+// c10::hash implementation
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace _hash_detail {
 
-// Use template argument deduction to shorten calls to torch::hash
+// Use template argument deduction to shorten calls to c10::hash
 template<typename T>
 size_t simple_get_hash(const T& o);
 
@@ -118,13 +118,13 @@ namespace _hash_detail {
 
 template<typename T>
 size_t simple_get_hash(const T& o) {
-  return torch::hash<T>()(o);
+  return c10::hash<T>()(o);
 }
 
 } // namespace _hash_detail
 
 // Use this function to actually hash multiple things in one line.
-// Dispatches to torch::hash, so it can hash containers.
+// Dispatches to c10::hash, so it can hash containers.
 // Example:
 //
 // static size_t hash(const MyStruct& s) {
@@ -132,7 +132,7 @@ size_t simple_get_hash(const T& o) {
 // }
 template<typename... Types>
 size_t get_hash(const Types&... args) {
-  return torch::hash<decltype(std::tie(args...))>()(std::tie(args...));
+  return c10::hash<decltype(std::tie(args...))>()(std::tie(args...));
 }
 
 } // namespace torch
