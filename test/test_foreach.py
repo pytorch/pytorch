@@ -1,5 +1,4 @@
 import torch
-import torch.cuda
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 
@@ -24,6 +23,7 @@ class TestForeach(TestCase):
         for _ in range(N):
             tensors.append(torch.zeros(H, W, device=device, dtype=dtype))
 
+        # bool tensor + 1 will result in int64 tensor
         if dtype == torch.bool:
             torch._foreach_add_(tensors, True)
         else:
@@ -40,6 +40,7 @@ class TestForeach(TestCase):
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
+            # bool tensor + 1 will result in int64 tensor
             if dtype == torch.bool:
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
@@ -60,6 +61,7 @@ class TestForeach(TestCase):
 
         size_change = 0
         for t in res: 
+            # bool tensor + 1 will result in int64 tensor
             if dtype == torch.bool:
                 dtype = torch.int64
             self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=device, dtype=dtype))
@@ -76,6 +78,7 @@ class TestForeach(TestCase):
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
         expected = [torch.tensor([[[2, 2, 2]], [[2, 2, 2]]], dtype=dtype, device=device)]
 
+        # bool tensor + 1 will result in int64 tensor
         if dtype == torch.bool: 
             expected[0] = expected[0].to(torch.int64).add(1)
 
