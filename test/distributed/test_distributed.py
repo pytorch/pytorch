@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_small_worldsize,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
+    require_n_gpus_for_nccl_backend,
 )
 
 try:
@@ -2444,6 +2445,7 @@ class _DistTestBase(object):
         # Ensure that each rank processes the same number of samples.
         validate_global_samples(local_num_samples)
 
+    @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
     def test_allgather_object(self):
         # Ensure stateful objects can be allgathered
         f = Foo(10)
@@ -2475,7 +2477,7 @@ class _DistTestBase(object):
                 [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
             )
 
-    @unittest.skipIf(BACKEND == 'nccl', "NCCL does not support gather")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support gather")
     def test_gather_object(self):
         # Ensure stateful objects can be gathered
         f = Foo(10)

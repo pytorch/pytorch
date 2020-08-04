@@ -1175,7 +1175,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     """
     Gathers picklable objects from the whole group into a list. Similar to
     :func:`all_gather`, but Python objects can be passed in. Note that the object
-    must be pickable in order to be gathered.
+    must be picklable in order to be gathered.
 
     Arguments:
         object_list (list[Any]): Output list. It should be correctly sized as the
@@ -1185,13 +1185,13 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 
     Returns:
         None. If the calling rank is part of this group, the output of the
-        collective will be populated into the input `object_list`. If the
-        calling rank is not part of the group, the passed in `object_list` will
+        collective will be populated into the input ``object_list``. If the
+        calling rank is not part of the group, the passed in ``object_list`` will
         be unmodified.
 
-    .. note:: Note that this API differs slightly from the all_gather collective
-        since it does not provide an async_op handle and thus will be a blocking
-        call.
+    .. note:: Note that this API differs slightly from the :func:`all_gather`
+        collective since it does not provide an ``async_op`` handle and thus
+        will be a blocking call.
 
     .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
@@ -1254,17 +1254,17 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         group: (ProcessGroup, optional): The process group to work on.
 
     Returns:
-        None. On the dst rank, object_gather_list will contain the output of the
-        collective.
+        None. On the ``dst`` rank, ``object_gather_list`` will contain the
+        output of the collective.
 
     .. note:: Note that this API differs slightly from the gather collective
         since it does not provide an async_op handle and thus will be a blocking
         call.
 
-    ..note:: Note that this API is not supported when using the NCCL backend.
+    .. note:: Note that this API is not supported when using the NCCL backend.
 
     .. warning::
-        :func:`all_gather` uses ``pickle`` module implicitly, which is
+        :func:`gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
