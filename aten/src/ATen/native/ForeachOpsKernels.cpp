@@ -1,6 +1,28 @@
 #include <ATen/ATen.h>
 namespace at { namespace native {
 
+std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  std::vector<Tensor> result;
+  for (auto& t : tensors) {
+    auto temp = t.add(scalar);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_add_scalar__kernel_fallback(TensorList tensors, Scalar scalar) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  for (auto& t : tensors) {
+    t.add_(scalar);
+  }
+
+  return tensors.vec();
+}
+
 std::vector<Tensor> foreach_sub_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
@@ -67,28 +89,6 @@ std::vector<Tensor> foreach_mul_scalar__kernel_fallback(TensorList tensors, Scal
   return tensors.vec();
 }
 
-std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-  std::vector<Tensor> result;
-  for (auto& t : tensors) {
-    auto temp = t.add(scalar);
-    result.emplace_back(temp);
-  }
-
-  return result;
-}
-
-std::vector<Tensor> foreach_add_scalar__kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-  for (auto& t : tensors) {
-    t.add_(scalar);
-  }
-
-  return tensors.vec();
-}
-
 std::vector<Tensor> foreach_add_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
@@ -113,7 +113,7 @@ std::vector<Tensor> foreach_add_list__kernel_fallback(TensorList tensors1, Tenso
   return tensors1.vec();
 }
 
-std::vector<Tensor> foreach_sub_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_sub_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -126,7 +126,7 @@ std::vector<Tensor> foreach_sub_list_kernel_cpu(TensorList tensors1, TensorList 
   return result;
 }
 
-std::vector<Tensor> foreach_sub_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_sub_list__kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -137,7 +137,7 @@ std::vector<Tensor> foreach_sub_list__kernel_cpu(TensorList tensors1, TensorList
   return tensors1.vec();
 }
 
-std::vector<Tensor> foreach_mul_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_mul_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -150,7 +150,7 @@ std::vector<Tensor> foreach_mul_list_kernel_cpu(TensorList tensors1, TensorList 
   return result;
 }
 
-std::vector<Tensor> foreach_mul_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_mul_list__kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -161,7 +161,7 @@ std::vector<Tensor> foreach_mul_list__kernel_cpu(TensorList tensors1, TensorList
   return tensors1.vec();
 }
 
-std::vector<Tensor> foreach_div_list_kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_div_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
@@ -174,7 +174,7 @@ std::vector<Tensor> foreach_div_list_kernel_cpu(TensorList tensors1, TensorList 
   return result;
 }
 
-std::vector<Tensor> foreach_div_list__kernel_cpu(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_div_list__kernel_fallback(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
