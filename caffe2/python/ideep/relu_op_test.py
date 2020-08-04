@@ -35,7 +35,7 @@ class ReluTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            inplace=st.booleans(),
-           **mu.gcs)
+           **mu.gcs_cpu_ideep)
     def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc):
         relu_fp32 = core.CreateOperator(
             "Relu",
