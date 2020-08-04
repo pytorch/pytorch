@@ -147,7 +147,7 @@ class DistributedDataParallel(Module):
         ``map_location`` is configured properly for every process. Without
         ``map_location``, ``torch.load`` would recover the module to devices
         where the module was saved from.
-        
+
     .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
         gradient will be ``M`` times smaller when compared to the same model
         trained on a single node with ``batch=M*N``(because the gradients
