@@ -254,6 +254,54 @@ void testExprCompareSelectEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
+void testExprCompareSelectDtypes() {
+  // LHS and RHS expressions should have the same dtype, but this dtype could
+  // differ from the dtype of the return values (but dtypes of true and false
+  // return values should be the same).
+  // This test constructs a CompareSelect expression where the input dtype is
+  // different from the output dtype and verifies that it works correctly:
+  //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kFloat));
+  std::vector<int> a_buffer(N, 1);
+  std::vector<int> b_buffer(N, 1);
+  std::vector<float> c_buffer(N, 0.0f);
+  std::vector<float> c_ref(N, 3.14f);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  // C[i] = (A[i] == B[i]) ? 3.14f : 2.78f
+  // A and B are int, C is float.
+  auto select_expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              FloatImm::make(3.14f),
+              FloatImm::make(2.78f),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  SimpleIREvaluator ir_eval(select_expr, a, b, c);
+  ir_eval(a_buffer, b_buffer, c_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(a_buffer, 1);
+  assertAllEqual(b_buffer, 1);
+  ExpectAllNear(c_buffer, c_ref, 1e-7);
+}
+
 void testExprSubstitute01() {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);

@@ -389,6 +389,28 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
   }
 
+  template <typename T>
+  Value compare_select_op_helper(
+      const Value& lhs,
+      const Value& rhs,
+      const Value& retval1,
+      const Value& retval2,
+      CompareSelectOperation cmp_op) {
+    Value value;
+    switch (retval1.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                               \
+  case ScalarType::Name:                                                    \
+    value = compare_select_op<T, Type>(lhs, rhs, retval1, retval2, cmp_op); \
+    break;
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        throw unsupported_dtype();
+    }
+
+    return value;
+  }
+
   void visit_compare_select_op(
       const CompareSelect* v,
       CompareSelectOperation cmp_op) {
@@ -409,7 +431,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     switch (lhs_v.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                          \
   case ScalarType::Name:                               \
-    value_ = compare_select_op<Type, int>(             \
+    value_ = compare_select_op_helper<Type>(           \
         lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
     break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
