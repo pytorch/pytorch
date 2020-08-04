@@ -323,29 +323,6 @@ class TestForeach(TestCase):
         self.assertEqual(res, tensors1)
         self.assertEqual(res[0], torch.ones(self.H, self.W, device=device, dtype=torch.float))
 
-    # Unary ops
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_exp(self, device, dtype):
-        tensors = get_test_data(device, dtype)
-
-        res = torch._foreach_exp(tensors)
-        torch._foreach_exp_(tensors)
-
-        for i in range(len(tensors)):
-            self.assertEqual(res[i], tensors[i])
-            self.assertEqual(res[i], torch.exp(torch.ones(self.H, self.W, device=device, dtype=dtype)))
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_sqrt(self, device, dtype):
-        tensors = get_test_data(device, dtype)
-
-        res = torch._foreach_sqrt(tensors)
-        torch._foreach_sqrt_(tensors)
-
-        for i in range(len(tensors)):
-            self.assertEqual(res[i], tensors[i])
-            self.assertEqual(res[i], torch.sqrt(torch.ones(self.H, self.W, device=device, dtype=dtype)))
-
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':
