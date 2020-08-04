@@ -32,18 +32,18 @@ Tensor new_with_vtensor_vulkan(
 VulkanTensor& vtensor_from_vulkan(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_vulkan(), "vtensor_from_vulkan expects Vulkan tensor input");
-  VulkanTensorImpl* impl =
+  VulkanTensorImpl* const impl =
       static_cast<VulkanTensorImpl*>(tensor.unsafeGetTensorImpl());
   return impl->unsafe_opaque_handle();
 }
 
 Tensor empty(
     IntArrayRef size,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory,
-    optional<MemoryFormat> memory_format) {
+    const optional<ScalarType> dtype,
+    const optional<Layout> layout,
+    const optional<Device> device,
+    const optional<bool> pin_memory,
+    const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
       !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
@@ -68,18 +68,18 @@ Tensor empty_strided(
 
 Tensor upsample_nearest2d(
     const Tensor& input,
-    IntArrayRef outputSizes,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    const IntArrayRef outputSizes,
+    const c10::optional<double> scales_h,
+    const c10::optional<double> scales_w) {
   VulkanTensor& x = vtensor_from_vulkan(input);
-  auto inputSizes = input.sizes();
-  auto in = inputSizes[0];
-  auto ic = inputSizes[1];
-  auto ih = inputSizes[2];
-  auto iw = inputSizes[3];
+  const auto inputSizes = input.sizes();
+  const auto in = inputSizes[0];
+  const auto ic = inputSizes[1];
+  const auto ih = inputSizes[2];
+  const auto iw = inputSizes[3];
 
-  auto oh = outputSizes[0];
-  auto ow = outputSizes[1];
+  const auto oh = outputSizes[0];
+  const auto ow = outputSizes[1];
   const float height_scale = compute_scales_value<float>(scales_h, ih, oh);
   const float width_scale = compute_scales_value<float>(scales_w, iw, ow);
   VulkanTensor output = VulkanTensor{{in, ic, oh, ow}};
@@ -108,12 +108,12 @@ Tensor adaptive_avg_pool2d(const at::Tensor& input, IntArrayRef outputSize) {
   return new_with_vtensor_vulkan(std::move(output), input.options());
 }
 
-Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor add(const Tensor& self, const Tensor& other, const Scalar alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
   const auto& x = vtensor_from_vulkan(xt);
   auto yt = other.is_vulkan() ? other : other.vulkan();
   const auto& y = vtensor_from_vulkan(yt);
-  float a = alpha.to<float>();
+  const float a = alpha.to<float>();
 
   VulkanTensor output{self.sizes().vec()};
   output.allocate_storage();
@@ -125,13 +125,13 @@ Tensor convolution(
     const Tensor& input, // Vulkan
     const Tensor& weight, // CPU
     const Tensor& bias, // CPU
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool transposed,
-    IntArrayRef output_padding,
-    int64_t groups) {
-  vulkan::Conv2DParams params{
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const bool transposed,
+    const IntArrayRef output_padding,
+    const int64_t groups) {
+  const vulkan::Conv2DParams params{
       input.sizes(), weight.sizes(), padding, stride, dilation, groups};
   TORCH_INTERNAL_ASSERT(
       input.dim() == 4, "convolution: Expected 4-dimensional input");
@@ -160,16 +160,16 @@ Tensor addmm(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar beta,
+    const Scalar alpha) {
   const VulkanTensor t =
       vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
   const VulkanTensor m1 =
       vtensor_from_vulkan(mat1.is_vulkan() ? mat1 : mat1.vulkan());
   const VulkanTensor m2 =
       vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
-  float b = beta.to<float>();
-  float a = alpha.to<float>();
+  const float b = beta.to<float>();
+  const float a = alpha.to<float>();
 
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
   output.allocate_storage();
@@ -198,8 +198,8 @@ Tensor mm(const Tensor& self, const Tensor& mat2) {
 
 Tensor clamp(
     const Tensor& self,
-    c10::optional<Scalar> min,
-    c10::optional<Scalar> max) {
+    const c10::optional<Scalar> min,
+    const c10::optional<Scalar> max) {
   VulkanTensor& x = vtensor_from_vulkan(self);
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
   output.allocate_storage();
@@ -214,33 +214,32 @@ Tensor clamp(
 
 Tensor& clamp_(
     Tensor& self,
-    c10::optional<Scalar> min,
-    c10::optional<Scalar> max) {
+    const c10::optional<Scalar> min,
+    const c10::optional<Scalar> max) {
   auto y = vulkan::aten::clamp(self, min, max);
   self.copy_(y);
   return self;
 }
 
-Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
+Tensor hardtanh(const Tensor& self, const Scalar min, const Scalar max) {
   return vulkan::aten::clamp(self, min, max);
 }
 
-Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
+Tensor& hardtanh_(Tensor& self, const Scalar min, const Scalar max) {
   return vulkan::aten::clamp_(self, min, max);
 }
 
 Tensor mean(
     const Tensor& self,
-    IntArrayRef dim,
-    bool keepdim,
-    optional<ScalarType> dtype) {
+    const IntArrayRef dim,
+    const bool keepdim,
+    const optional<ScalarType> dtype) {
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
   TORCH_INTERNAL_ASSERT(
       self.dim() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3);
   VulkanTensor& x = vtensor_from_vulkan(self);
-  auto sizes = self.sizes();
-  std::vector<int64_t> outputSizes{sizes[0], sizes[1]};
-  VulkanTensor output = VulkanTensor{outputSizes};
+  const auto sizes = self.sizes();
+  VulkanTensor output = VulkanTensor{std::vector<int64_t>{sizes[0], sizes[1]}};
   output.allocate_storage();
   vulkan::detail::mean(output, x);
   return new_with_vtensor_vulkan(std::move(output), self.options());
@@ -336,7 +335,7 @@ static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 using detail::VulkanTensor;
 Tensor convolution_prepack_weights(const Tensor& weight) {
-  auto wsizes = weight.sizes();
+  const auto wsizes = weight.sizes();
   TORCH_INTERNAL_ASSERT(
       wsizes.size() == 4,
       "convolution_prepack_weights: Expected 4-dimensional weight");
@@ -357,12 +356,12 @@ Tensor convolution_prepack_weights(const Tensor& weight) {
 
 Tensor convolution_prepacked(
     const Tensor& input, // Vulkan
-    IntArrayRef weightSizes,
+    const IntArrayRef weightSizes,
     const Tensor& weight_prepacked_vulkan, // Vulkan
     const c10::optional<Tensor>& bias, // Vulkan|CPU
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
     int64_t groups,
     const float output_min,
     const float output_max) {

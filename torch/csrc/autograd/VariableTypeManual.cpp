@@ -64,6 +64,10 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   return unpack(t, name, pos);
 }
 
+c10::optional<Tensor> unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
+  return t;
+}
+
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
@@ -80,10 +84,13 @@ namespace {
 
 void backward(
     const Tensor& self,
-    const Tensor& gradient,
+    const c10::optional<Tensor>& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
-  torch::autograd::backward({self}, {gradient}, std::move(keep_graph), create_graph);
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
 }
 
 void set_data(const Tensor & self, const Tensor & new_data) {
