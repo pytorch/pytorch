@@ -31,7 +31,39 @@ Pipeline::Factory::Factory(const VkDevice device)
 
 typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     const Descriptor& descriptor) const {
+  constexpr uint32_t x_offset = 0u;
+  constexpr uint32_t x_size = sizeof(Shader::WorkGroup::x);
+  constexpr uint32_t y_offset = x_size;
+  constexpr uint32_t y_size = y_offset + sizeof(Shader::WorkGroup::y);
+  constexpr uint32_t z_offset = y_size;
+  constexpr uint32_t z_size = z_offset + sizeof(Shader::WorkGroup::z);
+
+  constexpr VkSpecializationMapEntry specialization_map_entires[3]{
+    // X
+    {
+      1u,
+      x_offset,
+      x_size,
+    },
+    // Y
+    {
+      2u,
+      y_offset,
+      y_size,
+    },
+    // Z
+    {
+      3u,
+      z_offset,
+      z_size,
+    },
+  };
+
   const VkSpecializationInfo specialization_info{
+    3u,
+    specialization_map_entires,
+    sizeof(Shader::WorkGroup),
+    &descriptor.work_group,
   };
 
   const VkComputePipelineCreateInfo compute_pipeline_create_info{

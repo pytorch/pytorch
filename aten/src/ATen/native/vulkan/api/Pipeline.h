@@ -2,6 +2,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -11,12 +12,14 @@ namespace api {
 
 struct Pipeline final {
   struct Descriptor final {
-    VkShaderModule shader_module;
     VkPipelineLayout pipeline_layout;
+    VkShaderModule shader_module;
+    Shader::WorkGroup work_group;
 
     inline bool operator==(const Descriptor& descriptor) const {
-      return (shader_module == descriptor.shader_module) &&
-             (pipeline_layout == descriptor.pipeline_layout);
+      return (pipeline_layout == descriptor.pipeline_layout) &&
+             (shader_module == descriptor.shader_module) &&
+             (work_group == descriptor.work_group);
     }
   };
 
@@ -31,8 +34,11 @@ struct Pipeline final {
     struct Hasher {
       inline size_t operator()(const Descriptor& descriptor) const {
         return c10::get_hash(
+            descriptor.pipeline_layout,
             descriptor.shader_module,
-            descriptor.pipeline_layout);
+            descriptor.work_group.x,
+            descriptor.work_group.y,
+            descriptor.work_group.z);
       }
     };
 
