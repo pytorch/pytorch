@@ -80,6 +80,7 @@ from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
 import inspect
 import math
+import functools
 import numpy as np
 import io
 import os
@@ -7799,6 +7800,61 @@ a")
           return (%1)
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
+
+    def test_is_after_use(self):
+        def sorted_input_use(g):
+            uses = list(next(g.inputs()).uses())
+            return sorted(uses, key=functools.cmp_to_key(type(uses[0]).isAfter))
+
+        @torch.jit.script
+        def foo(x):
+            a = x + 1
+            return (x, x, a)
+
+        uses_sorted = sorted_input_use(foo.graph)
+        # sorts last use to the end
+        self.assertFalse(uses_sorted[0].isAfter(uses_sorted[1]))
+        self.assertTrue(uses_sorted[0].user.kind() == "aten::add")
+        self.assertEqual(uses_sorted[1].offset, 0)
+
+        @torch.jit.script
+        def foo(x, cond: bool):
+            if cond:
+                return x + 3
+            else:
+                return x - 3
+
+        uses_sorted = sorted_input_use(foo.graph)
+        self.assertTrue(uses_sorted[0].user.kind() == "aten::add")
+        self.assertTrue(uses_sorted[1].user.kind() == "aten::sub")
+
+        @torch.jit.script
+        def foo(x, cond: bool, cond2: bool):
+            if cond:
+                return x + 3
+            elif cond2 :
+                return x - 3
+
+            return x / 3
+
+        graph1 = foo.graph
+
+        @torch.jit.script
+        def foo(x, cond: bool, cond2: bool):
+            if cond:
+                return x + 3
+            else:
+                if cond2 :
+                    return x - 3
+                return x / 3
+
+        graph2 = foo.graph
+
+        for graph in [graph1, graph2]:
+            uses_sorted = sorted_input_use(graph)
+            self.assertTrue(uses_sorted[0].user.kind() == "aten::add")
+            self.assertTrue(uses_sorted[1].user.kind() == "aten::sub")
+            self.assertTrue(uses_sorted[2].user.kind() == "aten::div")
 
     def test_canonicalize_control_outputs(self):
         def test_all_outputs(g):

@@ -11,7 +11,14 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Install torch & torchvision - used to download & trace test model.
-retry pip install torch torchvision --progress-bar off
+# Ideally we should use the libtorch built on the PR so that backward
+# incompatible changes won't break this script - but it will significantly slow
+# down mobile CI jobs.
+# Here we install nightly instead of stable so that we have an option to
+# temporarily skip mobile CI jobs on BC-breaking PRs until they are in nightly.
+retry pip install --pre torch torchvision \
+  -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html \
+  --progress-bar off
 
 # Run end-to-end process of building mobile library, linking into the predictor
 # binary, and running forward pass with a real model.

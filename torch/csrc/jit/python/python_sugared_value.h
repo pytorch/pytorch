@@ -249,6 +249,36 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
   std::shared_ptr<SugaredTupleValue> modules_;
 };
 
+struct VISIBILITY_HIDDEN SugaredEnumClass : public SugaredValue {
+  explicit SugaredEnumClass(
+      std::map<std::string, SugaredValuePtr> enum_values,
+      EnumTypePtr enum_type)
+      : enum_values_(std::move(enum_values)),
+        enum_type_(std::move(enum_type)) {}
+
+  static std::shared_ptr<SugaredEnumClass> create(
+      const py::object& obj,
+      Function& m,
+      const SourceRange& loc);
+
+  std::string kind() const override {
+    return "EnumClass";
+  }
+
+  SugaredValuePtr attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
+
+ private:
+  // Using ordered map here to ensure ordering of enum values is deterministic
+  // when iterating through them.
+  std::map<std::string, SugaredValuePtr> enum_values_;
+  EnumTypePtr enum_type_;
+};
+
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   BooleanDispatchValue(py::dict dispatched_fn)
       : dispatched_fn_(std::move(dispatched_fn)) {}
