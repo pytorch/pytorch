@@ -51,15 +51,6 @@ void signbit_kernel_cuda(TensorIterator& iter){
   });
 }
 
-// template<typename T>
-// __host__ __device__ static inline thrust::complex<T> sgn_wrapper(thrust::complex<T> v) {
-//  if (v == thrust::complex<T>(0, 0)) {
-//    return thrust::complex<T>(0, 0);
-//  } else {
-//    return z / std::abs(z);
-//  }
-//}
-
 template<typename T>
 __host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> z) {
   if (z == c10::complex<T>(0, 0)) {
@@ -71,7 +62,6 @@ __host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> z)
 
 void sgn_kernel_cuda(TensorIterator& iter){
   AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cuda", [&]() {
-      //using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return sgn_wrapper(a);
       });
