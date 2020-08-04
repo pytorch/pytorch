@@ -4,6 +4,30 @@
 
 namespace c10 {
 
+// AliasAnalysisKind is a hint for the TorchScript JIT. It allows the JIT to
+// reason about the return values and arguments passes to registered custom
+// operations.
+//
+// If aliasAnalysisKind is not specified then default is CONSERVATIVE.
+//
+// CONSERVATIVE:TorchScript assumes there are side effects in every input
+// arguments.
+//   "foo(Tensor x, Tensor y, Tensor z) -> Tensor"
+//  there are side effects in x , y and z and return value can alias any
+//  input argument.
+//
+// FROM_SCHEMA: TorchScript uses the SCHEMA to identify which input
+// argument is mutated.
+//     "bar(Tensor(a) x, Tensor y, Tensor z) -> Tensor(a)"
+// x is mutated but not y and z.
+//
+//     "bar(Tensor(a!) x, Tensor y, Tensor z) -> ()"
+// x is inplace mutated.
+//
+// PURE_FUNCTION: TorchScript assumes there are no side effect in any
+// input argument and return value does not alias them.
+//
+// INTERNAL_SPECIAL_CASE: do not use
 enum class AliasAnalysisKind : uint8_t {
   INTERNAL_SPECIAL_CASE,
   CONSERVATIVE, // The most conservative alias analysis type, assumes
