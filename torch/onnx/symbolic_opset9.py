@@ -1564,6 +1564,11 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
+def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
+    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+    tensor = zeros(g, shape, dtype, layout, device)
+    return g.op("EyeLike", tensor)
+
 @parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
     if step != 1:
