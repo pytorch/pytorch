@@ -1134,13 +1134,13 @@ struct CAFFE2_API EnumType : public NamedType {
   static const TypeKind Kind = TypeKind::EnumType;
 
   static EnumTypePtr create(
-      const c10::QualifiedName& qualified_name,
+      const c10::QualifiedName& qualified_class_name,
       TypePtr value, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
     switch (value->kind()) {
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
-        return EnumTypePtr(new EnumType(qualified_name, value, cu));
+        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(cu)));
       default:
         AT_ERROR(
             "Cannot create Enum with value type '",
@@ -1177,9 +1177,13 @@ struct CAFFE2_API EnumType : public NamedType {
     return cu;
   }
 
+  const QualifiedName qualifiedClassName() const {
+    return name().value();
+  }
+
  private:
-  EnumType(c10::QualifiedName name, TypePtr value_type, std::weak_ptr<torch::jit::CompilationUnit> cu)
-      : NamedType(TypeKind::EnumType, std::move(name)),
+  EnumType(c10::QualifiedName qualified_class_name, TypePtr value_type, std::weak_ptr<torch::jit::CompilationUnit> cu)
+      : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
         value_type_(std::move(value_type)), cu_(cu) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
