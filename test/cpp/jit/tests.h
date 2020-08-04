@@ -99,6 +99,7 @@ namespace jit {
   _(LiteInterpreterDict)               \
   _(MobileNamedParameters)             \
   _(MobileSaveLoadData)                \
+  _(LiteSGD)                           \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
