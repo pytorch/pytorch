@@ -2514,4 +2514,3 @@ def as_strided(g, self, sizes, strides, offset=None):
         if offset:
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
         return g.op("Gather", self_1d, ind)
-
