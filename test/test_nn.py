@@ -3429,11 +3429,12 @@ class TestNN(NNTestCase):
         attn_equiv = copy.deepcopy(attn_orig)
 
         def forward_helper(attn, x, attn_mask, key_padding_mask):
-            o, _ = multi_head_attention_forward(x, x, x, emb_dim, num_heads, attn.in_proj_weight, attn.in_proj_bias,
-                                                attn.bias_k, attn.bias_v, attn.add_zero_attn, attn.dropout,
-                                                attn.out_proj.weight, attn.out_proj.bias, training=True,
-                                                key_padding_mask=key_padding_mask,
-                                                attn_mask=attn_mask)
+            o, _ = torch.nn.functional.multi_head_attention_forward(x, x, x, emb_dim, num_heads, attn.in_proj_weight,
+                                                                    attn.in_proj_bias, attn.bias_k, attn.bias_v,
+                                                                    attn.add_zero_attn, attn.dropout,
+                                                                    attn.out_proj.weight, attn.out_proj.bias,
+                                                                    training=True, key_padding_mask=key_padding_mask,
+                                                                    attn_mask=attn_mask)
             loss = o[:seq_len-1, :].sum()
             loss.backward()
             return loss
