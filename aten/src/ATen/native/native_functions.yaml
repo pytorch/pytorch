@@ -5418,22 +5418,66 @@
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
 - func: _foreach_add_.Scalar(Tensor[](a!) self, Scalar scalar) -> Tensor[](a!)
-  device_guard: False  
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_add_scalar__kernel_fallback
     CUDA: foreach_tensor_add_scalar__kernel_cuda
 
-- func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_list_kernel_cpu
+    CPU: foreach_sub_scalar_kernel_fallback
+    CUDA: foreach_tensor_sub_scalar_kernel_cuda
+
+- func: _foreach_sub_.Scalar(Tensor[](a!) self, Scalar scalar) -> Tensor[](a!)
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_sub_scalar__kernel_fallback
+    CUDA: foreach_tensor_sub_scalar__kernel_cuda
+
+- func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_mul_scalar_kernel_fallback
+    CUDA: foreach_tensor_mul_scalar_kernel_cuda
+
+- func: _foreach_mul_.Scalar(Tensor[](a!) self, Scalar scalar) -> Tensor[](a!)
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_mul_scalar__kernel_fallback
+    CUDA: foreach_tensor_mul_scalar__kernel_cuda
+
+- func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_div_scalar_kernel_fallback
+    CUDA: foreach_tensor_div_scalar_kernel_cuda
+
+- func: _foreach_div_.Scalar(Tensor[](a!) self, Scalar scalar) -> Tensor[](a!)
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_div_scalar__kernel_fallback
+    CUDA: foreach_tensor_div_scalar__kernel_cuda
+
+- func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_add_list_kernel_fallback
     CUDA: foreach_tensor_add_list_kernel_cuda
 
 - func: _foreach_add_.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_list__kernel_cpu
+    CPU: foreach_add_list__kernel_fallback
     CUDA: foreach_tensor_add_list__kernel_cuda
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
