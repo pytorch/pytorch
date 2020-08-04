@@ -34,8 +34,8 @@ bool check_fast_route(TensorList tensors) {
       return false;
     }
 
-    if (t.device() != expected_device) {	
-      return false;	
+    if (t.device() != expected_device) {
+      return false;
     }
 
     if (t.layout() != at::kStrided) {
