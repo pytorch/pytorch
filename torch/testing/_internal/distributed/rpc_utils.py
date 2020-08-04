@@ -76,44 +76,39 @@ MP_HELPERS_AND_SUFFIXES = {
 }
 
 
-class Test(NamedTuple):
-    test_class: Type[RpcAgentTestFixture]
-    mp_type: MultiProcess
-
-
 GENERIC_TESTS = [
-    Test(RpcTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(DistAutogradTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(DistOptimizerTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(JitRpcTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(JitDistAutogradTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(RemoteModuleTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(DdpUnderDistAutogradTest, MultiProcess.SPAWN),
-    Test(DdpComparisonTest, MultiProcess.SPAWN),
+    RpcTest,
+    DistAutogradTest,
+    DistOptimizerTest,
+    JitRpcTest,
+    JitDistAutogradTest,
+    RemoteModuleTest,
+    DdpUnderDistAutogradTest,
+    DdpComparisonTest,
 ]
 
 
 PROCESS_GROUP_TESTS = [
-    Test(ProcessGroupAgentRpcTest, MultiProcess.FORK | MultiProcess.SPAWN)
+    ProcessGroupAgentRpcTest
 ]
 
 
 TENSORPIPE_TESTS = [
-    Test(TensorPipeAgentRpcTest, MultiProcess.FORK | MultiProcess.SPAWN)
+    TensorPipeAgentRpcTest
 ]
 
 
 FAULTY_AGENT_TESTS = [
-    Test(FaultyAgentRpcTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(FaultyAgentDistAutogradTest, MultiProcess.FORK | MultiProcess.SPAWN),
-    Test(JitFaultyAgentRpcTest, MultiProcess.FORK | MultiProcess.SPAWN),
+    FaultyAgentRpcTest,
+    FaultyAgentDistAutogradTest,
+    JitFaultyAgentRpcTest,
 ]
 
 
 def generate_tests(
     prefix: str,
     mixin: Type[RpcAgentTestFixture],
-    tests: List[Test],
+    tests: List[Type[RpcAgentTestFixture]],
     mp_type_filter: MultiProcess,
     module_name: str,
 ) -> Dict[str, Type[RpcAgentTestFixture]]:
@@ -133,12 +128,12 @@ def generate_tests(
     is necessary for pickling to work on them.
     """
     ret: Dict[str, Type[RpcAgentTestFixture]] = {}
-    for test in tests:
+    for test_class in tests:
         for mp_type in MultiProcess:
-            if mp_type & mp_type_filter & test.mp_type:
+            if mp_type & mp_type_filter:
                 mp_helper, suffix = MP_HELPERS_AND_SUFFIXES[mp_type]
-                name = f"{prefix}{test.test_class.__name__}{suffix}"
-                class_ = type(name, (test.test_class, mixin, mp_helper), dict())
+                name = f"{prefix}{test_class.__name__}{suffix}"
+                class_ = type(name, (test_class, mixin, mp_helper), dict())
                 class_.__module__ = module_name
                 ret[name] = class_
     return ret
