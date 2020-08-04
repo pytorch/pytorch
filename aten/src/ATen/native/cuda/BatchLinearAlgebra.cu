@@ -915,7 +915,7 @@ AT_ERROR("lu: MAGMA library not found in "
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::empty({k}, at::device(at::kCUDA).dtype(at::kInt));
+      Tensor piv_tmp = at::zeros_like(pivots, at::device(at::kCUDA).dtype(at::kInt));
       cusolver_LU<scalar_t>(
         m, n, self_data, m, piv_tmp.data_ptr<int>(), info_tmp.data_ptr<int>());
       pivots.copy_(piv_tmp);
