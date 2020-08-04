@@ -948,6 +948,54 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
   }
 }
 
+// This optimization removes consecutive SplitToSequence and ConcatFromSequence
+// operators. The optimization only happens when
+//  1. Output of SplitToSequence is not used by any other nodes.
+//  2. The attribute keepdims and axis of SplitToSequence match
+//     attribute new_axis and axis of ConcatFromSequence.
+// In that case, the two ops combined are no-op, and can be safely removed.
+static void removeSequenceSplitConcat(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      removeSequenceSplitConcat(child_block);
+    }
+    if (it->kind() == onnx::ConcatFromSequence &&
+        it->input()->node()->kind() == onnx::SplitToSequence) {
+      if (it->input()->uses().size() > 1) {
+        continue;
+      }
+
+      auto split_node = it->input()->node();
+      auto concat_node = *it;
+
+      const auto split_axis =
+          split_node->hasAttribute(attr::axis) ? split_node->i(attr::axis) : 0;
+      const auto split_keepdims = split_node->hasAttribute(attr::keepdims)
+          ? split_node->i(attr::keepdims)
+          : 1;
+      const auto concat_axis = concat_node->i(attr::axis);
+      const auto concat_new_axis = concat_node->hasAttribute(attr::new_axis)
+          ? concat_node->i(attr::new_axis)
+          : 0;
+      const bool has_input_split = split_node->inputs().size() == 2;
+
+      if (has_input_split) {
+        continue;
+      }
+
+      if (split_keepdims == concat_new_axis) {
+        continue;
+      }
+
+      if (split_axis != concat_axis) {
+        continue;
+      }
+
+      concat_node->output()->replaceAllUsesWith(split_node->input());
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -994,6 +1042,7 @@ void PeepholeOptimizeONNX(
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
+  removeSequenceSplitConcat(graph->block());
 }
 
 } // namespace jit

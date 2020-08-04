@@ -431,7 +431,7 @@ if _enabled:
         def graph(self):
             r"""
             Returns a string representation of the internal graph for the
-            ``forward`` method. See `interpreting-graphs`_ for details.
+            ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
             return self.forward.graph
 
@@ -440,7 +440,7 @@ if _enabled:
             r"""
             Returns a string representation of the internal graph for the
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
-            See `interpreting-graphs`_ for details.
+            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph
 
@@ -448,8 +448,8 @@ if _enabled:
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
-            the internal graph for the ``forward`` method. See `inspecting-code`_
-            for details.
+            the internal graph for the ``forward`` method. See
+            :ref:`inspecting-code` for details.
             """
             return self.forward.code
 
@@ -463,7 +463,7 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See `inspecting-code`_ for details.
+            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))

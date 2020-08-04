@@ -9,14 +9,12 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <gtest/gtest.h>
+
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-
-const auto kTimeoutErrorString = "Operation timed out!";
-constexpr auto kWorkDelayTime = std::chrono::milliseconds(1000);
-constexpr auto kWorkTimeout = std::chrono::milliseconds(5);
 
 class NCCLTestBase {
  public:
@@ -254,17 +252,6 @@ class AllgatherNCCLTest : public NCCLTest {
   }
 };
 
-class AllgatherNCCLTestWithTimeout : public AllgatherNCCLTest {
- public:
-  AllgatherNCCLTestWithTimeout(const std::string& path, int worldSize)
-      : AllgatherNCCLTest(path, worldSize) {}
-
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
-    std::this_thread::sleep_for(kWorkDelayTime);
-    return AllgatherNCCLTest::run();
-  }
-};
-
 struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
@@ -308,12 +295,10 @@ void testAllreduce(const std::string& path, int rank, int size) {
     auto& tensor = tensors[j];
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
-      if (data[k] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[k], expected)
+          << "Allreduce ouputs do not match expected outputs";
     }
   }
-  std::cout << "Allreduce test successful" << std::endl;
 }
 
 void testBroadcast(const std::string& path, int rank, int size) {
@@ -336,14 +321,12 @@ void testBroadcast(const std::string& path, int rank, int size) {
         auto& tensor = tensors[j];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Broadcast outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Broadcast test successful" << std::endl;
 }
 
 void testReduce(const std::string& path, int rank, int size) {
@@ -367,14 +350,12 @@ void testReduce(const std::string& path, int rank, int size) {
         auto& tensor = tensors[rootTensor];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Reduce outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Reduce test successful" << std::endl;
 }
 
 void testAllgather(const std::string& path, int rank, int size) {
@@ -394,52 +375,11 @@ void testAllgather(const std::string& path, int rank, int size) {
       auto& tensor = tensors[i][j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
-        if (data[k] != expected) {
-          throw std::runtime_error("BOOM!");
-        }
+        EXPECT_EQ(data[k], expected)
+            << "Allgather outputs do not match expected outputs";
       }
     }
   }
-  std::cout << "Allgather test successful" << std::endl;
-}
-
-void testAllgatherWithTimeout(const std::string& path, int rank, int size) {
-  // First we must set NCCL_BLOCKING_WAIT to 1 for timeouts to work in
-  // ProcessGroupNCCL.
-  auto originalBlockingWait = getenv(c10d::NCCL_BLOCKING_WAIT);
-  setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1);
-  auto test = AllgatherNCCLTestWithTimeout(path, size);
-  test.initialize(rank, size);
-  auto work = test.run();
-
-  // Wait for work to finish
-  try {
-    test.wait(work, kWorkTimeout);
-  } catch (const std::runtime_error& e) {
-    // First we reset the NCCL_BLOCKING_WAIT environment variable to prevent
-    // any unwanted side-effects. We must do this at all exit-points for this
-    // function.
-    setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
-    // We are expecting the operation to timeout and throw a runtime_error
-    std::string errorMsg = e.what();
-    if (errorMsg.find(kTimeoutErrorString) != std::string::npos) {
-      // If the runtime_error message is the same one thrown in wait::timeout,
-      // the test is successful
-      std::cout << "Allgather test with timeouts was successful" << std::endl;
-      return;
-    } else {
-      // Other runtime errors indicates a test failure
-      throw std::runtime_error("BOOM!");
-    }
-  } catch (...) {
-    setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
-    // Any other exception indicates a test failure
-    throw std::runtime_error("BOOM!");
-  }
-  setenv(c10d::NCCL_BLOCKING_WAIT, originalBlockingWait, 1);
-  // If no exception, that is also an error since we expect the test.wait call
-  // to timeout and throw.
-  throw std::runtime_error("BOOM!");
 }
 
 void testReduceScatter(const std::string& path, int rank, int size) {
@@ -461,18 +401,15 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     auto& tensor = tensors[i];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[j], expected) << "ReduceScatter outputs do not match expected outputs!";
     }
   }
-  std::cout << "Reduce-scatter test successful" << std::endl;
 }
 
-int main(int argc, char** argv) {
+TEST(ProcessGroupNCCLTests, AllTests) {
   if (!at::cuda::is_available()) {
     LOG(INFO) << "CUDA not available, skipping test";
-    return EXIT_SUCCESS;
+    return;
   }
   // Use WORLD_SIZE and RANK environmental variables to do multi-node
   // distributed testing
@@ -485,18 +422,14 @@ int main(int argc, char** argv) {
   if (sizeEnv && rankEnv) {
     size = std::stoi(std::string(sizeEnv));
     rank = std::stoi(std::string(rankEnv));
-    std::cout << "Multi-node world size: " << size << " rank: " << rank
-              << std::endl;
+    LOG(INFO) << "Multi-node world size: " << size << " rank: " << rank;
   }
   // TemporaryFile file;
   TemporaryFile file;
 
-  testAllreduce(file.path, rank, size);
-  testBroadcast(file.path, rank, size);
-  testReduce(file.path, rank, size);
-  testAllgather(file.path, rank, size);
-  testAllgatherWithTimeout(file.path, rank, size);
-  testReduceScatter(file.path, rank, size);
-
-  return EXIT_SUCCESS;
+  EXPECT_NO_THROW(testAllreduce(file.path, rank, size));
+  EXPECT_NO_THROW(testBroadcast(file.path, rank, size));
+  EXPECT_NO_THROW(testReduce(file.path, rank, size));
+  EXPECT_NO_THROW(testAllgather(file.path, rank, size));
+  EXPECT_NO_THROW(testReduceScatter(file.path, rank, size));
 }

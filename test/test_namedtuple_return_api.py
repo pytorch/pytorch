@@ -39,7 +39,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             for r in ret:
                 r = r.strip()
                 self.assertEqual(len(r.split()), 1,
-                                 'only whitelisted operators are allowed to have named return type, got ' + name)
+                                 'only allowlisted operators are allowed to have named return type, got ' + name)
         file.close()
         self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
         Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
