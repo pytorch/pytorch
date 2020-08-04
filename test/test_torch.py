@@ -7572,7 +7572,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_matrix_exp_boundary_cases(self, device, dtype):
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating types"):
+        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating or complex types"):
             torch.randn(3, 3).type(torch.int).matrix_exp()
 
         with self.assertRaisesRegex(RuntimeError, "with dim at least 2"):
