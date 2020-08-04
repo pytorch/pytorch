@@ -19,9 +19,7 @@ class TestForeach(TestCase):
         N = 20
         H = 20
         W = 20
-        tensors = []
-        for _ in range(N):
-            tensors.append(torch.zeros(H, W, device=device, dtype=dtype))
+        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
 
         # bool tensor + 1 will result in int64 tensor
         if dtype == torch.bool:
@@ -34,9 +32,10 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_same_size_tensors(self, device, dtype):
-        tensors = []
-        for _ in range(self.N):
-            tensors.append(torch.zeros(self.H, self.W, device=device, dtype=dtype))
+        N = 20
+        H = 20
+        W = 20
+        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
@@ -51,27 +50,23 @@ class TestForeach(TestCase):
         H = 20
         W = 20
 
-        tensors = []
-        size_change = 0
-        for _ in range(N):
-            tensors.append(torch.zeros(H + size_change, W + size_change, device=device, dtype=dtype))
-            size_change += 1
-
+        tensors = [torch.zeros(H + n, W + n, device=device, dtype=dtype) for n in range(N)]
         res = torch._foreach_add(tensors, 1)
 
-        size_change = 0
-        for t in res: 
-            # bool tensor + 1 will result in int64 tensor
-            if dtype == torch.bool:
-                dtype = torch.int64
-            self.assertEqual(t, torch.ones(H + size_change, W + size_change, device=device, dtype=dtype))
-            size_change += 1
+        # bool tensor + 1 will result in int64 tensor
+        if dtype == torch.bool:
+            dtype = torch.int64
+        self.assertEqual([torch.ones(H + n, W + n, device=device, dtype=dtype) for n in range(N)], torch._foreach_add(tensors, 1))
 
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_add_scalar_with_empty_list(self, device, dtype):
-        tensors = []
-        with self.assertRaises(RuntimeError):
-            torch._foreach_add(tensors, 1)
+    def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
+        # TODO: enable empty list case
+        for tensors in [[torch.randn([0])]]:
+            res = torch._foreach_add(tensors, 1)
+            self.assertEqual(res, tensors)
+
+            torch._foreach_add_(tensors, 1)
+            self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_overlapping_tensors(self, device, dtype):
@@ -86,105 +81,35 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     def test_add_scalar_with_different_tensor_dtypes(self, device):
-        tensors = [torch.tensor([1], dtype=torch.float, device=device), 
-                   torch.tensor([1], dtype=torch.int, device=device)]
+        tensors = [torch.tensor([1.1], dtype=torch.float, device=device), 
+                   torch.tensor([1], dtype=torch.long, device=device)]
 
-        expected = [torch.tensor([2], dtype=torch.float, device=device), 
-                    torch.tensor([2], dtype=torch.int, device=device)]
+        expected = [torch.tensor([2.1], dtype=torch.float, device=device), 
+                    torch.tensor([2], dtype=torch.long, device=device)]
 
         res = torch._foreach_add(tensors, 1)
         self.assertEqual(res, expected)
 
     def test_add_scalar_with_different_scalar_type(self, device):
         # int tensor with float scalar
-        # should go 'slow' route
         scalar = 1.1
         tensors = [torch.tensor([1], dtype=torch.int, device=device)]
-        res = torch._foreach_add(tensors, scalar)
-        self.assertEqual(res, [torch.tensor([2.1], device=device)])
+        self.assertEqual([x + scalar for x in tensors], torch._foreach_add(tensors, scalar))
 
         # float tensor with int scalar
-        # should go 'fast' route
         scalar = 1
         tensors = [torch.tensor([1.1], device=device)]
-        res = torch._foreach_add(tensors, scalar)
-        self.assertEqual(res, [torch.tensor([2.1], device=device)])
+        self.assertEqual([x + scalar for x in tensors], torch._foreach_add(tensors, scalar))
 
         # bool tensor with int scalar
-        # should go 'slow' route
         scalar = 1
         tensors = [torch.tensor([False], device=device)]
-        res = torch._foreach_add(tensors, scalar)
-        self.assertEqual(res, [torch.tensor([1], device=device)])
+        self.assertEqual([x + scalar for x in tensors], torch._foreach_add(tensors, scalar))
 
         # bool tensor with float scalar
-        # should go 'slow' route
         scalar = 1.1
         tensors = [torch.tensor([False], device=device)]
-        res = torch._foreach_add(tensors, scalar)
-        self.assertEqual(res, [torch.tensor([1.1], device=device)])
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_add_list_same_size_tensors(self, device, dtype):
-        tensors1 = []
-        tensors2 = []
-        for _ in range(self.N):
-            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=dtype))
-            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=dtype))
-
-
-        res = torch._foreach_add(tensors1, tensors2)
-        for t in res:
-            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
-
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_add_list__same_size_tensors(self, device, dtype):
-        tensors1 = []
-        tensors2 = []
-        for _ in range(self.N):
-            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=dtype))
-            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=dtype))
-
-
-        torch._foreach_add_(tensors1, tensors2)
-        for t in tensors1:
-            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
-
-    def test_add_list_error_cases(self, device):
-        tensors1 = []
-        tensors2 = []
-
-        # Empty lists
-        with self.assertRaises(RuntimeError):
-            torch._foreach_add(tensors1, tensors2)
-            torch._foreach_add_(tensors1, tensors2)
-
-        # One empty list
-        tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaises(RuntimeError):
-            torch._foreach_add(tensors1, tensors2)
-            torch._foreach_add_(tensors1, tensors2)
-
-        # Lists have different amount of tensors
-        tensors2.append(torch.tensor([1], device=device))
-        tensors2.append(torch.tensor([1], device=device))
-        with self.assertRaises(RuntimeError):
-            torch._foreach_add(tensors1, tensors2)
-            torch._foreach_add_(tensors1, tensors2)
-
-    def test_add_list_different_dtypes(self, device):
-        tensors1 = []
-        tensors2 = []
-        for _ in range(self.N):
-            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=torch.float))
-            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=torch.int))
-
-        res = torch._foreach_add(tensors1, tensors2)
-        torch._foreach_add_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(res[0], torch.ones(self.H, self.W, device=device, dtype=torch.float))
-
+        self.assertEqual([x + scalar for x in tensors], torch._foreach_add(tensors, scalar))
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_sub_scalar_same_size_tensors(self, device, dtype):
@@ -259,6 +184,144 @@ class TestForeach(TestCase):
         torch._foreach_div_(tensors, 2)
         for t in tensors:
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).div(2))
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_bin_op_list_same_size_tensors(self, device, dtype):
+        if dtype == torch.bool:
+            return
+
+        if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
+            # Integer division of tensors using div or / is no longer supported
+            return
+
+        tensors1 = []
+        tensors2 = []
+        for _ in range(self.N):
+            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=dtype))
+            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=dtype))
+
+        res = torch._foreach_mul(tensors1, tensors2)
+        for t in res:
+            self.assertEqual(t, torch.zeros(self.H, self.W, device=device, dtype=dtype))
+
+        res = torch._foreach_div(torch._foreach_add(tensors1, 4), torch._foreach_mul(tensors2, 2))
+        for t in res:
+            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).mul(2))
+
+        res = torch._foreach_add(tensors1, tensors2)
+        for t in res:
+            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
+
+        res = torch._foreach_sub(res, tensors2)
+        for t in res:
+            self.assertEqual(t, torch.zeros(self.H, self.W, device=device, dtype=dtype))
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_bin_op_list_different_size_tensors(self, device, dtype):
+        if dtype == torch.bool:
+            return
+
+        if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
+            # Integer division of tensors using div or / is no longer supported
+            return
+
+        tensors1 = []
+        tensors2 = []
+        size_change = 0
+        for _ in range(self.N):
+            tensors1.append(torch.zeros(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
+            tensors2.append(torch.ones(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
+            size_change += 1
+
+        res = torch._foreach_mul(tensors1, tensors2)
+        size_change = 0
+        for t in res:
+            self.assertEqual(t, torch.zeros(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
+            size_change += 1
+
+        res = torch._foreach_div(torch._foreach_add(tensors1, 4), torch._foreach_mul(tensors2, 2))
+        size_change = 0
+        for t in res:
+            self.assertEqual(t, torch.ones(self.H + size_change, self.W + size_change, device=device, dtype=dtype).mul(2))
+            size_change += 1
+
+        res = torch._foreach_add(tensors1, tensors2)
+        size_change = 0
+        for t in res:
+            self.assertEqual(t, torch.ones(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
+            size_change += 1
+
+        res = torch._foreach_sub(res, tensors2)
+        size_change = 0
+        for t in res:
+            self.assertEqual(t, torch.zeros(self.H + size_change, self.W + size_change, device=device, dtype=dtype))
+            size_change += 1
+    
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_bin_op_list__same_size_tensors(self, device, dtype):
+        if dtype == torch.bool:
+            return
+
+        if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
+            # Integer division of tensors using div or / is no longer supported
+            return
+
+        tensors1 = []
+        tensors2 = []
+        for _ in range(self.N):
+            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=dtype))
+            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=dtype))
+
+
+        torch._foreach_add_(tensors1, tensors2)
+        for t in tensors1:
+            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
+
+        torch._foreach_sub_(tensors1, tensors2)
+        for t in tensors1:
+            self.assertEqual(t, torch.zeros(self.H, self.W, device=device, dtype=dtype))
+
+        torch._foreach_mul_(tensors1, tensors2)
+        for t in tensors1:
+            self.assertEqual(t, torch.zeros(self.H, self.W, device=device, dtype=dtype))
+
+        torch._foreach_div_(torch._foreach_add_(tensors1, 4), torch._foreach_add_(tensors2, 1))
+        for t in tensors1:
+            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).mul(2))
+
+    def test_add_list_error_cases(self, device):
+        tensors1 = []
+        tensors2 = []
+
+        # Empty lists
+        with self.assertRaises(RuntimeError):
+            torch._foreach_add(tensors1, tensors2)
+            torch._foreach_add_(tensors1, tensors2)
+
+        # One empty list
+        tensors1.append(torch.tensor([1], device=device))
+        with self.assertRaises(RuntimeError):
+            torch._foreach_add(tensors1, tensors2)
+            torch._foreach_add_(tensors1, tensors2)
+
+        # Lists have different amount of tensors
+        tensors2.append(torch.tensor([1], device=device))
+        tensors2.append(torch.tensor([1], device=device))
+        with self.assertRaises(RuntimeError):
+            torch._foreach_add(tensors1, tensors2)
+            torch._foreach_add_(tensors1, tensors2)
+
+    def test_add_list_different_dtypes(self, device):
+        tensors1 = []
+        tensors2 = []
+        for _ in range(self.N):
+            tensors1.append(torch.zeros(self.H, self.W, device=device, dtype=torch.float))
+            tensors2.append(torch.ones(self.H, self.W, device=device, dtype=torch.int))
+
+        res = torch._foreach_add(tensors1, tensors2)
+        torch._foreach_add_(tensors1, tensors2)
+        self.assertEqual(res, tensors1)
+        self.assertEqual(res[0], torch.ones(self.H, self.W, device=device, dtype=torch.float))
 
 instantiate_device_type_tests(TestForeach, globals())
 
