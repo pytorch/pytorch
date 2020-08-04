@@ -857,7 +857,10 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
           setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
           ConvertToVec(shape.dims()),
           infered_data_type,
-          is_quantized, false, scale, offset);
+          is_quantized,
+          false,
+          scale,
+          offset);
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()

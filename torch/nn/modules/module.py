@@ -758,6 +758,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_non_persistent_buffers_set' not in self.__dict__:
+            self._non_persistent_buffers_set = set()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
