@@ -990,10 +990,12 @@ Tensor compute_T18(const Tensor& A) {
 
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
-  const auto A9 = at::matmul(Bs.select(0, 0), Bs.select(0, 4)) + Bs.select(0, 3);
-  const auto res = Bs.select(0, 1) + at::matmul(Bs.select(0, 2) + A9, A9);
-
-  return res;
+  // compute A9
+  Bs.select(0, 3).add_(at::matmul(Bs.select(0, 0), Bs.select(0, 4)));
+  return Bs.select(0, 1).add_(at::matmul(
+    Bs.select(0, 2).add_(Bs.select(0, 3)),
+    Bs.select(0, 3)
+  ));
 }
 
 template <typename scalar_t>
