@@ -1190,9 +1190,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if dim is None and out is None and dtype is None and p is not None:
         if isinstance(p, str):
             if p == "fro":
-                return _VF.frobenius_norm(input)
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
-            return _VF.norm(input, p)
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
     # remove the overloads where dim is an int and replace with BraodcastingList1

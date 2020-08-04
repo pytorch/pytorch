@@ -139,7 +139,7 @@ class TensorPipeAgent : public RpcAgent {
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
 
-#if TENSORPIPE_HAS_SHM_TRANSPORT
+#ifdef TP_ENABLE_SHM
   static std::string createUniqueShmAddr();
 #endif
 

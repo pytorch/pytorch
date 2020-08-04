@@ -45,8 +45,15 @@ void sign_kernel_cuda(TensorIterator& iter){
   }
 }
 
+void signbit_kernel_cuda(TensorIterator& iter){
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return a < 0; });
+  });
+}
+
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda);
 
 }} // namespace at::native

@@ -9,6 +9,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <gtest/gtest.h>
+
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
@@ -293,12 +295,10 @@ void testAllreduce(const std::string& path, int rank, int size) {
     auto& tensor = tensors[j];
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
-      if (data[k] != expected) {
-        throw std::runtime_error("Allreduce ouputs do not match expected outputs");
-      }
+      EXPECT_EQ(data[k], expected)
+          << "Allreduce ouputs do not match expected outputs";
     }
   }
-  std::cout << "Allreduce test successful" << std::endl;
 }
 
 void testBroadcast(const std::string& path, int rank, int size) {
@@ -321,14 +321,12 @@ void testBroadcast(const std::string& path, int rank, int size) {
         auto& tensor = tensors[j];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("Broadcast outputs do not match expected outputs");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Broadcast outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Broadcast test successful" << std::endl;
 }
 
 void testReduce(const std::string& path, int rank, int size) {
@@ -352,14 +350,12 @@ void testReduce(const std::string& path, int rank, int size) {
         auto& tensor = tensors[rootTensor];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("Reduce outputs do not match expected outputs");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Reduce outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Reduce test successful" << std::endl;
 }
 
 void testAllgather(const std::string& path, int rank, int size) {
@@ -379,13 +375,11 @@ void testAllgather(const std::string& path, int rank, int size) {
       auto& tensor = tensors[i][j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
-        if (data[k] != expected) {
-          throw std::runtime_error("Allgather outputs do not match expected outputs");
-        }
+        EXPECT_EQ(data[k], expected)
+            << "Allgather outputs do not match expected outputs";
       }
     }
   }
-  std::cout << "Allgather test successful" << std::endl;
 }
 
 void testReduceScatter(const std::string& path, int rank, int size) {
@@ -407,18 +401,15 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     auto& tensor = tensors[i];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[j], expected) << "ReduceScatter outputs do not match expected outputs!";
     }
   }
-  std::cout << "Reduce-scatter test successful" << std::endl;
 }
 
-int main(int argc, char** argv) {
+TEST(ProcessGroupNCCLTests, AllTests) {
   if (!at::cuda::is_available()) {
     LOG(INFO) << "CUDA not available, skipping test";
-    return EXIT_SUCCESS;
+    return;
   }
   // Use WORLD_SIZE and RANK environmental variables to do multi-node
   // distributed testing
@@ -431,17 +422,14 @@ int main(int argc, char** argv) {
   if (sizeEnv && rankEnv) {
     size = std::stoi(std::string(sizeEnv));
     rank = std::stoi(std::string(rankEnv));
-    std::cout << "Multi-node world size: " << size << " rank: " << rank
-              << std::endl;
+    LOG(INFO) << "Multi-node world size: " << size << " rank: " << rank;
   }
   // TemporaryFile file;
   TemporaryFile file;
 
-  testAllreduce(file.path, rank, size);
-  testBroadcast(file.path, rank, size);
-  testReduce(file.path, rank, size);
-  testAllgather(file.path, rank, size);
-  testReduceScatter(file.path, rank, size);
-
-  return EXIT_SUCCESS;
+  EXPECT_NO_THROW(testAllreduce(file.path, rank, size));
+  EXPECT_NO_THROW(testBroadcast(file.path, rank, size));
+  EXPECT_NO_THROW(testReduce(file.path, rank, size));
+  EXPECT_NO_THROW(testAllgather(file.path, rank, size));
+  EXPECT_NO_THROW(testReduceScatter(file.path, rank, size));
 }
