@@ -185,4 +185,48 @@ std::vector<Tensor> foreach_div_list__kernel_cpu(TensorList tensors1, TensorList
   return tensors1.vec();
 }
 
+std::vector<Tensor> foreach_tensor_exp_cpu(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors.size(); i++) {
+    auto temp = tensors[i].exp();
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_exp__cpu(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i].exp_();
+  }
+
+  return tensors.vec();
+}
+
+std::vector<Tensor> foreach_tensor_sqrt_cpu(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < tensors.size(); i++) {
+    auto temp = tensors[i].sqrt();
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_sqrt__cpu(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i].sqrt_();
+  }
+
+  return tensors.vec();
+}
+
 }} // namespace at::native

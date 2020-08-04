@@ -24,7 +24,7 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
 }
 
 
-bool check_fast_route(TensorList tensors, Scalar scalar) {
+bool check_fast_route(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
 
@@ -40,7 +40,18 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
     if (!t.is_non_overlapping_and_dense()) {
       return false;
     }
+  }
 
+  return true;
+}
+
+bool check_fast_route(TensorList tensors, Scalar scalar) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  if (!check_fast_route(tensors)) {
+    return false;
+  }
+
+  for (auto t : tensors) {
     if ((at::isIntegralType(t.scalar_type(), true) && scalar.isFloatingPoint()) || 
         t.scalar_type() == at::kBool) {
      return false;
