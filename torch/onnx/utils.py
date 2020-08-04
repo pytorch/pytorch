@@ -347,8 +347,7 @@ def _model_to_jit_graph(model, args, _retain_param_name, update_jit_scripting_pa
 
                 torch._C._jit_pass_onnx_preprocess(method_graph)
                 torch._C._jit_pass_remove_mutation(method_graph)
-            # Delete prim::RaiseException + aten::format exception string nodes
-            torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(method_graph)
+
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(method_graph, tuple(in_vars), False, False)
         except AttributeError:
