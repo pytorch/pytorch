@@ -255,6 +255,12 @@ void testExprCompareSelectEQ() {
 }
 
 void testExprCompareSelectDtypes() {
+  // LHS and RHS expressions should have the same dtype, but this dtype could
+  // differ from the dtype of the return values (but dtypes of true and false
+  // return values should be the same).
+  // This test constructs a CompareSelect expression where the input dtype is
+  // different from the output dtype and verifies that it works correctly:
+  //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Buffer a(BufHandle("A", {N}, kInt));
@@ -267,6 +273,8 @@ void testExprCompareSelectDtypes() {
 
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
+  // C[i] = (A[i] == B[i]) ? 3.14f : 2.78f
+  // A and B are int, C is float.
   auto select_expr = For::make(
       i,
       0,
