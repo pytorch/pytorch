@@ -10,7 +10,7 @@ namespace at { namespace native {
 namespace {
 
 template<typename x_t, typename y_t, template<class> class Op>
-struct AddListFunctor_ {
+struct BinaryOpListFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl) 
@@ -82,7 +82,7 @@ struct AddListFunctor_ {
 };
 
 template<typename x_t, typename y_t, typename out_t, template<class> class Op>
-struct AddListFunctor {
+struct BinaryOpListFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl) 
@@ -170,16 +170,16 @@ std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tenso
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
-    for (int i = 0; i < tensors1.size(); i++) {
-        vec_res.emplace_back(at::native::empty_like(tensors1[i]));
+    for (const auto& t: tensors1) {
+        vec_res.emplace_back(at::native::empty_like(t));
     }
 
     tensor_lists.emplace_back(std::move(tensors1.vec()));
     tensor_lists.emplace_back(std::move(tensors2.vec()));
     tensor_lists.emplace_back(std::move(vec_res));
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_tensor_add_list_kernel_cuda", [&]() {
-        multi_tensor_apply<3>(tensor_lists, AddListFunctor<scalar_t, scalar_t, scalar_t, Op>());
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda", [&]() {
+        multi_tensor_apply<3>(tensor_lists, BinaryOpListFunctor<scalar_t, scalar_t, scalar_t, Op>());
     });
 
     return tensor_lists[2];
@@ -198,8 +198,8 @@ std::vector<Tensor> foreach_tensor_list_op_(TensorList tensors1, TensorList tens
     tensor_lists.emplace_back(std::move(tensors1.vec()));
     tensor_lists.emplace_back(std::move(tensors2.vec()));
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_tensor_add_list__kernel_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, AddListFunctor_<scalar_t, scalar_t, Op>());
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list__cuda", [&]() {
+        multi_tensor_apply<2>(tensor_lists, BinaryOpListFunctor_<scalar_t, scalar_t, Op>());
     });
 
     return tensor_lists[0];
