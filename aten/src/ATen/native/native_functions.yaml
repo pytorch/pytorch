@@ -5410,6 +5410,13 @@
     CUDA: cat_out_cuda
     QuantizedCPU: cat_out_quantized_cpu
 
+- func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_add_scalar_kernel_fallback
+    CUDA: foreach_tensor_add_scalar_kernel_cuda
+
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   dispatch:
