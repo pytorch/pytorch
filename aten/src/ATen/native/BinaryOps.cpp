@@ -40,6 +40,7 @@ DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
 DEFINE_DISPATCH(maximum_stub);
+DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
@@ -803,14 +804,15 @@ Tensor maximum(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  std::cout << "[minimum_out]" << std::endl;
+  auto iter = TensorIterator::comparison_op(result, self, other,
+                                            /*check_mem_overlap=*/true);
+  minimum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor minimum(const Tensor& self, const Tensor& other) {
-  std::cout << "[minimum]" << std::endl;
   Tensor result = at::empty(0, self.options());
-  return result;
+  return at::minimum_out(result, self, other);
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {

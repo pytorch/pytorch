@@ -512,22 +512,62 @@ void maximum_kernel(TensorIterator& iter) {
   } else if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "maximum_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (std::isnan(a) || a >= b) {
+        if (std::isnan(a)) {
           return a;
         }
-        return b;
+        if (std::isnan(b)) {
+          return b;
+        }
+        return a >= b ? a : b;
       });
     });
   } else {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "maximum_cpu", [&] {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (std::isnan(a.real())) {
+        if (std::isnan(a.real()) || std::isnan(a.imag())) {
           return a;
         }
-        if (std::isnan(b.real())) {
+        if (std::isnan(b.real()) || std::isnan(b.imag())) {
           return b;
         }
         if (b.real() >= a.real() && b.imag() >= a.imag()) {
+          return b;
+        }
+        return a;
+      });
+    });
+  }
+}
+
+void minimum_kernel(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), /*includeBool=*/ true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "minimum_cpu", [&] {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        return a <= b ? a : b;
+      });
+    });
+  } else if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "minimum_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        if (std::isnan(a)) {
+          return a;
+        }
+        if (std::isnan(b)) {
+          return b;
+        }
+        return a <= b ? a : b;
+      });
+    });
+  } else {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "minimum_cpu", [&] {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        if (std::isnan(a.real()) || std::isnan(a.imag())) {
+          return a;
+        }
+        if (std::isnan(b.real()) || std::isnan(b.imag())) {
+          return b;
+        }
+        if (b.real() <= a.real() && b.imag() <= a.imag()) {
           return b;
         }
         return a;
@@ -798,6 +838,7 @@ REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(max_elementwise_stub, &max_elementwise_kernel);
 REGISTER_DISPATCH(min_elementwise_stub, &min_elementwise_kernel);
 REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
+REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
