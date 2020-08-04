@@ -1049,12 +1049,12 @@ Tensor mexp_impl(
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
-      // We pin memory to make the transfer to CUDA faster and async
       auto idx_curr_norm_interval = (
         (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
+        // We pin memory to make the transfer to CUDA faster and async
         auto idx_to_device = _pin_and_move_memory_if_cuda_input(
           idx_curr_norm_interval, a
         );
@@ -1064,11 +1064,11 @@ Tensor mexp_impl(
     }
 
     // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
-    // We pin memory to make the transfer to CUDA faster and async
     auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
+      // We pin memory to make the transfer to CUDA faster and async
       auto idx_to_device = _pin_and_move_memory_if_cuda_input(
         idx_large_norm, a
       );
@@ -1171,7 +1171,7 @@ Tensor matrix_exp(const Tensor& a) {
           && (at::isFloatingType(a.scalar_type()) 
            || at::isComplexType(a.scalar_type())),
               "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
-              "of floating types with dim at least 2");
+              "of floating or complex types with dim at least 2");
   TORCH_CHECK(a.size(-1) == a.size(-2),
               "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of squared matrices");
