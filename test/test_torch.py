@@ -17095,7 +17095,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         is_cuda10_2_or_higher = (
             (torch.version.cuda is not None)
             and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-        
+
         # Create processes to test each combination of test cases and config settings
         processes = []
         for fn_name, arg_sizes in test_cases:
