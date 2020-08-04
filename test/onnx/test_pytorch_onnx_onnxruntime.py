@@ -964,6 +964,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_as_strided(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                chunk_size = list(x.size())
+                chunk_size[1] = chunk_size[1] * 2 - 1
+                chunk_stride = list(x.stride())
+                chunk_stride[1] = chunk_stride[1] // 2
+                return x.as_strided((3, 3, 3), (1, 4, 2), storage_offset=2), x.as_strided(chunk_size, chunk_stride)
+
+        x = torch.randn(5, 8, 7)
+        self.run_test(Model(), x)
+
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
             def __init__(self):
