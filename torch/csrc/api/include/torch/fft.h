@@ -1,7 +1,6 @@
 #pragma once
 
-#include <torch/arg.h>
-#include <torch/types.h>
+#include <ATen/ATen.h>
 
 namespace torch {
 namespace fft {
@@ -16,7 +15,7 @@ inline Tensor fft(const Tensor& self) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See the documenation of torch.fft.fft.
+/// See the documentation of torch.fft.fft.
 ///
 /// Example:
 /// ```
