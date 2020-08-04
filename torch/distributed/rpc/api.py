@@ -668,6 +668,8 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             # to guarantee that fut.wait() completes the profiling. This new
             # future will contain the same value as the original future.
             fut = rf._call_end_callbacks_on_future(fut)
+    if hasattr(_thread_local_var, "future_list"):
+        _thread_local_var.future_list.append(fut)
     return fut
 
 
