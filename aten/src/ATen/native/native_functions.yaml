@@ -5481,60 +5481,70 @@
     CUDA: foreach_tensor_add_list__kernel_cuda
 
 - func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_sub_list_kernel_cpu
     CUDA: foreach_tensor_sub_list_kernel_cuda
 
 - func: _foreach_sub_.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_sub_list__kernel_cpu
     CUDA: foreach_tensor_sub_list__kernel_cuda
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_mul_list_kernel_cpu
     CUDA: foreach_tensor_mul_list_kernel_cuda
 
 - func: _foreach_mul_.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_mul_list__kernel_cpu
     CUDA: foreach_tensor_mul_list__kernel_cuda
 
 - func: _foreach_div.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_div_list_kernel_cpu
     CUDA: foreach_tensor_div_list_kernel_cuda
 
 - func: _foreach_div_.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_div_list__kernel_cpu
     CUDA: foreach_tensor_div_list__kernel_cuda
 
 - func: _foreach_exp(Tensor[] tensors) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_exp_cpu
     CUDA: foreach_tensor_exp_cuda
 
 - func: _foreach_exp_(Tensor[](a!) self) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_exp__cpu
     CUDA: foreach_tensor_exp__cuda
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_cpu
     CUDA: foreach_tensor_sqrt_cuda
 
 - func: _foreach_sqrt_(Tensor[](a!) self) -> Tensor[](a!)
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt__cpu
