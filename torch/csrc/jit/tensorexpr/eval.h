@@ -673,7 +673,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   template <typename T>
-  TORCH_API void visit_intrinsics_helper(const Intrinsics* v) {
+  void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
     for (int i = 0; i < v->nparams(); i++) {
       v->param(i)->accept(this);
@@ -698,11 +698,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     std::vector<T> result(v1.size(), -1);
     if (values.size() == 1ULL) {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics(v->op_type(), v1[i]);
+        result[i] = compute_intrinsics<T>(v->op_type(), v1[i]);
       }
     } else {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics(v->op_type(), v1[i], v2[i]);
+        result[i] = compute_intrinsics<T>(v->op_type(), v1[i], v2[i]);
       }
     }
     value_ = Value(result);
@@ -710,15 +710,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void visit(const Intrinsics* v) override {
     auto ty = v->dtype().scalar_type();
-    switch (ty) {
-#define TYPE_CASE(Type, Name)         \
-  case ScalarType::Name:              \
-    visit_intrinsics_helper<Type>(v); \
-    break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-      default:
-        throw unsupported_dtype();
+    if (ty == ScalarType::Float) {
+      visit_intrinsics_helper<float>(v);
+    } else if (ty == ScalarType::Double) {
+      visit_intrinsics_helper<double>(v);
+    } else {
+      throw unsupported_dtype();
     }
   }
 
@@ -776,7 +773,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     apply_mutator(&intrinsics_expander);
   }
 
-  static float compute_intrinsics(IntrinsicsOp op_type, float v) {
+  template <typename T>
+  static T compute_intrinsics(IntrinsicsOp op_type, T v) {
     switch (op_type) {
       case kSin:
         return std::sin(v);
@@ -829,14 +827,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kLgamma:
         return std::lgamma(v);
       case kFrac:
-        float intpart;
+        T intpart;
         return std::modf(v, &intpart);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
-  static float compute_intrinsics(IntrinsicsOp op_type, float v1, float v2) {
+  template <typename T>
+  static T compute_intrinsics(IntrinsicsOp op_type, T v1, T v2) {
     switch (op_type) {
       case kPow:
         return std::pow(v1, v2);
