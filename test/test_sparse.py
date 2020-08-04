@@ -1248,6 +1248,23 @@ class TestSparse(TestCase):
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
 
+        # Unsupported arguments should error
+        kwarg_error_pairs = [
+            ({'keepdim': True},
+             RuntimeError, r'norm_sparse currently does not support keepdim=True'),
+            ({'dim': 0},
+             RuntimeError, r'norm_sparse currently only supports full reductions'),
+            ({'dtype': torch.double, 'p': 'fro'},
+             ValueError, r'dtype argument is not supported in frobenius norm'),
+            ({'dtype': torch.double, 'p': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument") 
+        ]
+        x = self._gen_sparse(3, 10, 100)[0]
+        for kwargs, err, msg in kwarg_error_pairs:
+            with self.assertRaisesRegex(err, msg):
+                x.norm(**kwargs)
+
+
     @skipIfRocm
     def test_sparse_sum(self):
 
