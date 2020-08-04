@@ -165,6 +165,20 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto shape_physical = self_physical.getPhysicalShape(shape);
+  auto result = self_physical.tensor().reshape(shape_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto size_physical = self_physical.getPhysicalShape(size);
+  auto result = self_physical.tensor().view(size_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -185,13 +199,18 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
+  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
+  m.impl("reshape", reshape_batching_rule);
+  m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
+  m.impl("view", view_batching_rule);
+  m.impl("view_as", native::view_as); // composite wrt autograd
 }
 
 } // namespace at
