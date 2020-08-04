@@ -582,6 +582,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   } break;
       AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
 #undef TYPE_CASE
+      case ScalarType::Half:
+        throw unsupported_dtype("IfThenElse condition can't have Half dtype");
       default:
         throw unsupported_dtype();
     }
