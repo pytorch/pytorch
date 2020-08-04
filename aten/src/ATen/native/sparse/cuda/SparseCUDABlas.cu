@@ -9,16 +9,11 @@
 
 #include <cusparse.h>
 
-#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if defined(__CUDACC__) && CUSPARSE_VERSION >= 11000
 #include <library_types.h>
 #endif
 
-// LIMITATION (cusparseSpMM): 
-// The generic APIs are currently (CUDA 10.1) available for all platforms except Windows. 
-// Using these APIs in any other systems will result in compile-time or run-time failures. 
-// Their support will be extended in the next releases. 
-
-#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10200)
+#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10100)
 const char* cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
   {
@@ -81,7 +76,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
-#if !defined(_MSC_VER) && defined(__CUDACC__) && CUSPARSE_VERSION >= 10301 // CUDA release >= 10.2 and not windows
+#if defined(__CUDACC__) && CUSPARSE_VERSION >= 11000
 
 template<typename T> 
 void csrmm2(
