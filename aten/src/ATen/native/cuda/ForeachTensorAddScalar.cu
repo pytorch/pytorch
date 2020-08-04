@@ -6,8 +6,8 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename x_t, template<class> class Op>
-struct BinaryOpScalarFunctor_ {
+template<typename x_t>
+struct AddScalarFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
@@ -30,7 +30,7 @@ struct BinaryOpScalarFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -49,7 +49,7 @@ struct BinaryOpScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -62,8 +62,8 @@ struct BinaryOpScalarFunctor_ {
         }
 };
 
-template<typename x_t, typename out_t, template<class> class Op>
-struct BinaryOpScalarFunctor {
+template<typename x_t, typename out_t>
+struct AddScalarFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
@@ -90,7 +90,7 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
                     // store
                     load_store(out, r_out, i_start, 0);
@@ -109,7 +109,7 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar;
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -124,8 +124,7 @@ struct BinaryOpScalarFunctor {
 
 } // namespace
 
-template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
     TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
     if (!check_fast_route(tensors, scalar)) {
@@ -142,30 +141,9 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar_kernel_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, BinaryOpScalarFunctor<scalar_t, scalar_t, Op>(), scalar.to<scalar_t>());
+        multi_tensor_apply<2>(tensor_lists, AddScalarFunctor<scalar_t, scalar_t>(), scalar.to<scalar_t>());
     });
     return tensor_lists[1];
-}
-
-template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op_(TensorList tensors, Scalar scalar) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
-    tensor_lists.emplace_back(std::move(tensors.vec()));
-
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar__kernel_cuda", [&]() {
-        multi_tensor_apply<1>(tensor_lists, BinaryOpScalarFunctor_<scalar_t, Op>(), scalar.to<scalar_t>());
-    });
-    return tensor_lists[0];
-}
-
-std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_add_scalar_kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::plus>(tensors, scalar);
 }
 
 std::vector<Tensor> foreach_tensor_add_scalar__kernel_cuda(TensorList tensors, Scalar scalar) {
@@ -175,67 +153,13 @@ std::vector<Tensor> foreach_tensor_add_scalar__kernel_cuda(TensorList tensors, S
         return at::native::foreach_add_scalar__kernel_fallback(tensors, scalar);
     }
 
-    return foreach_binary_op_<std::plus>(tensors, scalar);
-}
+    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    tensor_lists.emplace_back(std::move(tensors.vec()));
 
-std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_sub_scalar_kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::minus>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_sub_scalar__kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_sub_scalar__kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op_<std::minus>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_mul_scalar_kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::multiplies>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_mul_scalar__kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_mul_scalar__kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op_<std::multiplies>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_div_scalar_kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::divides>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_div_scalar__kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_div_scalar__kernel_fallback(tensors, scalar);
-    }
-
-    return foreach_binary_op_<std::divides>(tensors, scalar);
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_tensor_add_scalar__kernel_cuda", [&]() {
+        multi_tensor_apply<1>(tensor_lists, AddScalarFunctor_<scalar_t>(), scalar.to<scalar_t>());
+    });
+    return tensor_lists[0];
 }
 
 }} // namespace at::native
