@@ -3122,7 +3122,7 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
 
-class ProcessGroupAgentRpcTest(RpcTest):
+class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
@@ -3683,7 +3683,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # Reset for clean shutdown
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
-class TensorPipeAgentRpcTest(RpcTest):
+class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
