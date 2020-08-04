@@ -39,6 +39,7 @@ DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
+DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
@@ -790,14 +791,15 @@ Tensor min(const Tensor& self, const Tensor& other) {
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  std::cout << "[maximum_out]" << std::endl;
+  auto iter = TensorIterator::comparison_op(result, self, other,
+                                            /*check_mem_overlap=*/true);
+  maximum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor maximum(const Tensor& self, const Tensor& other) {
-  std::cout << "[maximum]" << std::endl;
   Tensor result = at::empty(0, self.options());
-  return result;
+  return at::maximum_out(result, self, other);
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
