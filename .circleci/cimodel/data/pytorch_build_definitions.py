@@ -149,14 +149,16 @@ class HiddenConf(object):
         return self.name
 
 class DocPushConf(object):
-    def __init__(self, name, parent_build=None):
+    def __init__(self, name, parent_build=None, branch="master"):
         self.name = name
         self.parent_build = parent_build
+        self.branch = branch
 
     def gen_workflow_job(self, phase):
         return {
             "pytorch_doc_push": {
                 "name": self.name,
+                "branch": self.branch,
                 "requires": [self.parent_build],
                 "context": "org-member",
                 "filters": gen_filter_dict(branches_list=["nightly"])
@@ -195,12 +197,40 @@ def gen_dependent_configs(xenial_parent_config):
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
-    for x in ["pytorch_python_doc_build", "pytorch_cpp_doc_build"]:
-        conf = HiddenConf(x, parent_build=xenial_parent_config)
-        configs.append(conf)
-        configs.append(DocPushConf(x.replace("build", "push"), x))
+    configs.append(
+        HiddenConf(
+            "pytorch_python_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_python_doc_push",
+            parent_build="pytorch_python_doc_build",
+            branch="site",
+        )
+    )
 
-    configs.append(HiddenConf("pytorch_doc_test", parent_build=xenial_parent_config))
+    configs.append(
+        HiddenConf(
+            "pytorch_cpp_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_cpp_doc_push",
+            parent_build="pytorch_cpp_doc_build",
+            branch="master",
+        )
+    )
+
+    configs.append(
+        HiddenConf(
+            "pytorch_doc_test",
+            parent_build=xenial_parent_config
+        )
+    )
     return configs
 
 
