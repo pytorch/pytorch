@@ -5522,30 +5522,6 @@
     CPU: foreach_div_list__kernel_fallback
     CUDA: foreach_tensor_div_list__kernel_cuda
 
-- func: _foreach_exp(Tensor[] tensors) -> Tensor[]
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_exp_cpu
-    CUDA: foreach_tensor_exp_cuda
-
-- func: _foreach_exp_(Tensor[](a!) self) -> Tensor[](a!)
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_exp__cpu
-    CUDA: foreach_tensor_exp__cuda
-
-- func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sqrt_cpu
-    CUDA: foreach_tensor_sqrt_cuda
-
-- func: _foreach_sqrt_(Tensor[](a!) self) -> Tensor[](a!)
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sqrt__cpu
-    CUDA: foreach_tensor_sqrt__cuda
-
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   dispatch:
