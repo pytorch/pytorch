@@ -23,12 +23,13 @@ import __future__
 import collections
 import functools
 import types
-from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
+from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
+from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
 @functools.lru_cache(None)
-def get_ignored_functions():
+def get_ignored_functions() -> Set[Callable]:
     """Return public functions that cannot be overridden by __torch_function__
 
     Returns
@@ -180,7 +181,7 @@ def get_ignored_functions():
     }
 
 @functools.lru_cache(None)
-def get_testing_overrides():
+def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -911,7 +912,7 @@ def get_testing_overrides():
     return ret
 
 
-def _get_overloaded_args(relevant_args):
+def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -975,7 +976,7 @@ def _get_overloaded_args(relevant_args):
 
 
 def handle_torch_function(
-        public_api, relevant_args, *args, **kwargs):
+        public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs) -> Any:
     """Implement a function with checks for __torch_function__ overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this
@@ -1023,7 +1024,7 @@ def handle_torch_function(
                     '__torch_function__: {}'
                     .format(func_name, list(map(type, overloaded_args))))
 
-def has_torch_function(relevant_args):
+def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     """Check for __torch_function__ implementations in the elements of an iterable
 
     Arguments
@@ -1044,7 +1045,7 @@ def has_torch_function(relevant_args):
     )
 
 @functools.lru_cache(None)
-def get_overridable_functions():
+def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
@@ -1104,13 +1105,13 @@ def get_overridable_functions():
     return overridable_funcs
 
 @functools.lru_cache(None)
-def get_tensor_methods():
+def get_tensor_methods() -> Set[Callable]:
     """ Returns a set of the overridable methods on ``torch.Tensor`` """
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 
-def is_tensor_method_or_property(func):
+def is_tensor_method_or_property(func: Callable) -> bool:
     """
     Returns True if the function passed in is a handler for a
     method or property belonging to ``torch.Tensor``, as passed
