@@ -623,8 +623,6 @@ class DistributedDataParallel(Module):
                             next in GossipGrad etc.
             hook (callable): is defined as:
                              hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-                             or
-                             hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -636,8 +634,9 @@ class DistributedDataParallel(Module):
                              by the Future and copy grads to individual parameters.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             torch._C.Future associated with the completion of
-                             c10d.ProcessGroupNCCL.work.
+                             Future associated with the completion of c10d.ProcessGroupNCCL.work.
+                             Note that this API will return a toch._C.Future which is an
+                             internal type and should be used with caution.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered
@@ -645,7 +644,11 @@ class DistributedDataParallel(Module):
 
         .. warning ::
             The Future object that hook returns should contain a result that has the same
-            shape with the tensors inside GradBucket bucket.
+            shape with the tensors inside grad bucket.
+
+        .. warning ::
+            DDP communication hook does not support single process multiple device mode.
+            Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
             DDP communication hook is experimental and subject to change.

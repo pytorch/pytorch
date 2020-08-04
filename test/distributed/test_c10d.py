@@ -3358,6 +3358,25 @@ class ReducerTest(TestCase):
             output.backward()
             optimizer.step()
 
+    def test_ddp_comm_hook_multiple_replica_check(self):
+        """
+        DDP communication hook does not support single process multiple device mode.
+        This unit test validates this condition is properly checked by reducer.
+        """
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Communication hook does not support single process multiple device mode."):
+            dist._register_comm_hook(reducer, None, dummy_hook)
+
 
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):

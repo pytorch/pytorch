@@ -1132,6 +1132,9 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr, "register_comm_hook can only be called once.");
+  TORCH_CHECK(
+      replicas_.size() == 1,
+      "Communication hook does not support single process multiple device mode.");
 
   comm_hook_ = std::move(iface);
 }
