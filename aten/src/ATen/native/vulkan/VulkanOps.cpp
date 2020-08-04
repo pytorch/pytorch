@@ -308,19 +308,23 @@ VulkanTensor transpose(
 
   std::array<int32_t, 8> idims8;
   idims8.fill(1);
+  std::array<int32_t, 8> odims8;
+  odims8.fill(1);
   std::copy(isizes.cbegin(), isizes.cend(), idims8.end() - idim);
+  std::copy(osizes.cbegin(), osizes.cend(), odims8.end() - idim);
   std::array<int32_t, 8> istrides8;
+  istrides8.fill(1);
+  std::array<int32_t, 8> ostrides8;
+  ostrides8.fill(1);
   for (int i = 6; i >= 0; --i) {
     istrides8[i] = idims8[i + 1] * istrides8[i + 1];
+    ostrides8[i] = odims8[i + 1] * ostrides8[i + 1];
   }
-
-  std::array<int32_t, 8> odims8 = idims8;
-  std::array<int32_t, 8> ostrides8 = istrides8;
   std::swap(istrides8[8 - idim + dim0], istrides8[8 - idim + dim1]);
 
   ConstBlock cb{};
   std::copy(istrides8.cbegin(), istrides8.cend(), std::begin(cb.istrides));
-  std::copy(istrides8.cbegin(), istrides8.cend(), std::begin(cb.ostrides));
+  std::copy(ostrides8.cbegin(), ostrides8.cend(), std::begin(cb.ostrides));
   std::copy(odims8.cbegin(), odims8.cend(), std::begin(cb.odims));
   cb.storageOffset = 0;
 
@@ -399,6 +403,7 @@ VulkanTensor slice(
   idims8.fill(1);
   std::copy(isizes.cbegin(), isizes.cend(), idims8.end() - idim);
   std::array<int32_t, 8> istrides8;
+  istrides8.fill(1);
   for (int i = 6; i >= 0; --i) {
     istrides8[i] = idims8[i + 1] * istrides8[i + 1];
   }

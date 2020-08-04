@@ -763,7 +763,7 @@ TEST(VulkanTest, tensor5d_transpose) {
     return;
 
   auto t_in =
-      at::empty({2, 3, 2, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      at::empty({1, 2, 3, 2, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
   for (int i = 0; i < numel; i++) {
