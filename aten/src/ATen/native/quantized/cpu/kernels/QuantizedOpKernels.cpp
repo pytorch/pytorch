@@ -2061,16 +2061,16 @@ void fake_quantize_learnable_scale_grad_tensor_kernel(
   float grad_big = quant_max - zero_point;
   auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
   // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dx) -> float {
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
     int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
     xq = std::max(std::min(xq, quant_max), quant_min);
     if (xq == quant_min) {
-      return dx * grad_small;
+      return dy * grad_small;
     } else if (xq == quant_max) {
-      return dx * grad_big;
+      return dy * grad_big;
     }
     float x_fq = static_cast<float>((xq - zero_point) * scale);
-    return dx * (x_fq - x) * inv_scale;
+    return dy * (x_fq - x) * inv_scale;
   });
 }
 
@@ -2085,11 +2085,11 @@ void fake_quantize_learnable_zero_point_grad_tensor_kernel(
   float inv_scale = 1.0f / scale;
   auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
   // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_scale, [&](float x, float dx) -> float {
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
     int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
     xq = std::max(std::min(xq, quant_max), quant_min);
     if (xq == quant_min || xq == quant_max) {
-      return dx * (-1) * scale;
+      return dy * (-1) * scale;
     }
     return 0;
   });
@@ -2138,16 +2138,16 @@ void fake_quantize_learnable_scale_grad_channel_kernel(
   float grad_big = quant_max - zero_point;
   auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
   // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dx) -> float {
+  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
     int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
     xq = std::max(std::min(xq, quant_max), quant_min);
     float x_fq = static_cast<float>((xq - zero_point) * scale);
     if (xq == quant_min) {
-      return dx * grad_small;
+      return dy * grad_small;
     } else if (xq == quant_max) {
-      return dx * grad_big;
+      return dy * grad_big;
     }
-    return dx * (x_fq - x) * inv_scale;
+    return dy * (x_fq - x) * inv_scale;
   });
 }
 
@@ -2162,11 +2162,11 @@ void fake_quantize_learnable_zero_point_grad_channel_kernel(
   float inv_scale = 1.0f / scale;
   auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
   // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_zero_point, [&](float x, float dx) -> float {
+  cpu_kernel(iter_zero_point, [&](float x, float dy) -> float {
     int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
     xq = std::max(std::min(xq, quant_max), quant_min);
     if (xq == quant_min || xq == quant_max) {
-      return dx * (-1) * scale;
+      return dy * (-1) * scale;
     }
     return 0;
   });

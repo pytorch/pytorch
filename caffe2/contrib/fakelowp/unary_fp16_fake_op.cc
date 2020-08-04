@@ -1,4 +1,3 @@
-#include <algorithm>
 #include "unary_fp16_fake_op.h"
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/utils/eigen_utils.h"
@@ -533,7 +532,14 @@ at::Half CalcSwishByLUT(at::Half x) {
 }
 
 at::Half CalcLogit(at::Half input, float eps) {
-  float x = clamp(at::Half(input), at::Half(eps), at::Half(1 - eps));
+  // Clamp the input in the range of eps to (1-eps)
+  float x = at::Half(input);
+  if (at::Half(input) < at::Half(eps)) {
+    x = at::Half(eps);
+  }
+  if (at::Half(input) > at::Half(1 - eps)) {
+    x = at::Half(1 - eps);
+  }
   if (x < 0.0f || x > 1.0f) {
     return at::Half(NAN);
   } else {
