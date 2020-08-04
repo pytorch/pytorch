@@ -228,37 +228,34 @@ at::Tensor vulkan_max_pool2d(
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 2,
       "Vulkan max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1
-      ? kH
-      : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kH = safe_downcast<int>(kernel_size[0]);
+  const int kW =
+      kernel_size.size() == 1 ? kH : safe_downcast<int>(kernel_size[1]);
   TORCH_CHECK(
       stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
       "Vulkan max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
   const int dW = stride.empty()
       ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
 
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
       "Vulkan max_pool2d: padding must be either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW =
-      padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int padH = safe_downcast<int>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int>(padding[1]);
 
   TORCH_CHECK(
       dilation.size() == 1 || dilation.size() == 2,
       "Vulkan max_pool2d: dilation must be either a single int, or a tuple of two ints");
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1
-      ? dilationH
-      : safe_downcast<int, int64_t>(dilation[1]);
+  const int dilationH = safe_downcast<int>(dilation[0]);
+  const int dilationW =
+      dilation.size() == 1 ? dilationH : safe_downcast<int>(dilation[1]);
   TORCH_CHECK(
       self.dim() == 4, "Vulkan max_pool2d is implemented for 4-dim input");
 
   const auto& x = vtensor_from_vulkan(self);
-  auto inputSize = self.sizes();
+  const auto inputSize = self.sizes();
   const int64_t iN = inputSize[0];
   const int64_t iC = inputSize[1];
   const int64_t iH = inputSize[2];
