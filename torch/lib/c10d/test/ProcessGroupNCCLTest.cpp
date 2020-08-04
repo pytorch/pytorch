@@ -406,30 +406,80 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-TEST(ProcessGroupNCCLTests, AllTests) {
-  if (!at::cuda::is_available()) {
-    LOG(INFO) << "CUDA not available, skipping test";
+class ProcessGroupNCCLTest: public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Use WORLD_SIZE and RANK environmental variables to do multi-node
+    // distributed testing
+    auto sizeEnv = std::getenv("WORLD_SIZE");
+    auto rankEnv = std::getenv("RANK");
+
+    if (sizeEnv && rankEnv) {
+      size_ = std::stoi(std::string(sizeEnv));
+      rank_ = std::stoi(std::string(rankEnv));
+    }
+    LOG(INFO) << "Multi-node world size: " << size_ << " rank: " << rank_;
+  }
+
+  bool skipTest() {
+    // Skip tests if CUDA is not available.
+    if (!at::cuda::is_available()) {
+      LOG(INFO) << "CUDA not available, skipping test";
+      return true;
+    }
+    return false;
+  }
+
+  int size_{1};
+  int rank_{0};
+};
+
+TEST_F(ProcessGroupNCCLTest, testAllreduce) {
+  if (skipTest()) {
     return;
   }
-  // Use WORLD_SIZE and RANK environmental variables to do multi-node
-  // distributed testing
-  auto sizeEnv = std::getenv("WORLD_SIZE");
-  auto rankEnv = std::getenv("RANK");
-
-  int size = 1;
-  int rank = 0;
-
-  if (sizeEnv && rankEnv) {
-    size = std::stoi(std::string(sizeEnv));
-    rank = std::stoi(std::string(rankEnv));
-    LOG(INFO) << "Multi-node world size: " << size << " rank: " << rank;
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, rank_, size_);
   }
-  // TemporaryFile file;
-  TemporaryFile file;
+}
 
-  EXPECT_NO_THROW(testAllreduce(file.path, rank, size));
-  EXPECT_NO_THROW(testBroadcast(file.path, rank, size));
-  EXPECT_NO_THROW(testReduce(file.path, rank, size));
-  EXPECT_NO_THROW(testAllgather(file.path, rank, size));
-  EXPECT_NO_THROW(testReduceScatter(file.path, rank, size));
+TEST_F(ProcessGroupNCCLTest, testBroadcast) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testReduce) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testReduce(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testAllgather) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testAllgather(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testReduceScatter(file.path, rank_, size_);
+  }
 }
