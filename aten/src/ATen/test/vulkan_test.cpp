@@ -605,3 +605,42 @@ TEST(VulkanTest, adaptive_avg_pool2d_2) {
   }
   ASSERT_TRUE(check);
 }
+
+TEST(VulkanTest, reshape) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 8, 1, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {1, 8});
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {1, 8});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, reshape2) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 3, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {2, 3, 1, 2});
+
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {2, 3, 1, 2});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}

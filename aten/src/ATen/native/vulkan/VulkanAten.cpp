@@ -163,6 +163,12 @@ at::Tensor vulkan_adaptive_avg_pool2d(
   return output;
 }
 
+at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape) {
+  return new_with_vtensor_vulkan(
+      vulkan::detail::reshape_copy(vtensor_from_vulkan(input), shape.vec()),
+      input.options());
+}
+
 Tensor vulkan_add(const Tensor& self, const Tensor& other, const Scalar alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
   const auto& x = vtensor_from_vulkan(xt);

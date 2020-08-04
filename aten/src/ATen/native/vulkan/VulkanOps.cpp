@@ -70,6 +70,24 @@ void upsample_nearest2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape) {
+  const auto shapeNumel = std::accumulate(
+      std::begin(shape), std::end(shape), 1, std::multiplies<int64_t>());
+  TORCH_INTERNAL_ASSERT(
+      shapeNumel == input.numel(),
+      "reshape_copy expects shape with equal number of elements with input Vulkan tensor");
+
+  input.sync_image_to_buffer();
+
+  VulkanTensor output{shape};
+  output.allocate_storage();
+  copy_buffer_to_buffer(
+      *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
+  return output;
+}
+
 void adaptive_avg_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
