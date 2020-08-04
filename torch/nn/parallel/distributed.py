@@ -758,11 +758,18 @@ class DistributedDataParallel(Module):
             raise TypeError("Communication hook must be callable.")
 
         sig = inspect.signature(hook)
-        if (sig.parameters['bucket'].annotation != inspect._empty and
-                sig.parameters['bucket'].annotation != dist._GradBucket):
-            raise ValueError("Communication hook: bucket annotation should be dist._GradBucket.")
+        if (
+            sig.parameters["bucket"].annotation != inspect._empty
+            and sig.parameters["bucket"].annotation != dist._GradBucket
+        ):
+            raise ValueError(
+                "Communication hook: bucket annotation should be dist._GradBucket."
+            )
 
-        if (sig.return_annotation != inspect._empty and
-                (sig.return_annotation != torch.futures.Future and
-                    sig.return_annotation != torch._C.Future)):
-            raise ValueError("Communication hook: return annotation should be torch.futures.Future or torch._C.Future.")
+        if sig.return_annotation != inspect._empty and (
+            sig.return_annotation != torch.futures.Future
+            and sig.return_annotation != torch._C.Future
+        ):
+            raise ValueError(
+                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+            )
