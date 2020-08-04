@@ -798,8 +798,8 @@ Tensor compute_T1(const Tensor& A) {
 
 // I + A + A^2 / 2
 Tensor compute_T2(const Tensor& A) {
-  // 3 for {I, A, A^2}
   auto As = _allocate_buffer(A, 3);
+  // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
   As.select(0, 2).div_(2.0);
   return As.sum(0);
@@ -808,23 +808,26 @@ Tensor compute_T2(const Tensor& A) {
 // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
 template <typename scalar_t>
 Tensor compute_T4(const Tensor& A) {
+  auto As = _allocate_buffer(A, 4);
   // 3 for {I, A, A^2}
-  auto As = _allocate_buffer(A, 3);
   _fill_matrix_powers(As, A, 3);
   
-  auto As_clone = As.clone(at::MemoryFormat::Preserve);
   at::native::matmul(
     // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
-    As.select(0, 2),
+    As.select(0, 3),
     // contains A^2
-    As_clone.select(0, 2),
+    As.select(0, 2),
     // computes (I / 2 + A / 6 + A^2 / 24)
     at::native::_compute_linear_combination(
-      As_clone, _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+      As.narrow(0, 0, 3),
+      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
     )
   );
 
-  return As.sum(0);
+  // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+  return at::native::_compute_linear_combination(
+    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  );
 }
 
 template <typename scalar_t>
