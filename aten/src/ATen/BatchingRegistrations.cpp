@@ -165,10 +165,25 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef destination) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto source_physical = self_physical.getPhysicalDims(source);
+  auto destination_physical = self_physical.getPhysicalDims(destination);
+  auto result = at::movedim(self_physical.tensor(), source_physical, destination_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto shape_physical = self_physical.getPhysicalShape(shape);
   auto result = self_physical.tensor().reshape(shape_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor unfold_batching_rule(const Tensor& self, int64_t dim, int64_t size, int64_t step) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().unfold(dim_physical, size, step);
   return self_physical.newLogicalFromPhysical(result);
 }
 
@@ -199,6 +214,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
+  m.impl("movedim.intlist", movedim_batching_rule);
+  m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
+  // NB: static_cast because there's another variant of narrow. However, we don't
+  // want to support the other variant yet bc it isn't documented...
+  m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
@@ -208,6 +228,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);
+  m.impl("unfold", unfold_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
