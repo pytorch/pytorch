@@ -3411,6 +3411,9 @@ class AbstractTestCases:
             g2_normal = q.normal_(generator=g2)
             self.assertEqual(g1_normal, g2_normal)
 
+        def test_invalid_generator_raises(self):
+            self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
+
         def test_sobolengine_unscrambled_lowdim(self):
             engine_1d = torch.quasirandom.SobolEngine(1)
             expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
@@ -12142,6 +12145,31 @@ class TestTorchDeviceType(TestCase):
         torch.cumsum(x, 0, out=y)
         self.assertFalse(y.is_contiguous())
         self.assertEqual(out, y, atol=0., rtol=0.)
+
+    def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
+        val, ind = fn(x, -1)
+        self.assertEqual(val, expected_val, atol=0, rtol=0)
+        self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+        out_val = torch.empty_like(val).t().contiguous().t()
+        out_ind = torch.empty_like(ind).t().contiguous().t()
+        fn(x, -1, out=(out_val, out_ind))
+        self.assertFalse(out_val.is_contiguous())
+        self.assertFalse(out_ind.is_contiguous())
+        self.assertEqual(out_val, expected_val, atol=0, rtol=0)
+        self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
+
+    def test_cummax_discontiguous(self, device):
+        x = torch.tensor([[0, 1, 2, 3, 2, 1], [4, 5, 6, 5, 6, 7]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[0, 1, 2, 3, 3, 3], [4, 5, 6, 6, 6, 7]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 2, 4, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummax, expected_val, expected_ind)
+
+    def test_cummin_discontiguous(self, device):
+        x = torch.tensor([[3, 2, 1, 0, 1, 2], [7, 6, 5, 4, 5, 2]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[3, 2, 1, 0, 0, 0], [7, 6, 5, 4, 4, 2]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 3, 3, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummin, expected_val, expected_ind)
+
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
