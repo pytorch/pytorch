@@ -302,6 +302,30 @@ void testExprCompareSelectDtypes() {
   ExpectAllNear(c_buffer, c_ref, 1e-7);
 }
 
+void testExprIntrinsicsDtypes() {
+  KernelScope kernel_scope;
+  constexpr int N = 256;
+  Buffer a(BufHandle("A", {N}, kDouble));
+  Buffer b(BufHandle("B", {N}, kDouble));
+  std::vector<double> a_buffer(N, -10.0);
+  std::vector<double> b_buffer(N, 0.0);
+  std::vector<double> b_ref(N, 10.0);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto fabs_expr = For::make(
+      i, 0, N, Store::make(b, {i}, fabs(Load::make(a, {i}, mask)), mask));
+
+  SimpleIREvaluator ir_eval(fabs_expr, a, b);
+  ir_eval(a_buffer, b_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+
+  assertAllEqual(a_buffer, -10.0);
+  ExpectAllNear(b_buffer, b_ref, 1e-7);
+}
+
 void testExprSubstitute01() {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);

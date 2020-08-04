@@ -660,19 +660,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     throw unimplemented_lowering(v);
   }
 
-  TORCH_API void visit(const Intrinsics* v) override {
+  template <typename T>
+  void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
     for (int i = 0; i < v->nparams(); i++) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }
-    std::vector<float> v1;
+    std::vector<T> v1;
     if (values.size() >= 1ULL) {
-      v1 = values[0].as_vec<float>();
+      v1 = values[0].as_vec<T>();
     }
-    std::vector<float> v2;
+    std::vector<T> v2;
     if (values.size() >= 2ULL) {
-      v2 = values[1].as_vec<float>();
+      v2 = values[1].as_vec<T>();
       if (v1.size() != v2.size()) {
         throw malformed_input("value size mismatch in Intrinsics", v);
       }
@@ -682,17 +683,28 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       throw unimplemented_lowering(v);
     }
 
-    std::vector<float> result(v1.size(), -1);
+    std::vector<T> result(v1.size(), -1);
     if (values.size() == 1ULL) {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics(v->op_type(), v1[i]);
+        result[i] = compute_intrinsics<T>(v->op_type(), v1[i]);
       }
     } else {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics(v->op_type(), v1[i], v2[i]);
+        result[i] = compute_intrinsics<T>(v->op_type(), v1[i], v2[i]);
       }
     }
     value_ = Value(result);
+  }
+
+  TORCH_API void visit(const Intrinsics* v) override {
+    auto ty = v->dtype().scalar_type();
+    if (ty == ScalarType::Float) {
+      visit_intrinsics_helper<float>(v);
+    } else if (ty == ScalarType::Double) {
+      visit_intrinsics_helper<double>(v);
+    } else {
+      throw unsupported_dtype();
+    }
   }
 
   void visit(const Allocate* v) override {
@@ -749,7 +761,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     apply_mutator(&intrinsics_expander);
   }
 
-  static float compute_intrinsics(IntrinsicsOp op_type, float v) {
+  template <typename T>
+  static T compute_intrinsics(IntrinsicsOp op_type, T v) {
     switch (op_type) {
       case kSin:
         return std::sin(v);
@@ -802,14 +815,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kLgamma:
         return std::lgamma(v);
       case kFrac:
-        float intpart;
+        T intpart;
         return std::modf(v, &intpart);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
-  static float compute_intrinsics(IntrinsicsOp op_type, float v1, float v2) {
+  template <typename T>
+  static T compute_intrinsics(IntrinsicsOp op_type, T v1, T v2) {
     switch (op_type) {
       case kPow:
         return std::pow(v1, v2);
