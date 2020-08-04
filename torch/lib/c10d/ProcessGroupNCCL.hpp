@@ -170,13 +170,14 @@ class ProcessGroupNCCL : public ProcessGroup {
       C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
     }
 
-    // Just returns NCCL collective's outputs. Should only be used if we know
-    // that NCCL collective's outputs are ready.
+    // Just returns NCCL collective's outputs after WorkNCCL's wait returns.
     at::IValue value() override {
+      work_->wait();
       return outputs_;
     }
 
     const at::IValue& constValue() override {
+      work_->wait();
       return outputs_;
     }
 
@@ -193,7 +194,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     // FutureNCCL has a value that was set in its constructor as NCCL
-    // collective's outputs and should be ready once workNCCL isCompleted.
+    // collective's outputs and should be ready once WorkNCCL isCompleted.
     bool hasValue() const override {
       return completed();
     }
