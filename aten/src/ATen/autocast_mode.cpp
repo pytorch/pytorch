@@ -59,6 +59,7 @@ int decrement_nesting() {
   return --nesting;
 }
 
+namespace {
 // Policies correspond to op categories that need code-divergent handling.
 // Wrapper templates below are specialized based on a policy template parameter.
 enum class CastPolicy : uint8_t {
@@ -320,7 +321,6 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::op
 }
 
 #ifndef USE_STATIC_DISPATCH
-namespace {
 /*****************************************************************************************************************
 This section performs load-time registration for autocast wrappers.
 
@@ -506,8 +506,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
     TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
 
-}
 #endif
+
+}
 
 } // namespace autocast
 } // namespace at
