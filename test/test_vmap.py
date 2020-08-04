@@ -570,6 +570,38 @@ class TestVmapOperators(TestCase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def test_movedim(self):
+        op = torch.movedim
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+
+        # movedim(tensor, int, int) variant
+        test(op, (torch.rand(B0, 2, 5), 0, 1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 5), 0, 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 2, B0, 5), 0, 1), in_dims=(2, None, None))
+        test(vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
+             (torch.rand(B1, 2, B0, 5, B2), 0, 1), in_dims=(2, None, None))
+
+        # movedim(tensor, intlist, intlist) variant
+        test(op, (torch.rand(B0, 2, 3, 5), [1, 0], [0, 2]), in_dims=(0, None, None))
+        test(op, (torch.rand(2, 3, B0, 5), [1, 0], [0, 2]), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)),
+             (torch.rand(B1, 2, B0, 5), [0, 1], [1, 0]), in_dims=(2, None, None))
+        test(vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
+             (torch.rand(B1, 2, B0, 5, B2), [0, 1], [1, 0]), in_dims=(2, None, None))
+
+    def test_narrow(self):
+        op = torch.narrow
+        test = self._vmap_view_test
+        B0, B1, B2 = 7, 11, 13
+
+        test(op, (torch.rand(B0, 2, 5), -1, 1, 3), in_dims=(0, None, None, None))
+        test(op, (torch.rand(2, B0, 5), 1, 1, 3), in_dims=(1, None, None, None))
+        test(vmap(op, in_dims=(0, None, None, None)),
+             (torch.rand(B1, 2, B0, 5), 1, 0, 0), in_dims=(2, None, None, None))
+        test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
+             (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
+
     def test_select(self):
         op = torch.select
         test = self._vmap_view_test
@@ -634,6 +666,18 @@ class TestVmapOperators(TestCase):
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
         test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 3, B2, 5),), in_dims=2)
+
+    def test_unfold(self):
+        op = torch.Tensor.unfold
+        test = self._vmap_view_test
+        B0, B1, B2 = 3, 2, 5
+
+        test(op, (torch.rand(B0, 7, 11), 0, 2, 1), in_dims=(0, None, None, None))
+        test(op, (torch.rand(7, B0, 11), 1, 4, 2), in_dims=(1, None, None, None))
+        test(vmap(op, in_dims=(0, None, None, None)),
+             (torch.rand(B1, 7, B0, 11), 1, 5, 1), in_dims=(2, None, None, None))
+        test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
+             (torch.rand(B1, 7, B0, 11, B2), -1, 2, 4), in_dims=(2, None, None, None))
 
     def test_view(self):
         test = self._vmap_view_test
