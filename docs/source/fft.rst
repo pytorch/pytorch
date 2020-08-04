@@ -1,6 +1,5 @@
 .. role:: hidden
     :class: hidden-section
-    :noindex:
 
 torch.fft
 =========
@@ -11,6 +10,8 @@ To use these functions the torch.fft module must be imported since its name
 conflicts with the :func:`torch.fft` function.
 
 .. automodule:: torch.fft
+    :noindex:
+
 .. currentmodule:: torch.fft
 
 Functions
