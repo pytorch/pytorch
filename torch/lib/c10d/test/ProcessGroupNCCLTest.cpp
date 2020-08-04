@@ -133,6 +133,24 @@ class NCCLTest : public NCCLTestBase {
   }
 
  protected:
+  // Launches sleep on every CUDA device
+  void launchDeviceSleep() {
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+  }
+
+  // Launches value initialization for every tensor
+  void valueInitialization() {
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
+    }
+  }
+
   const int numDevices_;
   THCState* state_;
   int worldSize_;
@@ -151,18 +169,8 @@ class AllreduceNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     return pg_->allreduce(tensors_);
   }
@@ -177,18 +185,8 @@ class BroadcastNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     ::c10d::BroadcastOptions options;
     options.rootRank = rootRank;
@@ -206,18 +204,8 @@ class ReduceNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     ::c10d::ReduceOptions options;
     options.rootRank = rootRank;
@@ -235,18 +223,8 @@ class AllgatherNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     return pg_->allgather(outputs_, tensors_);
   }
@@ -260,12 +238,8 @@ struct ReduceScatterNCCLTest : NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
     at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
+    launchDeviceSleep();
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
