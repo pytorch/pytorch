@@ -2445,6 +2445,7 @@ class _DistTestBase(object):
         # Ensure that each rank processes the same number of samples.
         validate_global_samples(local_num_samples)
 
+    @require_backend({"nccl", "gloo"})
     @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
     def test_allgather_object(self):
         # Ensure stateful objects can be allgathered
@@ -2477,6 +2478,7 @@ class _DistTestBase(object):
                 [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
             )
 
+    @require_backend({"gloo"})
     @unittest.skipIf(BACKEND == "nccl", "NCCL does not support gather")
     def test_gather_object(self):
         # Ensure stateful objects can be gathered
