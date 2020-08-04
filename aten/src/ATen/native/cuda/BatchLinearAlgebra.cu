@@ -23,7 +23,7 @@ template<class scalar_t>
 void cusolver_LU(int m, int n, scalar_t* dA, int ldda, int* ipiv, int* info);
 
 template<class scalar_t>
-void cusolver_Getri(int n, scalar_t* dA, int ldda, int* ipiv, int* info, const Tensor& ret);
+void cusolver_Getrs(int n, int nrhs, scalar_t* dA, int lda, int* ipiv, scalar_t* ret, int ldb, int* info);
 
 template<>
 void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
@@ -48,16 +48,16 @@ void cusolver_LU<float>(int m, int n, float* dA, int ldda, int* ipiv, int* info)
 }
 
 template<>
-void cusolver_Getri<double>(int n, double* dA, int ldda, int* ipiv, int* info, const Tensor& ret) {
+void cusolver_Getrs<double>(int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
   Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, n, dA, ldda, ipiv, ret.data_ptr<double>(), n, dinfo.data_ptr<int>()));
+  TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
   *info = dinfo.item<int>();
 }
 
 template<>
-void cusolver_Getri<float>(int n, float* dA, int ldda, int* ipiv, int* info, const Tensor& ret) {
+void cusolver_Getrs<float>(int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
   Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, n, dA, ldda, ipiv, ret.data_ptr<float>(), n, dinfo.data_ptr<int>()));
+  TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
   *info = dinfo.item<int>();
 }
 
@@ -699,13 +699,13 @@ static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret)
     return;
   }
   ret = at::eye(n, self.options());
-  cusolver_Getri<scalar_t>(n, self_data, n, ipiv.data_ptr<int>(), &info_tmp, ret);
+  cusolver_Getrs<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), ret.data_ptr<scalar_t>(), n, &info_tmp);
   info = info_tmp;
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
+  auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
-    auto self_inv_working_copy = cloneBatchedColumnMajor(self);
     std::vector<int64_t> infos(batchCount(self), 0);
     auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
@@ -719,10 +719,10 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
     Tensor ret;
     int64_t info = 0;
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse<scalar_t>(self.clone(at::MemoryFormat::Contiguous).transpose_(-2, -1), info, ret);
+      apply_single_inverse<scalar_t>(self_inv_working_copy, info, ret);
     });
     singleCheckErrors(info, "inverse_cuda");
-    return ret;
+    return ret.transpose(-2, -1);
   }
 }
 
@@ -917,7 +917,7 @@ AT_ERROR("lu: MAGMA library not found in "
     if (get_pivots) {
       Tensor piv_tmp = at::empty({k}, at::device(at::kCUDA).dtype(at::kInt));
       cusolver_LU<scalar_t>(
-        m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
+        m, n, self_data, m, piv_tmp.data_ptr<int>(), info_tmp.data_ptr<int>());
       pivots.copy_(piv_tmp);
     } else {
       magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
