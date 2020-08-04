@@ -17,10 +17,7 @@ class TestForeach(TestCase):
     # Ops with scalar
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar__same_size_tensors(self, device, dtype):
-        N = 20
-        H = 20
-        W = 20
-        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
 
         # bool tensor + 1 will result in int64 tensor
         if dtype == torch.bool:
@@ -29,14 +26,14 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
 
         for t in tensors:
-            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
+            self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype))
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_same_size_tensors(self, device, dtype):
         N = 20
         H = 20
         W = 20
-        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
@@ -47,17 +44,13 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_different_size_tensors(self, device, dtype):
-        N = 20
-        H = 20
-        W = 20
-
-        tensors = [torch.zeros(H + n, W + n, device=device, dtype=dtype) for n in range(N)]
+        tensors = [torch.zeros(self.H + n, self.W + n, device=device, dtype=dtype) for n in range(self.N)]
         res = torch._foreach_add(tensors, 1)
 
         # bool tensor + 1 will result in int64 tensor
         if dtype == torch.bool:
             dtype = torch.int64
-        self.assertEqual([torch.ones(H + n, W + n, device=device, dtype=dtype) for n in range(N)], torch._foreach_add(tensors, 1))
+        self.assertEqual([torch.ones(self.H + n, self.W + n, device=device, dtype=dtype) for n in range(self.N)], torch._foreach_add(tensors, 1))
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
