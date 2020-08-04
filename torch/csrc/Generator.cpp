@@ -34,11 +34,14 @@ PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
   return self.release();
 }
 
-static void THPGenerator_dealloc(THPGenerator* self)
+static void THPGenerator_dealloc(PyObject* _self)
 {
-  self->cdata.set_pyobj(nullptr);
-  self->cdata.~Generator();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  if (self->cdata.defined()) {
+    self->cdata.set_pyobj(nullptr);
+    self->cdata.~Generator();
+  }
+  Py_TYPE(_self)->tp_free(_self);
 }
 
 static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -178,7 +181,7 @@ PyTypeObject THPGeneratorType = {
   "torch._C.Generator",                   /* tp_name */
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
-  (destructor)THPGenerator_dealloc,            /* tp_dealloc */
+  THPGenerator_dealloc,                        /* tp_dealloc */
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

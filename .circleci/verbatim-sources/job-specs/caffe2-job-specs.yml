@@ -5,6 +5,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -64,6 +65,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
