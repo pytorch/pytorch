@@ -1564,6 +1564,11 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
+def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
+    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+    tensor = zeros(g, shape, dtype, layout, device)
+    return g.op("EyeLike", tensor)
+
 @parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
     if step != 1:
@@ -2478,3 +2483,34 @@ def kl_div(g, input, target, reduction, log_target):
     else:
         return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
                                           "request ONNX export support for the missing reduction type.")
+
+@parse_args('v', 'v', 'is', 'i')
+def as_strided(g, self, sizes, strides, offset=None):
+    sizes = sym_help._maybe_get_const(sizes, 'is')
+    rank = len(strides)
+    self_1d = g.op("Reshape", self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    if not sym_help._is_value(sizes):
+        ind = torch.tensor([0], dtype=torch.long)
+        for i, (size, stride) in enumerate(zip(sizes, strides)):
+            r_size = [1] * rank
+            r_size[i] = -1
+            ind = ind + torch.arange(size).view(r_size) * stride
+        if offset:
+            ind = ind + offset
+        return g.op("Gather", self_1d, g.op("Constant", value_t=ind))
+    else:
+        ind = None
+        for i, stride in enumerate(strides):
+            r_size = [1] * rank
+            r_size[i] = -1
+            size = select(g, sizes, g.op("Constant", value_t=torch.tensor([0])), g.op("Constant", value_t=torch.tensor(i)))
+            tmp_ind = g.op("Reshape", arange(g, size, 4, None, None, None), g.op("Constant", value_t=torch.tensor(r_size)))
+            tmp_ind = g.op("Mul", tmp_ind, g.op("Constant", value_t=torch.tensor([stride])))
+            if ind is None:
+                ind = tmp_ind
+            else:
+                ind = g.op("Add", ind, tmp_ind)
+        if offset:
+            ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
+        return g.op("Gather", self_1d, ind)
+
