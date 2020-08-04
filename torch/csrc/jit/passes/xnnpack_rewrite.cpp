@@ -277,16 +277,16 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::set<MobileOptimizerType>& optimization_blacklist,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
-  if (!optimization_blacklist.count(
+  if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_methods);
@@ -299,11 +299,11 @@ script::Module optimizeForMobile(
   // will have to explicitly call Inlining pass.
   runCanonicalOptimizations(cloned_module);
 
-  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
   }
 
-  if (!optimization_blacklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
     FuseAddRelu(cloned_module);
   }
 
@@ -334,7 +334,7 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::set<MobileOptimizerType>& blacklist,
+    const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "

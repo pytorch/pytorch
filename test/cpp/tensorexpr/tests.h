@@ -41,6 +41,8 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(SplitWithTailWithLoopOptions)           \
+  _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
   _(ScheduleInlineFunc01)                   \
@@ -58,9 +60,9 @@ namespace jit {
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
   _(ReduceRfactor)                          \
-  _(Reduce3DRfactor)                        \
-  _(Reduce3DRfactor2)                       \
-  _(Reduce3DRfactor3)                       \
+  _(Reduce3DRfactorInternal)                \
+  _(Reduce3DRfactorInner)                   \
+  _(Reduce3DRfactorOuter)                   \
   _(Reduce3DRfactorWithOuter)               \
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
@@ -150,6 +152,7 @@ namespace jit {
   _(SimplifyFoldComplexDifference)          \
   _(SimplifyIfComponents)                   \
   _(SimplifyOpaqueTerms)                    \
+  _(SimplifySymbolicMinMax)                 \
   _(SimplifyWontReorderFloat)               \
   _(SimplifyRoundModPattern)                \
   _(SimplifyRoundModPatternFactorization)   \
@@ -173,6 +176,14 @@ namespace jit {
   _(BoundsInference_4)                      \
   _(BoundsInference_5)                      \
   _(BoundsInference_6)                      \
+  _(BoundsInferenceNonOverlapping)          \
+  _(BoundsInferenceAdjacent)                \
+  _(MergeInferredBounds)                    \
+  _(MergeInferredLoadStoreDiff)             \
+  _(MergeInferred2DBounds)                  \
+  _(MergeAdjacentBounds)                    \
+  _(MergeSymbolicBounds)                    \
+  _(MergeSymbolicAdjacent)                  \
   _(LoopNestComputeAt_1)                    \
   _(LoopNestComputeAt_2)                    \
   _(LoopNestComputeAt_3)                    \
@@ -191,6 +202,7 @@ namespace jit {
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
+  _(Kernel_4)                               \
   _(FuserPass_1)                            \
   _(FuserPass_2)
 
@@ -315,8 +327,9 @@ namespace jit {
   _(LLVMIfThenElseTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
-  _(LLVMRFactorReduction)                  \
-  _(LLVMRFactorVectorizedReduction)
+  _(LLVMRFactorReduction)
+
+// _(LLVMRFactorVectorizedReduction)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \

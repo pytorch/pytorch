@@ -339,6 +339,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
+   .. automethod:: isposinf
+   .. automethod:: isneginf
    .. automethod:: isnan
    .. automethod:: is_contiguous
    .. automethod:: is_complex
@@ -351,6 +353,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
    .. automethod:: istft
+   .. automethod:: isreal
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: lcm
@@ -483,6 +486,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sigmoid_
    .. automethod:: sign
    .. automethod:: sign_
+   .. automethod:: signbit
    .. automethod:: sgn
    .. automethod:: sgn_
    .. automethod:: sin

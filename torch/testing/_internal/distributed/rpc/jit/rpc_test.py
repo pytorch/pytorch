@@ -754,7 +754,7 @@ class JitRpcAsyncOpTest:
             ret = fut.wait()
             return ret
 
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
             ret = rpc_async_call_remote_raising_torchscript_in_torchscript(
                 dst_worker_name
             )
@@ -1111,9 +1111,9 @@ class JitRpcTest(
             remote_add = [
                 remote_event
                 for remote_event in remote_events
-                if "add" in remote_event.name
+                if "aten::add" in remote_event.name
             ][0]
-            remote_add_profiled_name = f"{profiled_name}#remote_op: add"
+            remote_add_profiled_name = f"{profiled_name}#remote_op: aten::add"
             self.assertEqual(remote_add.name, remote_add_profiled_name)
 
     def test_record_function_jit_end_callbacks_with_fork(self):

@@ -26,7 +26,7 @@ bool WeightedSumOp<CUDAContext>::RunOnDevice() {
 
 template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, int32_t, int64_t>>::call(
+  return DispatchHelper<TensorTypes<float, at::Half, int32_t, int64_t>>::call(
       this, Input(0));
 }
 

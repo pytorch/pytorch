@@ -660,7 +660,7 @@ def trace(
         strict (``bool``, optional): run the tracer in a strict mode or not
             (default: ``True``). Only turn this off when you want the tracer to
             record your mutable container types (currently ``list``/``dict``)
-            and you are sure that the containuer you are using in your
+            and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
 
@@ -825,7 +825,7 @@ def trace_module(
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
     using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
-    method names to example inputs to trace (see the ``example_inputs``) argument below.
+    method names to example inputs to trace (see the ``inputs``) argument below.
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
@@ -847,10 +847,10 @@ def trace_module(
         check_inputs (list of dicts, optional): A list of dicts of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a set of input arguments that would
-                                                 be specified in ``example_inputs``. For best results, pass in a
+                                                 be specified in ``inputs``. For best results, pass in a
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original ``example_inputs`` are used for checking
+                                                 If not specified, the original ``inputs`` are used for checking
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.

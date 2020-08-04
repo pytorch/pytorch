@@ -130,20 +130,6 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
-         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack* stack) {
-           bool create_graph = pop(stack).toBool();
-           auto retain_graph = pop(stack).toOptional<bool>();
-           IValue gradient_ivalue = pop(stack);
-           at::Tensor gradient = gradient_ivalue.isNone()
-               ? at::Tensor()
-               : gradient_ivalue.toTensor();
-           at::Tensor self = pop(stack).toTensor();
-           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-           self.backward(gradient, keep_graph, create_graph);
-         },
-         aliasAnalysisConservative()),
-     Operator(
          "aten::save(t item, str filename) -> ()",
          [](Stack* stack) {
            auto filename = pop(stack).toStringRef();
@@ -716,6 +702,7 @@ RegisterOperators reg2({
         CREATE_SPECIALIZED_LIST_OPS("float", double)
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
@@ -775,6 +762,10 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::eq.str_list(str[] a, str[] b) -> bool",
+        listEq<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -785,6 +776,10 @@ RegisterOperators reg2({
     Operator(
         "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne.str_list(str[] a, str[] b) -> bool",
+        listNe<std::string>,
         aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
@@ -849,23 +844,6 @@ RegisterOperators reg2({
           push(stack, ss.str());
         },
         aliasAnalysisFromSchema()),
-#define CREATE_COPY_OP(other_type, c_type)                               \
-  Operator(                                                              \
-      "aten::copy_." #other_type "(Tensor(a!) self, " #other_type        \
-      " other) -> Tensor(a!)",                                           \
-      [](Stack* stack) {                                                 \
-        at::Tensor t;                                                    \
-        c_type other;                                                    \
-        pop(stack, t, other);                                            \
-        std::move(t) = other; /* NOLINT(bugprone-use-after-move) */      \
-        push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
-      },                                                                 \
-      aliasAnalysisFromSchema())
-
-    CREATE_COPY_OP(Tensor, at::Tensor),
-    CREATE_COPY_OP(int, int64_t),
-    CREATE_COPY_OP(float, double),
-#undef CREATE_COPY_OP
 
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
