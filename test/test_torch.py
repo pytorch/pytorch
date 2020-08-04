@@ -17065,11 +17065,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         new_stride = [3, 1, 1]
         sx = torch.as_strided(x, size=new_shape, stride=new_stride)
 
-        torch_fn = lambda x: torch.bmm(x, x)
-        np_fn = lambda x: np.matmul(x, x)
+        torch_fn = lambda x: torch.bmm(x, x)  # noqa: E731
+        np_fn = lambda x: np.matmul(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx)
 
-        torch_fn = lambda x: torch.mm(x, x)
+        torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @onlyCPU
