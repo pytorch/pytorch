@@ -54,6 +54,13 @@ def skipIfEmbed(func):
         return func(self)
     return wrapper
 
+def skipIfNoEmbed(func):
+    def wrapper(self):
+        if not self.embed_params:
+            raise unittest.SkipTest("Skip debug embed_params test")
+        return func(self)
+    return wrapper
+
 # def import_model(proto, input, workspace=None, use_gpu=True):
 #    model_def = onnx.ModelProto.FromString(proto)
 #    onnx.checker.check_model(model_def)
@@ -504,6 +511,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(inception_v3(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, input=x)
 
+    @skipIfNoEmbed
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,

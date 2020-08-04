@@ -922,6 +922,16 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
+    def test_all_gather(self):
+        info = rpc.get_worker_info()
+        results = rpc.api._all_gather(info.id)
+        expected = {}
+        for info in rpc._get_current_rpc_agent().get_worker_infos():
+            expected[info.name] = info.id
+
+        self.assertEqual(expected, results)
+
+    @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
         self._run_uneven_workload()
@@ -3105,6 +3115,21 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, errMsg):
                 rpc.remote(dst, fail_on_fut, args=(fut,))
 
+    @dist_init
+    def test_future_done(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut = rpc.rpc_async(dst, torch.add, args=(torch.zeros(2), 1))
+        fut.wait()
+        self.assertTrue(fut.done())
+
+    @dist_init
+    def test_future_done_exception(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut = rpc.rpc_async(dst, raise_func)
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            fut.wait()
+        self.assertTrue(fut.done())
+
     def _test_future_cb(self, func):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
@@ -3232,7 +3257,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_async_class_method(self):
-        print(dir(AsyncExecutionClass.class_async_add))
         self._test_async_function(AsyncExecutionClass.class_async_add)
 
     @dist_init
@@ -3359,6 +3383,8 @@ class RpcTest(RpcAgentTestFixture):
         # Test PG
         dist.barrier()
 
+        rpc.shutdown()
+
     @dist_init(setup_rpc=False)
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
@@ -3383,6 +3409,8 @@ class RpcTest(RpcAgentTestFixture):
 
         # Test PG
         dist.barrier()
+
+        rpc.shutdown()
 
     @dist_init
     def test_wait_all_with_exception(self):
