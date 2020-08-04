@@ -898,19 +898,24 @@ void initJitScriptBindings(PyObject* module) {
           "_save_for_mobile",
           [](Module& m,
              const std::string& filename,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            m._save_for_mobile(filename, _extra_files);
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_debug_info_in_bytecode = false) {
+            m._save_for_mobile(filename, _extra_files, _save_debug_info_in_bytecode);
           },
           py::arg("filename"),
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_debug_info_in_bytecode") = false)
       .def(
           "_save_to_buffer_for_mobile",
-          [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+          [](Module& m,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_debug_info_in_bytecode = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files);
+            m._save_for_mobile(buf, _extra_files, _save_debug_info_in_bytecode);
             return py::bytes(buf.str());
           },
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_debug_info_in_bytecode") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
