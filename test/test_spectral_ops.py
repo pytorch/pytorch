@@ -49,12 +49,12 @@ class TestFFT(TestCase):
             return torch.fft.fft(t)
         scripted_fn = torch.jit.script(fn)
 
-        # TODO: restore the following function once t.fft() is torch.fft.fft
+        # TODO: revisit the following function if t.fft() becomes torch.fft.fft
         # def method_fn(t):
         #     return t.fft()
         # scripted_method_fn = torch.jit.script(method_fn)
 
-        # TODO: restore the following line once t.fft() is torch.fft.fft
+        # TODO: revisit the following function if t.fft() becomes torch.fft.fft
         # torch_fns = (torch.fft.fft, torch.Tensor.fft, scripted_fn, scripted_method_fn)
         torch_fns = (torch.fft.fft, scripted_fn)
 
