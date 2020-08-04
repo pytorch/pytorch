@@ -113,6 +113,8 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort',
+    # Foreach functions for now.
+    '_foreach_add_',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -576,6 +578,8 @@ def format_return_variables(declaration):
 
     def get_return_value():
         if inplace:
+            if len(declaration['returns']) > 0 and declaration['returns'][0]['dynamic_type'] == 'TensorList':
+                return 'self.vec()'
             return 'self'
         if is_out_fn:
             return_names = [arg['name'] for arg in arguments

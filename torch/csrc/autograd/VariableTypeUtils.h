@@ -88,6 +88,11 @@ inline void increment_version(Tensor & t) {
   impl::bump_version(t);
 }
 
+inline void increment_version(at::TensorList tensors) {
+  for (auto & t : tensors)
+    impl::bump_version(t);
+}
+
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   variable_list& out;

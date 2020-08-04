@@ -332,6 +332,10 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const c10::optional<at::Tensor>& tensor);
 
+TORCH_API void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const at::TensorList tensors);
+
 template <
     typename T,
     typename = torch::enable_if_t<(
@@ -355,6 +359,7 @@ TORCH_API void addOutput(
     Node* node,
     const c10::intrusive_ptr<c10::ivalue::Object>& output);
 
+TORCH_API void addOutput(Node* node, const at::TensorList outputs);
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);

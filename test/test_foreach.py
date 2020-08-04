@@ -5,6 +5,23 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
+    def test_add_scalar__same_size_tensors(self, device, dtype):
+        N = 20
+        H = 20
+        W = 20
+        tensors = []
+        for _ in range(N):
+            tensors.append(torch.zeros(H, W, device=device, dtype=dtype))
+
+        if dtype == torch.bool:
+            torch._foreach_add_(tensors, True)
+        else:
+            torch._foreach_add_(tensors, 1)
+
+        for t in tensors:
+            self.assertEqual(t, torch.ones(H, W, device=device, dtype=dtype))
+
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_same_size_tensors(self, device, dtype):
         N = 20
         H = 20
