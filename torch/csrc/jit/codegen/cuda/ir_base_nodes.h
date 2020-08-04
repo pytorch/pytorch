@@ -228,6 +228,8 @@ class TORCH_CUDA_API Val : public Statement {
     return isScalar() && dtype_ == DataType::Int;
   }
 
+  c10::optional<int64_t> getInt() const;
+
   bool isZeroInt() const;
   bool isOneInt() const;
 

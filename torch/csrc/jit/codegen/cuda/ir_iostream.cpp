@@ -698,7 +698,7 @@ void IRPrinter::handle(const kir::GridReduction* gr) {
   indent();
   // Since block-level reduction is already done, those dimensions
   // with tidx/y/z being true do not participate in the grid reduction.
-  os << "bool " << kir::getPredicateFlagName(out->view()) << " = "
+  os << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
      << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
      << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false") << ", "
      << (!tidx ? "true" : "false") << ", " << (!tidy ? "true" : "false") << ", "

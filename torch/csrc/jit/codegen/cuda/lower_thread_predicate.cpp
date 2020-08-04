@@ -18,7 +18,7 @@ Val* getPredicatePerParallelType(
     TORCH_INTERNAL_ASSERT(!sources.empty(), "No predicate source found");
     TORCH_INTERNAL_ASSERT(sources.size() == 1, "Multiple sources detected");
     auto src = *sources.begin();
-    auto flag_name = kir::getPredicateFlagName(src);
+    auto flag_name = kir::GridReduction::getPredicateFlagName(src);
     return new kir::NamedScalar(flag_name, DataType::Bool);
   } else {
     return kir::eqExpr(kir::NamedScalar::getParallelIndex(pt), new kir::Int(0));

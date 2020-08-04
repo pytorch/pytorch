@@ -114,22 +114,25 @@ bool Val::isConstScalar() const {
   return ConstCheck::isConst(this);
 }
 
+c10::optional<int64_t> Val::getInt() const {
+  if (isConstScalar() && isAnInt()) {
+    if (this->getValType() == ValType::Scalar) {
+      return this->as<Int>()->value();
+    } else if (this->getValType() == ValType::KirScalar) {
+      return this->as<kir::Int>()->value();
+    }
+  }
+  return c10::optional<int64_t>();
+}
+
 bool Val::isZeroInt() const {
-  if (isConstScalar() && getValType().value() == ValType::Scalar &&
-      getDataType().value() == DataType::Int &&
-      this->as<Int>()->value().has_value() &&
-      this->as<Int>()->value() == Int::ScalarType(0))
-    return true;
-  return false;
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 0;
 }
 
 bool Val::isOneInt() const {
-  if (isConstScalar() && getValType().value() == ValType::Scalar &&
-      getDataType().value() == DataType::Int &&
-      this->as<Int>()->value().has_value() &&
-      this->as<Int>()->value() == Int::ScalarType(1))
-    return true;
-  return false;
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 1;
 }
 
 c10::optional<DataType> Val::getDataType() const {

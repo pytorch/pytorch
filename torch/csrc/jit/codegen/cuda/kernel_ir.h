@@ -529,6 +529,8 @@ class TORCH_CUDA_API GridReduction : public Expr {
     return sync_buffer_;
   }
 
+  static std::string getPredicateFlagName(const TensorView* val);
+
  private:
   ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;

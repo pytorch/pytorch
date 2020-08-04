@@ -135,6 +135,29 @@ void IndexLowering::handle(TernaryOp* top) {
   pushBack(new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
 }
 
+namespace {
+
+void allocateGridReductionFlag(TensorView* out_tv, Expr* current_scope_expr) {
+  auto flag_name = kir::GridReduction::getPredicateFlagName(out_tv);
+  auto flag_var = new kir::Allocate(
+      new kir::NamedScalar(flag_name, DataType::Bool),
+      MemoryType::Local,
+      new kir::Int(1));
+  // When enclosed by IfThenElse, place the variable outside of the
+  // IfThenElse. This IfThenElse is assumed to be the prediate for
+  // this grid reduction expression.
+  if (current_scope_expr->getExprType() == ExprType::IfThenElse) {
+    scope_utils::insertBefore(
+        scope_utils::getParent(current_scope_expr),
+        current_scope_expr,
+        flag_var);
+  } else {
+    scope_utils::pushBack(current_scope_expr, flag_var);
+  }
+}
+
+} // namespace
+
 void IndexLowering::handle(ReductionOp* rop) {
   TORCH_INTERNAL_ASSERT(
       ir_utils::isTVOp(rop),
@@ -175,6 +198,10 @@ void IndexLowering::handle(ReductionOp* rop) {
   }
 
   if (is_grid_reduce) {
+    // First, declare a boolean flag variable storing the return value
+    // of gridReduce.
+    allocateGridReductionFlag(out_tv, active_scope_expr);
+
     std::vector<IterDomain*> buffer_ids(out_tv->domain()->domain());
     buffer_ids.erase(
         std::remove_if(
