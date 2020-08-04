@@ -44,8 +44,8 @@ struct Conv2DParams final {
       int64_t DY,
       int64_t DX,
       int64_t G)
-      // TODO: What if inputSizes is not of the expected dimensionality?
-      // Should check prior to indexing.
+    // TODO: What if inputSizes is not of the expected dimensionality?
+    // Should check prior to indexing.
       : N(inputSizes[0]),
         C(inputSizes[1]),
         H(inputSizes[2]),
@@ -75,8 +75,8 @@ struct Conv2DParams final {
       c10::IntArrayRef stride,
       c10::IntArrayRef dilation,
       int64_t groups)
-      // TODO: What if these parameters are not of the correct dimensionality?
-      // Should check prior to indexing.
+    // TODO: What if these parameters are not of the correct dimensionality?
+    // Should check prior to indexing.
       : Conv2DParams(
             inputSizes,
             weightSizes[0],
