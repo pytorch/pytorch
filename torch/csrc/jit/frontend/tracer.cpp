@@ -884,8 +884,8 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
 }
 
 void ensureUniqueIfOutOfPlaced(const char* name, const at::TensorList tensors) {
-  for (int i = 0; i < tensors.size(); i++) {
-    ensureUniqueIfOutOfPlaced(name, tensors[i]);
+  for (auto& t : tensors) {
+    ensureUniqueIfOutOfPlaced(name, t);
   }
 }
 
