@@ -228,6 +228,7 @@ enum class OpType { conv2d, hardtanh_, mean, addmm };
 class BaseOp {
  public:
   BaseOp(OpType t) : type(t) {}
+  virtual ~BaseOp() = default;
   virtual at::Tensor run(at::Tensor&) = 0;
   virtual std::string toString() = 0;
   OpType type;
