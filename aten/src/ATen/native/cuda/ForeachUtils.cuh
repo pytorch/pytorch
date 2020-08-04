@@ -55,9 +55,9 @@ bool check_fast_route(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
   auto expected_dtype = tensors1[0].dtype();
-  auto expected_device = tensors[0].device();
+  auto expected_device = tensors1[0].device();
 
-  for (site_t i = 0; i < tensors1.size(); i++) {
+  for (int i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors from tensor lists have different size.");
 
     if (tensors1[i].dtype() != expected_dtype || 
