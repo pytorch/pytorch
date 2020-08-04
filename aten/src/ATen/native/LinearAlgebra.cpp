@@ -926,10 +926,12 @@ Tensor compute_T12(const Tensor& A) {
 
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
-  const auto A6 = Bs.select(0, 2) + at::matmul(Bs.select(0, 3), Bs.select(0, 3));
-  const auto res = Bs.select(0, 0) + at::matmul(Bs.select(0, 1) + A6, A6);
-
-  return res;
+  // compute A6
+  Bs.select(0, 2).add_(at::matmul(Bs.select(0, 3), Bs.select(0, 3)));
+  return Bs.select(0,0).add_(at::matmul(
+    Bs.select(0, 1).add_(Bs.select(0, 2)),
+    Bs.select(0, 2)
+  ));
 }
 
 template <typename scalar_t>
