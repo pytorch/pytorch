@@ -126,6 +126,12 @@ struct BinaryOpScalarFunctor {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
+    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+    if (!check_fast_route(tensors, scalar)) {
+        return at::native::foreach_add_scalar_kernel_fallback(tensors, scalar);
+    }
+
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
     for (const auto& t: tensors) {
