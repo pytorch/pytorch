@@ -165,10 +165,10 @@ struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_quantizer_arg<Ar
 template <class Result>
 struct PopResult final {
   static Result call(Stack& stack) {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
-      "Boxed kernel was expected to push one return value to the stack, but instead pushed ",
-      stack.size(), " values."
+      "Boxed kernel was expected to return one value on the stack, ",
+      "but instead pushed ", stack.size(), " values."
     );
     return std::move(stack[0]).to<Result>();
   }
@@ -181,10 +181,10 @@ struct PopResult<std::tuple<Types...>> final {
   static Result call(Stack& stack) {
     // for tuple return types, boxed kernel has pushed multiple values onto the stack
     constexpr int RetCount = sizeof...(Types);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
-      "Boxed kernel was expected to push ", RetCount, " return values to the stack, but instead pushed ",
-      stack.size(), " values."
+      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
+      "but instead pushed ", stack.size(), " values."
     );
     return pop_to_tuple_impl(stack, std::make_index_sequence<RetCount>());
   }
@@ -225,10 +225,10 @@ struct BoxedKernelWrapper<
       },
       [&] {
         // op returns void, boxed kernel has pushed nothing onto stack.
-        TORCH_CHECK(
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           stack.size() == 0,
-          "Boxed kernel for op with void return type pushed ", stack.size(),
-          " values to the stack."
+          "Boxed kernel was expected to return no values on the stack, ",
+          "but instead returned ", stack.size(), " values."
         );
       }
     );
@@ -263,9 +263,10 @@ struct BoxedKernelWrapper<
     torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
     );
 
     return outArg;
@@ -304,11 +305,10 @@ struct BoxedKernelWrapper<
     torch::jit::push(stack, std::forward<Args>(args)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
-      "Boxed kernel was expected to return ", RetCount,
-      " values on the stack, but instead returned ", stack.size(),
-      " values."
+      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
+      "but instead returned ", stack.size(), " values."
     );
 
     auto result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
