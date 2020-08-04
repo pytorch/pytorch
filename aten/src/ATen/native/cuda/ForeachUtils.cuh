@@ -27,10 +27,15 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
 bool check_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
+  auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
     if (t.dtype() != expected_dtype) {
       return false;
+    }
+
+    if (t.device() != expected_device) {	
+      return false;	
     }
 
     if (t.layout() != at::kStrided) {
@@ -57,7 +62,7 @@ bool check_fast_route(TensorList tensors1, TensorList tensors2) {
   auto expected_dtype = tensors1[0].dtype();
   auto expected_device = tensors1[0].device();
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (int64_t i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors from tensor lists have different size.");
 
     if (tensors1[i].dtype() != expected_dtype || 
