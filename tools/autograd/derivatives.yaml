@@ -896,7 +896,7 @@
   self: grad * self.cos()
 
 - name: sinc(Tensor self) -> Tensor
-  self: grad * (self.cos() * self - self.sin()) / self.pow(2)
+  self: grad * (at::cos(self * M_PI) / self - at::sin(self * M_PI) / ( M_PI * self.pow(2)))
 
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh()
