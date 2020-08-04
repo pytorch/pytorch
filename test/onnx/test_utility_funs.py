@@ -780,6 +780,33 @@ class TestUtilityFuns(TestCase):
         ort_outs2 = ort_sess.run(None, ort_inputs)
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
+    def test_onnx_function_substitution_pass(self):
+
+        @torch.jit.script
+        def f(x : torch.Tensor, y : torch.Tensor):
+            z = x - y
+            return x + z
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                return f(x, y)
+
+        model = MyModule()
+        input_1 = torch.tensor(11)
+        input_2 = torch.tensor(12)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        # Check that the prim::Constant node in the graph for representing the
+        # scripted function `f` is removed and the following prim::CallFunction
+        # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
+        for node in graph.nodes():
+            assert node.kind() != "prim::Constant"
+        assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -797,11 +824,6 @@ TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
 
-
-# opset 12tests
-TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 if __name__ == '__main__':
     run_tests()
