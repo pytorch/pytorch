@@ -3438,6 +3438,39 @@ class TestNN(NNTestCase):
             # output_2d in shape of [T, 1, D]
             self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
+    def test_multihead_self_attn(self):
+        import copy
+        seq_len, bsz, emb_dim, num_heads = 3, 2, 4, 2
+        attn_orig = torch.nn.MultiheadAttention(embed_dim=emb_dim, num_heads=num_heads)
+        attn_equiv = copy.deepcopy(attn_orig)
+
+        def forward_helper(attn, x, attn_mask, key_padding_mask):
+            o, _ = multi_head_attention_forward(x, x, x, emb_dim, num_heads, attn.in_proj_weight, attn.in_proj_bias,
+                                                attn.bias_k, attn.bias_v, attn.add_zero_attn, attn.dropout,
+                                                attn.out_proj.weight, attn.out_proj.bias, training=True,
+                                                key_padding_mask=key_padding_mask,
+                                                attn_mask=attn_mask)
+            loss = o[:seq_len-1, :].sum()
+            loss.backward()
+            return loss
+
+        # Last step of second sequence cannot attend to anything, but is not used in loss calculation
+        key_padding_mask = torch.as_tensor([[False, False, False], [False, True, True]])
+        attn_mask = torch.as_tensor([[False, True, True], [False, False, True], [True, False, False]])
+        x = torch.rand(seq_len, bsz, emb_dim)
+        loss_orig = forward_helper(attn_orig, x, attn_mask, key_padding_mask)
+
+        # Remove last step both sequences as they are not used in loss calculation - equivalent to orig
+        key_padding_mask = torch.as_tensor([[False, False], [False, True]])
+        attn_mask = torch.as_tensor([[False, True], [False, False]])
+        x = x[:seq_len-1, :, :]
+        loss_equiv = forward_helper(attn_equiv, x, attn_mask, key_padding_mask)
+
+        self.assertEqual(loss_orig, loss_equiv)
+        for (orig_p, equiv_p) in zip(attn_orig.parameters(), attn_equiv.parameters()):
+            self.assertEqual(orig_p, equiv_p)
+            self.assertEqual(orig_p.grad, equiv_p.grad)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
