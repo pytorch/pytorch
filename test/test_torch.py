@@ -1386,10 +1386,18 @@ class AbstractTestCases:
                 self.assertEqual(len(w), 1)
 
         def test_arange(self):
-            res1 = torch.arange(0, 1)
+            res = torch.tensor(range(10000))
+            res1 = torch.arange(0, 10000)  # Use a larger number so vectorized code can be triggered
             res2 = torch.tensor([], dtype=torch.int64)
-            torch.arange(0, 1, out=res2)
-            self.assertEqual(res1, res2, atol=0, rtol=0)
+            torch.arange(0, 10000, out=res2)
+            self.assertEqual(res, res1, atol=0, rtol=0)
+            self.assertEqual(res, res2, atol=0, rtol=0)
+
+            # Vectorization on non-contiguous tensors
+            res = torch.rand(3, 3, 300000).to(torch.int64)
+            res = res.permute(2, 0, 1)
+            torch.arange(0, 300000 * 3 * 3, out=res)
+            self.assertEqual(res.flatten(), torch.arange(0, 300000 * 3 * 3))
 
             # Check arange with only one argument
             res1 = torch.arange(10)
@@ -3402,6 +3410,9 @@ class AbstractTestCases:
             g2.set_state(default_state)
             g2_normal = q.normal_(generator=g2)
             self.assertEqual(g1_normal, g2_normal)
+
+        def test_invalid_generator_raises(self):
+            self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
         def test_sobolengine_unscrambled_lowdim(self):
             engine_1d = torch.quasirandom.SobolEngine(1)
@@ -13359,9 +13370,9 @@ class TestTorchDeviceType(TestCase):
         for maskType in [torch.uint8, torch.bool]:
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
-            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+            mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
 
-            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+            if dtype == torch.half and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -13380,34 +13391,46 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
-        # Since complex and half on CPU is not supported, need to skip the remaining test cases
-        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+        # Since half on CPU is not supported, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
-            # TODO .to() for bfloat16 does not work on windows
-            a = torch.ones(100, 100, device=device, dtype=dtype)
-        else:
-            a = torch.rand(100, 100, device=device).mul(100).to(dtype)
-        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        mask_first_el_each_row = torch.zeros(100, device=device, dtype=torch.bool)
         mask_first_el_each_row[0] = True
         a_masked = a.masked_select(mask_first_el_each_row)
         self.assertEqual(a_masked, a[:, 0])
 
-        mask_first_row = torch.zeros(100, 1, device=device, dtype=dtype).bool()
+        mask_first_row = torch.zeros(100, 1, device=device, dtype=torch.bool)
         mask_first_row[0][0] = True
         a_masked = a.masked_select(mask_first_row)
         self.assertEqual(a_masked, a[0, :])
 
         # Ensure that tensor is expanded to match mask properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
-            a = torch.ones(100, device=device, dtype=dtype)
-        else:
-            a = torch.rand(100, device=device).mul(100).to(maskType)
+        a = torch.rand(100, device=device).mul(100).to(dtype)
         mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
+
+    def test_masked_select_discontiguous(self, device):
+        for size in (10, 200):
+            vals = torch.rand(size, size, device=device)
+            mask = torch.full((size, size), False, dtype=torch.bool, device=device)
+            mask[:, ::2] = True
+            vals_list = (vals, vals.t())
+            mask_list = (mask, mask.t())
+            out_dc = torch.empty(size * size, device=device)[::2]
+            for v, m in product(vals_list, mask_list):
+                if m.is_contiguous():
+                    expected = v[:, ::2].clone().view(-1)
+                else:
+                    expected = v[::2].clone().view(-1)
+                out = torch.masked_select(v, m)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+                torch.masked_select(v, m, out=out_dc)
+                self.assertEqual(out_dc, expected, atol=0, rtol=0)
+
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
