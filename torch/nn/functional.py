@@ -3872,16 +3872,17 @@ def _pad_circular(input, padding):
         >>> print(z.shape)  # torch.Size([1, 1, 6, 5])
     """
     shape = input.shape
-    ndim = len(shape[2:])
+    paddable_shape = shape[2:]
+    ndim = len(paddable_shape)
 
     # Only supports wrapping around once
-    for a, size in enumerate(shape[2:]):
+    for a, size in enumerate(paddable_shape):
         assert padding[-(a * 2 + 1)] <= size
         assert padding[-(a * 2 + 2)] <= size
 
     # Get shape of padded array
     padded_shape = shape[:2]
-    for a, size in enumerate(shape[2:]):
+    for a, size in enumerate(paddable_shape):
         padded_shape += (size + padding[-(a * 2 + 1)] + padding[-(a * 2 + 2)],)
 
     out = torch.empty(padded_shape, dtype=input.dtype, layout=input.layout,
