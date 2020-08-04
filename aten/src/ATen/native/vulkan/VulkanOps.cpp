@@ -92,7 +92,10 @@ void adaptive_avg_pool2d(
     int32_t OW;
     int32_t OH;
   };
-  ConstBlock cb{IW, IH, OW, OH};
+  ConstBlock cb{static_cast<int32_t>(IW),
+                static_cast<int32_t>(IH),
+                static_cast<int32_t>(OW),
+                static_cast<int32_t>(OH)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
