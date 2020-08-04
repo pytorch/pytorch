@@ -11,7 +11,6 @@ import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
 import types
-import inspect
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
