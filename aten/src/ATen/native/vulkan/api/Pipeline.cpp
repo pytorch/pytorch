@@ -16,7 +16,8 @@ VkPipelineCache create_pipeline_cache(const VkDevice device) {
   };
 
   VkPipelineCache pipeline_cache{};
-  VK_CHECK(vkCreatePipelineCache(device, &pipeline_cache_create_info, nullptr, &pipeline_cache));
+  VK_CHECK(vkCreatePipelineCache(
+      device, &pipeline_cache_create_info, nullptr, &pipeline_cache));
 
   return pipeline_cache;
 }
@@ -28,7 +29,8 @@ Pipeline::Factory::Factory(const VkDevice device)
    pipeline_cache_(create_pipeline_cache(device), VK_DELETER(PipelineCache)(device)) {
 }
 
-typename Pipeline::Factory::Handle Pipeline::Factory::operator()(const Descriptor& descriptor) const {
+typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
+    const Descriptor& descriptor) const {
   const VkSpecializationInfo specialization_info{
   };
 
@@ -52,7 +54,7 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(const Descripto
 
   VkPipeline pipeline{};
   VK_CHECK(vkCreateComputePipelines(
-    device_, pipeline_cache_.get(), 1u, &compute_pipeline_create_info, nullptr, &pipeline));
+      device_, pipeline_cache_.get(), 1u, &compute_pipeline_create_info, nullptr, &pipeline));
 
   return Handle{
     pipeline,
@@ -60,12 +62,30 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(const Descripto
   };
 }
 
-Pipeline::Cache::Cache(const VkDevice device)
- : cache_(Factory(device)) {
+Pipeline::Layout::Factory::Factory(const VkDevice device)
+ : device_(device) {
 }
 
-VkPipeline Pipeline::Cache::retrieve(const Descriptor& descriptor) {
-  return cache_.retrieve(descriptor, &descriptor);
+typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
+    const Descriptor& descriptor) const {
+  const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
+    VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    nullptr,
+    0u,
+    1u,
+    &descriptor.descriptor_set_layout,
+    0u,
+    nullptr,
+  };
+
+  VkPipelineLayout pipeline_layout{};
+  VK_CHECK(vkCreatePipelineLayout(
+      device_, &pipeline_layout_create_info, nullptr, &pipeline_layout));
+
+  return Handle{
+    pipeline_layout,
+    Deleter(device_),
+  };
 }
 
 } // namespace api
