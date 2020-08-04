@@ -3842,30 +3842,34 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
-    """
+    """Circularly pads tensor.
+
+    Tensor values at the beginning are used to pad the end, and values at the
+    end are used to pad the beginning. The first and second axes of the tensor
+    are not padded.
+
     Args:
-        input: Tensor that follows the formatting of the input to convolution
-            layers.
-        padding: Tuple with length two times the degree of the convolution. The
-            order of the integers in the tuple are shown in the following
-            example:
+        input: Tensor with shape :math:`(N, C, D[, H, W])`.
+        padding: Tuple containing the number of elements to pad each side of
+            the tensor. The length of padding must be twice the number of
+            paddable axes. For example, the length of padding should be 4 for a
+            tensor of shape :math:`(N, C, H, W)`, and the length should be 6
+            for a tensor of shape :math:`(N, C, D, H, W)`.
 
-            For 3D convolutions:
-                padding[-2] is the amount of padding applied to the beginning
-                    of the depth dimension.
-                padding[-1] is the amount of padding applied to the end of the
-                    depth dimension.
-                padding[-4] is the amount of padding applied to the beginning
-                    of the height dimension.
-                padding[-3] is the amount of padding applied to the end of the
-                    height dimension.
-                padding[-6] is the amount of padding applied to the beginning
-                    of the width dimension.
-                padding[-5] is the amount of padding applied to the end of the
-                    width dimension.
+    Examples::
 
-    Returns:
-        out: Tensor with padded shape.
+        >>> x = torch.arange(6).view(1, 1, 2, 3)  # Create tensor
+        >>> # Example 1
+        >>> padding = (1, 1, 1, 1)
+        >>> y = F.pad(x, padding, mode='circular')
+        >>> print(x)
+        >>> print(y)
+        >>> print(y.shape)  # torch.Size([1, 1, 4, 5])
+        >>> # Example 2
+        >>> padding = (1, 1, 2, 2)
+        >>> z = F.pad(x, padding, mode='circular')
+        >>> print(z)
+        >>> print(z.shape)  # torch.Size([1, 1, 6, 5])
     """
     shape = input.shape
     ndim = len(shape[2:])
