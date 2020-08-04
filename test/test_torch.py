@@ -17064,22 +17064,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         new_shape = [2, 2, 2]
         new_stride = [3, 1, 1]
         sx = torch.as_strided(x, size=new_shape, stride=new_stride)
-        res_bmm = torch.bmm(sx, sx)
-        res_mm = []
-        for i in range(sx.shape[0]):
-            r = torch.mm(sx[i], sx[i])
-            res_mm.append(r)
-            self.assertEqual(r, res_bmm[i])
 
-        # Compares with NumPy
-        nx = x.cpu().numpy()
-        numpy_strides = np.array(new_stride) * nx.itemsize
-        nc = np.lib.stride_tricks.as_strided(nx, shape=new_shape, strides=numpy_strides)
-        expected1 = np.matmul(nc, nc)
-        expected2 = [np.matmul(m, m) for m in nc]
-        self.assertEqual(res_bmm, expected1)
-        for i in range(sx.shape[0]):
-            self.assertEqual(res_mm[i], expected2[i])
+        torch_fn = lambda x: torch.bmm(x, x)
+        np_fn = lambda x: np.matmul(x, x)
+        self.compare_with_numpy(torch_fn, np_fn, sx)
+
+        torch_fn = lambda x: torch.mm(x, x)
+        self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @onlyCPU
     @dtypes(torch.float)
