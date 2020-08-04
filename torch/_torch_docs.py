@@ -5725,7 +5725,7 @@ Example::
 
 add_docstr(torch.sgn,
            r"""
-sgn(input, out=None) -> Tensor
+sgn(input, *, out=None) -> Tensor
 
 Returns a new complex tensor with the same angle as that of the elements of :attr:`input` and absolute value 1.
 
