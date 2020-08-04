@@ -2,9 +2,6 @@
 #include <ATen/native/cuda/ForeachUtils.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 
-// NOTE: CUDA on Windows requires that the enclosing function
-// of a __device__ lambda not have internal linkage.
-
 namespace at { namespace native {
 
 namespace {
