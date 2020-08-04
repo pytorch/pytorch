@@ -964,6 +964,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_as_strided(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                chunk_size = list(x.size())
+                chunk_size[1] = chunk_size[1] * 2 - 1
+                chunk_stride = list(x.stride())
+                chunk_stride[1] = chunk_stride[1] // 2
+                return x.as_strided((3, 3, 3), (1, 4, 2), storage_offset=2), x.as_strided(chunk_size, chunk_stride)
+
+        x = torch.randn(5, 8, 7)
+        self.run_test(Model(), x)
+
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -2696,6 +2709,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_eye(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+
+        x = torch.randn(2, 3, 4)
+        another_x = torch.randn(5, 6, 7)
+        self.run_test(TensorFactory(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):

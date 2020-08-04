@@ -4411,7 +4411,7 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
-# white list for complex
+# allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
@@ -5984,6 +5984,23 @@ class TestAutogradDeviceType(TestCase):
         y = torch.randn(5, 5, 1, device=device, requires_grad=True)
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
+
+    def test_where_scalar(self, device):
+        x = torch.randn(5, 5, device=device, requires_grad=True)
+        scalar = 4.
+        cond = mask_not_all_zeros((5, 5)).to(device=device)
+
+        def where_scalar_first(cond, x):
+            return torch.where(cond, scalar, x)
+
+        def where_scalar_second(cond, x):
+            return torch.where(cond, x, scalar)
+
+        gradcheck(where_scalar_first, (cond, x))
+        gradgradcheck(where_scalar_first, (cond, x))
+
+        gradcheck(where_scalar_second, (cond, x))
+        gradgradcheck(where_scalar_second, (cond, x))
 
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")

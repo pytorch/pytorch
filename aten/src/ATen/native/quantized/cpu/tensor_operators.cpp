@@ -60,7 +60,6 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
-namespace {
 Tensor& quantized_resize_cpu_(
     Tensor& self,
     IntArrayRef size,
@@ -79,9 +78,4 @@ Tensor& quantized_resize_cpu_(
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, QuantizedCPU, m) {
-  m.impl_UNBOXED("resize_", quantized_resize_cpu_);
-}
-
-}  // namespcae
 }}  // at::native
