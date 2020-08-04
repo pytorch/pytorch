@@ -47,10 +47,6 @@ class Linear(nn.Linear):
 
         qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
-        qat_linear.activation_post_process = qconfig.activation()
-        # to avoid circular dependencies
-        from torch.quantization import register_activation_post_process_hook
-        register_activation_post_process_hook(qat_linear)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear

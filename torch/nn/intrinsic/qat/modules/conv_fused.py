@@ -173,10 +173,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                          bn.eps, bn.momentum,
                          False,
                          qconfig)
-        qat_convbn.activation_post_process = qconfig.activation()
-        # to avoid circular dependencies
-        from torch.quantization import register_activation_post_process_hook
-        register_activation_post_process_hook(qat_convbn)
         qat_convbn.weight = conv.weight
         qat_convbn.bias = conv.bias
         qat_convbn.bn.weight = bn.weight

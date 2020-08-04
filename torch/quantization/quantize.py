@@ -330,8 +330,12 @@ def prepare_qat(model, mapping=None, inplace=False):
     """
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
-    model = prepare(model, inplace=inplace)
+    if not inplace:
+        model = copy.deepcopy(model)
+
+    propagate_qconfig_(model, qconfig_dict=None)
     _convert(model, mapping, inplace=True)
+    prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
