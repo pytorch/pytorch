@@ -900,7 +900,8 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
              bool _save_debug_info_in_bytecode = false) {
-            m._save_for_mobile(filename, _extra_files, _save_debug_info_in_bytecode);
+            m._save_for_mobile(
+                filename, _extra_files, _save_debug_info_in_bytecode);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap(),
