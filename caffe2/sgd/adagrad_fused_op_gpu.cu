@@ -267,7 +267,7 @@ __global__ void linear_index_weight_offsets_dedup_kernel(
       : prefix_sum_length_data[group - 1]; // start offset of the segment
   int end = prefix_sum_length_data[group]; // end offset of the segment
 
-  for (int line = start; line < end; ++line) {
+  for (int line = start; line < end; line += threadIdx.x) {
     // line: the idx in the indices
     seg_id_data[line] = group;
   }
@@ -1163,7 +1163,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
     linear_index_weight_offsets_dedup_kernel<IndexType>
         <<<num_lengths,
-           std::min(maxThreads, block_size),
+           32,
            0,
            context_.cuda_stream()>>>(
             indices,

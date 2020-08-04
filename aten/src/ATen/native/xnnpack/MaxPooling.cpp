@@ -208,6 +208,8 @@ Tensor max_pool2d(
       0u,                                                             // flags
       &max_pool_op);                                                  // operator
 
+  Operator max_pool_scoped_op(max_pool_op);
+
   TORCH_CHECK(
       xnn_status_success == create_status,
       "xnn_create_max_pooling2d_nhwc_f32 failed!");

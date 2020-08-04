@@ -81,6 +81,7 @@ jobs:
         no_output_timeout: "90m"
         command: |
           set -e
+          export PYTHONUNBUFFERED=1
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
@@ -145,12 +146,24 @@ jobs:
         command: |
           set -e
 
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          ${PARALLEL_FLAGS}
+          source ./workspace/env
+          cd workspace
+          EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
+          elif [[ ${BUILD_ENVIRONMENT} == *caffe2* ]]; then
+            echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
+            echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           fi
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -184,10 +197,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.13"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -197,12 +210,6 @@ jobs:
     executor: <<parameters.executor>>
     steps:
       - checkout
-      - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -255,10 +262,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.13"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -270,12 +277,6 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
-      - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m

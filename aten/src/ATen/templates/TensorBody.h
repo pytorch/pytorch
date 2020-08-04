@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
@@ -47,13 +48,6 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
-
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
@@ -164,6 +158,16 @@ class CAFFE2_API Tensor {
   //    multiple versions of a defaulted special member functions are not allowed
   // Tensor& operator=(const Tensor&) & = default;
   // Tensor& operator=(Tensor&&) & = default;
+
+  // Also MSVC will wrongly issue the following warning with the aforementioned fix
+  //    warning C4522: 'at::Tensor': multiple assignment operators specified
+  // Let's just skip the warning.
+
+  #ifdef _MSC_VER
+  #pragma warning( push )
+  #pragma warning( disable : 4522 )
+  #endif
+
   Tensor& operator=(const Tensor& x) & {
     impl_ = x.impl_;
     return *this;
@@ -176,6 +180,10 @@ class CAFFE2_API Tensor {
   Tensor& operator=(Scalar v) &&;
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
+
+  #ifdef _MSC_VER
+  #pragma warning( pop )
+  #endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
