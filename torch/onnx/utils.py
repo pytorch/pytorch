@@ -202,9 +202,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # elimination variant that doesn't need to look up if an op has side effects.
     torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
     torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_fixup_onnx_loops(graph)
-    torch._C._jit_pass_fixup_onnx_conditionals(graph)
-    torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
     return graph
@@ -841,6 +838,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 for b in n.blocks():
                     new_block = new_node.addBlock()
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
+                new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
                 return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
