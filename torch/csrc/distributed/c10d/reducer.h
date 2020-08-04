@@ -40,6 +40,17 @@ class Reducer {
   // all live on the same device and have the same dimensionality.
   void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
+  void rebuildBuckets();
+
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
@@ -126,16 +137,6 @@ class Reducer {
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible.
-  std::vector<std::vector<size_t>> rebuildBuckets();
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;

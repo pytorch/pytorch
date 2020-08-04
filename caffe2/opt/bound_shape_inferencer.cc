@@ -660,7 +660,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
         op.input(0), dimTypes, dims, w_data_type, int8_fc ? true : false);
   } else {
     ShapeInfo& x_shape_info = x_it->second;
-    if (x_shape_info.getDimType(0) != TensorBoundShape_DimType_BATCH) {
+    if (x_shape_info.getDimType(0) == TensorBoundShape_DimType_UNKNOWN) {
       CAFFE_ENFORCE_GE(x_shape_info.shape.dims_size(), 1);
       x_shape_info.shape.set_dims(0, spec_.max_batch_size);
       x_shape_info.setDimType(0, TensorBoundShape_DimType_BATCH);
@@ -857,7 +857,10 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
           setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
           ConvertToVec(shape.dims()),
           infered_data_type,
-          is_quantized, false, scale, offset);
+          is_quantized,
+          false,
+          scale,
+          offset);
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()

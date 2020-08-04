@@ -21,7 +21,7 @@ void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks) {
 
 int cudaNumDevices() {
   int n = 0;
-  AT_CUDA_CHECK(cudaGetDeviceCount(&n));
+  C10_CUDA_CHECK_WARN(cudaGetDeviceCount(&n));
   return n;
 }
 

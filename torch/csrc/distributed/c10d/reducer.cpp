@@ -603,9 +603,9 @@ void Reducer::initialize_buckets(
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
-  // If initialize_buckets is called during training loop, since grad
-  // could be mutated/cleared before allocating new bucket content
-  // tensor, then it needs to check rpc context ptr is nullptr or not,
+  // If initialize_buckets is called during training loop, e.g, inside
+  // rebuildBuckets(), since grad could be mutated and be pointed to
+  // bucket_view, then it needs to check rpc context ptr is nullptr or not,
   // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
   // mutate grad in rpc context.
   using torch::distributed::autograd::ThreadLocalDistAutogradContext;
@@ -668,7 +668,7 @@ void Reducer::initialize_buckets(
           TORCH_CHECK(
               variable_index < replicas_[replica_index].size(),
               "Out of range variable index specified.");
-          auto& variable = replicas_[replica_index][variable_index];
+          const auto& variable = replicas_[replica_index][variable_index];
           if (!options.has_device()) {
             options = options.device(variable.device());
           } else {
@@ -777,16 +777,18 @@ void Reducer::initialize_bucketviews(
       bucket_view = contents.narrow(0, offset, length).view(v.sizes());
     }
     replica.bucket_views.push_back(bucket_view);
-    // If grad has already been defined/calculated in previous iterations,
-    // and the grad does not point to bucket_view, that means bucket_view
-    // is newly allocated, if this function is called inside initialize_bucket,
-    // old grad needs to be copied into new bucket_view for initialization
-    // and let grad point to bucket_view;
-    // otherwise this function is called for communication hook, bucket_view
-    // has the updated results in new tensor, just let grad point to
-    // bucket_view. If grad is not defined, do not let it point to bucket_view.
-    // E.g., for global_unused parameters, their grads should be kept as being
-    // undefined.
+    // There are two cases to handle:
+    // 1. initialize_bucketviews could be called inside communication hook,
+    // bucket_view has the updated results in new tensor, just let grad point to
+    // bucket_view.
+    // 2. initialize_bucketviews could be called inside initialize_bucket when
+    // rebuildBuckets, if grad has already been defined/calculated in previous
+    // iteration, old grad needs to be copied into new bucket_view
+    // and let grad point to the new bucket_view;
+    // 3. initialize_bucketviews could be called inside initialize_bucket
+    // during construction. When grad is not defined, do not let it point to
+    // bucket_view, because grads should be kept as being undefined for globally
+    // unused parameters.
     runGradCallbackForVariable(v, [&](auto& grad) {
       if (grad.defined() && !grad.is_alias_of(bucket_view)) {
         if (copy_to_bucket_view) {
@@ -810,15 +812,6 @@ void Reducer::initialize_bucketviews(
 // want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
-  // Rebuild bucket if this is the first time to rebuild.
-  // No need to lock as initialize_buckets() requires a lock inside.
-  // if initialize_buckets is called multiple times, it clears grad
-  // so need to be called after optimizer.step.
-  if (!rebuilt_params_.empty()) {
-    auto rebuilt_bucket_indices = rebuildBuckets();
-    initialize_buckets(std::move(rebuilt_bucket_indices));
-  }
-
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
@@ -1139,7 +1132,11 @@ void Reducer::sync_bucket_indices(
   }
 }
 
-std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
+void Reducer::rebuildBuckets() {
+  if (rebuilt_params_.empty()) {
+    return;
+  }
+
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
       "rebuilt parameter tensors size is not same as rebuilt parameter indices size.");
@@ -1165,7 +1162,7 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  return rebuilt_bucket_indices;
+  initialize_buckets(std::move(rebuilt_bucket_indices));
 }
 
 // See Note [DDP Communication Hook]

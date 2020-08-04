@@ -349,11 +349,11 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
 
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
-      "1D tensors expected, got, ",
+      "1D tensors expected, but got ",
       self.dim(),
-      ", ",
+      "D and ",
       other.dim(),
-      " tensors");
+      "D tensors");
   TORCH_CHECK(
       self.scalar_type() == other.scalar_type(),
       "dot : expected both vectors to have same dtype, but found ",

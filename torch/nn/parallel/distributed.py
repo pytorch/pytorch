@@ -563,6 +563,12 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
+        # It may allocate new buckets before deallocating old buckets
+        # inside rebuildBuckets.
+        # To save peak memory usage, call rebuildBuckets before the peak
+        # memory usage increases during computing outputs.
+        self.reducer.rebuildBuckets()
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -602,6 +608,7 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+        return self
 
     def _register_comm_hook(self, state: object, hook: callable):
         r"""
