@@ -3411,9 +3411,6 @@ class AbstractTestCases:
             g2_normal = q.normal_(generator=g2)
             self.assertEqual(g1_normal, g2_normal)
 
-        def test_invalid_generator_raises(self):
-            self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
-
         def test_sobolengine_unscrambled_lowdim(self):
             engine_1d = torch.quasirandom.SobolEngine(1)
             expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
