@@ -112,7 +112,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       out.set_quantizer_(make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        at::native::quantized_relu_(out);
+        at::native::relu_quantized_cpu_(out);
       }
     }
   });

@@ -153,6 +153,9 @@ if(HIP_FOUND)
   set(CMAKE_HCC_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
+  set(hip_DIR ${HIP_PATH}/lib/cmake/hip)
+  set(AMDDeviceLibs_DIR ${ROCM_PATH}/lib/cmake/AMDDeviceLibs)
+  set(amd_comgr_DIR ${ROCM_PATH}/lib/cmake/amd_comgr)
   set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
@@ -164,7 +167,9 @@ if(HIP_FOUND)
   set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
   set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
 
-  find_package_and_print_version(rocrand REQUIRED) 
+  find_package_and_print_version(hip REQUIRED)
+  find_package_and_print_version(amd_comgr REQUIRED)
+  find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
@@ -174,12 +179,19 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
-  
+
+  if(HIP_COMPILER STREQUAL clang)
+    set(hip_library_name amdhip64)
+  else()
+    set(hip_library_name hip_hcc)
+  endif()
+  message("HIP library name: ${hip_library_name}")
+
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
   # setup, hcc is only used for linking, but it should be used to
   # compile the *_hip.cc files as well.
-  find_library(PYTORCH_HIP_HCC_LIBRARIES hip_hcc HINTS ${HIP_PATH}/lib)
+  find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
@@ -187,7 +199,7 @@ if(HIP_FOUND)
   # however currently it's just the lib name
   find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
   set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)

@@ -129,4 +129,26 @@ CAFFE2_API ShapeInfo constructShapeInfoWithDefaultDimType(
 
 CAFFE2_API void parseShapeInfoMapFromString(const std::string&, ShapeInfoMap&);
 
+// Extract shape info from tensorBoundShapes to a ShapeInfoMap.
+// Change shape according to new max_batch_size and max_feature_len
+// at the same time if necessary.
+CAFFE2_API ShapeInfoMap extractShapeInfoFromTensorBoundShapes(
+    TensorBoundShapes tensor_bound_shapes,
+    int64_t new_max_batch_size = -1,
+    int64_t new_max_feature_len = -1);
+
+// In-place modify TensorBoundShape to change shape size based on type
+CAFFE2_API void changeTensorBoundShapes(
+    TensorBoundShape& tensor_shape_and_type,
+    const int64_t old_batch_size,
+    const int64_t old_seq_size,
+    const int64_t new_batch_size,
+    const int64_t new_seq_size);
+
+// In-place modify TensorShape's shape at a specific dimension
+CAFFE2_API void modifyTensorShapeDimSize(
+    TensorShape* tensor_shape,
+    int dim_index,
+    const int64_t old_size,
+    const int64_t new_size);
 } // namespace caffe2

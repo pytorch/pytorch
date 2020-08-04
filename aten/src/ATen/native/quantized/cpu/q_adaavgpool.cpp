@@ -334,7 +334,7 @@ bool enable_qnnpack_for_ada_avgpool(
 #endif
 } // namespace
 
-Tensor quantized_adaptive_avg_pool2d(
+Tensor adaptive_avg_pool2d_quantized_cpu(
     const at::Tensor& input,
     IntArrayRef output_size) {
 #ifdef USE_PYTORCH_QNNPACK
@@ -346,13 +346,13 @@ Tensor quantized_adaptive_avg_pool2d(
 #endif
   Tensor output;
   AT_DISPATCH_QINT_TYPES(
-      input.scalar_type(), "quantized_adaptive_avg_pool2d", [&]() {
+      input.scalar_type(), "adaptive_avg_pool2d_quantized_cpu", [&]() {
         output = q_adaptive_avg_pool2d<scalar_t>(input, output_size);
       });
   return output;
 }
 
-Tensor& quantized_adaptive_avg_pool3d_out(
+Tensor& adaptive_avg_pool3d_out_quantized_cpu(
     at::Tensor& output,
     const at::Tensor& input,
     IntArrayRef output_size) {
@@ -363,17 +363,17 @@ Tensor& quantized_adaptive_avg_pool3d_out(
   }
 #endif
   AT_DISPATCH_QINT_TYPES(
-      input.scalar_type(), "quantized_adaptive_avg_pool3d", [&]() {
+      input.scalar_type(), "adaptive_avg_pool3d_quantized_cpu", [&]() {
         output = q_adaptive_avg_pool3d<scalar_t>(output, input, output_size);
       });
   return output;
 }
 
-Tensor quantized_adaptive_avg_pool3d(
+Tensor adaptive_avg_pool3d_quantized_cpu(
     const at::Tensor& input,
     IntArrayRef output_size) {
   Tensor output;
-  return quantized_adaptive_avg_pool3d_out(output, input, output_size);
+  return adaptive_avg_pool3d_out_quantized_cpu(output, input, output_size);
 }
 
 } // namespace native
