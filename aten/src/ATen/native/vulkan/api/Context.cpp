@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
 
+#include <ATen/native/vulkan/api/Cache.h>
+
 #include <sstream>
 
 namespace at {
