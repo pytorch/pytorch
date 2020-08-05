@@ -84,46 +84,52 @@ void testMobileNamedParameters() {
   child.register_parameter("foo", 4 * torch::ones({}), false);
   m.register_module("child1", child);
   m.register_module("child2", child);
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
 
+  // I also tried registering the parameter after registering the child modules
+  // using below code and commenting out line 84, but the result was the same
+//  auto children = m.named_children();
+//  for (const auto& e : children) {
+//    auto test = e.value;
+//    test.register_parameter("foo", 4 * torch::ones({}), false);
+//  }
 
+  // Expected:
+  // foo, 1
+  // child1.foo, 4
+  // child2.foo, 4
+  //
+  // Actual:
+  // foo, 1
+  // child1.foo, 4
+  // child2.foo, -4
   auto full_params = m.named_parameters();
   std::cout << "full: before modification " << std::endl;
   for (const auto& e : full_params) {
     // note that child1.foo and child2.foo are supposed to start with the same value of 4
     // however, by the time child2.foo is printed here, it will already be -4
     // this indicates that modifying child1.foo is also modifying child2.foo
-    std::cout << e.name << ", " << e.value << std::endl;
+    std::cout << e.name << ", " << e.value.item<int>() << std::endl;
     auto tensor = e.value;
     tensor *= -1;
   }
+
+  // Expected:
+  // foo, -1
+  // child1.foo, -4
+  // child2.foo, -4
   std::cout << "full: after modification " << std::endl;
   full_params = m.named_parameters();
   for (const auto& e : full_params) {
-    std::cout << e.name << ", " << e.value << std::endl;
+    std::cout << e.name << ", " << e.value.item<int>() << std::endl;
   }
 
-  std::cout << std::endl;
-  std::cout << "mobile: before modification " << std::endl;
-  auto mobile_params = bc.named_parameters();
-  for (const auto& e : mobile_params) {
-    std::cout << e.first << ", " << e.second << std::endl;
-    auto tensor = e.second;
-    tensor *= -1;
-  }
-  std::cout << "mobile: after modification " << std::endl;
-  auto delta = bc.named_parameters();
-  for (const auto& e : delta) {
-    std::cout << e.first << ", " << e.second << std::endl;
-  }
+//  std::stringstream ss;
+//  m._save_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile(ss);
 
 //  AT_ASSERT(full_params.size() == mobile_params.size());
 //  for (const auto& e : full_params) {
-//    std::cout << e.name << std::endl;
-//    std::cout << mobile_params[e.name].item().toInt() << std::endl;
-//    AT_ASSERT(e.value.item().toInt() == (mobile_params[e.name].item().toInt() * -1));
+//    AT_ASSERT(e.value.item().toInt() == mobile_params[e.name].item().toInt());
 //  }
 }
 
