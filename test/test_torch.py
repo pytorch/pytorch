@@ -16987,6 +16987,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_nextafter(self, device, dtype):
