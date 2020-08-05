@@ -270,9 +270,17 @@ class JitTestCase(TestCase):
                            consider_subgraphs)
             return
 
-        nodes = [node for node in graph.nodes()
-                 if node.kind() == kind]
-        perform_assert(graph, kind, len(nodes), num_kind_nodes,
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        perform_assert(graph, kind, len(out_nodes), num_kind_nodes,
                        consider_subgraphs)
 
     def assertExpectedONNXGraph(self, g, *args, **kwargs):
