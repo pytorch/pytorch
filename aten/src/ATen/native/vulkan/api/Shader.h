@@ -10,6 +10,10 @@ namespace vulkan {
 namespace api {
 
 struct Shader final {
+  /*
+    Shader Descriptor
+  */
+
   struct Descriptor final {
     enum class Type {
       Source,
@@ -41,6 +45,10 @@ struct Shader final {
              (shader.binary.size == descriptor.shader.binary.size);
     }
   };
+
+  /*
+    Shader Factory
+  */
 
   class Factory final {
    public:
@@ -76,6 +84,91 @@ struct Shader final {
     std::unique_ptr<Compiler> compiler_;
   };
 
+  /*
+    Shader Cache
+  */
+
+  typedef api::Cache<Factory> Cache;
+
+  //
+  // Shader Layout
+  //
+
+  struct Layout final {
+    /*
+      Shader Layout Descriptor
+    */
+
+    struct Descriptor final {
+      struct Slot final {
+        VkDescriptorSetLayoutBinding binding;
+
+        inline bool operator==(const Slot& slot) const {
+          return (binding.binding == slot.binding.binding) &&
+                 (binding.descriptorType == slot.binding.descriptorType) &&
+                 (binding.descriptorCount == slot.binding.descriptorCount) &&
+                 (binding.stageFlags == slot.binding.stageFlags) &&
+                 (binding.pImmutableSamplers == slot.binding.pImmutableSamplers);
+        }
+
+        inline size_t hash() const {
+          return c10::get_hash(
+              binding.binding,
+              binding.descriptorType,
+              binding.descriptorCount,
+              binding.stageFlags,
+              binding.pImmutableSamplers);
+        }
+      };
+
+      std::array<Slot, 8u> slots;
+
+      inline bool operator==(const Descriptor& descriptor) const {
+        return (slots == descriptor.slots);
+      }
+    };
+
+    /*
+      Shader Layout Factory
+    */
+
+    class Factory final {
+     public:
+      explicit Factory(VkDevice device);
+
+      typedef Layout::Descriptor Descriptor;
+      typedef VK_DELETER(DescriptorSetLayout) Deleter;
+      typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
+
+      struct Hasher {
+        inline size_t operator()(const Descriptor& descriptor) const {
+          size_t hash = 0u;
+
+          for (const Descriptor::Slot& slot : descriptor.slots) {
+            hash = c10::hash_combine(hash, slot.hash());
+          }
+
+          return hash;
+        }
+      };
+
+      Handle operator()(const Descriptor& descriptor) const;
+
+     private:
+      VkDevice device_;
+    };
+
+    /*
+      Shader Layout Cache
+    */
+
+    typedef api::Cache<Factory> Cache;
+  };
+
+  //
+  // Work Group
+  //
+
   struct WorkGroup final {
     uint32_t x;
     uint32_t y;
@@ -85,8 +178,6 @@ struct Shader final {
       return (x == work_group.x) && (y == work_group.y) && (z == work_group.z);
     }
   };
-
-  typedef api::Cache<Factory> Cache;
 };
 
 } // namespace api

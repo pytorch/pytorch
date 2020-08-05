@@ -11,6 +11,10 @@ namespace vulkan {
 namespace api {
 
 struct Pipeline final {
+  /*
+    Pipeline Descriptor
+  */
+
   struct Descriptor final {
     VkPipelineLayout pipeline_layout;
     VkShaderModule shader_module;
@@ -22,6 +26,10 @@ struct Pipeline final {
              (work_group == descriptor.work_group);
     }
   };
+
+  /*
+    Pipeline Factory
+  */
 
   class Factory final {
    public:
@@ -49,9 +57,21 @@ struct Pipeline final {
     api::Handle<VkPipelineCache, VK_DELETER(PipelineCache)> pipeline_cache_;
   };
 
+  /*
+    Pipeline Cache
+  */
+
   typedef api::Cache<Factory> Cache;
 
+  //
+  // Pipeline Layout
+  //
+
   struct Layout final {
+    /*
+      Pipeline Layout Descriptor
+    */
+
     struct Descriptor final {
       VkDescriptorSetLayout descriptor_set_layout;
 
@@ -59,6 +79,10 @@ struct Pipeline final {
         return (descriptor_set_layout == descriptor.descriptor_set_layout);
       }
     };
+
+    /*
+      Pipeline Layout Factory
+    */
 
     class Factory final {
      public:
@@ -79,6 +103,10 @@ struct Pipeline final {
      private:
       VkDevice device_;
     };
+
+    /*
+      Pipeline Layout Cache
+    */
 
     typedef api::Cache<Factory> Cache;
   };
