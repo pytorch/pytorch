@@ -21,6 +21,16 @@
 
 namespace at { namespace native {
 
+namespace {
+
+template<typename T>
+struct is_pair : public std::false_type {};
+
+template<typename T1, typename T2>
+struct is_pair<thrust::pair<T1, T2>> : public std::true_type {};
+
+}  // namespace
+
 #ifdef __HIP_PLATFORM_HCC__
 template<typename T, int size>
 struct ROCm_Bug {
@@ -219,18 +229,27 @@ __global__ void reduce_kernel(R reduction) {
   reduction.template run<output_vec_size>();
 }
 
-template <typename index_t>
-static OffsetCalculator<2, index_t> make_output_calculator(const TensorIterator& iter) {
+template <typename index_t, int num_outputs=1>
+static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const TensorIterator& iter) {
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
   int input_index = iter.ntensors() - 1;
   int output_index = 0;
-  std::array<const int64_t*, 2> strides = {
-    iter.strides(output_index).data() + num_reduce_dims,
-    iter.strides(input_index).data() + num_reduce_dims,
-  };
   auto shape = iter.shape().data() + num_reduce_dims;
-  return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
+  return c10::guts::if_constexpr<num_outputs == 1>([&]() {
+    std::array<const int64_t*, 2> strides = {
+      iter.strides(output_index).data() + num_reduce_dims,
+      iter.strides(input_index).data() + num_reduce_dims,
+    };
+    return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
+  }, /* else */ [&]() {
+    std::array<const int64_t*, 3> strides = {
+      iter.strides(output_index).data() + num_reduce_dims,
+      iter.strides(output_index + 1).data() + num_reduce_dims,
+      iter.strides(input_index).data() + num_reduce_dims,
+    };
+    return OffsetCalculator<3, index_t>(num_output_dims, shape, strides.data());
+  });
 }
 
 template <typename index_t>
@@ -278,9 +297,11 @@ template <typename scalar_t, typename ops_t, typename index_t, typename out_scal
 struct ReduceOp {
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
+  using project_traits = function_traits<decltype(&ops_t::project)>;
+  static constexpr int num_outputs = is_pair<project_traits::result_type>::value ? 2 : 1;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
-  using OutputCalculator = OffsetCalculator<2, index_t>;
+  using OutputCalculator = OffsetCalculator<num_outputs, index_t>;
 
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value
