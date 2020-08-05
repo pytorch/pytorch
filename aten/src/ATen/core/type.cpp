@@ -1000,31 +1000,6 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
       new InterfaceType(std::move(qualifiedName), is_module));
 }
 
-void ClassType::addStaticMethod(torch::jit::Function* method) {
-  TORCH_CHECK(
-      findMethod(method->name()) == nullptr,
-      "Can't redefine method: ",
-      method->name(),
-      " on class: ",
-      repr_str());
-  TORCH_CHECK(
-      findStaticMethod(method->name()) == nullptr,
-      "Can't redefine method: ",
-      method->name(),
-      " on class: ",
-      repr_str());
-  staticmethods_.push_back(method);
-}
-
-torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
-  for (auto method : staticmethods_) {
-    if (name == method->name()) {
-      return method;
-    }
-  }
-  return nullptr;
-}
-
 void ClassType::addMethod(torch::jit::Function* method) {
   TORCH_CHECK(
       findMethod(method->name()) == nullptr,

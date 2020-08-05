@@ -94,8 +94,7 @@ struct TORCH_API CompilationUnit {
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
       // see [name mangling]
-      bool shouldMangle = false,
-      bool staticMethods = false);
+      bool shouldMangle = false);
 
   // same as above but parse the definitions from source
   // Returns the list of Function's just defined.
@@ -261,8 +260,7 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle = false,
-      bool staticMethod = false) const;
+      bool shouldMangle = false) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(

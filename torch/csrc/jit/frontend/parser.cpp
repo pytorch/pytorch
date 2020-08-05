@@ -703,11 +703,7 @@ struct ParserImpl {
     const auto statements =
         parseStatements(/*expect_indent=*/true, /*in_class=*/true);
     return ClassDef::create(
-        name.range(),
-        name,
-        superclass,
-        List<Stmt>(statements),
-        List<Stmt>::create(name.range(), std::vector<Stmt>()));
+        name.range(), name, superclass, List<Stmt>(statements));
   }
 
   TreeRef parseFunction(bool is_method) {

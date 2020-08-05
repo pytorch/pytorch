@@ -2122,9 +2122,6 @@ struct CAFFE2_API ClassType : public NamedType {
   torch::jit::Function& getMethod(const std::string& name) const;
   bool hasMethod(const std::string& name) const;
 
-  void addStaticMethod(torch::jit::Function* method);
-  torch::jit::Function* findStaticMethod(const std::string& name) const;
-
   // [Internal Only] Remove method from the ClassType
   // caller is responsible to make sure the modification is safe:
   // it is unsafe to having existing allocations
@@ -2184,7 +2181,6 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
-  std::vector<torch::jit::Function*> staticmethods_;
 
   bool isModule_ = false;
 };

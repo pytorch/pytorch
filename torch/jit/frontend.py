@@ -137,19 +137,13 @@ def get_jit_class_def(cls, self_name):
                                method[0],
                                self_name=self_name) for method in methods]
 
-    static_methods = inspect.getmembers(
-        cls, predicate=lambda m: inspect.isfunction(m) and is_static_fn(cls, m.__name__) and m.__name__ in cls.__dict__)
-    static_method_defs = [get_jit_def(method[1],
-                                      method[0],
-                                      self_name=self_name) for method in static_methods]
-
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs, static_method_defs, self_name)
+    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, def_name, self_name=None):
@@ -180,8 +174,7 @@ def get_jit_def(fn, def_name, self_name=None):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse(
-            "def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
         fn_def.body = unused_fn_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
@@ -200,10 +193,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, static_methods, self_name):
+def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], [Stmt(method) for method in static_methods])
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):

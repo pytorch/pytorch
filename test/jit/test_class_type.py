@@ -1,8 +1,4 @@
 from __future__ import division
-from typing import List, Tuple, Iterable
-from torch.testing._internal.common_utils import IS_SANDCASTLE
-import torch.testing._internal.jit_utils
-from torch.testing._internal.jit_utils import JitTestCase
 import io
 import os
 import sys
@@ -15,12 +11,15 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.jit_utils import JitTestCase
+import torch.testing._internal.jit_utils
+from torch.testing._internal.common_utils import IS_SANDCASTLE
+from typing import List, Tuple, Iterable
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
-
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
@@ -85,21 +84,6 @@ class TestClassType(JitTestCase):
             return foo.foo
 
         self.assertEqual(fn(1), 3)
-
-    def test_staticmethod(self):
-        class X(object):
-            def __init__(self, x):
-                # type: (int) -> None
-                self.x = x
-
-            @staticmethod
-            def identity(x):
-                return x
-
-        def fn(x, y):
-            return X.identity(x)
-
-        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
 
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
@@ -221,6 +205,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
+
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -752,56 +737,41 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return self.x * val * 3
 
+
         def add():
             return MyClass(4) + 3
-
         def sub():  # noqa: E306
             return MyClass(4) - 3
-
         def mul():  # noqa: E306
             return MyClass(4) * 3
-
         def pow():  # noqa: E306
             return MyClass(4) ** 3
-
         def truediv():  # noqa: E306
             return MyClass(4) / 3
-
         def ne():  # noqa: E306
             return MyClass(4) != 3
-
         def eq():  # noqa: E306
             return MyClass(4) == 3
-
         def lt():  # noqa: E306
             return MyClass(4) < 3
-
         def gt():  # noqa: E306
             return MyClass(4) > 3
-
         def le():  # noqa: E306
             return MyClass(4) <= 3
-
         def ge():  # noqa: E306
             return MyClass(4) >= 3
-
         def _and():  # noqa: E306
             return MyClass(4) & 3
-
         def _or():  # noqa: E306
             return MyClass(4) | 3
-
         def _xor():  # noqa: E306
             return MyClass(4) ^ 3
-
         def getitem():  # noqa: E306
             return MyClass(4)[1]
-
         def setitem():  # noqa: E306
             a = MyClass(4)
             a[1] = 5
             return a.x
-
         def call():  # noqa: E306
             a = MyClass(5)
             return a(2)
@@ -1030,20 +1000,20 @@ class TestClassType(JitTestCase):
         @torch.jit.script
         class CompetitiveLinkingTokenReplacementUtils:
             def __init__(self):
-                self.my_list: List[Tuple[float, int, int]] = []
-                self.my_dict: Dict[int, int] = {}
+                self.my_list : List[Tuple[float, int, int]] = []
+                self.my_dict : Dict[int, int] = {}
 
         @torch.jit.script
         def foo():
             y = CompetitiveLinkingTokenReplacementUtils()
-            new_dict: Dict[int, int] = {1: 1, 2: 2}
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
             y.my_dict = new_dict
 
-            new_list: List[Tuple[float, int, int]] = [(1.0, 1, 1)]
+            new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
             y.my_list = new_list
             return y
 
-    def test_static_method(self):
+    def test_staticmethod(self):
         """
         Test static methods on class types.
         """
@@ -1064,14 +1034,19 @@ class TestClassType(JitTestCase):
             def __eq__(self, other: 'ClassWithStaticMethod'):
                 return self.a == other.a and self.b == other.b
 
+            # staticmethod that calls constructor.
             @staticmethod
-            def create(a: 'ClassWithStaticMethod', b: 'ClassWithStaticMethod') -> 'ClassWithStaticMethod':
-                return ClassWithStaticMethod(a.a, b.b)
+            def create(args: List['ClassWithStaticMethod']) -> 'ClassWithStaticMethod':
+                return ClassWithStaticMethod(args[0].a, args[0].b)
 
-        def test_function(a: 'ClassWithStaticMethod', b: 'ClassWithStaticMethod') -> 'ClassWithStaticMethod':
-            return ClassWithStaticMethod.create(a, b)
+            # staticmethod that calls another staticmethod.
+            @staticmethod
+            def create_from(a: int, b: int) -> 'ClassWithStaticMethod':
+                a = ClassWithStaticMethod(a, b)
+                return ClassWithStaticMethod.create([a])
 
-        a = ClassWithStaticMethod(1, 1)
-        b = ClassWithStaticMethod(2, 2)
+        # Script function that calls staticmethod.
+        def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
+            return ClassWithStaticMethod.create_from(a, b)
 
-        self.checkScript(test_function, (a, b))
+        self.checkScript(test_function, (1, 2))
