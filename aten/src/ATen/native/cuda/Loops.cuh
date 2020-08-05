@@ -1,6 +1,14 @@
 
 #pragma once
 
+#define NUM_THREADS (C10_WARP_SIZE * 2)
+#define THREAD_WORK_SIZE 4
+#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
+
+constexpr int num_threads = NUM_THREADS;
+constexpr int thread_work_size = THREAD_WORK_SIZE;
+constexpr int block_work_size = BLOCK_WORK_SIZE;
+
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
@@ -10,14 +18,6 @@
 #include <thrust/tuple.h>
 
 namespace at { namespace native {
-
-#define NUM_THREADS (C10_WARP_SIZE * 2)
-#define THREAD_WORK_SIZE 4
-#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
-
-constexpr int num_threads = NUM_THREADS;
-constexpr int thread_work_size = THREAD_WORK_SIZE;
-constexpr int block_work_size = BLOCK_WORK_SIZE;
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
