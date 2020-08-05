@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: :ref:`recommend-saving-models`
+    See also: `saving-loading-tensors`
 
     Args:
         obj: saved object

@@ -93,8 +93,10 @@ std::ostream& operator<<(
       out << l.delim;
     }
     printValueRef(out, n);
-    out << " : ";
-    out << *n->type();
+    if (c10::type_verbosity() >= c10::TypeVerbosity::Type) {
+      out << " : ";
+      out << *n->type();
+    }
   }
   return out;
 }

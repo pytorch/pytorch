@@ -754,7 +754,7 @@ class JitRpcAsyncOpTest:
             ret = fut.wait()
             return ret
 
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
             ret = rpc_async_call_remote_raising_torchscript_in_torchscript(
                 dst_worker_name
             )
