@@ -31,7 +31,7 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
 
 // Note: the function is implemented using the __restrict__ memory modifier,
 // which means that if `output` actually is aliased by `input`, the result
-// produces is undefined.
+// produced is undefined.
 Tensor _compute_linear_combination_out(const Tensor& input, const Tensor& coefficients, Tensor& output) {
   auto output_first_dim_size = coefficients.size(0);
   auto input_first_dim_size = coefficients.size(1);
@@ -88,12 +88,15 @@ Tensor _compute_linear_combination_out(const Tensor& input, const Tensor& coeffi
     .add_input(coefficients_restrided)
     .build();
 
+  // The dimension of size n is traversed inside the kernels,
+  // it is the first dimension of `input` and the second of `coefficients`
   auto input_stride = input.stride(0);
+  auto coeff_stride = coefficients.stride(1);
   _compute_linear_combination_stub(
     iter.device_type(),
     iter,
-    input.stride(0),
-    coefficients.stride(1),
+    input_stride,
+    coeff_stride,
     input_first_dim_size
   );
   return output;
