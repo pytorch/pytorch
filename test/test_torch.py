@@ -12997,12 +12997,12 @@ class TestTorchDeviceType(TestCase):
                 include_bfloat16=device.startswith('cuda')) + torch.testing.get_all_complex_dtypes():
             test_data = [
                 (torch.ones(height, width, device=device, dtype=dtype),
-                torch.ones(height, width, device=device, dtype=dtype),
-                torch.tensor([[3], [1]], device=device, dtype=dtype).repeat(1, width), "add"),
+                 torch.ones(height, width, device=device, dtype=dtype),
+                 torch.tensor([[3], [1]], device=device, dtype=dtype).repeat(1, width), "add"),
                 (torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
-                torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
-                torch.tensor([[8], [2]], device=device,
-                            dtype=dtype).repeat(1, width), "multiply"),
+                 torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
+                 torch.tensor([[8], [2]], device=device,
+                              dtype=dtype).repeat(1, width), "multiply"),
             ]
 
             for input, src, result, operation in test_data:
