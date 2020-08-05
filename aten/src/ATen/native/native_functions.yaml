@@ -220,24 +220,34 @@
   variants: function, method
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
+  variants: method
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# Note [Adding an alias]
+# To add an alias do the following:
+#
+# 1) Copy the original functions native_functions.yaml entry, but replace the
+#      original function's name with their own.
+# 2) Implement the corresponding functions and have them redispatch to the
+#      original function.
+# 3) Add docstrings to the new functions that reference the original function.
+# 4) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
+# 5) Update the op_alias_mappings in torch/testing/_internal/jit_utils.py.
+# 6) Add a test validating the alias's behavior is the same as the original
+#      function's.
+#
+# See torch.absolute, an alias for torch.abs, as an example.
+
+# Absolute, alias for abs
 - func: absolute(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU, CUDA: abs
 
 - func: absolute_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
-  dispatch:
-    CPU, CUDA: abs_
+  variants: method
 
 - func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: abs_out
 
 - func: angle(Tensor self) -> Tensor
   use_c10_dispatcher: full
