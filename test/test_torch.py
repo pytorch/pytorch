@@ -18346,31 +18346,49 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_argminmax_multiple(self, device, dtype):
-        # Reference: https://github.com/pytorch/pytorch/issues/41998
+        # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
         self.compare_with_numpy(torch.argmax, np.argmax, t)
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
-        # Case from the issue
+        # Case: Randomly Generated Tensors
+        for ndims in range(1, 5):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for n in range(ndims + 1):
+                for contiguous in [False, True]:
+                    # Generate Input.
+                    x = self._generate_input(shape, dtype, device, False)
+                    if contiguous:
+                        x = x.T
+                    self.compare_with_numpy(torch.argmax, np.argmax, x, device=None, dtype=None)
+                    self.compare_with_numpy(torch.argmin, np.argmin, x, device=None, dtype=None)
+
+        def verify_against_numpy(t):
+            # Argmax
+            torch_fn = partial(torch.argmax, dim=1)
+            np_fn = partial(np.argmax, axis=1)
+            self.compare_with_numpy(torch_fn, np_fn, t)
+            # Non-contiguous input
+            self.compare_with_numpy(torch_fn, np_fn, t.T)
+
+            # Argmin
+            torch_fn = partial(torch.argmin, dim=1)
+            np_fn = partial(np.argmin, axis=1)
+            self.compare_with_numpy(torch_fn, np_fn, t)
+            # Non-contiguous input
+            self.compare_with_numpy(torch_fn, np_fn, t.T)
+
+        # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
         t = torch.tensor([[1, 5],
                           [2, 10],
                           [3, 3]], device=device, dtype=dtype)
-        torch_fn = partial(torch.argmax, dim=1)
-        np_fn = partial(np.argmax, axis=1)
-        self.compare_with_numpy(torch_fn, np_fn, t)
-        torch_fn = partial(torch.argmin, dim=1)
-        np_fn = partial(np.argmin, axis=1)
-        self.compare_with_numpy(torch.argmin, np.argmin, t)
+        verify_against_numpy(t)
 
+        # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
         t = torch.tensor([[1, 5],
                           [2, 10],
                           [0, 0]], device=device, dtype=dtype)
-        torch_fn = partial(torch.argmax, dim=1)
-        np_fn = partial(np.argmax, axis=1)
-        self.compare_with_numpy(torch_fn, np_fn, t)
-        torch_fn = partial(torch.argmin, dim=1)
-        np_fn = partial(np.argmin, axis=1)
-        self.compare_with_numpy(torch.argmin, np.argmin, t)
+        verify_against_numpy(t)
 
 
 # NOTE [Linspace+Logspace precision override]
