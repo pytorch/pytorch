@@ -108,15 +108,14 @@ class TestEnum(JitTestCase):
             scripted_enum_comp(Foo.ITEM1),
             False)
 
-
     def test_heterogenous_value_type_enum_error(self):
-        global Color
+        global ColorDiffType
 
-        class Color(Enum):
+        class ColorDiffType(Enum):
             RED = 1
             GREEN = "green"
 
-        def enum_comp(x: Color, y: Color) -> bool:
+        def enum_comp(x: ColorDiffType, y: ColorDiffType) -> bool:
             return x == y
 
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
@@ -125,13 +124,13 @@ class TestEnum(JitTestCase):
             scripted_enum_comp = torch.jit.script(enum_comp)
 
     def test_enum_name(self):
-        global Color
+        global ColorForName
 
-        class Color(Enum):
+        class ColorForName(Enum):
             RED = 1
             GREEN = 2
 
-        def enum_name(x: Color) -> str:
+        def enum_name(x: ColorForName) -> str:
             return x.name
 
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
@@ -139,17 +138,17 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_name = torch.jit.script(enum_name)
 
-        self.assertEqual(scripted_enum_name(Color.RED), Color.RED.name)
-        self.assertEqual(scripted_enum_name(Color.GREEN), Color.GREEN.name)
+        self.assertEqual(scripted_enum_name(ColorForName.RED), ColorForName.RED.name)
+        self.assertEqual(scripted_enum_name(ColorForName.GREEN), ColorForName.GREEN.name)
 
     def test_enum_value(self):
-        global Color
+        global ColorForValue
 
-        class Color(Enum):
+        class ColorForValue(Enum):
             RED = 1
             GREEN = 2
 
-        def enum_value(x: Color) -> int:
+        def enum_value(x: ColorForValue) -> int:
             return x.value
 
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
@@ -157,51 +156,51 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_value = torch.jit.script(enum_value)
 
-        self.assertEqual(scripted_enum_value(Color.RED), Color.RED.value)
-        self.assertEqual(scripted_enum_value(Color.GREEN), Color.GREEN.value)
+        self.assertEqual(scripted_enum_value(ColorForValue.RED), ColorForValue.RED.value)
+        self.assertEqual(scripted_enum_value(ColorForValue.GREEN), ColorForValue.GREEN.value)
 
     def test_enum_as_const(self):
-        global Color
+        global ColorConst
 
-        class Color(Enum):
+        class ColorConst(Enum):
             RED = 1
             GREEN = 2
 
         @torch.jit.script
-        def enum_const(x: Color) -> bool:
-            if x == Color.RED:
+        def enum_const(x: ColorConst) -> bool:
+            if x == ColorConst.RED:
                 return True
             else:
                 return False
 
-        self.assertEqual(enum_const(Color.RED), True)
-        self.assertEqual(enum_const(Color.GREEN), False)
+        self.assertEqual(enum_const(ColorConst.RED), True)
+        self.assertEqual(enum_const(ColorConst.GREEN), False)
 
     def test_non_existent_enum_value(self):
-        global Color
+        global ColorNonExistentVal
 
-        class Color(Enum):
+        class ColorNonExistentVal(Enum):
             RED = 1
             GREEN = 2
 
-        def enum_const(x: Color) -> bool:
-            if x == Color.PURPLE:
+        def enum_const(x: ColorNonExistentVal) -> bool:
+            if x == ColorNonExistentVal.PURPLE:
                 return True
             else:
                 return False
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "has no attribute 'PURPLE'", "Color.PURPLE"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "has no attribute 'PURPLE'", "ColorNonExistentVal.PURPLE"):
             torch.jit.script(enum_const)
 
     def test_enum_ivalue_type(self):
-        global Color
+        global ColorIValueType
 
-        class Color(Enum):
+        class ColorIValueType(Enum):
             RED = 1
             GREEN = 2
 
         def is_color_enum(x: Any):
-            if isinstance(x, Color):
+            if isinstance(x, ColorIValueType):
                 return True
             else:
                 return False
@@ -209,18 +208,18 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_is_color_enum = torch.jit.script(is_color_enum)
 
-        self.assertEqual(scripted_is_color_enum(Color.RED), True)
-        self.assertEqual(scripted_is_color_enum(Color.GREEN), True)
+        self.assertEqual(scripted_is_color_enum(ColorIValueType.RED), True)
+        self.assertEqual(scripted_is_color_enum(ColorIValueType.GREEN), True)
         self.assertEqual(scripted_is_color_enum(1), False)
 
     def test_closed_over_enum_constant(self):
-        global Color
+        global ColorClosedOver
 
-        class Color(Enum):
+        class ColorClosedOver(Enum):
             RED = 1
             GREEN = 2
 
-        a = Color
+        a = ColorClosedOver
 
         def closed_over_aliased_type():
             return a.RED.value
@@ -228,10 +227,10 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(closed_over_aliased_type)
 
-        self.assertEqual(scripted(), Color.RED.value)
+        self.assertEqual(scripted(), ColorClosedOver.RED.value)
 
 
-        b = Color.RED
+        b = ColorClosedOver.RED
 
         def closed_over_aliased_value():
             return b.value
@@ -239,28 +238,67 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(closed_over_aliased_value)
 
-        self.assertEqual(scripted(), Color.RED.value)
+        self.assertEqual(scripted(), ColorClosedOver.RED.value)
 
     def test_enum_as_module_attribute(self):
-        global Color
+        global ColorModuleAttr
 
-        class Color(Enum):
+        class ColorModuleAttr(Enum):
             RED = 1
             GREEN = 2
 
         class TestModule(torch.nn.Module):
-            def __init__(self, e: Color):
+            def __init__(self, e: ColorModuleAttr):
                 super(TestModule, self).__init__()
                 self.e = e
 
             def forward(self):
                 return self.e.value
 
-        m = TestModule(Color.RED)
+        m = TestModule(ColorModuleAttr.RED)
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(m)
 
-        self.assertEqual(scripted(), Color.RED.value)
+        self.assertEqual(scripted(), ColorModuleAttr.RED.value)
+
+    def test_enum_return(self):
+        global ColorForReturn
+
+        class ColorForReturn(Enum):
+            RED = 1
+            GREEN = 2
+
+        @torch.jit.script
+        def return_enum(cond: bool):
+            if cond:
+                return ColorForReturn.RED
+            else:
+                return ColorForReturn.GREEN
+
+        self.assertEqual(return_enum(True), ColorForReturn.RED)
+        self.assertEqual(return_enum(False), ColorForReturn.GREEN)
+
+    def test_enum_module_return(self):
+        global ColorForModuleReturn
+
+        class ColorForModuleReturn(Enum):
+            RED = 1
+            GREEN = 2
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, e: ColorForModuleReturn):
+                super(TestModule, self).__init__()
+                self.e = e
+
+            def forward(self):
+                return self.e
+
+        m = TestModule(ColorForModuleReturn.RED)
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(m)
+
+        self.assertEqual(scripted(), ColorForModuleReturn.RED)
+
 
     def test_enum_iterate(self):
         global ColorForIterate
@@ -299,14 +337,14 @@ class TestEnumFeatureGuard(JitTestCase):
             os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = self.saved_enum_env_var
 
     def test_enum_comp_disabled(self):
-        global Color
+        global ColorGuarded
 
-        class Color(Enum):
+        class ColorGuarded(Enum):
             RED = 1
             GREEN = 2
 
-        def enum_comp(x: Color, y: Color) -> bool:
+        def enum_comp(x: ColorGuarded, y: ColorGuarded) -> bool:
             return x == y
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unknown type name 'Color'", "Color"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unknown type name 'ColorGuarded'", "ColorGuarded"):
             torch.jit.script(enum_comp)
