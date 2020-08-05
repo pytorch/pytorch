@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/memory.h>
 #include "ATen/core/interned_strings.h"
 #include "c10/util/Exception.h"
+#include "jit/api/function_impl.h"
 #include "jit/ir/ir.h"
 
 namespace torch {
@@ -456,6 +457,13 @@ void removeProfilingNodes_(
 void findValuesWithKnownSizes_(
     Block* block,
     std::unordered_map<Value*, TensorTypePtr>& value_types) {
+  for (auto i : block->inputs()) {
+    if (allShapesAreKnown(i)) {
+      if (auto tensor_ty = i->type()->cast<TensorType>()) {
+        value_types[i] = tensor_ty;
+      }
+    }
+  }
   auto reverse_iter = block->nodes().reverse();
   for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
     Node* n = *it++;
@@ -585,6 +593,29 @@ void insertGuards(
         *fusion_group->g(attr::Subgraph),
         fusion_group->inputs());
 
+    /*
+    auto graph = b->owningGraph();
+    auto fp = new GraphFunction("<tensorexpr>", fusion_group->g(attr::Subgraph), nullptr);
+    Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
+                           ->s_(attr::name, "tensorexpr")
+                           ->output()
+                           ->setType(FunctionType::create(fp));
+    std::vector<Value*> inputs = {fn_constant};
+    auto copy_fusion_group = fusion_group->g(attr::Subgraph)->copy();
+    auto otypes = fmap()
+    auto tuple_type = TupleType::create()
+    auto return_tuple = copy_fusion_group->createTuple(copy_fusion_group->return_node()->inputs(), nullptr);
+    copy_fusion_group->appendNode(return_tuple);
+    for (int i = copy_fusion_group->outputs().size() - 1; i >= 0; i++) {
+      copy_fusion_group->eraseOutput(i);
+    }
+    copy_fusion_group->registerOutput(return_tuple->output());
+    Value* result = graph->insertNode(graph->create(prim::CallFunction, inputs))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+
+    
+    */
     for (size_t i = 0; i < fusion_group->inputs().size(); ++i) {
       Value* inp = fusion_group->input(i);
       if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
