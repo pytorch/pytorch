@@ -734,6 +734,10 @@ RegisterOperators reg2({
         listSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sort.str(str[](a!) self, bool reverse=False) -> ()",
+        listSort<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::sorted.int(int[](a) input) -> (int[])",
         listCopyAndSort<int64_t>,
         aliasAnalysisFromSchema()),
@@ -749,6 +753,11 @@ RegisterOperators reg2({
         "aten::sorted.bool(bool[](a) input) -> (bool[])",
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sorted.str(str[](a) input) -> (bool[])",
+        listCopyAndSort<std::string>,
+        aliasAnalysisFromSchema()),
+
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
@@ -1136,7 +1145,7 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
               << "returns a bool";
   } else {
     error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools or "
+              << " must be of Tensors, ints, floats, bools, strs or "
               << "a User Defined Class that defines the __lt__ compare method"
               << ", got list of " << list_element_type->repr_str() << "\n";
   }
