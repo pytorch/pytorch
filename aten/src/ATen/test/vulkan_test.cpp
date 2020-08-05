@@ -62,6 +62,39 @@ TEST(VulkanTest, add) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, add_not4dim) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_in0 = at::rand({1, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::add(t_in0, t_in1, 2);
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+  auto tv_out = at::add(tv_in0, tv_in1, 2);
+  auto t_out = tv_out.cpu();
+
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, add_cpu_vulkan) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_in0 = at::rand({2, 96, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 =
+      at::rand({1, 2, 96, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::add(t_in0, t_in1, 2);
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+
+  auto tv_out1 = at::add(tv_in0, t_in1, 2);
+  auto t_out1 = tv_out1.cpu();
+  ASSERT_TRUE(almostEqual(t_out1, t_out_expected));
+
+  auto tv_out2 = at::add(t_in0, tv_in1, 2);
+  auto t_out2 = tv_out2.cpu();
+  ASSERT_TRUE(almostEqual(t_out2, t_out_expected));
+}
+
 TEST(VulkanTest, conv2d) {
   if (!at::vulkan::is_available())
     return;
@@ -134,6 +167,21 @@ TEST(VulkanTest, addmm) {
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
 }
 
+TEST(VulkanTest, mm) {
+  if (!at::vulkan::is_available())
+    return;
+  auto t_m1 = at::rand({10, 20}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_m2 = at::rand({20, 30}, at::device(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = t_m1.mm(t_m2);
+
+  auto tv_m1 = t_m1.vulkan();
+  auto tv_m2 = t_m2.vulkan();
+  auto tv_out = tv_m1.mm(tv_m2);
+  auto t_out = tv_out.cpu();
+  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
 TEST(VulkanTest, clamp) {
   if (!at::vulkan::is_available())
     return;
@@ -180,6 +228,7 @@ enum class OpType { conv2d, hardtanh_, mean, addmm };
 class BaseOp {
  public:
   BaseOp(OpType t) : type(t) {}
+  virtual ~BaseOp() = default;
   virtual at::Tensor run(at::Tensor&) = 0;
   virtual std::string toString() = 0;
   OpType type;
@@ -548,6 +597,65 @@ TEST(VulkanTest, adaptive_avg_pool2d_2) {
   auto tv_in = t_in.vulkan();
 
   auto tv_out = at::adaptive_avg_pool2d(tv_in, {1, 1});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, reshape) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 8, 1, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {1, 8});
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {1, 8});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, reshape2) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 3, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::reshape(t_in, {2, 3, 1, 2});
+
+  auto tv_in = t_in.vulkan();
+  auto tv_out = at::reshape(tv_in, {2, 3, 1, 2});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, max_pool2d) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({1, 3, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = at::max_pool2d(t_in, {2, 2}, {1}, {0}, {1});
+  auto tv_in = t_in.vulkan();
+
+  auto tv_out = at::max_pool2d(tv_in, {2, 2}, {1}, {0}, {1});
   auto t_out = tv_out.cpu();
 
   const auto check = almostEqual(t_out, t_out_expected);
