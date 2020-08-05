@@ -15,6 +15,8 @@ import types
 import pickle
 import textwrap
 import operator
+import os
+import subprocess
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -28,7 +30,8 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC, \
+    wrapDeterministicFlagAPITest
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -113,17 +116,14 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
-            deterministic_restore = torch.is_deterministic()
-
             for deterministic in [True, False]:
                 torch.set_deterministic(deterministic)
                 self.assertEqual(deterministic, torch.is_deterministic())
 
             with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
                 torch.set_deterministic(1)
-
-            torch.set_deterministic(deterministic_restore)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -17115,6 +17115,86 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # check that mixed arguments are rejected
             self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cuda()))
             self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cuda(), b2))
+
+    @onlyCUDA
+    @unittest.skipIf(IS_WINDOWS, "Test is broken on Windows. See https://github.com/pytorch/pytorch/issues/42501")
+    @wrapDeterministicFlagAPITest
+    def test_cublas_config_deterministic_error(self, device):
+        test_cases = [
+            # (function, (tensor sizes))
+            ('mm', ((2, 2), (2, 2),)),
+            ('mv', ((2, 2), (2,),)),
+            ('bmm', ((1, 2, 2), (1, 2, 2),))]
+
+        test_configs = [
+            # (CuBLAS workspace config, is deterministic)
+            ('garbage', False),
+            (None, False),
+            (':4096:8', True),
+            (':16:8', True)]
+
+        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        # Create processes to test each combination of test cases and config settings
+        processes = []
+        for fn_name, arg_sizes in test_cases:
+            for config, is_config_deterministic in test_configs:
+                # Setting the config variable before creating the process will make the
+                # process's CUDA initialization honor the setting
+                if config is None:
+                    if os.environ.get(cublas_var_name) is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = config
+                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
+                script = """
+import torch
+torch.set_deterministic(True)
+fn = torch.{}
+arg_sizes = {}
+device = '{}'
+args = []
+for arg_size in arg_sizes:
+    args.append(torch.randn(*arg_size, device=device))
+fn(*args)
+""".format(fn_name, arg_sizes, device)
+                # It would have been preferable to use the `multiprocessing` module to avoid having
+                # to execute code from a string, but that caused issues in Windows
+                # https://github.com/pytorch/pytorch/pull/41377#issuecomment-666641223
+                p = subprocess.Popen(
+                    [sys.executable, '-c', script],
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    # On Windows, opening the subprocess with the default CWD makes `import torch`
+                    # fail, so just set CWD to this script's directory
+                    cwd=os.path.dirname(os.path.realpath(__file__)))
+                processes.append((p, fn_name, config, should_throw_error))
+
+        def test_case_info():
+            return 'function "%s", config "%s"' % (fn_name, '' if config is None else config)
+
+        # Wait for each process to finish and check for correct error behavior
+        for p, fn_name, config, should_throw_error in processes:
+            _, error = p.communicate()
+            if error:
+                error_message = error.decode("utf-8")
+                self.assertTrue(
+                    should_throw_error,
+                    msg="did not expect this error to be raised for case '%s':\n%s" % (
+                        test_case_info(), error_message))
+                expected_error_message = "RuntimeError: Deterministic behavior was enabled with either"
+                self.assertTrue(
+                    expected_error_message in error_message,
+                    msg=("expected error related to CuBLAS determinism for case "
+                         "'%s', but got a different error:\n%s" % (test_case_info(), error_message)))
+            else:
+                self.assertTrue(
+                    not should_throw_error,
+                    msg=("expected error related to CuBLAS determinism for case "
+                         "'%s', but did not get an error" % test_case_info()))
 
     @onlyCPU
     @dtypes(torch.float)

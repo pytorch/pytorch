@@ -344,7 +344,8 @@ namespace jit {
   _(CudaNoThreadIdxWrite_1)                \
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
-  _(CudaTestRand01)
+  _(CudaTestRand01)                        \
+  _(CudaSigmoid)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)

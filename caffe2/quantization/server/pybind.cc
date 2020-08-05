@@ -100,6 +100,15 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("delimiter") = " ");
 
   m.def(
+      "DumpOutputColumnMaxHistogramFile",
+      [](Observable<NetBase>::Observer* ob) {
+        OutputColumnMaxHistogramNetObserver* hist_ob =
+            dynamic_cast_if_rtti<OutputColumnMaxHistogramNetObserver*>(ob);
+        hist_ob->DumpOutputColumnMaxHistogramFile();
+      },
+      pybind11::arg("ob"));
+
+  m.def(
       "AddOutputColumnMaxHistogramObserver",
       [](const string& net_name,
          const string& out_file_name,
