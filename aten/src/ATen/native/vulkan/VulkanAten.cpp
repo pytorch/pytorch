@@ -2,6 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/Vulkan.h>
@@ -161,6 +162,92 @@ at::Tensor vulkan_adaptive_avg_pool2d(
   y.allocate_storage();
   vulkan::detail::adaptive_avg_pool2d(y, x, ih, iw, oh, ow, in, ic);
   return output;
+}
+
+at::Tensor vulkan_max_pool2d(
+    const at::Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(
+      kernel_size.size() == 1 || kernel_size.size() == 2,
+      "Vulkan max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
+  const int kH = safe_downcast<int>(kernel_size[0]);
+  const int kW =
+      kernel_size.size() == 1 ? kH : safe_downcast<int>(kernel_size[1]);
+  TORCH_CHECK(
+      stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+      "Vulkan max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
+  const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
+  const int dW = stride.empty()
+      ? kW
+      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
+
+  TORCH_CHECK(
+      padding.size() == 1 || padding.size() == 2,
+      "Vulkan max_pool2d: padding must be either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int>(padding[1]);
+
+  TORCH_CHECK(
+      dilation.size() == 1 || dilation.size() == 2,
+      "Vulkan max_pool2d: dilation must be either a single int, or a tuple of two ints");
+  const int dilationH = safe_downcast<int>(dilation[0]);
+  const int dilationW =
+      dilation.size() == 1 ? dilationH : safe_downcast<int>(dilation[1]);
+  TORCH_CHECK(
+      self.dim() == 4, "Vulkan max_pool2d is implemented for 4-dim input");
+
+  const auto& x = vtensor_from_vulkan(self);
+  const auto inputSize = self.sizes();
+  const int64_t iN = inputSize[0];
+  const int64_t iC = inputSize[1];
+  const int64_t iH = inputSize[2];
+  const int64_t iW = inputSize[3];
+
+  const int64_t oH =
+      pooling_output_shape<int64_t>(iH, kH, padH, dH, dilationH, ceil_mode);
+  const int64_t oW =
+      pooling_output_shape<int64_t>(iW, kW, padW, dW, dilationW, ceil_mode);
+
+  pool2d_shape_check(
+      self,
+      kH,
+      kW,
+      dH,
+      dW,
+      padH,
+      padW,
+      dilationH,
+      dilationW,
+      iC,
+      iH,
+      iW,
+      oH,
+      oW);
+
+  VulkanTensor y{{iN, iC, oH, oW}};
+  y.allocate_storage();
+  vulkan::detail::max_pool2d(
+      y,
+      x,
+      iH,
+      iW,
+      oH,
+      oW,
+      iN,
+      iC,
+      kH,
+      kW,
+      dH,
+      dW,
+      padH,
+      padW,
+      dilationH,
+      dilationW);
+  return new_with_vtensor_vulkan(std::move(y), self.options());
 }
 
 at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape) {
