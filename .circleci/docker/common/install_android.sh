@@ -79,6 +79,8 @@ rm "$_tmp_vulkansdk_targz"
 
 
 # Installing SwiftShader for Vulkan
+# XCB libs
+sudo apt-get install xcb
 # CMake >= 3.13 is required by SwiftShader
 _cmake_dir=/var/lib/jenkins/swiftshader-cmake
 mkdir -p $_cmake_dir
@@ -93,7 +95,7 @@ _swiftshader_root_dir=/var/lib/jenkins
 _swiftshader_dir="$_swiftshader_root_dir/swiftshader"
 retry git clone https://github.com/google/swiftshader.git "$_swiftshader_dir"
 pushd "$_swiftshader_dir"
-git submodule update --init --recursive
+git submodule sync && git submodule update -q --init --recursive
 popd
 #_tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
 #curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
