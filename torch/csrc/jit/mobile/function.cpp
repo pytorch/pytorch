@@ -79,7 +79,7 @@ void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
 
-std::string Function::get_module_debug_info(size_t pc) {
+std::string Function::get_module_debug_info(size_t pc) const {
   TORCH_CHECK(
       pc < pc_to_module_debug_info_.size(),
       "Module debug info index out of boundary.");

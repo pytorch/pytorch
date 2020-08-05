@@ -28,7 +28,7 @@ class Function {
 
   void set_register_size(size_t size);
 
-  std::string get_module_debug_info(size_t pc);
+  std::string get_module_debug_info(size_t pc) const;
 
  private:
   c10::QualifiedName name_;
