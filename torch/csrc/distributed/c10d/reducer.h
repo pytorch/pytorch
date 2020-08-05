@@ -59,15 +59,120 @@ class Reducer {
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
- protected:
-  // Forward declaration.
-  struct Bucket;
+  // A bucket replica represents [1..N] gradients to be reduced,
+  // with the same dtype, on the same device.
+  //
+  // Batching gradients together before reducing them can result in lower
+  // overhead and/or faster time to completion. Only gradients of the same type
+  // and on the same device can be batched. The tensor that represents the
+  // flattened gradient uses the same type and is placed on the same device.
+  // Buckets are filled as the gradients they hold are computed (triggered by
+  // autograd hooks). Buckets are reduced in a predetemined order that is
+  // identical across processes.
+  struct BucketReplica {
+    // Flattened (1 dimensional) contents of bucket.
+    at::Tensor contents;
 
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
+
+    // Variables that contribute to this bucket replica. Use refcounted value
+    // here so that we can easily unflatten the bucket contents into the
+    // participating variables after reduction has completed.
+    std::vector<torch::autograd::Variable> variables;
+
+    // Per-variable offset/length into the flat bucket contents tensor.
+    std::vector<size_t> offsets;
+    std::vector<size_t> lengths;
+
+    // Number of tensors to be added before this bucket is complete.
+    // This is reset to `variables.size()` every iteration.
+    size_t pending;
+
+    // TODO(@pietern)
+    // Memory copies from gradient tensors into the bucket are potentially
+    // done on different CUDA streams. We record an event for every copy
+    // so that we can synchronize with them prior to kicking off the reduction.
+    // std::vector<at::cuda::CUDAEvent> events;
+  };
+
+  // A bucket holds N bucket replicas (1 per model replica).
+  //
+  // If every bucket in this struct is ready, the reduction can be kicked off.
+  // One bucket per replica. Reduction is kicked off when every bucket is ready.
+  //
+  struct Bucket {
+    std::vector<BucketReplica> replicas;
+
+    // Global indices of participating variables in the bucket
+    std::vector<size_t> variable_indices;
+
+    // Number of replicas to be marked done before this bucket is ready.
+    size_t pending;
+
+    // Keep work handle around when this set of buckets is being reduced.
+    std::shared_ptr<c10d::ProcessGroup::Work> work;
+
+    // Keep future work handle around if DDP comm hook is registered.
+    c10::intrusive_ptr<torch::jit::Future> future_work;
+
+    // If this bucket should expect a single sparse gradient.
+    // Implies: replicas[i].variables.size() == 1.
+    bool expect_sparse_gradient = false;
+  };
+
+  // Return number of buckets in the reducer.
+  size_t getNumBuckets() const;
+
+  // Returns buckets that contain tensors to be allreduced.
+  const std::vector<Bucket>& getBuckets() const;
+
+  // Rebuild buckets according to when tensors received gradients in the
+  // backward pass.
+  std::vector<std::vector<size_t>> rebuildBuckets();
+
+  // Returns true if we should rebuild buckets, else false. We only rebuild
+  // buckets once after the first iteration and never rebuild them if
+  // find_unused_parameters_.
+  bool shouldRebuildBuckets() const;
+
+  // Pushes all parameters to be rebuilt.
+  void pushRebuiltParamsForAllIndices();
+
+  // A struct containing work handle and tensor for allreduce scheduled in
+  // forward pass, if applicable.
+  struct ForwardPassAllreduceWork {
+    std::shared_ptr<c10d::ProcessGroup::Work> workHandle_;
+    at::Tensor resultTensor_;
+  };
+
+  // Handle for the currently scheduled allreduce in the forward pass, if
+  // applicable.
+  ForwardPassAllreduceWork forwardPassWorkHandle_;
+
+  // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
+  // corresponding tensor being reduced.
+  void setForwardPassWorkHandle(
+      std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      at::Tensor& tensor);
+
+  // Retrieve on-device tensors used to track locally unused parameters. For
+  // each replica, it is a tensor where index i = 1 if the Variable with that
+  // index has been used.
+  std::vector<at::Tensor> getLocalUsedMapsOnDevice() const;
+
+ protected:
   // Locates a specific variable by replica index and variable index.
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
   };
+  void pushRebuiltParams(const VariableIndex index);
 
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
@@ -109,9 +214,9 @@ class Reducer {
 
   void verify_replica0_across_processes();
 
-  void mark_variable_ready_dense(VariableIndex index);
+  void mark_variable_ready_dense(VariableIndex index, int divFactor);
 
-  void mark_variable_ready_sparse(VariableIndex index);
+  void mark_variable_ready_sparse(VariableIndex index, int divFactor);
 
   void mark_variable_ready(VariableIndex index);
 
@@ -135,56 +240,12 @@ class Reducer {
   // and parameter indices order may change more frequently.
   // For find_unused_parameters = false case, buckets are only rebuilt once,
   // the performance cost is negligible.
-  std::vector<std::vector<size_t>> rebuildBuckets();
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
   void runGradCallbackForVariable(
       torch::autograd::Variable& variable,
       GradCallback&& cb);
-
-  // A bucket replica represents [1..N] gradients to be reduced,
-  // with the same dtype, on the same device.
-  //
-  // Batching gradients together before reducing them can result in lower
-  // overhead and/or faster time to completion. Only gradients of the same type
-  // and on the same device can be batched. The tensor that represents the
-  // flattened gradient uses the same type and is placed on the same device.
-  // Buckets are filled as the gradients they hold are computed (triggered by
-  // autograd hooks). Buckets are reduced in a predetemined order that is
-  // identical across processes.
-  //
-  struct BucketReplica {
-    // Flattened (1 dimensional) contents of bucket.
-    at::Tensor contents;
-
-    // Views into contents for each grad.  Each view will be created with
-    // layout (sizes + strides) matching the grad's expected layout
-    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
-    // grad.copy_(bucket_views[i]) and
-    // bucket_views[i].copy_(grad)
-    // provide convenient ways to move grad data in/out of contents.
-    std::vector<at::Tensor> bucket_views;
-
-    // Variables that contribute to this bucket replica. Use refcounted value
-    // here so that we can easily unflatten the bucket contents into the
-    // participating variables after reduction has completed.
-    std::vector<torch::autograd::Variable> variables;
-
-    // Per-variable offset/length into the flat bucket contents tensor.
-    std::vector<size_t> offsets;
-    std::vector<size_t> lengths;
-
-    // Number of tensors to be added before this bucket is complete.
-    // This is reset to `variables.size()` every iteration.
-    size_t pending;
-
-    // TODO(@pietern)
-    // Memory copies from gradient tensors into the bucket are potentially
-    // done on different CUDA streams. We record an event for every copy
-    // so that we can synchronize with them prior to kicking off the reduction.
-    // std::vector<at::cuda::CUDAEvent> events;
-  };
 
   // This function is called inside `initialize_buckets` and
   // `finalize_backward`. The function call in `initialize_bucket` creates views
@@ -194,31 +255,6 @@ class Reducer {
   // was registered to recrate views with the result of `future_work`. Before
   // `finalize_backward` call, views must be cleared.
   void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
-
-  // A bucket holds N bucket replicas (1 per model replica).
-  //
-  // If every bucket in this struct is ready, the reduction can be kicked off.
-  // One bucket per replica. Reduction is kicked off when every bucket is ready.
-  //
-  struct Bucket {
-    std::vector<BucketReplica> replicas;
-
-    // Global indices of participating variables in the bucket
-    std::vector<size_t> variable_indices;
-
-    // Number of replicas to be marked done before this bucket is ready.
-    size_t pending;
-
-    // Keep work handle around when this set of buckets is being reduced.
-    std::shared_ptr<c10d::ProcessGroup::Work> work;
-
-    // Keep future work handle around if DDP comm hook is registered.
-    c10::intrusive_ptr<torch::jit::Future> future_work;
-
-    // If this bucket should expect a single sparse gradient.
-    // Implies: replicas[i].variables.size() == 1.
-    bool expect_sparse_gradient = false;
-  };
 
   std::vector<Bucket> buckets_;
 

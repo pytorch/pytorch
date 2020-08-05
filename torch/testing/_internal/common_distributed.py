@@ -131,7 +131,7 @@ def skip_if_rocm(func):
     return wrapper
 
 TIMEOUT_DEFAULT = 100
-TIMEOUT_OVERRIDE = {}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 300}
 
 
 def get_timeout(test_id):
