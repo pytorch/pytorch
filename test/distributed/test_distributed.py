@@ -2453,7 +2453,7 @@ class _DistTestBase(object):
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
     def test_ddp_sync_params_and_buffers(self):
-        # Test that after calling _sunc_params_and_buffers, models across ranks
+        # Test that after calling _sync_params_and_buffers, models across ranks
         # are the same and are equal to the model on the input rank.
         dim = 2
         rank = self.rank

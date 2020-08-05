@@ -188,6 +188,8 @@ class join:
         dist.all_reduce(all_active_procs, group=self.pg)
         return all_active_procs.item()
 
+    # Check and perform sync of module buffers in the forward pass if the models
+    # have buffers that should be synchronized.
     def _check_and_sync_module_buffers(self):
         if self.net.will_sync_module_buffers():
             rank_to_use = self.net._find_common_rank(self.rank, False)
@@ -195,6 +197,8 @@ class join:
                 self.net.modules_buffers[0], self.net.broadcast_bucket_size, rank_to_use
             )
 
+    # Agree upon a common rank and broadcast model parameters to all other
+    # ranks.
     def _sync_final_model(self, is_last_joiner):
         # Agree upon the process that will be the authoritative model copy.
         # The current rank is a candidate for being the authoritative copy if
@@ -202,11 +206,20 @@ class join:
         self.authoritative_rank = self.net._find_common_rank(self.rank, is_last_joiner)
         self.net._sync_params_and_buffers(authoritative_rank=self.authoritative_rank)
 
+    # Schedule allreduce ops to match those scheduled in the reducer's backward
+    # pass.
     def _match_all_reduce_for_bwd_pass(self):
         n_buckets = self.net.reducer.get_num_buckets()
         allreduce_work = []
+        # Schedule allreduce in the same order as Reducer schedules them, i.e.
+        # the order of the buckets. Retrieving the bucket order from the reducer
+        # ensures that we keep the same order in join mode, such as when bucket
+        # order is rebuilt dynamically.
         for i in range(n_buckets):
             bucket_tensors = self.net.reducer.get_tensors_for_bucket_idx(i)
+            # Joined processes contribute zero gradient. To keep the gradient
+            # consistent, the dividing factor is reduced by 1 for each joined
+            # process.
             zero_tensors = [
                 torch.zeros_like(t).to(self.rank if self.is_nccl else "cpu")
                 for t in bucket_tensors
@@ -216,6 +229,7 @@ class join:
         for work in allreduce_work:
             work.wait()
 
+    # Allreduces the used parameter mapping across ranks.
     def _match_unused_params_allreduce(self):
         locally_used_param_maps = self.net.reducer._get_local_used_maps()
         self.pg.allreduce(locally_used_param_maps, AllreduceOptions())
@@ -235,14 +249,16 @@ class join:
                 # Some DDP process still needs to be joined.
                 if is_last_joiner:
                     is_last_joiner = False
-                # Schedule a corresponding broadcast if we are syncing module buffers in the forward pass.
+                # Schedule a corresponding broadcast if we are syncing module
+                # buffers in the forward pass.
                 self._check_and_sync_module_buffers()
                 # Schedule an allreduce to match the backwards pass allreduce.
                 self._match_all_reduce_for_bwd_pass()
                 # Check if we need to allreduce locally unused params.
                 if self.net.find_unused_parameters:
                     self._match_unused_params_allreduce()
-                # Check if we need to rebuild buckets to match broadcast calls from other processes.
+                # Check if we need to rebuild buckets to match broadcast calls
+                # from other processes.
                 if not buckets_rebuilt:
                     if self.net.reducer._should_rebuild_buckets():
                         if self.net.find_unused_parameters:
