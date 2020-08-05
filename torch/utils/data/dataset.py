@@ -2,7 +2,7 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm
+from torch import randperm, randint
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
@@ -248,6 +248,48 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
+            # Cannot verify that all self.datasets are Sized
+            total += len(d)  # type: ignore
+        return total
+
+
+class RandomSampleDataset(IterableDataset):
+    r"""Dataset for random-sampling multiple :class:`IterableDataset` s.
+
+    This class is useful to assemble different existing dataset streams by sampling elements
+    from a randomly selected stream. The random-sampling operation is done on-the-fly, so sampling
+    large-scale datasets with this class will be efficient.
+
+    The underlying dataset streams might be slow to access, and it might be necessary
+    to limit the number of streams that are open at a given instant. This is supported.
+
+    Arguments:
+        datasets (iterable of IterableDataset): datasets to be sampled
+        N_max (int): the max number of datasets that can be open at any time
+    """
+    def __init__(self, datasets: Iterable[Dataset], N_max: int = 40):
+        super(RandomSampleDataset, self).__init__()
+        self.datasets = datasets
+        self.N_max = N_max
+        for d in self.datasets:
+            assert isinstance(d, IterableDataset), "RandomSampleDataset only supports IterableDataset"
+
+    def __iter__(self):
+        randints = randperm(len(self.datasets))
+        iterators = [iter(self.datasets[d]) for d in randints]
+        N = min(len(iterators), self.N_max)
+        while N > 0:
+            k = randint(N, ())
+            try:
+                yield next(iterators[k])
+            except StopIteration:
+                del iterators[k]
+                N = min(len(iterators), self.N_max)
+
+    def __len__(self):
+        total = 0
+        for d in self.datasets:
+            assert isinstance(d, IterableDataset), "RandomSampleDataset only supports IterableDataset"
             # Cannot verify that all self.datasets are Sized
             total += len(d)  # type: ignore
         return total

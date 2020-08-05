@@ -12,7 +12,8 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, DataLoader,
+                              ConcatDataset, ChainDataset, RandomSampleDataset)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
@@ -1197,6 +1198,22 @@ except RuntimeError as e:
 
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
+
+    def test_random_sample_iterable_style_dataset(self):
+        # random sampling
+        dataset1 = CountingIterableDataset(20)
+        dataset2 = CountingIterableDataset(15)
+        expected = list(range(20)) + list(range(15))
+        for num_workers in [0, 1]:
+            random_sample_dataset = RandomSampleDataset([dataset1, dataset2])
+            fetched = list(DataLoader(random_sample_dataset, num_workers=num_workers))
+            self.assertEqual(len(fetched), len(expected))
+            for e, d in zip(sorted(expected), sorted(fetched)):
+                self.assertIsInstance(d, torch.Tensor)
+                self.assertEqual(e, d)
+
+        with self.assertRaisesRegex(AssertionError, "RandomSampleDataset only supports IterableDataset"):
+            list(iter(RandomSampleDataset([dataset1, self.dataset])))
 
     def test_multiprocessing_contexts(self):
         reference = [
