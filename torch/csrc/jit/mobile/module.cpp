@@ -130,7 +130,7 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
-std::string Module::get_forward_method_debug_info(size_t pc) {
+std::string Module::get_forward_method_debug_info(size_t pc) const {
   return find_method("forward")->get_module_debug_info(pc);
 }
 
