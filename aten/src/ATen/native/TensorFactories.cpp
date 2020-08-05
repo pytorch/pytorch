@@ -469,6 +469,24 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
   return at::empty({}, options).fill_(s);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ packbits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor packbits(const Tensor& bit_array, c10::optional<int64_t> dim, bool big_endian) {
+  TORCH_CHECK(true, "packbits works with boolean tensors only");
+
+  if (dim) {
+    bit_array.print();
+  }
+  auto result = at::zeros_like(bit_array);
+  return result;
+}
+
+// Tensor packbits(const Tensor& bit_array, int64_t dim, const TensorOptions& options) {
+
+//   return native::packbits_endian(bit_array, dim, /*big_endian=*/true, options);
+// }
+
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor rand(IntArrayRef size, const TensorOptions& options) {

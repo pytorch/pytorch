@@ -25,12 +25,12 @@ import torch
 import types
 
 def get_ignored_functions():
-    """Return public functions that cannot be overrided by __torch_function__
+    """Return public functions that cannot be overridden by __torch_function__
 
     Returns
     -------
     A tuple of functions that are publicly available in the torch API but cannot
-    be overrided with __torch_function__. Mostly this is because none of the
+    be overridden with __torch_function__. Mostly this is because none of the
     arguments of these functions are tensors or tensor-likes.
 
     """
@@ -150,7 +150,7 @@ def get_ignored_functions():
         torch.is_vulkan_available,
         torch.is_deterministic,
         torch.set_deterministic,
-        torch.unify_type_list
+        torch.unify_type_list,
     )
 
 def get_testing_overrides():
