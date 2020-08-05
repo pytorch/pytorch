@@ -12146,6 +12146,31 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(y.is_contiguous())
         self.assertEqual(out, y, atol=0., rtol=0.)
 
+    def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
+        val, ind = fn(x, -1)
+        self.assertEqual(val, expected_val, atol=0, rtol=0)
+        self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+        out_val = torch.empty_like(val).t().contiguous().t()
+        out_ind = torch.empty_like(ind).t().contiguous().t()
+        fn(x, -1, out=(out_val, out_ind))
+        self.assertFalse(out_val.is_contiguous())
+        self.assertFalse(out_ind.is_contiguous())
+        self.assertEqual(out_val, expected_val, atol=0, rtol=0)
+        self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
+
+    def test_cummax_discontiguous(self, device):
+        x = torch.tensor([[0, 1, 2, 3, 2, 1], [4, 5, 6, 5, 6, 7]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[0, 1, 2, 3, 3, 3], [4, 5, 6, 6, 6, 7]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 2, 4, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummax, expected_val, expected_ind)
+
+    def test_cummin_discontiguous(self, device):
+        x = torch.tensor([[3, 2, 1, 0, 1, 2], [7, 6, 5, 4, 5, 2]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[3, 2, 1, 0, 0, 0], [7, 6, 5, 4, 4, 2]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 3, 3, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummin, expected_val, expected_ind)
+
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -13076,9 +13101,9 @@ class TestTorchDeviceType(TestCase):
         for maskType in [torch.uint8, torch.bool]:
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
-            mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+            mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
 
-            if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+            if dtype == torch.half and torch.device(device).type == 'cpu':
                 self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                 continue
 
@@ -13097,34 +13122,46 @@ class TestTorchDeviceType(TestCase):
             torch.masked_select(src, mask, out=dst3)
             self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), atol=0, rtol=0)
 
-        # Since complex and half on CPU is not supported, need to skip the remaining test cases
-        if (dtype.is_complex or dtype == torch.half) and torch.device(device).type == 'cpu':
+        # Since half on CPU is not supported, need to skip the remaining test cases
+        if dtype == torch.half and torch.device(device).type == 'cpu':
             return
 
         # Ensure that masks are expanded to match tensor properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
-            # TODO .to() for bfloat16 does not work on windows
-            a = torch.ones(100, 100, device=device, dtype=dtype)
-        else:
-            a = torch.rand(100, 100, device=device).mul(100).to(dtype)
-        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        a = torch.rand(100, 100, device=device).mul(100).to(dtype)
+        mask_first_el_each_row = torch.zeros(100, device=device, dtype=torch.bool)
         mask_first_el_each_row[0] = True
         a_masked = a.masked_select(mask_first_el_each_row)
         self.assertEqual(a_masked, a[:, 0])
 
-        mask_first_row = torch.zeros(100, 1, device=device, dtype=dtype).bool()
+        mask_first_row = torch.zeros(100, 1, device=device, dtype=torch.bool)
         mask_first_row[0][0] = True
         a_masked = a.masked_select(mask_first_row)
         self.assertEqual(a_masked, a[0, :])
 
         # Ensure that tensor is expanded to match mask properly
-        if IS_WINDOWS and dtype == torch.bfloat16 and torch.device(device).type == 'cuda':
-            a = torch.ones(100, device=device, dtype=dtype)
-        else:
-            a = torch.rand(100, device=device).mul(100).to(maskType)
+        a = torch.rand(100, device=device).mul(100).to(dtype)
         mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
+
+    def test_masked_select_discontiguous(self, device):
+        for size in (10, 200):
+            vals = torch.rand(size, size, device=device)
+            mask = torch.full((size, size), False, dtype=torch.bool, device=device)
+            mask[:, ::2] = True
+            vals_list = (vals, vals.t())
+            mask_list = (mask, mask.t())
+            out_dc = torch.empty(size * size, device=device)[::2]
+            for v, m in product(vals_list, mask_list):
+                if m.is_contiguous():
+                    expected = v[:, ::2].clone().view(-1)
+                else:
+                    expected = v[::2].clone().view(-1)
+                out = torch.masked_select(v, m)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+                torch.masked_select(v, m, out=out_dc)
+                self.assertEqual(out_dc, expected, atol=0, rtol=0)
+
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
@@ -17045,6 +17082,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 genf = genf_float
 
             _test_mm(n, m, p, dtype, genf)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_strided_mm_bmm(self, device, dtype):
+        # Tests strided view case with stride smaller than corresponding dimension size
+        x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], dtype=dtype, device=device)
+        new_shape = [2, 2, 2]
+        new_stride = [3, 1, 1]
+        sx = torch.as_strided(x, size=new_shape, stride=new_stride)
+
+        torch_fn = lambda x: torch.bmm(x, x)  # noqa: E731
+        np_fn = lambda x: np.matmul(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx)
+
+        torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @onlyCPU
     @dtypes(torch.float)
