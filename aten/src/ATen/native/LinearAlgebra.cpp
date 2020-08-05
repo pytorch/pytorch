@@ -1015,7 +1015,8 @@ void compute_T18_scale_square(
 
   // Square
   auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
-  auto s_cpu = s.to(at::kCPU);
+  auto s_cpu = (s.device().type() == at::kCPU)
+    ? s : s.to(at::kCPU);
   for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
