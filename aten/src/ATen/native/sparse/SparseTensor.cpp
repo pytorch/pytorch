@@ -4,6 +4,7 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseGCSTensorImpl.hpp>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -141,12 +142,29 @@ namespace {
   }
 }
 
+SparseTensor new_gcs_tensor(const TensorOptions& options) {
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
+  AT_ASSERT(options.layout() == kSparseGCS);
+  DispatchKey dispatch_key;
+  if (options.device().is_cuda()) {
+    dispatch_key = DispatchKey::SparseCUDA;
+  } else {
+    dispatch_key = DispatchKey::SparseCPU;
+  }
+  
+  return detail::make_tensor<SparseGCSTensorImpl>(
+                                                  DispatchKeySet(dispatch_key), options.dtype());
+}
+
 Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, const Tensor& reduction,
                          ArrayRef<int64_t> size, Scalar fill_value, const TensorOptions& options) {
-  Tensor values = expand_values_if_needed(values_);
-  // make sure that indicies do not contain any entries that are greater than the dim.
-  int64_t sparse_dim = indices.size(0)-1;
-  return values;
+  // Tensor values = expand_values_if_needed(values_);
+  // // make sure that indicies do not contain any entries that are greater than the dim.
+  // int64_t sparse_dim = indices.size(0)-1;
+
+  SparseTensor self = new_gcs_tensor(options);
+  
+  return self;
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
@@ -302,8 +320,48 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   return self;
 }
 
-SparseTensor to_sparse_gcs(const Tensor& self) {
-  return self;
+std::vector<int> make_strides(std::vector<int> shape) {
+  std::vector<int> dims(shape.size());
+  std::iota(std::begin(dims), std::end(dims), 0);
+  std::vector<int> strides;
+  int ndims = shape.size();
+
+  if (ndims == 0)
+    return strides;
+
+  strides.insert(std::begin(strides), 1);
+
+  std::cout << "strides: " << strides << std::endl;
+  
+  return strides;
+}
+
+SparseTensor to_sparse_gcs(const Tensor& self, const Tensor& reduction, Scalar fill_value) {
+  IntArrayRef shape = self.sizes();
+  int N = shape.size();
+  std::vector<int> dims1, dims2;
+  // if reduction arg is not specified.
+  if (reduction.numel() == 0) {
+    dims1.resize(N/2);
+    dims2.resize(N/2);
+    std::iota(std::begin(dims1), std::end(dims1), 0);
+    std::iota(std::begin(dims2), std::end(dims2), N/2);
+  }
+  else {
+
+  }
+
+  std::vector<int> strides1 = make_strides(dims1);
+  std::vector<int> strides2 = make_strides(dims2);
+
+  Tensor pointers;
+  Tensor indices;
+  Tensor values_;
+  at::TensorOptions sparse_options = self.options().layout(kSparseGCS);
+
+  Tensor sparse = at::sparse_gcs_tensor(pointers, indices, values_, reduction, shape, fill_value, sparse_options);
+  
+  return sparse;
 }
 
 SparseTensor dense_to_sparse(const Tensor& self){

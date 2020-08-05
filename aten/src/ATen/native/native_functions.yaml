@@ -3540,7 +3540,7 @@
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
-- func: to_sparse_gcs(Tensor self) -> Tensor
+- func: to_sparse_gcs(Tensor self, Tensor reduction, Scalar fill_value) -> Tensor
   use_c10_dispatcher: full
   variants: method
 
