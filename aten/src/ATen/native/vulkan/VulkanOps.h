@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanConvolution.h>
 #include <c10/util/Optional.h>
@@ -28,6 +30,10 @@ void adaptive_avg_pool2d(
     const int64_t OW,
     const int64_t IN,
     const int64_t IC);
+
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape);
 
 void add(
     VulkanTensor& output,

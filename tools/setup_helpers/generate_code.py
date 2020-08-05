@@ -33,6 +33,7 @@ def generate_code(ninja_global=None,
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.autograd.utils import load_op_list_and_strip_overload
     from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
@@ -55,6 +56,8 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
+        selected_op_list = load_op_list_and_strip_overload(selected_op_list, selected_op_list_path)
+
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
@@ -67,7 +70,6 @@ def generate_code(ninja_global=None,
             jit_gen_dir,
             tools_jit_templates,
             disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
             force_schema_registration=force_schema_registration)
 
