@@ -113,7 +113,7 @@ class TestOptimizer(unittest.TestCase):
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
-        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 13)
+        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
@@ -211,7 +211,10 @@ class TestOptimizer(unittest.TestCase):
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
                          " Please build with USE_XNNPACK=1.")
-    def test_optimize_for_mobile_asan(self):
+    def test_quantized_conv_no_asan_failures(self):
+        # There were ASAN failures when fold_conv_bn was run on
+        # already quantized conv modules. Verifying that this does
+        # not happen again.
 
         class Child(nn.Module):
             def __init__(self):
@@ -237,16 +240,14 @@ class TestOptimizer(unittest.TestCase):
                 x = self.dequant(x)
                 return x
 
-        def _quant_script_and_optimize(model):
-            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-            torch.quantization.prepare(model, inplace=True)
-            model(torch.randn(4, 1, 4, 4))
-            torch.quantization.convert(model, inplace=True)
-            model = torch.jit.script(model)
-            model_optim = optimize_for_mobile(model)
-            return model, model_optim
-
-        m, m_optim = _quant_script_and_optimize(Parent())
+        model = Parent()
+        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        torch.quantization.prepare(model, inplace=True)
+        model(torch.randn(4, 1, 4, 4))
+        torch.quantization.convert(model, inplace=True)
+        model = torch.jit.script(model)
+        # this line should not have ASAN failures
+        model_optim = optimize_for_mobile(model)
 
 if __name__ == '__main__':
     unittest.main()
