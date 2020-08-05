@@ -30,3 +30,24 @@ class RpcAgentTestFixture(ABC):
         Does nothing for other agents.
         """
         pass
+
+    # Shutdown sequence is not well defined, so we may see any of the following
+    # errors when running tests that simulate errors via a shutdown on the
+    # remote end.
+    @abstractmethod
+    def get_shutdown_error_regex(self):
+        """
+        Return various error message we may see from RPC agents while running
+        tests that check for failures. This function is used to match against
+        possible errors to ensure failures were raised properly.
+        """
+        pass
+
+    @abstractmethod
+    def get_timeout_error_regex(self):
+        """
+        Returns a partial string indicating the error we should receive when an
+        RPC has timed out. Useful for use with assertRaisesRegex() to ensure we
+        have the right errors during timeout.
+        """
+        pass
