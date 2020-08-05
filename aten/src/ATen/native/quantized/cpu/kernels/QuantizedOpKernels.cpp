@@ -2593,6 +2593,66 @@ void dequantize_tensor_per_channel_affine_cpu(
       });
 }
 
+// quantize stubs for floating point scale and zero_point.
+void quantize_tensor_per_row_float_qparams_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_row_float_qparams_cpu", [&]() {
+        int64_t batches = size_to_dim_(axis, rtensor.sizes());
+        int64_t elements_per_channel =
+            size_from_dim_(axis + 1, rtensor.sizes());
+        int64_t channel = rtensor.size(axis);
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        const float* rdata = rtensor.data_ptr<float>();
+        auto qdata = qtensor.data_ptr<scalar_t>();
+        for (auto b = 0; b < batches; ++b) {
+          for (auto c = 0; c < channel; ++c) {
+            for (auto e = 0; e < elements_per_channel; ++e) {
+              auto i = b * channel * elements_per_channel +
+                  c * elements_per_channel + e;
+              qdata[i] = quantize_val_float_qparams<scalar_t>(
+                  scales_data[c], zero_points_data[c], rdata[i]);
+            }
+          }
+        }
+      });
+}
+
+void dequantize_tensor_per_row_float_qparams_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "dequantize_tensor_per_row_float_qparams_cpu", [&]() {
+        int64_t batches = size_to_dim_(axis, rtensor.sizes());
+        int64_t elements_per_channel =
+            size_from_dim_(axis + 1, rtensor.sizes());
+        int64_t channel = rtensor.size(axis);
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        const auto* qd = qtensor.data_ptr<scalar_t>();
+        float* rd = rtensor.data_ptr<float>();
+        for (auto b = 0; b < batches; ++b) {
+          for (auto c = 0; c < channel; ++c) {
+            for (auto e = 0; e < elements_per_channel; ++e) {
+              auto i = b * channel * elements_per_channel +
+                  c * elements_per_channel + e;
+              // We need to convert the qint8 value to float to ensure the
+              // subtraction subexpression returns a float
+              rd[i] = (static_cast<float>(qd[i].val_) * scales_data[c] + zero_points_data[c]);
+            }
+          }
+        }
+      });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
@@ -2649,6 +2709,12 @@ REGISTER_DISPATCH(
     dequantize_tensor_per_channel_affine_stub,
     &dequantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(
+    quantize_tensor_per_row_float_qparams_stub,
+    &quantize_tensor_per_row_float_qparams_cpu);
+REGISTER_DISPATCH(
+    dequantize_tensor_per_row_float_qparams_stub,
+    &dequantize_tensor_per_row_float_qparams_cpu);
 
 } // namespace native
 } // namespace at
