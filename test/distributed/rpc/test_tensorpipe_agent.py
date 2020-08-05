@@ -7,10 +7,17 @@ from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
 )
+from torch.testing._internal.distributed.nn.api.remote_module_test import (
+    RemoteModuleTest,
+)
 from torch.testing._internal.distributed.rpc.dist_autograd_test import DistAutogradTest
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
 )
+from torch.testing._internal.distributed.rpc.jit.dist_autograd_test import (
+    JitDistAutogradTest,
+)
+from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
 from torch.testing._internal.distributed.rpc.rpc_test import TensorPipeAgentRpcTest
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
@@ -35,6 +42,18 @@ class TensorPipeDistAutogradTestWithSpawn(DistAutogradTest, SpawnHelper):
 
 
 class TensorPipeDistOptimizerTestWithSpawn(DistOptimizerTest, SpawnHelper):
+    pass
+
+
+class TensorPipeJitRpcTestWithSpawn(JitRpcTest, SpawnHelper):
+    pass
+
+
+class TensorPipeJitDistAutogradTestWithSpawn(JitDistAutogradTest, SpawnHelper):
+    pass
+
+
+class TensorPipeRemoteModuleTestWithSpawn(RemoteModuleTest, SpawnHelper):
     pass
 
 
