@@ -12,7 +12,7 @@ namespace api {
 
 struct Pipeline final {
   /*
-    Pipeline Descriptor
+    Descriptor
   */
 
   struct Descriptor final {
@@ -28,7 +28,7 @@ struct Pipeline final {
   };
 
   /*
-    Pipeline Factory
+    Factory
   */
 
   class Factory final {
@@ -58,18 +58,18 @@ struct Pipeline final {
   };
 
   /*
-    Pipeline Cache
+    Cache
   */
 
   typedef api::Cache<Factory> Cache;
 
   //
-  // Pipeline Layout
+  // Layout
   //
 
   struct Layout final {
     /*
-      Pipeline Layout Descriptor
+      Descriptor
     */
 
     struct Descriptor final {
@@ -81,7 +81,7 @@ struct Pipeline final {
     };
 
     /*
-      Pipeline Layout Factory
+      Factory
     */
 
     class Factory final {
@@ -105,7 +105,7 @@ struct Pipeline final {
     };
 
     /*
-      Pipeline Layout Cache
+      Cache
     */
 
     typedef api::Cache<Factory> Cache;

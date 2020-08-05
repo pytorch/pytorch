@@ -1578,10 +1578,15 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
+            # These type ignores arise from the fact that a nested_dict
+            # technically isn't a Mapping, as it doesn't implement
+            # enough methods.  I could fix this with a Protocol but
+            # then I need typing_extensions which isn't currently
+            # a build dep.
             legacy_th_declarations.append(
-                LEGACY_TH_DECLARATION.substitute(env))
+                LEGACY_TH_DECLARATION.substitute(env))  # type: ignore
             legacy_th_definitions.append(
-                LEGACY_TH_DEFINITION.substitute(env))
+                LEGACY_TH_DEFINITION.substitute(env))  # type: ignore
 
     def process_native(option):
         # type: (FunctionOption) -> None
