@@ -942,6 +942,50 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
   return new Div(lhs_new, rhs_new);
 }
 
+const Expr* PolynomialTransformer::mutate(const Max* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Max(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Max(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) > 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
+const Expr* PolynomialTransformer::mutate(const Min* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Min(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Min(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) < 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
   std::vector<const Expr*> new_params;
   bool changed = false;

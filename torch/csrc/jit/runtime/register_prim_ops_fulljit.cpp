@@ -702,6 +702,7 @@ RegisterOperators reg2({
         CREATE_SPECIALIZED_LIST_OPS("float", double)
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
@@ -733,6 +734,10 @@ RegisterOperators reg2({
         listSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sort.str(str[](a!) self, bool reverse=False) -> ()",
+        listSort<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::sorted.int(int[](a) input) -> (int[])",
         listCopyAndSort<int64_t>,
         aliasAnalysisFromSchema()),
@@ -749,6 +754,11 @@ RegisterOperators reg2({
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sorted.str(str[](a) input) -> (bool[])",
+        listCopyAndSort<std::string>,
+        aliasAnalysisFromSchema()),
+
+    Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
         aliasAnalysisFromSchema()),
@@ -761,6 +771,10 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::eq.str_list(str[] a, str[] b) -> bool",
+        listEq<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -771,6 +785,10 @@ RegisterOperators reg2({
     Operator(
         "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne.str_list(str[] a, str[] b) -> bool",
+        listNe<std::string>,
         aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
@@ -1127,7 +1145,7 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
               << "returns a bool";
   } else {
     error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools or "
+              << " must be of Tensors, ints, floats, bools, strs or "
               << "a User Defined Class that defines the __lt__ compare method"
               << ", got list of " << list_element_type->repr_str() << "\n";
   }
