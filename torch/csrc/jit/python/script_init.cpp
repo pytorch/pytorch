@@ -1308,6 +1308,21 @@ void initJitScriptBindings(PyObject* module) {
         }
         const auto self = SimpleSelf(classType);
         cu->define(classname, methodDefs, rcbs, &self);
+
+        rcbs.clear();
+        methodDefs.clear();
+        for (const auto& def : classDef.staticmethods()) {
+          methodDefs.emplace_back(Def(def));
+          rcbs.push_back(
+              pythonResolver(rcb, classDef.name().name(), classType));
+        }
+        cu->define(
+            classname,
+            methodDefs,
+            rcbs,
+            &self,
+            /*shouldMangle=*/false,
+            /*staticMethods=*/true);
       });
   m.def(
       "_jit_script_interface_compile",

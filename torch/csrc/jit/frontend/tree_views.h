@@ -430,7 +430,7 @@ struct ClassDef : public TreeView {
   }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
-    return create(range(), new_ident, superclass(), body());
+    return create(range(), new_ident, superclass(), body(), staticmethods());
   }
   Ident name() const {
     return Ident(subtree(0));
@@ -441,13 +441,17 @@ struct ClassDef : public TreeView {
   List<Stmt> body() const {
     return List<Stmt>(subtree(2));
   }
+  List<Stmt> staticmethods() const {
+    return List<Stmt>(subtree(3));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
-      const List<Stmt>& body) {
-    return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body}));
+      const List<Stmt>& body,
+      const List<Stmt>& staticmethods) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF, range, {name, superclass, body, staticmethods}));
   }
 };
 

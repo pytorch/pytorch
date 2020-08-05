@@ -596,11 +596,17 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  if (field != "__new__") {
+  if (field == "__new__") {
+    return SpecialFormValue::create(prim::CreateObject);
+  }
+
+  auto* static_method = type_->findStaticMethod(field);
+  if (!static_method) {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();
   }
-  return SpecialFormValue::create(prim::CreateObject);
+
+  return std::make_shared<FunctionValue>(static_method);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(

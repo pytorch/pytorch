@@ -3752,7 +3752,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    bool staticMethod) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -3787,8 +3788,12 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
-    // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    // Register this as a (possibly static) method on `self`'s type
+    if (!staticMethod) {
+      self->getClassType()->addMethod(fn.get());
+    } else {
+      self->getClassType()->addStaticMethod(fn.get());
+    }
   }
   return fn;
 }
@@ -3798,7 +3803,8 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
     const Self* self,
-    bool shouldMangle) {
+    bool shouldMangle,
+    bool staticMethods) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
@@ -3810,7 +3816,8 @@ std::vector<Function*> CompilationUnit::define(
         resolvers[i],
         self,
         function_table,
-        shouldMangle);
+        shouldMangle,
+        staticMethods);
     const auto& name = fn->name();
     function_table[name] = fn.get();
     functions.push_back(fn.get());
