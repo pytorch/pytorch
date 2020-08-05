@@ -4,7 +4,7 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseGCSTensorImpl.hpp>
+#include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -163,7 +163,7 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   // int64_t sparse_dim = indices.size(0)-1;
 
   SparseTensor self = new_gcs_tensor(options);
-  
+  get_sparse_gcs_impl(self)->resize_and_clear_(size);
   return self;
 }
 

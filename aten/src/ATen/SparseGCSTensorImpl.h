@@ -8,5 +8,8 @@ namespace at {
 struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+
+  void resize_and_clear_(ArrayRef<int64_t>& size) {
+  }
 };
 }
