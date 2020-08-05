@@ -13,7 +13,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
-import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler
 from torch.distributed.rpc.internal import (
@@ -27,8 +26,6 @@ from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
-    get_shutdown_error_regex,
-    get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
     wait_until_pending_futures_and_users_flushed,
@@ -2274,7 +2271,7 @@ class RpcTest(RpcAgentTestFixture):
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
-            error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+            error_str = self.get_shutdown_error_regex()
             wait_until_node_failure(dst_rank, error_str)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
@@ -2342,7 +2339,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
             for _ in range(10)
         ]
-        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        expected_error = self.get_timeout_error_regex()
         for fut in futs:
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 fut.wait()
@@ -2372,7 +2369,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst_rank)
         timeout = 0.1  # 100 ms
-        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        expected_error = self.get_timeout_error_regex()
         # Test async UDF
         fut = rpc.rpc_async(dst_worker, my_sleep_func, args=(1,), timeout=timeout)
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -3038,7 +3035,7 @@ class RpcTest(RpcAgentTestFixture):
         # 10 ms timeout
         rref = rpc.remote(dst_worker, my_sleep_func, args=(2, ), timeout=0.01)
         # Future corresponding to the remote creation should time out.
-        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref._get_future().wait()
         # Call to ensure pending callbacks are run.
@@ -3508,9 +3505,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # 10 ms timeout
         rref = rpc.remote(dst_worker, func, args=args, timeout=0.001)
         # Future corresponding to the remote creation should time out.
-        expected_error = get_timeout_error_regex(
-            dist_utils.TEST_CONFIG.rpc_backend_name
-        )
+        expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref._get_future().wait()
 
@@ -3600,9 +3595,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
-        expected_error = get_timeout_error_regex(
-            dist_utils.TEST_CONFIG.rpc_backend_name
-        )
+        expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref.to_here(0.01)
 
@@ -3612,9 +3605,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
     def test_rpc_builtin_timeout(self):
         next_rank = (self.rank + 1) % self.world_size
         dst_worker = worker_name(next_rank)
-        expected_error = get_timeout_error_regex(
-            dist_utils.TEST_CONFIG.rpc_backend_name
-        )
+        expected_error = self.get_timeout_error_regex()
         # PYTHON_CALL message types which correspond to Python UDF over RPC
         # by default get a delay (see faulty_rpc_agent_test_fixture)
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -3659,7 +3650,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
     def test_rpc_script_timeout(self):
         next_rank = (self.rank + 1) % self.world_size
         dst_worker = worker_name(next_rank)
-        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rpc.rpc_sync(dst_worker, my_script_func, args=(torch.tensor(1),), timeout=1)
 

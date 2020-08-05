@@ -47,3 +47,16 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
             self.messages_to_fail = faulty_messages
         if messages_to_delay is not None:
             self.messages_to_delay = messages_to_delay
+
+    def get_shutdown_error_regex(self):
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
+        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+
+    def get_timeout_error_regex(self):
+        return "RPC ran for more than"
