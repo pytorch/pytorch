@@ -1,8 +1,9 @@
-import torch.distributed.rpc as rpc
+from abc import ABC, abstractmethod
+
 import torch.testing._internal.dist_utils
 
 
-class RpcAgentTestFixture(object):
+class RpcAgentTestFixture(ABC):
     @property
     def world_size(self):
         return 4
@@ -14,13 +15,18 @@ class RpcAgentTestFixture(object):
         )
 
     @property
+    @abstractmethod
     def rpc_backend(self):
-        return rpc.backend_registry.BackendType[
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        ]
+        pass
 
     @property
+    @abstractmethod
     def rpc_backend_options(self):
-        return torch.testing._internal.dist_utils.TEST_CONFIG.build_rpc_backend_options(
-            self
-        )
+        pass
+
+    def setup_fault_injection(self, faulty_messages, messages_to_delay):
+        """Method used by dist_init to prepare the faulty agent.
+
+        Does nothing for other agents.
+        """
+        pass
