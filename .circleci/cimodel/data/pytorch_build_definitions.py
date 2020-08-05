@@ -2,13 +2,12 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
+from cimodel.data.pytorch_build_data import CONFIG_TREE_DATA, TopLevelNode
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path
-
+from cimodel.data.simple.util.docker_constants import gen_docker_image
 
 
 @dataclass
@@ -27,7 +26,7 @@ class Conf:
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
-    parent_build: Optional['Conf'] = None
+    parent_build: Optional["Conf"] = None
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
@@ -64,18 +63,26 @@ class Conf:
         return result
 
     def gen_docker_image_path(self):
-
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
+        image_name, _ = gen_docker_image(base_build_env_name)
+        return miniutils.quote(image_name)
 
-        image_path = gen_docker_image_path(base_build_env_name)
-        return miniutils.quote(image_path)
+    def gen_docker_image_requires(self):
+        parms_source = self.parent_build or self
+        base_build_env_name = "-".join(parms_source.get_parms(True))
+        _, requires = gen_docker_image(base_build_env_name)
+        return miniutils.quote(requires)
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
 
     def gen_build_name(self, build_or_test):
-        return ("_".join(map(str, self.get_build_job_name_pieces(build_or_test)))).replace(".", "_").replace("-", "_")
+        return (
+            ("_".join(map(str, self.get_build_job_name_pieces(build_or_test))))
+            .replace(".", "_")
+            .replace("-", "_")
+        )
 
     def get_dependents(self):
         return self.dependent_tests or []
@@ -116,12 +123,13 @@ class Conf:
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
+            job_def["requires"] = [self.gen_docker_image_requires()]
 
         if not self.is_important:
             job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
-        return {job_name : job_def}
+        return {job_name: job_def}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -131,20 +139,26 @@ class HiddenConf(object):
         self.parent_build = parent_build
 
     def gen_workflow_job(self, phase):
-        return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
+        return {
+            self.gen_build_name(phase): {
+                "requires": [self.parent_build.gen_build_name("build")]
+            }
+        }
 
     def gen_build_name(self, _):
         return self.name
 
 class DocPushConf(object):
-    def __init__(self, name, parent_build=None):
+    def __init__(self, name, parent_build=None, branch="master"):
         self.name = name
         self.parent_build = parent_build
+        self.branch = branch
 
     def gen_workflow_job(self, phase):
         return {
             "pytorch_doc_push": {
                 "name": self.name,
+                "branch": self.branch,
                 "requires": [self.parent_build],
                 "context": "org-member",
                 "filters": gen_filter_dict(branches_list=["nightly"])
@@ -183,12 +197,40 @@ def gen_dependent_configs(xenial_parent_config):
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
-    for x in ["pytorch_python_doc_build", "pytorch_cpp_doc_build"]:
-        conf = HiddenConf(x, parent_build=xenial_parent_config)
-        configs.append(conf)
-        configs.append(DocPushConf(x.replace("build", "push"), x))
+    configs.append(
+        HiddenConf(
+            "pytorch_python_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_python_doc_push",
+            parent_build="pytorch_python_doc_build",
+            branch="site",
+        )
+    )
 
-    configs.append(HiddenConf("pytorch_doc_test", parent_build=xenial_parent_config))
+    configs.append(
+        HiddenConf(
+            "pytorch_cpp_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_cpp_doc_push",
+            parent_build="pytorch_cpp_doc_build",
+            branch="master",
+        )
+    )
+
+    configs.append(
+        HiddenConf(
+            "pytorch_doc_test",
+            parent_build=xenial_parent_config
+        )
+    )
     return configs
 
 
@@ -251,7 +293,7 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if gcc_version == 'clang5' and not is_xla:
+            if gcc_version == "clang5" and not is_xla:
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
@@ -290,20 +332,25 @@ def instantiate_configs():
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
         # should run on a CPU-only build that runs on all PRs.
-        if distro_name == 'xenial' and fc.find_prop("pyver") == '3.6' \
-                and cuda_version is None \
-                and parallel_backend is None \
-                and compiler_name == 'gcc' \
-                and fc.find_prop('compiler_version') == '5.4':
+        if (
+            distro_name == "xenial"
+            and fc.find_prop("pyver") == "3.6"
+            and cuda_version is None
+            and parallel_backend is None
+            and compiler_name == "gcc"
+            and fc.find_prop("compiler_version") == "5.4"
+        ):
             c.dependent_tests = gen_docs_configs(c)
 
         if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
-        if (compiler_name == "gcc"
-                and compiler_version == "5.4"
-                and not is_libtorch
-                and parallel_backend is None):
+        if (
+            compiler_name == "gcc"
+            and compiler_version == "5.4"
+            and not is_libtorch
+            and parallel_backend is None
+        ):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
