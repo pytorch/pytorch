@@ -180,8 +180,7 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   int64_t n = batch1_.size(transpose_result ? 1 : 2);
   int64_t num_batches = result_sizes[0];
 
-  // AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::ScalarType::Half, self.scalar_type(), "baddmm_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
     scalar_t* batch1_ptr = batch1_.data_ptr<scalar_t>();
@@ -243,12 +242,12 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor self_;
-  std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
-  //if (&result != &self) {
-  //  std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  //} else {
-  // self_ = self;
-  //}
+  // std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  } else {
+   self_ = self;
+  }
   {
     at::NoNamesGuard guard;
     baddmm_out_cuda_impl(result, self_, batch1, batch2, beta, alpha);

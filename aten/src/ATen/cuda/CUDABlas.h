@@ -85,10 +85,10 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
 #endif
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
-// #ifdef __HIP_PLATFORM_HCC__
-// template <>
-// void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
-// #endif
+#ifdef __HIP_PLATFORM_HCC__
+template <>
+void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+#endif
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
