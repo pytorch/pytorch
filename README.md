@@ -337,6 +337,7 @@ Three pointers to get you started:
 * [PyTorch Twitter](https://twitter.com/PyTorch)
 * [PyTorch Blog](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
+* [Deep Learning with Pytorch Book by  Eli Stevens, Luca Antiga, and Thomas Viehmann](https://pytorch.org/deep-learning-with-pytorch)
 
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
