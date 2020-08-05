@@ -142,7 +142,14 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+            ``get_tensors`` returns a list of ``torch.Tensor``. Each tensor in
+            the list refers to the replica on each device. There will be multiple
+            replicas only in the case of single process multiple device mode. In
+            the single process single device mode, this list would consist of only
+            a single tensor.
+           )");
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -709,19 +716,25 @@ They are used in specifying strategies for reduction collectives, e.g.,
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
-            ``get_future`` retrieves a future associated with the completion of
-            ``c10d.ProcessGroup.work``. As an example, a future object can be
-            retrieved by ``fut = process_group.allreduce(tensors).get_future()``.
+            Returns:
+                A ``torch._C.Future`` object which is associated with the completion of
+                the ``ProcessGroupNCCL::WorkNCCL``. As an example, a future object can
+                be retrieved by ``fut = process_group.allreduce(tensors).get_future()``.
 
-            In the example above, if ``allreduce`` work was done on GPU, ``fut.wait()``
-            would return after synchronizing the correct GPU streams to ensure
-            we can have asynchronous CUDA execution and it does not wait for the
-            entire operation to complete on GPU. If NCCL_BLOCKING_WAIT is enabled,
-            in that case, it would wait for the entire operation to complete before
-            returning. In addition, if a callback function was added by `fut.then()`,
-            it will synchronize the appropriate streams and invoke the callback inline.
+            The ``torch._C.Future`` object returned by this API can be used in
+            ``DistributedDataParallel._register_comm_hook``, but it is subject to some
+            subtle differences compared to ``torch.futures.Future`` due to compromises
+            made for performance reasons. This API currently only supports NCCL backend.
+            In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
+            ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
+            with PyTorch's default device streams to ensure we can have asynchronous CUDA
+            execution and it does not wait for the entire operation to complete on GPU.
+            If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
+            operation to complete before returning. In addition, if a callback function was
+            added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
+            the callback inline.
 
-            Note that `fut.done()` actually returns if the work was completed on the GPU.
+            Note that ``fut.done()`` returns if the work was completed on the GPU.
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend.

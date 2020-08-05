@@ -116,6 +116,7 @@ std::vector<at::Tensor> PythonCommHook::processFuture(
   // Since we have a Python hook, future_value can be a PyObject.
   if (future_value.isPyObject()) {
     // We first convert it to an IValue that contains a TensorVector.
+    py::gil_scoped_acquire ag;
     py::object obj = torch::jit::toPyObject(future_value);
     auto value = torch::jit::toIValue(
         obj, c10::ListType::create(c10::TensorType::get()));

@@ -166,11 +166,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // FutureNCCL's value is NCCL collective's outputs and callbacks were
     // invoked inline by addCallback(), so markCompleted is not needed.
-    void markCompleted(at::IValue value) override {
+    void markCompleted(at::IValue /* unused */) override {
       C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
     }
 
-    // Returns NCCL collective's outputs after WorkNCCL wait() returns.
+    // Just returns NCCL collective's outputs after WorkNCCL's wait returns.
     at::IValue value() override {
       work_->wait();
       return outputs_;
@@ -181,9 +181,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       return outputs_;
     }
 
-    // Add a callback to FutureNCCL. FutureNCCL invokes the callback inline.
-    // Callbacks return a Future (not FutureNCCL).
+    // Add a callback to FutureNCCL. It invokes the callback inline after
+    // WorkNCCL's wait(). workCallbacks return a Future (not FutureNCCL).
     void addCallback(std::function<void(void)> callback) override {
+      work_->wait();
       callback();
     }
 
@@ -277,6 +278,18 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(

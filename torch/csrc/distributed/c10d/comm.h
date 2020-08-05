@@ -65,7 +65,7 @@ class TORCH_API PythonCommHook : public CommHookInterface {
   PythonCommHook(py::object state, py::object hook);
 
   ~PythonCommHook() override {
-    pybind11::gil_scoped_acquire ag;
+    py::gil_scoped_acquire ag;
     state_.dec_ref();
     hook_.dec_ref();
     // explicitly setting PyObject* state_ and hook_ to nullptr to prevent
