@@ -3803,3 +3803,60 @@ class TensorPipeAgentRpcTest(TensorPipeRpcAgentTestFixture, RpcTest):
                 num_worker_threads=self.rpc_backend_options.num_worker_threads,
                 rpc_timeout=timeout,
             )
+
+    def _test_map_locations(self, options):
+        with self.assertRaisesRegex(ValueError, "Invalid map_location"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+        self.assertFalse(rpc.api._is_current_rpc_agent_set())
+
+    @skip_if_lt_x_gpu(1)
+    def test_map_locations_wrong_worker_name(self):
+        options = self.rpc_backend_options
+        options.set_map_location("none_exist", {-1: 0})
+        self._test_map_locations(options)
+
+    def test_map_locations_invalid_max_local_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {torch.cuda.device_count(): -1})
+
+        self._test_map_locations(options)
+
+    @skip_if_lt_x_gpu(1)
+    def test_map_locations_invalid_min_local_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {-2: 0})
+
+        self._test_map_locations(options)
+
+    @skip_if_lt_x_gpu(1)
+    def test_map_locations_invalid_min_remote_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {0: -2})
+
+        self._test_map_locations(options)
+
+    def test_map_locations_invalid_max_remote_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {-1: torch.cuda.device_count()})
+
+        self._test_map_locations(options)
+
+    @skip_if_lt_x_gpu(1)
+    def test_map_locations_many_to_one(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {-1: 0})
+        options.set_map_location(dst, {0: 0})
+
+        self._test_map_locations(options)

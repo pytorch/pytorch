@@ -500,7 +500,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
               The number of threads in the thread-pool used by
               :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
               requests.
-          )");
+          )")
+      .def_readwrite(
+          "map_locations",
+          &TensorPipeRpcBackendOptions::mapLocations,
+          R"(The device map locations.)")
+      .def(
+          "set_map_location",
+          &TensorPipeRpcBackendOptions::setMapLocation);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);

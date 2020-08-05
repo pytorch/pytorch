@@ -202,6 +202,42 @@ def _all_gather(obj):
     return states.gathered_objects
 
 
+# detect if any worker has invalid map_location configurations, and return
+# names of failed workers
+def _check_map_locations(map_locations):
+    if not map_locations:
+        return []
+
+    local_device_count = torch.cuda.device_count()
+    # gather device count from all ranks, valid device ids are in range
+    # [-1, torch.cuda.device_count()).
+    all_device_counts = _all_gather(local_device_count)
+    valid = True
+    for worker_name in all_device_counts:
+        remote_device_count = all_device_counts[worker_name]
+        if worker_name in map_locations:
+            map_location = map_locations[worker_name]
+            key_set = set(map_location.keys())
+            val_set = set(map_location.values())
+            if not all([
+                len(map_location) == len(key_set),
+                len(map_location) == len(val_set),  # checking 1-to-1 mapping
+                min(key_set) >= -1,
+                max(key_set) < local_device_count, # checking local range
+                min(val_set) >= -1,
+                max(val_set) < remote_device_count  # checking remote range
+            ]):
+                valid = False
+                break
+
+    # check all worker names are valid
+    valid = valid and len(set(map_locations.keys()) - set(all_device_counts.keys())) == 0
+
+    # gather results from all workers
+    results = _all_gather(valid)
+    return list(filter(lambda name: not results[name], results))
+
+
 @_require_initialized
 def _wait_all_workers():
     r"""
