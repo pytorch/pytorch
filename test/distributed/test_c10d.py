@@ -3583,7 +3583,7 @@ class CommTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device('cuda:%d' % self.rank)
-        ranks = list(range(self.world_size()))
+        ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
@@ -3595,7 +3595,7 @@ class CommTest(MultiProcessTestCase):
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cuda:%d' % self.rank)
-        ranks = list(range(self.world_size()))
+        ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
@@ -3606,7 +3606,7 @@ class CommTest(MultiProcessTestCase):
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cpu')
-        ranks = list(range(self.world_size()))
+        ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 

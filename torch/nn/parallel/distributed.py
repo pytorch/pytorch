@@ -153,7 +153,6 @@ class join:
     def __init__(self, net, enable=True):
         self.net = net
         self.pg = net.process_group
-        self.is_nccl = dist.get_backend(self.pg) == dist.Backend.NCCL
         self.rank = dist.get_rank()
         self.enable = enable
         self.net.ddp_join_enabled = self.enable
@@ -170,7 +169,9 @@ class join:
         def patched_fwd(fwd):
             @wraps(fwd)
             def patcher(*args, **kwargs):
-                ones = torch.ones(1).to(self.rank if self.is_nccl else "cpu")
+                ones = torch.ones(1).to(
+                    self.net.device_ids[0] if self.net.device_type != "cpu" else "cpu"
+                )
                 work = dist.all_reduce(ones, group=self.pg, async_op=True)
                 self.net.reducer._set_forward_pass_work_handle(work, ones)
                 return fwd(*args, **kwargs)
@@ -184,7 +185,9 @@ class join:
     # Used to determine no. of currently active procs and whether all procs have
     # joined.
     def _schedule_all_reduce_for_fwd_pass(self):
-        all_active_procs = torch.zeros(1).to(self.rank if self.is_nccl else "cpu")
+        all_active_procs = torch.zeros(1).to(
+            self.net.device_ids[0] if self.net.device_type != "cpu" else "cpu"
+        )
         dist.all_reduce(all_active_procs, group=self.pg)
         return all_active_procs.item()
 
@@ -221,7 +224,9 @@ class join:
             # consistent, the dividing factor is reduced by 1 for each joined
             # process.
             zero_tensors = [
-                torch.zeros_like(t).to(self.rank if self.is_nccl else "cpu")
+                torch.zeros_like(t).to(
+                    self.net.device_ids[0] if self.net.device_type != "cpu" else "cpu"
+                )
                 for t in bucket_tensors
             ]
             work = self.pg.allreduce(zero_tensors, AllreduceOptions())
@@ -337,6 +342,14 @@ class DistributedDataParallel(Module):
         ``map_location`` is configured properly for every process. Without
         ``map_location``, ``torch.load`` would recover the module to devices
         where the module was saved from.
+
+    .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
+        gradient will be ``M`` times smaller when compared to the same model
+        trained on a single node with ``batch=M*N`` (because the gradients
+        between different nodes are averaged). You should take this into
+        consideration when you want to obtain a mathematically equivalent
+        training process compared to the non-DistributedDataParallel
+        counterpart.
 
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
@@ -559,7 +572,6 @@ class DistributedDataParallel(Module):
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
-        self.is_nccl = dist.get_backend(self.process_group) == dist.Backend.NCCL
         self.ddp_join_enabled = False
 
         if check_reduction:
@@ -871,7 +883,7 @@ class DistributedDataParallel(Module):
 
     def _find_common_rank(self, input_rank, rank_cond):
         rank_to_use = torch.tensor([input_rank if rank_cond else -1]).to(
-            input_rank if self.is_nccl else "cpu"
+            self.device_ids[0] if self.device_type != "cpu" else "cpu"
         )
         dist.all_reduce(rank_to_use, op=ReduceOp.MAX, group=self.process_group)
         if rank_to_use.item() == -1:

@@ -8,6 +8,9 @@
 #include <c10/util/Exception.h>
 
 #include <tuple>
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 namespace at { namespace native {
 
@@ -134,6 +137,13 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+
+#ifdef USE_VULKAN
+  if (self.is_vulkan()) {
+    return at::native::vulkan_max_pool2d(
+      self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+#endif
 
 #if defined(C10_MOBILE)
   if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
