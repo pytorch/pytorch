@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from functools import partial
 from hypothesis import given
+from torch.testing._internal.common_utils import skipIfRocm
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -251,6 +252,7 @@ class TestSequenceOps(serial.SerializedTestCase):
                             min_size=0,
                             max_size=10),
            **hu.gcs_cpu_only)
+    @skipIfRocm
     def test_remove_data_blocks(self, data, indices, gc, dc):
         indices = np.array(indices)
 
