@@ -19,25 +19,25 @@ namespace impl {
 //
 
 // is_mutable_tensor_ref
-template<class T> struct is_mutable_tensor_ref : std::false_type {};
+template <class T> struct is_mutable_tensor_ref : std::false_type {};
 template <> struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
 
 // is_tuple_of_mutable_tensor_refs
 //
-template<class T, class Enable = void>
+template <class T, class Enable = void>
 struct is_tuple_of_mutable_tensor_refs : std::false_type {};
 
-template<class T>
+template <class T>
 struct is_tuple_of_mutable_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
 : guts::typelist::all<is_mutable_tensor_ref, guts::typelist::from_tuple_t<T>>
 {};
 
 // has_ivalue_to<T> tests the presence/absence of instance method IValue::to<T>()
 //
-template<class T, class Enable = void>
+template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
-template<class T>
+template <class T>
 struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
 : std::true_type
 {};
@@ -93,11 +93,11 @@ inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
 inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack) {
   return true;
 }
-template<typename Item>
+template <typename Item>
 inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item) {
   return pushIValueOrCannotBox(stack, item);
 }
-template<typename Item, typename... Rest>
+template <typename Item, typename... Rest>
 inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
   auto res = pushIValueOrCannotBox(stack, item);
   return boxArgumentsOrCannotBoxIntoStack(stack, other_items...) && res;
@@ -123,7 +123,7 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 // an op signature has failed to trigger any of the partial specializations
 // that follow.
 //
-template<class FuncType, class Enable = void>
+template <class FuncType, class Enable = void>
 struct BoxedKernelWrapper {
   static_assert(sizeof(FuncType) == -1,
     "Function signature contains one or more unsupported parameter and/or return types. "
@@ -132,6 +132,7 @@ struct BoxedKernelWrapper {
     "- (your function type) is the unsupported signature.");
 };
 
+//
 // 1. Unsupported type traps.
 //
 // These specializations capture the remaining gaps in boxing support.
@@ -148,17 +149,55 @@ using has_quantizer_arg =
     std::is_same<c10::intrusive_ptr<at::Quantizer>, std::decay_t<Args>>...
   >;
 
-template<class Result, class... Args>
+template <class Result, class... Args>
 struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_quantizer_arg<Args...>::value, void>> {
   static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
     TORCH_INTERNAL_ASSERT(false, "Unboxed call to a boxed kernel with unboxable parameter type at::Quantizer.");
   }
 };
 
+//
 // 2. Supported signatures, other than ref-passing.
 //
 
-template<class Result, class... Args>
+// helper class whose specializations handle single and multiple return values, respectively
+//
+template <class Result>
+struct PopResult final {
+  static Result call(Stack& stack) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return one value on the stack, ",
+      "but instead pushed ", stack.size(), " values."
+    );
+    return std::move(stack[0]).to<Result>();
+  }
+};
+
+template <class... Types>
+struct PopResult<std::tuple<Types...>> final {
+  using Result = std::tuple<Types...>;
+
+  static Result call(Stack& stack) {
+    // for tuple return types, boxed kernel has pushed multiple values onto the stack
+    constexpr int RetCount = sizeof...(Types);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == RetCount,
+      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
+      "but instead pushed ", stack.size(), " values."
+    );
+    return pop_to_tuple_impl(stack, std::make_index_sequence<RetCount>());
+  }
+private:
+  // note: this has been moved into its own helper only to avoid a parse error on `indices` otherwise.
+  // I'm sure there's an incantation that slips it past the parser but eh
+  template <size_t... indices>
+  static Result pop_to_tuple_impl(Stack& stack, std::index_sequence<indices...>) {
+    return std::make_tuple((std::move(stack[indices]).to<Types>())...);
+  }
+};
+
+template <class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
@@ -181,22 +220,22 @@ struct BoxedKernelWrapper<
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          stack.size() == 1,
-          "Boxed kernel was expected to push exactly one return value to the stack."
-        );
-        return delay_check(std::move(stack[0]).to<Result>());
+        // op has pushed one or more values onto the stack.
+        return delay_check(PopResult<Result>::call(stack));
       },
       [&] {
+        // op returns void, boxed kernel has pushed nothing onto stack.
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           stack.size() == 0,
-          "Boxed kernel for op with void return type pushed one or more return values to the stack."
+          "Boxed kernel was expected to return no values on the stack, ",
+          "but instead returned ", stack.size(), " values."
         );
       }
     );
   }
 };
 
+//
 // 3. signatures taking a single Tensor reference as their first argument,
 // and also returning one.
 //
@@ -204,7 +243,8 @@ struct BoxedKernelWrapper<
 // and the generated BoxedKernelWrapper specializations will simply return
 // the initial argument.
 //
-template<class... OtherArgs>
+
+template <class... OtherArgs>
 struct BoxedKernelWrapper<
   at::Tensor&(at::Tensor&, OtherArgs...),
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
@@ -225,13 +265,15 @@ struct BoxedKernelWrapper<
     (*boxed_kernel_func)(functor, opHandle, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
     );
 
     return outArg;
   }
 };
 
+//
 // 4. signatures returning a tuple of Tensor references, and taking the same
 // number of Tensor refs as their initial arguments.
 //
@@ -239,7 +281,8 @@ struct BoxedKernelWrapper<
 // and the generated BoxedKernelWrapper specializations will return a tuple
 // of those initial arguments.
 //
-template<class Result, class... Args>
+
+template <class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
@@ -263,8 +306,9 @@ struct BoxedKernelWrapper<
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, but instead returned ", stack.size(), " values."
+      stack.size() == RetCount,
+      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
+      "but instead returned ", stack.size(), " values."
     );
 
     auto result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
