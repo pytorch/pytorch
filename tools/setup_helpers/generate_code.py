@@ -49,6 +49,12 @@ def generate_code(ninja_global=None,
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
     data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
+
+    # hack to test sandcastle pathing
+    if data_dir == '' and (os.getenv('SANDCASTLE') == '1' or
+                           os.getenv('TW_JOB_USER') == 'sandcastle'):
+        data_dir = 'fbcode/caffe2'
+
     autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
