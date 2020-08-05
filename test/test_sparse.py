@@ -1030,15 +1030,15 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        not IS_WINDOWS,
-        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
+        not IS_WINDOWS or [int(x) for x in torch.version.cuda.split(".")] >= [11, 0],
+        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     def test_bmm_windows_error(self):
         a = torch.rand(2, 2, 2).to_sparse().cuda()
         b = torch.rand(2, 2, 2).cuda()
         with self.assertRaisesRegex(
                 RuntimeError,
-                "bmm sparse-dense CUDA is not supported on Windows"):
+                "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
 
     @cuda_only
