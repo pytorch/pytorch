@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import unittest
 from enum import Flag, auto
-from typing import Dict, List, NamedTuple, Type
+from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN
