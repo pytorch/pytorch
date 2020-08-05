@@ -117,7 +117,7 @@ class join:
 
     ..warning::
         This module currently does not support custom distributed collective
-        operations in the forward pass, such as `SyncBatchNorm` or other custom
+        operations in the forward pass, such as ``SyncBatchNorm`` or other custom
         defined collectives in the model's forward pass.
 
     Args:

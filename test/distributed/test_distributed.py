@@ -2753,12 +2753,8 @@ class _DistTestBase(object):
         small_model = nn.Linear(dim, dim, bias=False)
 
         class UnusedParamModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-
-        class FindUnusedParamModule(nn.Module):
             def __init__(self, unused_params_rank):
-                super(FindUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
                 self.unused_params_rank = unused_params_rank
@@ -2773,8 +2769,8 @@ class _DistTestBase(object):
                     else self.t1(x)
                 )
 
-        unjoined_rank_with_unused_params_model = FindUnusedParamModule(1)
-        joined_rank_with_unused_params_model = FindUnusedParamModule(0)
+        unjoined_rank_with_unused_params_model = UnusedParamModule(1)
+        joined_rank_with_unused_params_model = UnusedParamModule(0)
 
         rank = self.rank
         models_to_test = [
