@@ -335,9 +335,13 @@ or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the d
 manual_kernel_registration: True
 ```
 
-With this flag set, we will not generate code to automatically register the C++ operator
-implementation with the dispatcher. This is a workaround for ops that need manual
-Variable code (see VariableTypeManual.cpp) and should only be used rarely.
+With this flag set, we will not generate code to automatically register the C++ operator implementation
+to TypeDefault (catchAll dispatch key) with the dispatcher.
+It doesn't make sense to have both `dispatch` section and `manual_kernel_registration: True` for the same op.
+You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.cpp.
+Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
+(It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
+This field should only be used rarely.
 
 ## Writing an implementation in C++
 

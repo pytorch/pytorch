@@ -846,7 +846,6 @@
   use_c10_dispatcher: full
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  manual_kernel_registration: True
   variants: method
   device_guard: False
 
@@ -1210,7 +1209,6 @@
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-  manual_kernel_registration: True
   variants: method
   device_guard: False
   dispatch:
@@ -2636,14 +2634,12 @@
 # be updated.
 - func: detach(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
-  manual_kernel_registration: True
   variants: function, method
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
-  manual_kernel_registration: True
   variants: function, method
 
 - func: size.int(Tensor self, int dim) -> int
@@ -3340,7 +3336,6 @@
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-  manual_kernel_registration: True
   variants: function, method
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
