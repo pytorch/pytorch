@@ -547,6 +547,28 @@ TEST_F(ModulesTest, Flatten) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
+TEST_F(ModulesTest, Unflatten) {
+  // Non-named tensor
+  Unflatten unflatten(UnflattenOptions(0, {2, 2}));
+  auto output = unflatten->forward(torch::tensor({1, 2, 3, 4}));
+  auto expected = torch::tensor({{1, 2}, {3, 4}});
+  ASSERT_TRUE(torch::equal(output, expected));
+
+  // Named tensor
+  auto make_dimnames = [] (std::vector<std::string> names) {
+    std::vector<torch::Dimname> dimnames;
+    for (auto name : names) {
+      dimnames.push_back(torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
+    }
+    return dimnames;
+  };
+  
+  unflatten = Unflatten(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
+  output = unflatten->forward(torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
+  expected = torch::tensor({{{1, 2}, {3, 4}}}).refine_names(make_dimnames({"A", "B1", "B2"}));
+  ASSERT_TRUE(torch::equal(output, expected));
+}
+
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -3501,8 +3523,17 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
 }
 
 TEST_F(ModulesTest, PrettyPrintFlatten) {
-  ASSERT_EQ(c10::str(Flatten()), "torch::nn::Flatten()");
-  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), "torch::nn::Flatten()");
+  ASSERT_EQ(c10::str(Flatten()), 
+    "torch::nn::Flatten(start_dim=1, end_dim=-1)");
+  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), 
+    "torch::nn::Flatten(start_dim=2, end_dim=4)");
+}
+
+TEST_F(ModulesTest, PrettyPrintUnflatten) {
+  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
+    "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
+  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}))),
+    "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
 TEST_F(ModulesTest, ReflectionPad1d) {

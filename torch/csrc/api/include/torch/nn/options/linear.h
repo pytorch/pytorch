@@ -3,6 +3,7 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
+#include <c10/util/variant.h>
 
 namespace torch {
 namespace nn {
@@ -38,6 +39,29 @@ struct TORCH_API FlattenOptions {
   TORCH_ARG(int64_t, start_dim) = 1;
   /// last dim to flatten
   TORCH_ARG(int64_t, end_dim) = -1;
+};
+
+// ============================================================================
+
+/// Options for the `Unflatten` module.
+///
+/// Example:
+/// ```
+/// Unflatten model(UnflattenOptions(0, {2, 2}));
+/// Unflatten model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
+/// ```
+struct TORCH_API UnflattenOptions {
+  typedef std::vector<std::tuple<std::string, int64_t>> namedshape_t;
+  typedef c10::variant<std::vector<int64_t>, namedshape_t> sizes_t;
+  typedef c10::variant<int64_t, std::string> dim_t;
+  
+  UnflattenOptions(int64_t dim, std::vector<int64_t> unflattened_size);
+  UnflattenOptions(std::string dim, namedshape_t unflattened_size);
+
+  /// dim to unflatten
+  TORCH_ARG(dim_t, dim);
+  /// new shape of unflattened dim
+  TORCH_ARG(sizes_t, unflattened_size);
 };
 
 // ============================================================================
