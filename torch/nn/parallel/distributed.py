@@ -148,6 +148,14 @@ class DistributedDataParallel(Module):
         ``map_location``, ``torch.load`` would recover the module to devices
         where the module was saved from.
 
+    .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
+        gradient will be ``M`` times smaller when compared to the same model
+        trained on a single node with ``batch=M*N`` (because the gradients
+        between different nodes are averaged). You should take this into
+        consideration when you want to obtain a mathematically equivalent
+        training process compared to the non-DistributedDataParallel
+        counterpart.
+
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
 
@@ -634,9 +642,11 @@ class DistributedDataParallel(Module):
                              by the Future and copy grads to individual parameters.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of c10d.ProcessGroupNCCL.work.
-                             Note that this API will return a toch._C.Future which is an
-                             internal type and should be used with caution.
+                             Future associated with the completion of ``c10d.ProcessGroupNCCL.work``.
+                             Note that ``get_future`` API will return a ``torch._C.Future``
+                             which is an internal type and should be used with caution. It
+                             can still be used by ``_register_comm_hook`` API, but it is subject
+                             to some subtle differences compared to ``torch.futures.Future``.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered

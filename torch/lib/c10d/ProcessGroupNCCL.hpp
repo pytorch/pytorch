@@ -194,9 +194,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     // FutureNCCL has a value that was set in its constructor as NCCL
-    // collective's outputs and should be ready once WorkNCCL isCompleted.
+    // collective's outputs.
     bool hasValue() const override {
-      return completed();
+      return true;
     }
 
    private:
@@ -278,6 +278,18 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
