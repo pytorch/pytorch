@@ -70,6 +70,24 @@ void upsample_nearest2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape) {
+  const auto shapeNumel = std::accumulate(
+      std::begin(shape), std::end(shape), 1, std::multiplies<int64_t>());
+  TORCH_INTERNAL_ASSERT(
+      shapeNumel == input.numel(),
+      "reshape_copy expects shape with equal number of elements with input Vulkan tensor");
+
+  input.sync_image_to_buffer();
+
+  VulkanTensor output{shape};
+  output.allocate_storage();
+  copy_buffer_to_buffer(
+      *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
+  return output;
+}
+
 void adaptive_avg_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
@@ -241,12 +259,20 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
 
 VBuffer bufferFromOptionalHostData(
     c10::optional<const float*> data,
-    const uint32_t size) {
+    const uint32_t dataSize,
+    const uint32_t bufferSize) {
+  TORCH_INTERNAL_ASSERT(
+      dataSize <= bufferSize,
+      "buffer size(",
+      bufferSize,
+      ") is not enough for data(",
+      dataSize,
+      ")");
   const auto sizeAligned =
-      ROUND_UP(size, context().limits().minStorageBufferOffsetAlignment);
+      ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
   VBuffer buffer{sizeAligned};
   if (data.has_value()) {
-    buffer.copy_from_host_to_device((void*)*data, size);
+    buffer.copy_from_host_to_device(*data, dataSize);
   } else {
     buffer.set_zeros();
   }
@@ -257,10 +283,6 @@ VBuffer bufferZeros(const uint32_t size) {
   VBuffer buffer{size};
   buffer.set_zeros();
   return buffer;
-}
-
-uint32_t conv2d_biasBufferSize(uint32_t oc) {
-  return sizeof(float) * ALIGN_UP4(oc);
 }
 
 void conv2d_depthwise(
@@ -348,7 +370,10 @@ void conv2d_depthwise(
       output,
       input,
       weight,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -368,7 +393,10 @@ void conv2d_depthwise(
       output,
       input,
       weightTensor,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -566,7 +594,10 @@ void conv2d(
       output,
       input,
       kernelImage,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -585,7 +616,10 @@ void conv2d(
         output,
         input,
         weight_prepacked,
-        bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+        bufferFromOptionalHostData(
+            bias,
+            sizeof(float) * params.OC,
+            sizeof(float) * ALIGN_UP4(params.OC)),
         params,
         output_min,
         output_max);
