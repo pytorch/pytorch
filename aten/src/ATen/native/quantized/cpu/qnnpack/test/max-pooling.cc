@@ -333,7 +333,8 @@ TEST(MAX_POOLING_OP, unit_batch_many_channels_large_1xM_pool_with_padding) {
   for (size_t channels = pytorch_qnnp_params.u8maxpool.kr;
        channels <= 3 * pytorch_qnnp_params.u8maxpool.kr;
        channels += 3) {
-    for (size_t poolSize = 3; poolSize <= pytorch_qnnp_params.u8maxpool.mr;
+    for (size_t poolSize = pytorch_qnnp_params.u8maxpool.mr; poolSize <=
+         pytorch_qnnp_params.u8maxpool.mr + pytorch_qnnp_params.u8maxpool.qr;
          poolSize++) {
       for (size_t paddingLeft = 0; paddingLeft <= 1; paddingLeft++) {
         for (size_t paddingRight = 0; paddingRight <= 1; paddingRight++) {
