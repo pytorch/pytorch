@@ -72,10 +72,12 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
         self.exportTest(PermuteNet(), x)
 
+    @disableScriptTest()
     def test_embedding_sequential_1(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork1(), x)
 
+    @disableScriptTest()
     def test_embedding_sequential_2(self):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork2(), x)

@@ -498,6 +498,10 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
+# update_jit_scripting_passes is a flag which enables new jit scripting API for ONNX export.
+# This purpose of this flag is to enable the new API temporarily for testing purposes.
+# Once the these jit API's are fully tested, they will become part of production code-path by
+# removing this flag.
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
