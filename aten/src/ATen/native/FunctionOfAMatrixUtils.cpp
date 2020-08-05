@@ -39,7 +39,7 @@ Tensor _compute_linear_combination_out(const Tensor& input, const Tensor& coeffi
   // Recall that `coefficients` is a [m, n] Tensor,
   // `input` is a [n, ...] Tensor, `output` is a [m, ...] Tensor.
   // We restride Tensors to the common dim == input.dim() + 1, so that
-  // coefficients.sizes() = [m, 1 (instead of n), 1 repeated (input.dim() - 1) times,
+  // coefficients.sizes() = [m, 1 (instead of n), 1 repeated (input.dim() - 1) times],
   // input.sizes() = [1, 1 (instead of n), ...],
   // output.sizes() = [m, 1 (instead of n), ...].
   // The second dimension in newly restrided Tensors is traversed inside the kernels.
