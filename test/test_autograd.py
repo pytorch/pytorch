@@ -2383,6 +2383,7 @@ class TestAutograd(TestCase):
     @skipIfNoLapack
     def test_cholesky_mod(self):
         jitter_tensor = torch.as_tensor([0, 1e-8], dtype=torch.float64)
+
         def func(root, upper):
             x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
             ret = torch.cholesky_mod(x, upper, jitter=jitter_tensor)
