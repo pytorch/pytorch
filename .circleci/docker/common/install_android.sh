@@ -75,6 +75,16 @@ rm "$_tmp_vulkansdk_targz"
 
 
 # Installing SwiftShader for Vulkan
+# CMake >= 3.13 is required by SwiftShader
+_cmake_dir=/var/lib/jenkins/swiftshader-cmake
+mkdir -p $_cmake_dir
+_tmp_cmake_targz=/tmp/cmake.tar.gz
+curl --silent --show-error --location --fail --retry 3 --output $_tmp_cmake_targz https://cmake.org/files/v3.16/cmake-3.16.8-Linux-x86_64.tar.gz
+tar -C "$_cmake_dir" -xvzf "$_tmp_cmake_targz"
+_cmake_bin_path="$_cmake_dir/cmake-3.16.8-Linux-x86_64/bin/cmake"
+rm "$_tmp_cmake_targz"
+
+# SwiftShader
 _swiftshader_root_dir=/var/lib/jenkins
 _tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
 curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
@@ -84,7 +94,7 @@ rm "$_tmp_swiftshader_zip"
 
 pushd "$_swiftshader_dir/build"
 
-cmake ..
+$_cmake_bin_path ..
 make --jobs=8
 ./vk-unittests
 
