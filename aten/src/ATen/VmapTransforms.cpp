@@ -104,6 +104,12 @@ Tensor VmapPhysicalView::newLogicalFromPhysical(const Tensor& physical) const {
   return makeBatched(physical, computeFrontBatchDimsFromLevels(levels_));
 }
 
+void VmapPhysicalView::makeLogicalFromPhysicalListInplace(std::vector<Tensor>& physical_tensors) const {
+  for (int64_t idx = 0; idx < physical_tensors.size(); ++idx) {
+    physical_tensors[idx] = newLogicalFromPhysical(physical_tensors[idx]);
+  }
+}
+
 // Given a Tensor or a BatchedTensor, returns the underlying physical tensor
 // with all vmapped dimensions permuted to the front, if they exist, and a
 // bitset of vmap levels that were present in the tensor.
