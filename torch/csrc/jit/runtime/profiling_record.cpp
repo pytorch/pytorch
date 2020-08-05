@@ -184,6 +184,7 @@ bool needsProfiledOutput(Node* n) {
   switch (n->kind()) {
     case prim::AutogradAdd:
     case prim::AutogradZero:
+    case aten::_grad_sum_to_size:
       return true;
     default:
       return false;

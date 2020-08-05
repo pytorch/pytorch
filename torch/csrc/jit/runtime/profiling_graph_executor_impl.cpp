@@ -83,6 +83,22 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+void removeProfilingNodes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+
+      if (it->outputs().size()) {
+        it->output()->replaceAllUsesWith(it->input());
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfilingNodes(ib);
+      }
+    }
+  }
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   if (!getGraphExecutorOptimize()) {
@@ -98,6 +114,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   LowerGradOf(*copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   specializeAutogradZero(*copy);
+  // this should remove grad_sum_to_size
+  PeepholeOptimize(copy);
 
   runRequiredPasses(copy);
   //PeepholeOptimize(copy);
@@ -125,6 +143,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     GRAPH_DEBUG("Running no needsGradientInProfilingMode version");
     runNondiffOptimization(copy, true);
   }
+  removeProfilingNodes(copy->block());
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
 }
@@ -184,6 +203,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
+    if (remaining_bailout_depth == getBailoutDepth()) {	
+      PeelProfilingLoops(copy);	
+    }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);
