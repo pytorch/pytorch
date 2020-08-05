@@ -16,6 +16,7 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -534,6 +535,18 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
   else Py_RETURN_FALSE;
 }
 
+static PyObject * THPModule_vmapmode_increment_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::VmapMode::increment_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPModule_vmapmode_decrement_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::VmapMode::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
@@ -569,6 +582,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", (PyCFunction)THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", (PyCFunction)THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
+  {"_vmapmode_increment_nesting", (PyCFunction)THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
+  {"_vmapmode_decrement_nesting", (PyCFunction)THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},

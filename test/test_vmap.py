@@ -778,5 +778,72 @@ class TestVmapOperators(TestCase):
              (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(2, 0))
 
+    def test_no_random_op_support(self):
+        B0 = 2
+
+        captured = torch.rand(3)
+
+        random_ops = [
+            # out-of-place on BatchedTensor
+            (torch.bernoulli, (torch.rand(B0, 1),)),
+            (lambda t: torch.bernoulli(t, p=0.5), (torch.rand(B0, 1),)),
+            (lambda t: torch.multinomial(t, 2), (torch.rand(B0, 3),)),
+            (torch.normal, (torch.randn(B0, 1), torch.randn(B0, 1))),
+            (lambda t: torch.normal(t, 1.), (torch.randn(B0, 1),)),
+            (lambda t: torch.normal(0., t), (torch.randn(B0, 1),)),
+            (torch.poisson, (torch.rand(B0, 1),)),
+            (torch.rand_like, (torch.rand(B0, 1),)),
+            (torch.randn_like, (torch.rand(B0, 1),)),
+            (lambda t: torch.randint_like(t, 2), (torch.rand(B0, 1),)),
+            (lambda t: torch.randint_like(t, 0, 2), (torch.rand(B0, 1),)),
+
+            # out-of-place on captured tensor
+            (lambda t: torch.bernoulli(captured), (torch.rand(B0),)),
+            (lambda t: torch.bernoulli(captured, p=0.5), (torch.rand(B0),)),
+            (lambda t: torch.multinomial(captured, 2), (torch.rand(B0),)),
+            (lambda t: torch.normal(captured, captured), (torch.randn(B0),)),
+            (lambda t: torch.normal(captured, 1.), (torch.randn(B0),)),
+            (lambda t: torch.normal(0., captured), (torch.randn(B0),)),
+            (lambda t: torch.poisson(captured), (torch.rand(B0),)),
+            (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
+            (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
+            (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
+            (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
+
+            # in-place on BatchedTensor
+            (lambda t: t.bernoulli_(), (torch.randn(B0, 1),)),
+            (lambda t: t.cauchy_(), (torch.randn(B0, 1),)),
+            (lambda t: t.exponential_(), (torch.randn(B0, 1),)),
+            (lambda t: t.geometric_(0.5), (torch.randn(B0, 1),)),
+            (lambda t: t.log_normal_(), (torch.randn(B0, 1),)),
+            (lambda t: t.normal_(), (torch.randn(B0, 1),)),
+            (lambda t: t.random_(), (torch.randn(B0, 1),)),
+            (lambda t: t.random_(0, 2), (torch.randn(B0, 1),)),
+            (lambda t: t.random_(2), (torch.randn(B0, 1),)),
+            (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
+
+            # in-place on captured tensor
+            (lambda t: captured.bernoulli_(), (torch.randn(B0),)),
+            (lambda t: captured.cauchy_(), (torch.randn(B0),)),
+            (lambda t: captured.exponential_(), (torch.randn(B0),)),
+            (lambda t: captured.geometric_(0.5), (torch.randn(B0),)),
+            (lambda t: captured.log_normal_(), (torch.randn(B0),)),
+            (lambda t: captured.normal_(), (torch.randn(B0),)),
+            (lambda t: captured.random_(), (torch.randn(B0),)),
+            (lambda t: captured.random_(0, 2), (torch.randn(B0),)),
+            (lambda t: captured.random_(2), (torch.randn(B0),)),
+            (lambda t: captured.uniform_(), (torch.randn(B0),)),
+
+            # factory functions
+            (lambda t: torch.rand(1), (torch.randn(B0),)),
+            (lambda t: torch.randn(1), (torch.randn(B0),)),
+            (lambda t: torch.randint(5, [1]), (torch.randn(B0),)),
+            (lambda t: torch.randperm(5), (torch.randn(B0),)),
+        ]
+        for op, args in random_ops:
+            with self.assertRaisesRegex(RuntimeError,
+                                        'vmap: We do not yet support calling random operations'):
+                vmap(op)(*args)
+
 if __name__ == '__main__':
     run_tests()

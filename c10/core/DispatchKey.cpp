@@ -44,6 +44,8 @@ const char* toString(DispatchKey t) {
       return "BackendSelect";
     case DispatchKey::Batched:
       return "Batched";
+    case DispatchKey::VmapMode:
+      return "VmapMode";
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
     case DispatchKey::Autocast:
