@@ -10,7 +10,6 @@
 #   now exists only for compatibility with projects that have not
 #   been ported.
 #
-
 #   Instead, list ``CUDA`` among the languages named in the top-level
 #   call to the :command:`project` command, or call the
 #   :command:`enable_language` command with ``CUDA``.
