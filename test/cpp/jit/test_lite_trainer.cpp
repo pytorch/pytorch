@@ -88,12 +88,43 @@ void testMobileNamedParameters() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
+
   auto full_params = m.named_parameters();
-  auto mobile_params = bc.named_parameters();
-  AT_ASSERT(full_params.size() == mobile_params.size());
+  std::cout << "full: before modification " << std::endl;
   for (const auto& e : full_params) {
-    AT_ASSERT(e.value.item().toInt() == mobile_params[e.name].item().toInt());
+    // note that child1.foo and child2.foo are supposed to start with the same value of 4
+    // however, by the time child2.foo is printed here, it will already be -4
+    // this indicates that modifying child1.foo is also modifying child2.foo
+    std::cout << e.name << ", " << e.value << std::endl;
+    auto tensor = e.value;
+    tensor *= -1;
   }
+  std::cout << "full: after modification " << std::endl;
+  full_params = m.named_parameters();
+  for (const auto& e : full_params) {
+    std::cout << e.name << ", " << e.value << std::endl;
+  }
+
+  std::cout << std::endl;
+  std::cout << "mobile: before modification " << std::endl;
+  auto mobile_params = bc.named_parameters();
+  for (const auto& e : mobile_params) {
+    std::cout << e.first << ", " << e.second << std::endl;
+    auto tensor = e.second;
+    tensor *= -1;
+  }
+  std::cout << "mobile: after modification " << std::endl;
+  auto delta = bc.named_parameters();
+  for (const auto& e : delta) {
+    std::cout << e.first << ", " << e.second << std::endl;
+  }
+
+//  AT_ASSERT(full_params.size() == mobile_params.size());
+//  for (const auto& e : full_params) {
+//    std::cout << e.name << std::endl;
+//    std::cout << mobile_params[e.name].item().toInt() << std::endl;
+//    AT_ASSERT(e.value.item().toInt() == (mobile_params[e.name].item().toInt() * -1));
+//  }
 }
 
 void testMobileSaveLoadData() {
