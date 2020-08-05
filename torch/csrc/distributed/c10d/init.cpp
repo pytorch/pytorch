@@ -176,24 +176,7 @@ PyObject* c10d_init(PyObject* _unused) {
       .def("get_num_buckets", &::c10d::Reducer::getNumBuckets)
       .def(
           "get_tensors_for_bucket_idx",
-          [](::c10d::Reducer& reducer, int i) {
-            auto& buckets = reducer.getBuckets();
-            TORCH_CHECK(
-                i < buckets.size(),
-                c10::str(
-                    "Attempt to access bucket index ",
-                    i,
-                    " but only have ",
-                    buckets.size(),
-                    " buckets."))
-            auto& bucket = buckets[i];
-            std::vector<at::Tensor> tensors;
-            tensors.reserve(bucket.replicas.size());
-            for (const auto& rep : bucket.replicas) {
-              tensors.push_back(rep.contents);
-            }
-            return tensors;
-          },
+          &::c10d::Reducer::getTensorsForBucket,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",

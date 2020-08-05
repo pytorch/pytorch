@@ -394,8 +394,23 @@ size_t Reducer::getNumBuckets() const {
   return buckets_.size();
 }
 
-const std::vector<Reducer::Bucket>& Reducer::getBuckets() const {
-  return buckets_;
+std::vector<at::Tensor> Reducer::getTensorsForBucket(int i) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_CHECK(
+      i < buckets_.size(),
+      c10::str(
+          "Attempt to access bucket index ",
+          i,
+          " but only have ",
+          buckets_.size(),
+          " buckets."))
+  auto& bucket = buckets_[i];
+  std::vector<at::Tensor> tensors;
+  tensors.reserve(bucket.replicas.size());
+  for (const auto& rep : bucket.replicas) {
+    tensors.push_back(rep.contents);
+  }
+  return tensors;
 }
 
 bool Reducer::shouldRebuildBuckets() const {
@@ -1169,6 +1184,8 @@ void Reducer::sync_bucket_indices(
 
 std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(
+      !has_rebuilt_bucket_, "Expected to rebuild buckets at most once.");
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
       c10::str(

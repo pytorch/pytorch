@@ -2537,7 +2537,6 @@ class _DistTestBase(object):
     ):
         from torch.nn.parallel.distributed import join
 
-        print(f"Running DDP uneven input test with model {test_case.name}")
         model = test_case.model
         inp = test_case.inp
         rank = self.rank
