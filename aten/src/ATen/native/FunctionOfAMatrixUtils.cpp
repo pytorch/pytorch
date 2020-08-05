@@ -10,6 +10,7 @@ DEFINE_DISPATCH(_compute_linear_combination_stub);
 // for i in range(m):
 //    for j in range(n):
 //        output[i, ...] += coefficients[i, j] * input[j, ...]
+//
 // Note: if input.dtype == scalar_t<T>, then coefficients.dtype == T.
 // This is relevant when scalar_t<T> == complex<T>.
 Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficients) {
@@ -28,9 +29,22 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
   return output;
 }
 
+// Note: the function is implemented using the __restrict__ memory modifier,
+// which means that if `output` actually is aliased by `input`, the result
+// produces is undefined.
 Tensor _compute_linear_combination_out(const Tensor& input, const Tensor& coefficients, Tensor& output) {
   auto output_first_dim_size = coefficients.size(0);
   auto input_first_dim_size = coefficients.size(1);
+
+  // Recall that `coefficients` is a [m, n] Tensor,
+  // `input` is a [n, ...] Tensor, `output` is a [m, ...] Tensor.
+  // We restride Tensors to the common dim == input.dim() + 1, so that
+  // coefficients.sizes() = [m, 1 (instead of n), 1 repeated (input.dim() - 1) times,
+  // input.sizes() = [1, 1 (instead of n), ...],
+  // output.sizes() = [m, 1 (instead of n), ...].
+  // The second dimension in newly restrided Tensors is traversed inside the kernels.
+  // This is done to avoid synchronizations/atomic operations in the kernels
+  // and also quarantees determinism, required by the autograd.
 
   // restride output
   auto output_to_broadcasted_dim = output.unsqueeze(1);
