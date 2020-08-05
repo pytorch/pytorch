@@ -248,6 +248,8 @@ class TestOptimizer(unittest.TestCase):
         model = torch.jit.script(model)
         # this line should not have ASAN failures
         model_optim = optimize_for_mobile(model)
+        self.assertFalse(hasattr(model_optim.conv1, "bias"))
+        self.assertFalse(hasattr(model_optim.child.conv2, "bias"))
 
 if __name__ == '__main__':
     unittest.main()
