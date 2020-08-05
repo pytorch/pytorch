@@ -1346,6 +1346,10 @@ jobs:
     resource_class: medium
     machine:
       image: ubuntu-1604:201903-01
+    parameters:
+      branch:
+        type: string
+        default: "master"
     steps:
     - attach_workspace:
         at: /tmp/workspace
@@ -1362,7 +1366,7 @@ jobs:
         name: Docs push
         command: |
           pushd /tmp/workspace
-          git push -u origin master
+          git push -u origin "<< parameters.branch >>"
 
   pytorch_python_doc_build:
     environment:
@@ -5532,6 +5536,7 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_doc_push:
+          branch: site
           context: org-member
           filters:
             branches:
@@ -5544,6 +5549,7 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_doc_push:
+          branch: master
           context: org-member
           filters:
             branches:

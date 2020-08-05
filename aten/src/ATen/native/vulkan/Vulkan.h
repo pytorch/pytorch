@@ -126,6 +126,8 @@ class VulkanTensor final {
   bool can_be_image() const;
   bool has_image() const;
 
+  void sync_image_to_buffer() const;
+
   // if imageSizes argument is not specified:
   // Allocates VImage of sizes{W,H,NC4} and fills it from tensor VBuffer if it
   // exists, see comment for VulkanTensor.
@@ -275,6 +277,10 @@ class VBuffer final {
       VkDeviceSize offset,
       VkDeviceSize size) const;
 
+  inline VkBuffer vkbuffer() const {
+    return buffer_;
+  }
+
  private:
   VkDeviceSize bufferSizeBytes_;
   VkDescriptorType descriptorType_;
@@ -367,6 +373,11 @@ void copy_image_to_buffer(
     VBuffer& buffer,
     bool addBufferMemoryBarrierForHost = false);
 
+void copy_buffer_to_buffer(
+    const VBuffer& srcBuffer,
+    VBuffer& dstBuffer,
+    VkDeviceSize size);
+
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
     VkDescriptorType descriptorType);
@@ -389,6 +400,11 @@ void createDescriptorSetLayoutSinglePool(
     VkDescriptorSetLayout* descrSetLayout,
     VkDescriptorPool* descrPool,
     VkDescriptorSet* descrSet);
+
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer);
+void beginCommandBuffer(VkCommandBuffer commandBuffer);
+void endCommandBuffer(VkCommandBuffer commandBuffer);
+void submitAndWaitCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer);
 
 struct WorkGroupSize {
   uint32_t x;
