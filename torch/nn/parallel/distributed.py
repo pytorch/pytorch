@@ -96,7 +96,7 @@ class join:
     train with uneven inputs across participating processes.
 
     This context manager will keep track of already-joined DDP processes, and
-    "shadow" the forward and backward passes by inserting collectibe communication
+    "shadow" the forward and backward passes by inserting collective communication
     operations to match with the ones created by non-joined DDP processes. This
     will ensure each collective call has a corresponding call by already-joined
     DDP processes, preventing hangs or errors that would otherwise happen when
@@ -109,30 +109,35 @@ class join:
     To use this to enable training with uneven inputs across processes, simply
     wrap this context manager around your training loop. No further modifications
     to the model or data loading is required.
+
     .. warning::
         This module works only with the multi-process, single-device usage of
-        :clas:`DistributedDataParallel`, which means that a single process works
-        on a single GPU.
+        :class:`torch.nn.parallel.distributed.DistributedDataParallel`, which
+        means that a single process works on a single GPU.
 
     ..warning::
-        This module currently does not support distributed collective operations
-        in the forward pass, such as `SyncBatchNorm` or other collectives in the
-        forward pass.
+        This module currently does not support custom distributed collective
+        operations in the forward pass, such as `SyncBatchNorm` or other custom
+        defined collectives in the model's forward pass.
 
     Args:
         net (DDP model): The model, wrapped in DDP, being trained within the
-            context manager. An instance of :class:`DistributedDataParallel`.
+            context manager. An instance of
+            :class:`torch.nn.parallel.distributed.DistributedDataParallel`.
 
         enable (bool): Whether to enable uneven input detection or not. Pass in
-            enable=False to disable in cases where you know that inputs are even
-            across participating processes. Default is True.
+            ``enable=False`` to disable in cases where you know that inputs are
+            even across participating processes. Default is ``True``.
 
     Attributes:
-        net (DistributedDataParallel): DDP network
-        enable (bool): Whether it is enabled or not
+        net (DistributedDataParallel): DDP network that will be trained under
+            this context manager.
+        enable (bool): Whether to enable uneven input detection or not. If False,
+            this context manager is a no-op.
         authoritative_rank (Union[None, int]): After all processes have joined,
             this will contain the rank that was agreed upon to broadcast the
-            final model's state. None if all processes have not yet joined.
+            final model's state. ``None`` if all processes have not yet joined,
+            or if ``enable=False``.
 
     Example::
         >>> from torch.nn.parallel.distributed import join, DistributedDataParallel as DDP
