@@ -39,9 +39,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
-    FaultyRpcAgentTestFixture,
-)
 
 
 def foo_add():
@@ -3432,7 +3429,7 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
 
-class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
+class FaultyAgentRpcTest(RpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
