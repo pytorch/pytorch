@@ -16996,13 +16996,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         t2 = torch.tensor([inf, -inf, 10], device=device, dtype=dtype)
         actual = torch.nextafter(t1, t2)
         expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
         a = torch.randn(100, device=device, dtype=dtype)
         b = torch.randn(100, device=device, dtype=dtype)
         actual = torch.nextafter(a, b)
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @slowTest
     @onlyOnCPUAndCUDA
