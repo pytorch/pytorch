@@ -42,9 +42,6 @@ from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
     FaultyRpcAgentTestFixture,
 )
-from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
-    TensorPipeRpcAgentTestFixture,
-)
 
 
 def foo_add():
@@ -3743,11 +3740,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         # Reset for clean shutdown
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
-class TensorPipeAgentRpcTest(TensorPipeRpcAgentTestFixture, RpcTest):
-
-    @dist_init
-    def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
+class TensorPipeAgentRpcTest(RpcTest):
 
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
