@@ -872,13 +872,13 @@ class TestTensorExprFuser(BaseTestClass):
             test_erfc,
             test_frac,
             test_lgamma,
-            test_sigmoid,
             test_reciprocal,
             test_neg,
             # TODO: properly handle NaNs in Max/Min and reenable these tests:
             # test_threshold,
             # test_relu,
             # test_tanh,
+            # test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
