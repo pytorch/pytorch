@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 
 #include <thrust/tuple.h>
 
@@ -42,6 +43,32 @@ static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorI
     element_sizes[i] = iter.element_size(i);
   }
   return OffsetCalculator<num_outputs>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
+}
+
+template<typename func_t, typename policy_t>
+__device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using args_t = typename traits::ArgsTuple;
+
+  int idx = blockIdx.x;
+
+  return_t results[thread_work_size];
+  args_t args[thread_work_size];
+
+  // load
+  policy.load(args, idx);
+
+  // compute
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    if (policy.check_inbounds(i)) {
+      results[i] = c10::guts::apply(f, args[i]);
+    }
+  }
+
+  // store
+  policy.store(results, idx);
 }
 
 }}  // namespace at::native
