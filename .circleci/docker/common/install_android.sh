@@ -4,6 +4,10 @@ set -ex
 
 [ -n "${ANDROID_NDK}" ]
 
+retry () {
+    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+}
+
 _https_amazon_aws=https://ossci-android.s3.amazonaws.com
 
 apt-get update
