@@ -635,6 +635,27 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "prim::ListConstruct"
 
+    def test_custom_layer_tuple(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def symbolic(g, input):
+                return g.op('CustomNamespace::Custom', input, outputs=2)
+
+            @staticmethod
+            def forward(ctx, input):
+                return input, input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = utils._model_to_graph(model, batch)
+        iter = graph.nodes()
+        assert next(iter).kind() == "CustomNamespace::Custom"
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
         class MyModule(torch.nn.Module):
