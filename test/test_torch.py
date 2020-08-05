@@ -17083,6 +17083,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
             _test_mm(n, m, p, dtype, genf)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_strided_mm_bmm(self, device, dtype):
+        # Tests strided view case with stride smaller than corresponding dimension size
+        x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], dtype=dtype, device=device)
+        new_shape = [2, 2, 2]
+        new_stride = [3, 1, 1]
+        sx = torch.as_strided(x, size=new_shape, stride=new_stride)
+
+        torch_fn = lambda x: torch.bmm(x, x)  # noqa: E731
+        np_fn = lambda x: np.matmul(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx)
+
+        torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx[0])
+
     @onlyCPU
     @dtypes(torch.float)
     def test_bmm(self, device, dtype):
