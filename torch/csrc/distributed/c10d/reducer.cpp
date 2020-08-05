@@ -399,6 +399,7 @@ const std::vector<Reducer::Bucket>& Reducer::getBuckets() const {
 }
 
 bool Reducer::shouldRebuildBuckets() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   // if find_unused_parameters_, we do not rebuild buckets.
   return !find_unused_parameters_ && !has_rebuilt_bucket_;
 }
@@ -406,6 +407,7 @@ bool Reducer::shouldRebuildBuckets() const {
 void Reducer::setForwardPassWorkHandle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
     at::Tensor& tensor) {
+  std::lock_guard<std::mutex> lock(mutex_);
   // If there was a previous handle, it should have already completed. This is
   // because we await this handle in the backward pass, and only reinstall in
   // the next forward pass.
@@ -417,10 +419,12 @@ void Reducer::setForwardPassWorkHandle(
 }
 
 std::vector<at::Tensor> Reducer::getLocalUsedMapsOnDevice() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   return local_used_maps_dev_;
 }
 
 void Reducer::pushRebuiltParamsForAllIndices() {
+  std::lock_guard<std::mutex> lock(mutex_);
   const auto replica_count = replicas_.size();
   for (size_t replica_index = 0; replica_index < replica_count;
        ++replica_index) {
@@ -436,7 +440,7 @@ void Reducer::pushRebuiltParamsForAllIndices() {
   }
 }
 
-void Reducer::pushRebuiltParams(const VariableIndex index) {
+void Reducer::pushRebuiltParams(const VariableIndex& index) {
   if (!has_rebuilt_bucket_ && !find_unused_parameters_ &&
       index.replica_index == 0) {
     rebuilt_params_.push_back(
@@ -608,10 +612,12 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       // Rebuild bucket if this is the first time to rebuild
       if (!has_rebuilt_bucket_ && !find_unused_parameters_) {
         TORCH_CHECK(!rebuilt_params_.empty());
+        // Unlock before rebuildBuckets() since both rebuildBuckets() and
+        // initialize_buckets() grab the lock.
+        lock.unlock();
         auto rebuilt_bucket_indices = rebuildBuckets();
         // Unlock before initialize_buckets() as initialize_buckets() requires a
         // lock, it could result in self deadlock without unlocking here.
-        lock.unlock();
         initialize_buckets(std::move(rebuilt_bucket_indices));
       } else {
         lock.unlock();
@@ -1162,6 +1168,7 @@ void Reducer::sync_bucket_indices(
 }
 
 std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
+  std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
       c10::str(

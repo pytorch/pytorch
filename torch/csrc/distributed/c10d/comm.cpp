@@ -20,7 +20,7 @@ class BroadcastWork {
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
     BroadcastOptions broadcastOptions;
     broadcastOptions.rootRank = rank;
-    work_ = std::move(process_group->broadcast(flat_tensor_, broadcastOptions));
+    work_ =process_group->broadcast(flat_tensor_, broadcastOptions);
   }
 
   void finish() {

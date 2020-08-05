@@ -2448,6 +2448,10 @@ class _DistTestBase(object):
         # Ensure that each rank processes the same number of samples.
         validate_global_samples(local_num_samples)
 
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_sync_params_and_buffers(self):
         # Test that after calling _sunc_params_and_buffers, models across ranks
         # are the same and are equal to the model on the input rank.
@@ -2493,6 +2497,10 @@ class _DistTestBase(object):
             for t, expected in zip(net_module_states, expected_states):
                 self.assertEqual(t, expected)
 
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_grad_div_uneven_inputs(self):
         # Test that we scale by the effective world size when allreducing grads.
         # For example if N processes start DDP training but 0 < K < N join, we
@@ -2580,6 +2588,10 @@ class _DistTestBase(object):
                 self.assertEqual(t, tensor)
         dist.barrier()
 
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_uneven_inputs(self):
         @dataclass
         class DDPUnevenTestInput:

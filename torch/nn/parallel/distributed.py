@@ -105,6 +105,10 @@ class join:
     Once all DDP processes have joined, the context manager will broadcast the
     model corresponding to the last joined process to all processes to ensure the
     model is the same across all processes (which is guaranteed by DDP).
+
+    To use this to enable training with uneven inputs across processes, simply
+    wrap this context manager around your training loop. No further modifications
+    to the model or data loading is required.
     .. warning::
         This module works only with the multi-process, single-device usage of
         :clas:`DistributedDataParallel`, which means that a single process works
@@ -131,9 +135,10 @@ class join:
             final model's state. None if all processes have not yet joined.
 
     Example::
-        >>> from torch.nn.parallel import join, DistributedDataParallel as DDP
+        >>> from torch.nn.parallel.distributed import join, DistributedDataParallel as DDP
+        >>> import torch.distributed as dist
         >>> import torch
-        >>> dist.init_process_group(...)
+        >>> dist.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = DDP(my_model)
         >>> with join():
         >>>     for _ in range(n_iters): # n_iters can be different across ranks
@@ -206,6 +211,10 @@ class join:
         for work in allreduce_work:
             work.wait()
 
+    def _match_unused_params_allreduce(self):
+        locally_used_param_maps = self.net.reducer._get_local_used_maps()
+        self.pg.allreduce(locally_used_param_maps, AllreduceOptions())
+
     def __exit__(self, *args):
         if not self.enable:
             return
@@ -227,8 +236,7 @@ class join:
                 self._match_all_reduce_for_bwd_pass()
                 # Check if we need to allreduce locally unused params.
                 if self.net.find_unused_parameters:
-                    locally_used_param_maps = self.net.reducer._get_local_used_maps()
-                    self.pg.allreduce(locally_used_param_maps, AllreduceOptions())
+                    self._match_unused_params_allreduce()
                 # Check if we need to rebuild buckets to match broadcast calls from other processes.
                 if not buckets_rebuilt:
                     if self.net.reducer._should_rebuild_buckets():

@@ -144,17 +144,6 @@ class Reducer {
   // Pushes all parameters to be rebuilt.
   void pushRebuiltParamsForAllIndices();
 
-  // A struct containing work handle and tensor for allreduce scheduled in
-  // forward pass, if applicable.
-  struct ForwardPassAllreduceWork {
-    std::shared_ptr<c10d::ProcessGroup::Work> workHandle_;
-    at::Tensor resultTensor_;
-  };
-
-  // Handle for the currently scheduled allreduce in the forward pass, if
-  // applicable.
-  ForwardPassAllreduceWork forwardPassWorkHandle_;
-
   // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
   // corresponding tensor being reduced.
   void setForwardPassWorkHandle(
@@ -172,9 +161,9 @@ class Reducer {
     size_t replica_index;
     size_t variable_index;
   };
-  void pushRebuiltParams(const VariableIndex index);
+  void pushRebuiltParams(const VariableIndex& index);
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
@@ -293,6 +282,18 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+
+
+  // A struct containing work handle and tensor for allreduce scheduled in
+  // forward pass, if applicable.
+  struct ForwardPassAllreduceWork {
+    std::shared_ptr<c10d::ProcessGroup::Work> workHandle_;
+    at::Tensor resultTensor_;
+  };
+
+  // Handle for the currently scheduled allreduce in the forward pass, if
+  // applicable.
+  ForwardPassAllreduceWork forwardPassWorkHandle_;
 
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
