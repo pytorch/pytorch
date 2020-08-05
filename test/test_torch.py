@@ -12151,6 +12151,31 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(y.is_contiguous())
         self.assertEqual(out, y, atol=0., rtol=0.)
 
+    def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
+        val, ind = fn(x, -1)
+        self.assertEqual(val, expected_val, atol=0, rtol=0)
+        self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+        out_val = torch.empty_like(val).t().contiguous().t()
+        out_ind = torch.empty_like(ind).t().contiguous().t()
+        fn(x, -1, out=(out_val, out_ind))
+        self.assertFalse(out_val.is_contiguous())
+        self.assertFalse(out_ind.is_contiguous())
+        self.assertEqual(out_val, expected_val, atol=0, rtol=0)
+        self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
+
+    def test_cummax_discontiguous(self, device):
+        x = torch.tensor([[0, 1, 2, 3, 2, 1], [4, 5, 6, 5, 6, 7]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[0, 1, 2, 3, 3, 3], [4, 5, 6, 6, 6, 7]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 2, 4, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummax, expected_val, expected_ind)
+
+    def test_cummin_discontiguous(self, device):
+        x = torch.tensor([[3, 2, 1, 0, 1, 2], [7, 6, 5, 4, 5, 2]], device=device, dtype=torch.float).t().contiguous().t()
+        expected_val = torch.tensor([[3, 2, 1, 0, 0, 0], [7, 6, 5, 4, 4, 2]], device=device, dtype=torch.float)
+        expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 3, 3, 5]], device=device, dtype=torch.long)
+        self._test_cumminmax_helper(x, torch.cummin, expected_val, expected_ind)
+
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -17062,6 +17087,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 genf = genf_float
 
             _test_mm(n, m, p, dtype, genf)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_strided_mm_bmm(self, device, dtype):
+        # Tests strided view case with stride smaller than corresponding dimension size
+        x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], dtype=dtype, device=device)
+        new_shape = [2, 2, 2]
+        new_stride = [3, 1, 1]
+        sx = torch.as_strided(x, size=new_shape, stride=new_stride)
+
+        torch_fn = lambda x: torch.bmm(x, x)  # noqa: E731
+        np_fn = lambda x: np.matmul(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx)
+
+        torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
+        self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @onlyCPU
     @dtypes(torch.float)
