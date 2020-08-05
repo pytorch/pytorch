@@ -104,6 +104,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
          const string& out_file_name,
          const std::vector<std::string>& observe_column_max_for_blobs,
          int dump_freq,
+         int bin_nums,
          bool mul_nets,
          string delimiter) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
@@ -120,7 +121,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
                 net,
                 out_file_name,
                 observe_column_max_for_blobs,
-                2048,
+                bin_nums,
                 dump_freq,
                 mul_nets,
                 delimiter));
@@ -132,6 +133,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("out_file_name"),
       pybind11::arg("observe_column_max_for_blobs"),
       pybind11::arg("dump_freq") = -1,
+      pybind11::arg("bin_nums") = 16,
       pybind11::arg("mul_nets") = false,
       pybind11::arg("delimiter") = " ");
 
