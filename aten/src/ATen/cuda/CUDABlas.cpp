@@ -150,8 +150,11 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(cublasDgemmBatched(
-      handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc, num_batches));
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+  TORCH_CUDABLAS_CHECK(cublasDgemmStridedBatched(
+      handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
 
 template <>
@@ -161,8 +164,11 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSgemmBatched(
-      handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc, num_batches));
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+  TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
+      handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
 
 #ifndef __HIP_PLATFORM_HCC__
@@ -173,10 +179,13 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
     cublasOperation_t opb = _cublasOpFromChar(transb);
     _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
     GEMM_CHECK_ARGVALUES(c10::complex<double>);
-    TORCH_CUDABLAS_CHECK(cublasZgemmBatched(
+    const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+    const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+    const int64_t stridec = ldc*n;
+    TORCH_CUDABLAS_CHECK(cublasZgemmStridedBatched(
         handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
-        lda, reinterpret_cast<const cuDoubleComplex*>(b), ldb, reinterpret_cast<const cuDoubleComplex*>(&beta),
-        reinterpret_cast<cuDoubleComplex*>(c), ldc, num_batches));
+        lda, stridea, reinterpret_cast<const cuDoubleComplex*>(b), ldb, strideb, reinterpret_cast<const cuDoubleComplex*>(&beta),
+        reinterpret_cast<cuDoubleComplex*>(c), ldc, stridec, num_batches));
   }
 #endif
 
@@ -188,10 +197,13 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
     cublasOperation_t opb = _cublasOpFromChar(transb);
     _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
     GEMM_CHECK_ARGVALUES(c10::complex<float>);
-    TORCH_CUDABLAS_CHECK(cublasCgemmBatched(
+    const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+    const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+    const int64_t stridec = ldc*n;
+    TORCH_CUDABLAS_CHECK(cublasCgemm3mStridedBatched(
         handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
-        lda, reinterpret_cast<const cuComplex*>(b), ldb, reinterpret_cast<const cuComplex*>(&beta),
-        reinterpret_cast<cuComplex*>(c), ldc, num_batches));
+        lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
+        reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
   }
 #endif
 
@@ -240,8 +252,12 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  TORCH_CUDABLAS_CHECK(cublasHgemmBatched(
-      handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc, num_batches));
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
+  const int64_t stridec = ldc*n;
+  TORCH_CUDABLAS_CHECK(cublasHgemmStridedBatched(
+      handle, opa, opb, m, n, k, reinterpret_cast<const __half *>(&alpha), reinterpret_cast<const __half *>(a), lda, stridea,
+      reinterpret_cast<const __half *>(b), ldb, strideb, reinterpret_cast<const __half *>(&beta), reinterpret_cast<__half *>(c), ldc, stridec, num_batches));
 }
 
 template <>

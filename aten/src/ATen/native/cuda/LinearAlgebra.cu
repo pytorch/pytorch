@@ -44,7 +44,7 @@ Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, b
   } else {
     transpose_tensor = !transpose_result;
     if (!tensor.is_contiguous()) {
-      tensor_ = tensor.contiguous();
+      tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
     }
     ld_tensor = tensor_strides[1];
   }
@@ -133,9 +133,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 }
 
 Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(std::max(1, (int)(self.dim())) == 3, "self must be a 3D tensor");
-  TORCH_CHECK(std::max(1, (int)batch1.dim()) == 3, "batch1 must be a 3D tensor");
-  TORCH_CHECK(std::max(1, (int)batch2.dim()) == 3, "batch2 must be a 3D tensor");
+  TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
+  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
+  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
@@ -145,6 +145,7 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   TORCH_CHECK(self_sizes[0] == batch2_sizes[0], "self dim 0 must match batch2 dim 0");
   TORCH_CHECK(self_sizes[1] == batch1_sizes[1], "self dim 1 must match batch1 dim 1");
   TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
+  TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
   if (&result != &self) {
     at::native::resize_as_(result, self);
@@ -170,10 +171,8 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   ldc = result_.stride(transpose_result ? 1 : 2);
   Tensor batch1_ = transpose_result ? batch2 : batch1;
   Tensor batch2_ = transpose_result ? batch1 : batch2;
-  batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1,
-            transpose_result, lda);
-  batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2,
-            transpose_result, ldb);
+  batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, transpose_result, lda);
+  batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, transpose_result, ldb);
 
   IntArrayRef result_sizes = result_.sizes();
   int64_t m = result_sizes[transpose_result ? 2 : 1];
@@ -243,14 +242,20 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
 }
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  Tensor b_self = std::get<0>(expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out"));
+  Tensor self_;
+  std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
+  //if (&result != &self) {
+  //  std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  //} else {
+  // self_ = self;
+  //}
   {
     at::NoNamesGuard guard;
-    baddmm_out_cuda_impl(result, b_self, batch1, batch2, beta, alpha);
+    baddmm_out_cuda_impl(result, self_, batch1, batch2, beta, alpha);
   }
-  // namedinference::propagate_names_if_nonempty(
-  //     result,
-  //     namedinference::compute_baddbmm_outnames(result, batch1, batch2, self));
+  namedinference::propagate_names_if_nonempty(
+       result,
+       namedinference::compute_baddbmm_outnames(result, batch1, batch2, self));
   return result;
 }
 
@@ -269,7 +274,7 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddmm_out_cuda_impl(result, batch1, batch1, batch2, beta, alpha);
+    baddmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
       result,

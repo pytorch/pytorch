@@ -19225,7 +19225,7 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
