@@ -168,8 +168,7 @@ void initJITBindings(PyObject* module) {
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
       .def(
-          "_jit_pass_onnx_remove_inplace_ops_for_onnx",
-          RemoveInplaceOpsForONNX)
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
