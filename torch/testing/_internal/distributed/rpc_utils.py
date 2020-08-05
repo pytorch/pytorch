@@ -76,6 +76,11 @@ MP_HELPERS_AND_SUFFIXES = {
 }
 
 
+# This list contains test suites that are agent-agnostic and that only verify
+# compliance with the generic RPC interface specification. These tests should
+# *not* make use of implementation details of a specific agent (options,
+# attributes, ...). These test suites will be instantiated multiple times, once
+# for each agent (except the faulty agent, which is special).
 GENERIC_TESTS = [
     RpcTest,
     DistAutogradTest,
@@ -88,16 +93,27 @@ GENERIC_TESTS = [
 ]
 
 
+# This list contains test suites that will only be run on the ProcessGroupAgent.
+# These suites should be standalone, and separate from the ones in the generic
+# list (not subclasses of those!).
 PROCESS_GROUP_TESTS = [
     ProcessGroupAgentRpcTest
 ]
 
 
+# This list contains test suites that will only be run on the TensorPipeAgent.
+# These suites should be standalone, and separate from the ones in the generic
+# list (not subclasses of those!).
 TENSORPIPE_TESTS = [
     TensorPipeAgentRpcTest
 ]
 
 
+# This list contains test suites that will only be run on the faulty RPC agent.
+# That agent is special as it's only used to perform fault injection in order to
+# verify the error handling behavior. Thus the faulty agent will only run the
+# suites in this list, which were designed to test such behaviors, and not the
+# ones in the generic list.
 FAULTY_AGENT_TESTS = [
     FaultyAgentRpcTest,
     FaultyAgentDistAutogradTest,
