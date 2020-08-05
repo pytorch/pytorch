@@ -9,6 +9,9 @@ TORCH_API void PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
     bool disable_shape_peepholes = false);
 TORCH_API void PeepholeOptimize(
+    Graph* graph,
+    bool disable_shape_peepholes = false);
+TORCH_API void PeepholeOptimize(
     Block* block,
     bool disable_shape_peepholes = false);
 

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -82,7 +83,68 @@ struct PeepholeOptimizeImpl {
             }
           }
         }
-      } else if (
+      } 
+      else if (node->kind() == prim::profile && node->inputs().size() > 0 && 
+      node->input(0)->node()->matches(
+              "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+
+          GRAPH_DEBUG("found ", getHeader(node->input(0)->node()));
+          auto in_type = it->input(0)->node()->input(0)->type()->expect<TensorType>();
+          auto out_type = it->output()->type()->expect<TensorType>();
+          auto in_syms = in_type->symbolic_sizes();
+          auto out_syms = out_type->symbolic_sizes();
+          if (in_syms.rank().has_value() && out_syms.rank().has_value()) {
+            if (*in_syms.sizes() == *out_syms.sizes()) {
+              GRAPH_DEBUG("Removing ", getHeader(*it));
+              it->input(0)->setType(it->output()->type());
+              it->output()->replaceAllUsesWith(it->input(0));
+              it.destroyCurrent();
+            }
+          }
+          //   auto max_rank = std::max(*out_syms.rank(), *in_syms.rank());
+          //   auto in_sizes = *in_syms.sizes();
+          //   auto padded_dims = max_rank - *out_syms.rank();
+
+          //   // TODO: Figure out how to reshape back
+          //   if (padded_dims) {
+          //     continue;
+          //   }
+
+          //   // std::vector<c10::ShapeSymbol> out_sizes(padded_dims, c10::ShapeSymbol::fromStaticSize(1));
+          //   // auto orig_out_sizes = *out_syms.sizes();
+          //   // out_sizes.insert(out_sizes.end(),orig_out_sizes.begin(), orig_out_sizes.end());
+          //   auto out_sizes = *out_syms.sizes();
+
+          //   std::vector<int64_t> reduce_axes; 
+          //   bool dimension_match = true;
+          //   for (size_t i = 0; i < max_rank; i++) {
+          //     if (out_sizes[i].is_static()) {
+          //       if (out_sizes[i].static_size() == 1) {
+          //         reduce_axes.push_back(i);
+          //       }
+          //       // no reduction since out_sizes isn't equal to 1
+          //     } else if (out_sizes[i] != in_sizes[i]) {
+          //       dimension_match = false;
+          //       break;
+          //     }
+          //   }
+
+          //   if (!dimension_match) {
+          //     continue;
+          //   }
+
+          // auto graph = b->owningGraph();
+          // auto axes_constant = graph->insertConstant(IValue{reduce_axes});
+          // auto keep_dims = graph->insertConstant(IValue{true});
+          // auto sum = graph->insert(aten::sum, {it->input(0), axes_constant, keep_dims});
+
+          // // if (padded_dims > 0) {
+          // //   sum = graph->insert(aten::reshape_as, {sum, });
+          // // }
+          // n->output()->replaceAllUsesWith(sum);
+          // it.destroyCurrent();
+      }
+      else if (
           node->matches(
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
               /*const_inputs=*/attr::size)) {
