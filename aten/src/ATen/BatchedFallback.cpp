@@ -55,9 +55,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
               "Batching rule not implemented for ", schema, ". ",
               "We could not generate a fallback.");
-  TORCH_CHECK(num_returns == 1,
+  TORCH_CHECK(num_returns >= 1,
               "Batching rule not implemented for ", schema, ". ",
-              "We do not yet support operations with multiple returns.");
+              "We do not support operations with no returns.");
   TORCH_WARN("Batching rule not implemented for ", schema, " falling back "
              "to slow (for loop and stack) implementation");
 
@@ -105,8 +105,14 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, call `op`, and store the result in
   // `output_shards`.
-  std::vector<Tensor> output_shards;
-  output_shards.reserve(num_batches);
+  //
+  // NOTE: [Output shards layout]
+  // Assume that the operator has three outputs: a, b, c.
+  // The layout of output_shards is as follows:
+  // [ a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3]
+  // This is so that we can call at::stack([a0...a3]), at::stack([b0...b3])
+  // more easily in the next step.
+  std::vector<Tensor> output_shards(num_batches * num_returns);
 
   for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
     auto index = computeIndex(linear_idx, batch_sizes);
@@ -130,21 +136,30 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
     op.callBoxed(stack);
 
-    // We assume there is a single tensor return
-    output_shards.emplace_back(torch::jit::pop(stack).toTensor());
+    // Store the result into `output_shards`. See NOTE: [Output shards layout]
+    // to learn about the details of how we store the shards.
+    const auto returns = torch::jit::last(stack, num_returns);
+    for (int64_t return_idx = 0; return_idx < returns.size(); ++return_idx) {
+      output_shards[num_batches * return_idx + linear_idx] = returns[return_idx].toTensor();
+    }
+    torch::jit::drop(stack, num_returns);
   }
 
-  // Stack the tensors together to form the result.
-  auto flat_output = at::stack(output_shards);
-  VmapDimVector output_sizes(batch_sizes);
-  output_sizes.insert(
-      output_sizes.end(),
-      flat_output.sizes().begin() + 1,
-      flat_output.sizes().end());
+  // For each output Tensor, stack the shards of the tensor together to form a return
   torch::jit::drop(stack, num_arguments);
-  torch::jit::push(
-      stack,
-      input_physical_views.front().newLogicalFromPhysical(flat_output.view(output_sizes)));
+  for (int64_t return_idx = 0; return_idx < num_returns; ++return_idx) {
+    const auto* shards_begin = output_shards.data() + (return_idx * num_batches);
+    auto shards = TensorList(shards_begin, num_batches);
+    auto flat_output = at::stack(shards);
+    VmapDimVector output_sizes(batch_sizes);
+    output_sizes.insert(
+        output_sizes.end(),
+        flat_output.sizes().begin() + 1,
+        flat_output.sizes().end());
+    torch::jit::push(
+        stack,
+        input_physical_views.front().newLogicalFromPhysical(flat_output.view(output_sizes)));
+  }
 }
 
 } // namespace at
