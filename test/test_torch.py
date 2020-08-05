@@ -15449,12 +15449,12 @@ class TestTorchDeviceType(TestCase):
         # complex NaNs are defined as at least one of the real or imaginary parts being a NaN
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
         a_vals = (
-            complex(float('inf'), 1), complex(2, 1), complex(float('inf'), float('inf')),
-            complex(1, float('nan')), complex(float('nan'), float('nan'))
+            complex(float('inf'), 1), complex(2, 2), complex(1, 10),
+            complex(float('inf'), float('inf')), complex(1, float('nan')), complex(float('nan'), float('nan'))
         )
         b_vals = (
-            complex(float('inf'), float('inf')), complex(2, 2), complex(float('nan'), 1),
-            complex(-float('inf'), -float('inf')), complex(1, 1)
+            complex(float('inf'), float('inf')), complex(2, 1), complex(2, 0),
+            complex(float('nan'), 1), complex(-float('inf'), -float('inf')), complex(float('nan'), 1)
         )
         for torch_op, numpy_op in ops:
             a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)

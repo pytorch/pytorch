@@ -40,10 +40,10 @@ void maximum_kernel_cuda(TensorIterator& iter) {
         if (::isnan(b.real()) || ::isnan(b.imag())) {
           return b;
         }
-        if (b.real() >= a.real() && b.imag() >= a.imag()) {
-          return b;
+        if (a.real() > b.real() || (a.real() == b.real() && a.imag() >= b.imag())) {
+          return a;
         }
-        return a;
+        return b;
       });
     });
   }
@@ -79,10 +79,10 @@ void minimum_kernel_cuda(TensorIterator& iter) {
         if (::isnan(b.real()) || ::isnan(b.imag())) {
           return b;
         }
-        if (b.real() <= a.real() && b.imag() <= a.imag()) {
-          return b;
+        if (a.real() < b.real() || (a.real() == b.real() && a.imag() <= b.imag())) {
+          return a;
         }
-        return a;
+        return b;
       });
     });
   }

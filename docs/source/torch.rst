@@ -360,7 +360,9 @@ Comparison Ops
     le
     lt
     max
+    maximum
     min
+    minimum
     ne
     sort
     topk
