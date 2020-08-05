@@ -6,7 +6,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/core/asan.h"
+#include <c10/macros/Macros.h>
+
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -19,6 +20,7 @@
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/offline_tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
@@ -1013,7 +1015,7 @@ void addObjectMethods(py::module& m) {
 }
 
 void addGlobalMethods(py::module& m) {
-  m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+  m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
@@ -1728,6 +1730,21 @@ void addGlobalMethods(py::module& m) {
     new_proto.SerializeToString(&out);
     return py::bytes(out);
   });
+  m.def(
+      "create_offline_tensor",
+      [](const std::string& name,
+         const std::vector<int>& dims,
+         int datatype) -> bool {
+        Workspace* curr_ws = GetCurrentWorkspace();
+        auto* b = curr_ws->CreateBlob(name);
+        auto* offline = b->GetMutable<OfflineTensor>();
+        CAFFE_ENFORCE(offline);
+        offline->setShapeAndType(
+            dims,
+            CPU,
+            DataTypeToTypeMeta(static_cast<TensorProto::DataType>(datatype)));
+        return true;
+      });
   m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
