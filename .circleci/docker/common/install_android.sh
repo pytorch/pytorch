@@ -86,11 +86,16 @@ rm "$_tmp_cmake_targz"
 
 # SwiftShader
 _swiftshader_root_dir=/var/lib/jenkins
-_tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
-curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
-unzip -qo "$_tmp_swiftshader_zip" -d "$_swiftshader_root_dir"
-_swiftshader_dir="$_swiftshader_root_dir/swiftshader-master"
-rm "$_tmp_swiftshader_zip"
+_swiftshader_dir="$_swiftshader_root_dir/swiftshader"
+retry git clone https://github.com/google/swiftshader.git "$_swiftshader_dir"
+pushd "$_swiftshader_dir"
+git submodule update --init --recursive
+popd
+#_tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
+#curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
+#unzip -qo "$_tmp_swiftshader_zip" -d "$_swiftshader_root_dir"
+#_swiftshader_dir="$_swiftshader_root_dir/swiftshader-master"
+#rm "$_tmp_swiftshader_zip"
 
 pushd "$_swiftshader_dir/build"
 
