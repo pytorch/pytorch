@@ -78,8 +78,8 @@ Shader::Factory::Factory(const VkDevice device)
 
 // std::unique_ptr requires its template parameter to be fully defined.
 // For that reason pimpl through unique_ptr requires the definition of
-// the [default] constructor and assignment to show up after impl is
-// fully defined.
+// the [default] constructor and move assignment operator to appear after
+// impl is fully defined.
 
 Shader::Factory::Factory(Factory&&) = default;
 Shader::Factory& Shader::Factory::Factory::operator=(Factory&&) = default;
@@ -119,6 +119,35 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
 
   return Handle{
     shader_module,
+    Deleter(device_),
+  };
+}
+
+Shader::Layout::Factory::Factory(const VkDevice device)
+  : device_(device) {
+}
+
+Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
+    const Descriptor& descriptor) const {
+  static_assert(
+      sizeof(Descriptor::Slot) == sizeof(VkDescriptorSetLayoutBinding),
+      "This implementation assumes a Descriptor::Slot's memory layout is the same"
+      "as VkDescriptorSetLayoutBinding.  A copy needs to be performed otherwise.");
+
+  const VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
+    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    nullptr,
+    0u,
+    descriptor.slots.size(),
+    reinterpret_cast<const VkDescriptorSetLayoutBinding*>(descriptor.slots.data()),
+  };
+
+  VkDescriptorSetLayout descriptor_set_layout{};
+  VK_CHECK(vkCreateDescriptorSetLayout(
+      device_, &descriptor_set_layout_create_info, nullptr, &descriptor_set_layout));
+
+  return Handle{
+    descriptor_set_layout,
     Deleter(device_),
   };
 }
