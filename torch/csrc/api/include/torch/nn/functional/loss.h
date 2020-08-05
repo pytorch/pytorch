@@ -164,13 +164,7 @@ inline Tensor binary_cross_entropy(
       "Please ensure they have the same size.");
   }
 
-  auto weight_ = weight;
-  if (weight_.defined()) {
-    auto new_size = at::infer_size(target.sizes(), weight_.sizes());
-    weight_ = weight_.expand(new_size);
-  }
-
-  return torch::binary_cross_entropy(input, target, weight_, reduction_enum);
+  return torch::binary_cross_entropy(input, target, weight, reduction_enum);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

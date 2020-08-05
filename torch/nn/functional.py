@@ -5,7 +5,7 @@ import warnings
 import math
 
 import torch
-from torch._C import _infer_size, _add_docstr
+from torch._C import _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
@@ -2510,10 +2510,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     if target.size() != input.size():
         raise ValueError("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                          "Please ensure they have the same size.".format(target.size(), input.size()))
-
-    if weight is not None:
-        new_size = _infer_size(target.size(), weight.size())
-        weight = weight.expand(new_size)
 
     return torch._C._nn.binary_cross_entropy(
         input, target, weight, reduction_enum)
