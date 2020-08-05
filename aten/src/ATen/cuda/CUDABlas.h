@@ -50,17 +50,6 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
-// cublasStatus_t cublasHgemmBatched(cublasHandle_t handle,
-//                                   cublasOperation_t transa,
-//                                   cublasOperation_t transb,
-//                                   int m, int n, int k,
-//                                   const __half           *alpha,
-//                                   const __half           *Aarray[], int lda,
-//                                   const __half           *Barray[], int ldb,
-//                                   const __half           *beta,
-//                                   __half           *Carray[], int ldc,
-//                                   int batchCount)
-
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
   char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
       const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, Dtype beta, \
