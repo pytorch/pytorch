@@ -2144,6 +2144,18 @@ nelement() -> int
 Alias for :meth:`~Tensor.numel`
 """)
 
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
+""")
+
 add_docstr_all('nonzero',
                r"""
 nonzero() -> LongTensor
