@@ -130,8 +130,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_remove_inplace_ops(graph)
-
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
@@ -154,8 +152,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
-        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+        # _remove_inplace_ops makes the IR invalid for JIT passes / alias db
+        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -344,9 +342,6 @@ def _model_to_jit_graph(model, args, _retain_param_name, update_jit_scripting_pa
                 method_graph = freezed_m._get_method('forward').graph
                 method_graph.eraseInput(0)  # Remove 'self' from model inputs
                 params = []
-
-                torch._C._jit_pass_onnx_preprocess(method_graph)
-                torch._C._jit_pass_remove_mutation(method_graph)
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(method_graph, tuple(in_vars), False, False)

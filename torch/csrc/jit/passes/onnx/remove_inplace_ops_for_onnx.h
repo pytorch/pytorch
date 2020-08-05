@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void PreprocessForONNX(std::shared_ptr<Graph>& graph);
+TORCH_API void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

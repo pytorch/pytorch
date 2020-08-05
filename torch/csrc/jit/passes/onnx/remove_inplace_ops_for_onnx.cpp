@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <limits>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 namespace torch {
 namespace jit {
@@ -412,9 +413,60 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
   }
 }
 
+// Remove Mutation pass does not handle mutation on block inputs.
+// To fix this, insert a clone node following the graph input:
+// Example for graph input node %0:
+//
+//  %2 : None = prim::Constant()
+//  %3 : Tensor = aten::clone(%0, %2)
+//  %5 : Tensor = aten::zero_(%3)
+
+static void PrepareForRemoveMutations(const std::shared_ptr<Graph>& graph, Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      PrepareForRemoveMutations(graph, child_block);
+    }
+  }
+
+  for (auto input : b->inputs()) {
+    for (auto use : input->uses()) {
+      Node* node = use.user;
+      if (!torch::jit::isInplaceOpVariant(graph, node)) {
+        continue;
+      }
+
+      auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
+
+      if (it != node->inputs().end()) {
+        int index = std::distance(node->inputs().begin(), it);
+
+        std::cerr
+            << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
+            << "This changes graph semantics." << std::endl;
+
+        auto newNode = node->owningGraph()->create(aten::clone, 1);
+        newNode->copyMetadata(input->node());
+        newNode->addInput(input);
+
+        auto* noneNode = node->owningGraph()->create(prim::Constant);
+        noneNode->output()->setType(NoneType::get());
+        newNode->addInput(noneNode->output());
+
+        newNode->insertBefore(node);
+        noneNode->insertBefore(newNode);
+        node->replaceInput(index, newNode->output());
+        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+      }
+    }
+  }
+}
+
 } // namespace
 
-void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
+void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
+  PrepareForRemoveMutations(graph, graph->block());
+  RemoveTensorMutation(graph);
+  RemoveListMutation(graph);
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
   PrepareListPopForONNX(graph->block());
