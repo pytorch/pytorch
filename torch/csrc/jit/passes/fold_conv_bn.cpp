@@ -62,10 +62,10 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
 
   const std::string real_typename = t->name()->qualifiedName();
   const std::string demangled_typename = removeTorchMangle(real_typename);
-  bool is_floating_point_conv = (
-    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
-    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
-    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
+  bool is_floating_point_conv =
+      ((demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
 
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {

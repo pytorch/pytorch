@@ -610,10 +610,9 @@ bool is_functional(
 }
 
 std::string removeTorchMangle(const std::string& orig_name) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(orig_name, mangle_re, "");
-    return qualified_name;
+  static std::regex mangle_re("\\.___torch_mangle_\\d+");
+  auto qualified_name = std::regex_replace(orig_name, mangle_re, "");
+  return qualified_name;
 }
 
 c10::optional<std::string> getModuleName(Value* value) {
