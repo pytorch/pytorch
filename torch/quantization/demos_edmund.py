@@ -35,6 +35,8 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
     nn.LSTM,
 }
 
+from torch.quantization.adaround import adaround_qconfig
+
 # from  mobilenet_classes import (
 #     ConvBNReLU,
 #     InvertedResidual,
@@ -85,6 +87,7 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 def evaluate(model, criterion, data_loader, neval_batches):
+    print("starting and evaluation")
     model.eval()
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
@@ -100,7 +103,7 @@ def evaluate(model, criterion, data_loader, neval_batches):
             top5.update(acc5[0], image.size(0))
             if cnt >= neval_batches:
                  return top1, top5
-
+    print("finishing an evaluation")
     return top1, top5
 
 def load_model(model_file):
@@ -113,7 +116,7 @@ def load_model(model_file):
 
 def prepare_data_loaders(data_path):
     train_batch_size = 30
-    eval_batch_size = 300
+    eval_batch_size = 30
 
     traindir = os.path.join(data_path, 'train')
     valdir = os.path.join(data_path, 'val')
@@ -209,31 +212,34 @@ def imagenet_download():
     print("done loading")
     return model, data_loader, data_loader_test
 
-def quantize_model(model, data_loader, per_tensor=True):
+def quantize_model(model, data_loader_test, per_tensor=True):
     print("starting quantization")
     # criterion = nn.CrossEntropyLoss()
     num_calibration_batches = 30
+    num_eval_batches = 10
 
     model = copy.deepcopy(model)
-    if per_tensor:
-        model.qconfig = torch.quantization.default_qconfig
-    else:
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # if per_tensor:
+    #     model.qconfig = torch.quantization.default_qconfig
+    # else:
+    #     model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    model.qconfig = adaround_qconfig
 
     # unquantized_model = copy.deepcopy(model)
-
-    model = torch.quantization.prepare(model, inplace=False)
+    criterion = nn.CrossEntropyLoss()
+    model = torch.quantization.prepare_qat(model, inplace=False)
+    evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
     # evaluate(model,criterion, data_loader, num_calibration_batches)
-    count = 0
-    for image, target in data_loader:
-        with torch.no_grad():
-            output = model(image)
-            print(count)
-            count += 1
-            if count >= num_calibration_batches:
-                break
+    # count = 0
+    # for image, target in data_loader:
+    #     with torch.no_grad():
+    #         output = model(image)
+    #         print(count)
+    #         count += 1
+    #         if count >= num_calibration_batches:
+    #             break
 
-    model = torch.quantization.convert(model, inplace=False)
+    # model = torch.quantization.convert(model, inplace=False)
 
     print("ending quantization")
     return model
@@ -241,8 +247,8 @@ def quantize_model(model, data_loader, per_tensor=True):
 def adaround_demo(input_model, data_loader, data_loader_test):
     print("starting adaround")
     train_batch_size = 30
-    eval_batch_size = 300
-    num_eval_batches = 1
+    eval_batch_size = 30
+    num_eval_batches = 10
     criterion = nn.CrossEntropyLoss()
     model = copy.deepcopy(input_model)
 
@@ -250,25 +256,27 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     model.eval()
     # model.fuse_model()
 
-    quantized_tensor_model = quantize_model(model, data_loader, True)
+    quantized_tensor_model = quantize_model(model, data_loader_test, True)
+    # quantized_tensor_model = copy.deepcopy(model)
     results = []
     print("starting initial evaluation")
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
     print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
     results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
-    print('Per tensor quantization accuracy results, no bias correction')
-    results.append('Per tensor quantization accuracy results, no bias correction')
+    print('Per tensor quantization accuracy results, no adaround')
+    results.append('Per tensor quantization accuracy results, no adaround')
 
     print("starting adaround quick function")
     # _correct_bias.sequential_bias_correction(quantized_tensor_model, model, data_loader_test)
-    adaround.quick_function(model, quantized_tensor_model, data_loader_test)
+    adaround.quick_function(quantized_tensor_model, 0, data_loader_test)
+    # print(model._modules['features']._modules['9'])
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
     print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))
     results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
-    print('Per tensor quantization accuracy results, with bias correction')
-    results.append('Per tensor quantization accuracy results, with bias correction')
+    print('Per tensor quantization accuracy results, with adaround')
+    results.append('Per tensor quantization accuracy results, with adaround')
 
 
     for result in results:
