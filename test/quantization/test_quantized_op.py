@@ -1942,7 +1942,7 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
-    def test_batch_norm_1d_2d_3d_relu(self):
+    def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
@@ -1993,7 +1993,7 @@ class TestQuantizedOps(TestCase):
                     msg="{} vs {}".format(qy, quantize_ref))
 
     @skipIfNoFBGEMM
-    def test_batch_norm_1d_2d_3d(self):
+    def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
         max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
