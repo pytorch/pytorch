@@ -38,6 +38,7 @@ TESTS = [
     'distributed/test_distributed',
     'test_distributions',
     'test_expecttest',
+    'test_foreach',
     'test_indexing',
     'test_jit',
     'test_logging',
