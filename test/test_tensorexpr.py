@@ -856,7 +856,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_cosh,
             test_tan,
             test_atan,
-            test_tanh,
             test_sqrt,
             test_floor,
             test_ceil,
@@ -879,6 +878,7 @@ class TestTensorExprFuser(BaseTestClass):
             # TODO: properly handle NaNs in Max/Min and reenable these tests:
             # test_threshold,
             # test_relu,
+            # test_tanh,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
