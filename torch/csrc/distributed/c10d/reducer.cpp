@@ -360,7 +360,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     } else {
       bucket_view.zero_();
     }
-    // The grad is not modified and dosesn't need to be written back.
+    // The grad is not modified and doesn't need to be written back.
     return false;
   });
 }
