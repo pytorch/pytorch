@@ -260,39 +260,39 @@ TEST(IValueTest, ListNestedEquality) {
 }
 
 TEST(IValueTest, EnumEquality) {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto int_enum_type1 = EnumType::create("enum_class_1", IntType::get(), cu);
+  auto int_enum_type2 = EnumType::create("enum_class_2", IntType::get(), cu);
+  auto string_enum_type = EnumType::create("enum_class_3", StringType::get(), cu);
+
   EXPECT_EQ(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", IValue(1))),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1)))
+          int_enum_type1, "enum_name_1", IValue(1)))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", IValue(1))),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_2", "enum_name_1", IValue(1)))
+          int_enum_type2, "enum_name_1", IValue(1)))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", IValue(1))),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_2", IValue(1)))
+          int_enum_type1, "enum_name_2", IValue(1)))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", IValue(1))),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(2)))
-  );
-
-  EXPECT_NE(
-      IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
-      IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue("1")))
+          string_enum_type, "enum_name_1", IValue("1")))
   );
 }
+
+// TODO(gmagogsfm): Add type conversion test?
 } // namespace c10
