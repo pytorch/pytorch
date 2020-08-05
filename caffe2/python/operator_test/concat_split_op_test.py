@@ -4,7 +4,7 @@ from __future__ import division
 from __future__ import print_function
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
@@ -146,41 +146,28 @@ class TestConcatSplitOps(serial.SerializedTestCase):
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
-            max_value=20,
+            max_value=5,
             allow_empty=True,
         ),
-        split_by_scaling_lengths=st.booleans(),
         **hu.gcs
     )
-    def test_split_by_lengths(self, inputs, split_by_scaling_lengths, gc, dc):
+    def test_split_by_lengths(self, inputs, gc, dc):
         data, lengths = inputs
         len_len = len(lengths)
 
         def _find_factor_simple(x):
-            for i in [2, 3, 5, 7, 9, 11]:
+            for i in [2, 3, 5]:
                 if x % i == 0:
                     return i
             return x
 
         num_output = _find_factor_simple(len_len)
-        scaling_factor = 1
-
-        if split_by_scaling_lengths:
-            sum_len = sum(lengths)
-            sum_scaling_lengths = _find_factor_simple(sum_len)
-            if sum_scaling_lengths != sum_len and sum_scaling_lengths >= num_output:
-                scaling_lengths = [1] * (num_output - 1) + [sum_scaling_lengths - num_output + 1]
-                len_len = len(scaling_lengths)
-                lengths = np.array(scaling_lengths, dtype=np.int32)
-                scaling_factor = (sum_len // sum_scaling_lengths) if sum_scaling_lengths else 1
-
         axis = 0
         op = core.CreateOperator(
             "SplitByLengths",
             ["data", "lengths"],
             ['X_{}'.format(i) for i in range(num_output)],
             axis=axis,
-            use_scaling_lengths=split_by_scaling_lengths,
         )
 
         def split_by_lengths_ref(data, lengths, num_output=num_output, axis=0):
@@ -189,8 +176,8 @@ class TestConcatSplitOps(serial.SerializedTestCase):
                 np.array(
                     data.take(
                         np.arange(
-                            scaling_factor * idxs[i * len_len // num_output],
-                            scaling_factor * idxs[(i + 1) * len_len // num_output]
+                            idxs[i * len_len // num_output],
+                            idxs[(i + 1) * len_len // num_output]
                         ),
                         axis=axis
                     )
@@ -198,22 +185,12 @@ class TestConcatSplitOps(serial.SerializedTestCase):
             ]
         outputs_with_grad = range(num_output)
         input_tensors = [data, lengths]
-
-        if gc == hu.cpu_do:
-            self.assertReferenceChecks(
-                hu.cpu_do, op, input_tensors, split_by_lengths_ref)
-            self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
-            self.assertGradientChecks(
-                hu.cpu_do, op, input_tensors, 0, outputs_with_grad,
-                input_device_options={"lengths": hu.cpu_do, "data": hu.cpu_do})
-
-        if gc == hu.gpu_do and workspace.has_gpu_support:
-            self.assertReferenceChecks(
-                hu.gpu_do, op, input_tensors, split_by_lengths_ref)
-            self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
-            self.assertGradientChecks(
-                hu.gpu_do, op, input_tensors, 0, outputs_with_grad,
-                input_device_options={"lengths": hu.gpu_do, "data": hu.gpu_do})
+        self.assertReferenceChecks(
+            hu.cpu_do, op, input_tensors, split_by_lengths_ref)
+        self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
+        self.assertGradientChecks(
+            hu.cpu_do, op, input_tensors, 0, outputs_with_grad,
+            input_device_options={"lengths": hu.cpu_do})
 
 
 if __name__ == "__main__":

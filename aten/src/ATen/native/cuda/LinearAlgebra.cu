@@ -401,15 +401,19 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     TORCH_CUDABLAS_CHECK(
         cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
 
-    at::cuda::blas::dot<scalar_t>(
-        handle,
-        n,
-        self.data_ptr<scalar_t>(),
-        incx,
-        other.data_ptr<scalar_t>(),
-        incy,
-        result.data_ptr<scalar_t>());
-
+    try {
+      at::cuda::blas::dot<scalar_t>(
+          handle,
+          n,
+          self.data_ptr<scalar_t>(),
+          incx,
+          other.data_ptr<scalar_t>(),
+          incy,
+          result.data_ptr<scalar_t>());
+    } catch (...) {
+      TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
+      throw;
+    }
     TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
 
     return result;

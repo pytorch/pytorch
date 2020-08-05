@@ -4,11 +4,11 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 )
 
 
-class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
+class ProcessGroupRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def rpc_backend(self):
         return rpc.backend_registry.BackendType[
-            "TENSORPIPE"
+            "PROCESS_GROUP"
         ]
 
     @property
@@ -16,12 +16,18 @@ class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
         return rpc.backend_registry.construct_rpc_backend_options(
             self.rpc_backend,
             init_method=self.init_method,
+            # Some tests need additional threads (ex: test_trainer_ps)
+            num_send_recv_threads=8,
         )
 
     def get_shutdown_error_regex(self):
-        # FIXME Once we consolidate the error messages returned by the
-        # TensorPipe agent put some more specific regex here.
-        error_regexes = [".*"]
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
         return "|".join(["({})".format(error_str) for error_str in error_regexes])
 
     def get_timeout_error_regex(self):
