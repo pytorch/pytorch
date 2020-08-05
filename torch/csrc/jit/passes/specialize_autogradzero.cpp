@@ -70,6 +70,17 @@ private:
     }
   }
 
+  static Value* getProfiledUse(Value* inp) {
+    for (auto use : inp->uses()) {
+      if (use.user->kind() == prim::profile) {
+        return use.user->output();
+
+      }
+    }
+
+    return nullptr;
+  }
+
   Node* prepareGraph() {
 
     auto vif = g.create(prim::If, {}, g.outputs().size());
@@ -91,7 +102,17 @@ private:
         if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {
           continue;
         }
-        auto pout = inp->uses()[0].user->output();
+
+        auto pout = getProfiledUse(inp);
+        if (!pout) {
+          state[inp] = State::Unknown;
+          continue;
+        }
+
+        if (pout->node()->kind() != prim::profile) {
+          GRAPH_DUMP("assertion : ", &g);
+          GRAPH_DEBUG("assertion node: ", getHeader(pout->node()));
+        }
         TORCH_INTERNAL_ASSERT(pout->node()->kind() == prim::profile);
         auto pttp = pout->type()->cast<TensorType>();
         if (!pttp->undefined().has_value()) {
