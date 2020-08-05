@@ -150,21 +150,21 @@ ncclResult_t ncclAlltoall(
     ncclDataType_t type,
     ncclComm_t comm,
     cudaStream_t stream) {
-  int numranks;
-  size_t rankdiff = count * size;
-  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
-    // NCCL uses 0 byte message for synchronization
-    // Avoid send/recv when message size is zero
-    if (count != 0) {
+  // NCCL uses 0 byte message for synchronization
+  // Avoid send/recv when message size is zero
+  if (count != 0) {
+    int numranks;
+    size_t rankdiff = count * size;
+    C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
+    C10D_NCCL_CHECK(ncclGroupStart());
+    for (int r = 0; r < numranks; r++) {
       C10D_NCCL_CHECK(ncclSend(
           ((char*)sendbuff) + r * rankdiff, count, type, r, comm, stream));
       C10D_NCCL_CHECK(ncclRecv(
           ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
     }
+    C10D_NCCL_CHECK(ncclGroupEnd());
   }
-  C10D_NCCL_CHECK(ncclGroupEnd());
   return ncclSuccess;
 }
 
