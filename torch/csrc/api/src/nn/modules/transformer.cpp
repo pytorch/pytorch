@@ -138,11 +138,11 @@ namespace nn {
   }
 
   ///Pass the inputs (and mask) through the decoder layer.
-  Tensor TransformerDecoderLayerImpl::forward(Tensor tgt, Tensor memory,
-    Tensor tgt_mask,
-    Tensor memory_mask,
-    Tensor tgt_key_padding_mask,
-    Tensor memory_key_padding_mask){
+  Tensor TransformerDecoderLayerImpl::forward(Tensor tgt, const Tensor& memory,
+    const Tensor& tgt_mask,
+    const Tensor& memory_mask,
+    const Tensor& tgt_key_padding_mask,
+    const Tensor& memory_key_padding_mask){
 
     Tensor  tgt2 = std::get<0>(self_attn(
         tgt, //query
@@ -173,7 +173,7 @@ namespace nn {
     return tgt;
   }
 
-  Tensor TransformerDecoderLayerImpl::activation(Tensor input){
+  Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
     Tensor ret;
     if (c10::get_if<enumtype::kGELU>(&options.activation())) {
        ret = F::gelu(input);

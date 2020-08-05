@@ -51,11 +51,19 @@ class TORCH_API TransformerDecoderLayerImpl : public Cloneable<TransformerDecode
   ///       tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
   ///       memory_key_padding_mask: the mask for the memory keys per batch (optional).
   Tensor forward(Tensor tgt,
+<<<<<<< HEAD
     Tensor memory,
     Tensor tgt_mask = {},
     Tensor memory_mask = {},
     Tensor tgt_key_padding_mask = {},
     Tensor memory_key_padding_mask = {});
+=======
+    const Tensor& memory,
+    const Tensor& tgt_mask = {},
+    const Tensor& memory_mask = {},
+    const Tensor& tgt_key_padding_mask = {},
+    const Tensor& memory_key_padding_mask = {});
+>>>>>>> CPP TransformerDecoderLayer API
 
  protected:
   /// The options used to configure this module.
@@ -95,7 +103,7 @@ class TORCH_API TransformerDecoderLayerImpl : public Cloneable<TransformerDecode
   LayerNorm norm3{nullptr};
 
   ///Apply activation based on configuration
-  Tensor activation(Tensor input);
+  Tensor activation(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `TransformerDecoderLayerImpl`.
