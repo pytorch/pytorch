@@ -16,7 +16,7 @@ enum class QScheme : uint8_t {
   PER_CHANNEL_AFFINE = 1,
   PER_TENSOR_SYMMETRIC = 2,
   PER_CHANNEL_SYMMETRIC = 3,
-  PER_ROW_FLOAT_QPARAMS = 4,
+  PER_CHANNEL_FLOAT_QPARAMS = 4,
   COMPILE_TIME_NUM_QSCHEMES = 5,
 };
 
@@ -24,7 +24,7 @@ constexpr auto kPerTensorAffine = QScheme::PER_TENSOR_AFFINE;
 constexpr auto kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE;
 constexpr auto kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC;
 constexpr auto kPerChannelSymmetric = QScheme::PER_CHANNEL_SYMMETRIC;
-constexpr auto kPerRowFloatQParams = QScheme::PER_ROW_FLOAT_QPARAMS;
+constexpr auto kPerChannelAffineFloatQParams = QScheme::PER_CHANNEL_FLOAT_QPARAMS;
 constexpr int COMPILE_TIME_NUM_QSCHEMES =
   static_cast<int>(QScheme::COMPILE_TIME_NUM_QSCHEMES);
 
@@ -38,8 +38,8 @@ inline std::string toString(QScheme qscheme) {
       return "per_tensor_symmetric";
     case kPerChannelSymmetric:
       return "per_channel_symmetric";
-    case kPerRowFloatQParams:
-      return "per_row_float_qparams";
+    case kPerChannelAffineFloatQParams:
+      return "per_channel_float_qparams";
     default:
       TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
   }

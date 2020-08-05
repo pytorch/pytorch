@@ -235,12 +235,13 @@ class TestQuantizedTensor(TestCase):
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
-    def test_quantize_per_row_float_qparams(self):
+    def test_quantize_per_channel_float_qparams(self):
         r = torch.rand(3, 2, dtype=torch.float) * 4
         scales = torch.tensor([0.2, 0.03], dtype=torch.float)
         zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
         axis = 1
 
+        # Reference quantize function with FP zero_point.
         def quantize_ref(data, scales, zero_points):
             res = torch.empty((3, 2))
             quant_min, quant_max = 0, 255

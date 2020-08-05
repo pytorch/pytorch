@@ -18,7 +18,7 @@ Tensor quantize_tensor_per_channel_affine(
     Tensor zero_points,
     int64_t axis);
 
-Tensor quantize_tensor_per_row_float_qparams(
+Tensor quantize_tensor_per_channel_float_qparams(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
@@ -36,7 +36,7 @@ Tensor dequantize_tensor_per_channel_affine(
     Tensor scales,
     Tensor zero_points,
     int64_t axis);
-Tensor dequantize_tensor_per_row_float_qparams(
+Tensor dequantize_tensor_per_channel_float_qparams(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
@@ -53,7 +53,7 @@ using quantize_tensor_per_channel_affine_fn = void (*)(
     Tensor zero_points,
     int64_t axis);
 
-using quantize_tensor_per_row_float_qparams_fn = void (*)(
+using quantize_tensor_per_channel_float_qparams_fn = void (*)(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
@@ -70,7 +70,7 @@ using dequantize_tensor_per_channel_affine_fn = void (*)(
     Tensor zero_points,
     int64_t axis);
 
-using dequantize_tensor_per_row_float_qparams_fn = void (*)(
+using dequantize_tensor_per_channel_float_qparams_fn = void (*)(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
@@ -84,8 +84,8 @@ DECLARE_DISPATCH(
     quantize_tensor_per_channel_affine_fn,
     quantize_tensor_per_channel_affine_stub);
 DECLARE_DISPATCH(
-    quantize_tensor_per_row_float_qparams_fn,
-    quantize_tensor_per_row_float_qparams_stub);
+    quantize_tensor_per_channel_float_qparams_fn,
+    quantize_tensor_per_channel_float_qparams_stub);
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_fn,
@@ -94,8 +94,8 @@ DECLARE_DISPATCH(
     dequantize_tensor_per_channel_affine_fn,
     dequantize_tensor_per_channel_affine_stub);
 DECLARE_DISPATCH(
-    dequantize_tensor_per_row_float_qparams_fn,
-    dequantize_tensor_per_row_float_qparams_stub);
+    dequantize_tensor_per_channel_float_qparams_fn,
+    dequantize_tensor_per_channel_float_qparams_stub);
 
 
 // Quantize a float value into a uint value given scale and zero_point

@@ -50,33 +50,23 @@ QuantizerPtr make_per_channel_affine_quantizer(
   TORCH_CHECK(
       isFloatingType(scales.scalar_type()),
       "scale tensor must be floating point");
-  TORCH_CHECK(
-      isIntegralType(zero_points.scalar_type(), false /*includeBool*/),
-      "zero_points tensor must have integral type");
-  Tensor scales_double = scales.to(kDouble).contiguous();
-  Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
-  return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
-                                                        scales_double, zero_points_int64,
-                                                        axis);
-}
 
-QuantizerPtr make_per_row_float_qparams_quantizer(
-    const Tensor& scales,
-    const Tensor& zero_points,
-    int64_t axis,
-    ScalarType scalar_type) {
-  checkPerChannelParamDims(scales, zero_points);
-  TORCH_CHECK(
-      isFloatingType(scales.scalar_type()),
-      "scale tensor must be floating point");
-  TORCH_CHECK(
-      isFloatingType(zero_points.scalar_type()),
-      "zero_points tensor must have floating type");
-  Tensor scales_float = scales.to(kFloat).contiguous();
-  Tensor zero_points_float = zero_points.to(kFloat).contiguous();
-  return c10::make_intrusive<PerRowFloatQParamsQuantizer>(scalar_type,
-                                                          scales_float, zero_points_float,
+  if (isFloatingType(zero_points.scalar_type())) {
+    Tensor scales_float = scales.to(kFloat).contiguous();
+    Tensor zero_points_float = zero_points.to(kFloat).contiguous();
+    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(scalar_type,
+                                                                      scales_float,
+                                                                      zero_points_float,
+                                                                      axis);
+  }
+  else {
+    Tensor scales_double = scales.to(kDouble).contiguous();
+    Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
+    return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
+                                                          scales_double,
+                                                          zero_points_int64,
                                                           axis);
+  }
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
@@ -168,7 +158,7 @@ Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
   return rtensor;
 }
 
-Tensor PerRowFloatQParamsQuantizer::quantize(Tensor rtensor) {
+Tensor PerChannelAffineFloatQParamsQuantizer::quantize(Tensor rtensor) {
  TORCH_CHECK(
       rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
  Tensor qtensor = new_qtensor(
@@ -176,15 +166,15 @@ Tensor PerRowFloatQParamsQuantizer::quantize(Tensor rtensor) {
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
  rtensor = rtensor.contiguous();
- native::quantize_tensor_per_row_float_qparams(
+ native::quantize_tensor_per_channel_float_qparams(
    rtensor, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
-Tensor PerRowFloatQParamsQuantizer::dequantize(Tensor qtensor) {
+Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-  native::dequantize_tensor_per_row_float_qparams(
+  native::dequantize_tensor_per_channel_float_qparams(
     qtensor, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }

@@ -2594,14 +2594,14 @@ void dequantize_tensor_per_channel_affine_cpu(
 }
 
 // quantize stubs for floating point scale and zero_point.
-void quantize_tensor_per_row_float_qparams_cpu(
+void quantize_tensor_per_channel_float_qparams_cpu(
     Tensor rtensor,
     Tensor qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "quantize_tensor_per_row_float_qparams_cpu", [&]() {
+      qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
@@ -2623,14 +2623,14 @@ void quantize_tensor_per_row_float_qparams_cpu(
       });
 }
 
-void dequantize_tensor_per_row_float_qparams_cpu(
+void dequantize_tensor_per_channel_float_qparams_cpu(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "dequantize_tensor_per_row_float_qparams_cpu", [&]() {
+      qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
@@ -2710,11 +2710,11 @@ REGISTER_DISPATCH(
     &dequantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 REGISTER_DISPATCH(
-    quantize_tensor_per_row_float_qparams_stub,
-    &quantize_tensor_per_row_float_qparams_cpu);
+    quantize_tensor_per_channel_float_qparams_stub,
+    &quantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(
-    dequantize_tensor_per_row_float_qparams_stub,
-    &dequantize_tensor_per_row_float_qparams_cpu);
+    dequantize_tensor_per_channel_float_qparams_stub,
+    &dequantize_tensor_per_channel_float_qparams_cpu);
 
 } // namespace native
 } // namespace at

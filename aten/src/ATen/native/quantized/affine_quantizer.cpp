@@ -13,10 +13,10 @@ namespace native {
 
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
-DEFINE_DISPATCH(quantize_tensor_per_row_float_qparams_stub);
+DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
-DEFINE_DISPATCH(dequantize_tensor_per_row_float_qparams_stub);
+DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
 
 namespace {
 
@@ -79,13 +79,6 @@ void checkZeroPoints(const std::string& fn_name, Tensor zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
   for (size_t i = 0; i < zero_points.numel(); ++i) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
-  }
-}
-
-void checkFloatZeroPoints(const std::string& fn_name, Tensor zero_points) {
-  auto zero_points_data = zero_points.data_ptr<float>();
-  for (size_t i = 0; i < zero_points.numel(); ++i) {
-    checkZeroPoint<float>(fn_name, zero_points_data[i]);
   }
 }
 
@@ -156,13 +149,13 @@ Tensor quantize_tensor_per_channel_affine(
   return qtensor;
 }
 
-Tensor quantize_tensor_per_row_float_qparams(
+Tensor quantize_tensor_per_channel_float_qparams(
     Tensor rtensor,
     Tensor qtensor,
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  static const auto fn_name = "quantize_tensor_per_row_float_qparams";
+  static const auto fn_name = "quantize_tensor_per_channel_float_qparams";
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
@@ -172,12 +165,11 @@ Tensor quantize_tensor_per_row_float_qparams(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkFloatZeroPoints(fn_name, zero_points);
   });
 
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
-      "Channel axis out of range in per row float qparams quantization. Got: ",
+      "Channel axis out of range in per channel float qparams quantization. Got: ",
       axis, "Expected: [0, ", rtensor.dim(), ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
@@ -187,7 +179,7 @@ Tensor quantize_tensor_per_row_float_qparams(
       channel == int64_t(zero_points.numel()),
       "length of zero_points must equal to channel");
 
-  quantize_tensor_per_row_float_qparams_stub(
+  quantize_tensor_per_channel_float_qparams_stub(
       rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
   return qtensor;
 
@@ -248,7 +240,7 @@ Tensor dequantize_tensor_per_channel_affine(
   return rtensor;
 }
 
-Tensor dequantize_tensor_per_row_float_qparams(
+Tensor dequantize_tensor_per_channel_float_qparams(
     Tensor qtensor,
     Tensor rtensor,
     Tensor scales,
@@ -263,12 +255,11 @@ Tensor dequantize_tensor_per_row_float_qparams(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkFloatZeroPoints(fn_name, zero_points);
   });
 
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
-      "Channel axis out of range in per row float qparams dequantization. Got:",
+      "Channel axis out of range in per channel float qparams dequantization. Got:",
       axis, " Expected: [0, ", qtensor.dim(), ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
@@ -278,7 +269,7 @@ Tensor dequantize_tensor_per_row_float_qparams(
       channel == int64_t(zero_points.numel()),
       "length of zero_points must equal to channel");
 
-  dequantize_tensor_per_row_float_qparams_stub(
+  dequantize_tensor_per_channel_float_qparams_stub(
       qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);
   return rtensor;
 }

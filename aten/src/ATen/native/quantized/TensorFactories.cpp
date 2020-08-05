@@ -49,13 +49,8 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       options.dtype() == kQInt8 || options.dtype() == kQUInt8,
       "Supported data type for tensor creation is int8 or uint8");
-  QuantizerPtr quantizer;
-  if (zero_points.scalar_type() == kFloat) {
-    quantizer = make_per_row_float_qparams_quantizer(scales, zero_points, axis, typeMetaToScalarType(options.dtype()));
-  } else {
-    quantizer = make_per_channel_affine_quantizer(
+  QuantizerPtr quantizer = make_per_channel_affine_quantizer(
           scales, zero_points, axis, typeMetaToScalarType(options.dtype()));
-  }
   return new_qtensor(
       size,
       options,
