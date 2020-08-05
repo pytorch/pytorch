@@ -337,7 +337,7 @@ VBuffer::~VBuffer() {
 }
 
 void VBuffer::copy_from_device_to_host(
-    void* const outputData, const int64_t size) {
+    void* const outputData, const int64_t size) const {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
@@ -594,6 +594,11 @@ void VImage::addImageMemoryBarrier(
     barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
   } else if (
+      oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  } else if (
       oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
       newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -703,6 +708,50 @@ void createDescriptorSetLayoutSinglePool(
   createDescriptorPool(
       device, poolSizes.data(), size, 1 /* maxSets */, descrPool);
   allocateDescriptorSet(device, *descrPool, descrSetLayout, descrSet);
+}
+
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer) {
+  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
+  commandBufferAllocateInfo.sType =
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  commandBufferAllocateInfo.commandPool = context().commandPool();
+  commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  commandBufferAllocateInfo.commandBufferCount = 1;
+
+  VK_CHECK(vkAllocateCommandBuffers(
+      device, &commandBufferAllocateInfo, commandBuffer));
+}
+
+void beginCommandBuffer(VkCommandBuffer commandBuffer) {
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+}
+
+void endCommandBuffer(VkCommandBuffer commandBuffer) {
+  VK_CHECK(vkEndCommandBuffer(commandBuffer));
+}
+
+void submitAndWaitCommandBuffer(
+    VkDevice device,
+    VkQueue queue,
+    VkCommandBuffer commandBuffer) {
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+
+  VkFence fence;
+  VkFenceCreateInfo fenceCreateInfo{};
+  fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fenceCreateInfo.flags = 0;
+  VK_CHECK(vkCreateFence(device, &fenceCreateInfo, NULL, &fence))
+
+  VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
+  vkWaitForFences(device, 1, &fence, VK_TRUE, ComputeUnit::kFenceTimeoutNanos);
+
+  vkDestroyFence(device, fence, NULL);
 }
 
 ComputeUnit::~ComputeUnit() {
@@ -873,7 +922,7 @@ void ComputeUnit::dispatchCommandBuffer(
 }
 
 void ComputeUnit::endCommandBuffer() {
-  VK_CHECK(vkEndCommandBuffer(commandBuffer_));
+  at::native::vulkan::detail::endCommandBuffer(commandBuffer_);
 }
 
 void ComputeUnit::dispatchCommandBuffer(
@@ -1103,6 +1152,30 @@ void copy_image_to_buffer(
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 } // VBuffer <-> VImage
 
+void copy_buffer_to_buffer(
+    const VBuffer& srcBuffer,
+    VBuffer& dstBuffer,
+    VkDeviceSize size) {
+  auto device = context().device();
+  VkCommandBuffer commandBuffer{};
+  allocateCommandBuffer(device, &commandBuffer);
+  beginCommandBuffer(commandBuffer);
+
+  VkBufferCopy copyRegion{};
+  copyRegion.srcOffset = 0;
+  copyRegion.dstOffset = 0;
+  copyRegion.size = size;
+  vkCmdCopyBuffer(
+      commandBuffer,
+      srcBuffer.vkbuffer(),
+      dstBuffer.vkbuffer(),
+      1,
+      &copyRegion);
+
+  endCommandBuffer(commandBuffer);
+  submitAndWaitCommandBuffer(device, context().queue(), commandBuffer);
+}
+
 // VulkanTensor
 
 class VulkanTensor::Impl final {
@@ -1140,10 +1213,16 @@ class VulkanTensor::Impl final {
   }
 
   inline VBuffer* buffer() {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
   const VBuffer* buffer() const {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
@@ -1207,46 +1286,53 @@ class VulkanTensor::Impl final {
     return const_cast<VulkanTensor::Impl*>(this)->image(imageSizes);
   }
 
-  void allocate_storage() {
-    auto bufferSize = sizeof(float) * numel_;
+  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
+    const auto d = sizes.size();
+    const auto numel = std::accumulate(
+        std::begin(sizes), std::end(sizes), 1, std::multiplies<int64_t>());
+    VkDeviceSize bufferSize{sizeof(float) * numel};
     // alignment to be able to copy between image and buffer
-    const auto d = dim();
     if (d == 4) {
-      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0] * sizes_[1]) *
-          sizes_[2] * sizes_[3];
+      bufferSize =
+          sizeof(float) * ALIGN_UP4(sizes[0] * sizes[1]) * sizes[2] * sizes[3];
     } else if (d == 3) {
-      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0]) * sizes_[1] * sizes_[2];
+      bufferSize = sizeof(float) * ALIGN_UP4(sizes[0]) * sizes[1] * sizes[2];
     } else if (d == 2) {
-      bufferSize = sizeof(float) * 4 * sizes_[0] * sizes_[1];
+      bufferSize = sizeof(float) * 4 * sizes[0] * sizes[1];
     } else if (d == 1) {
-      bufferSize = sizeof(float) * 4 * sizes_[0];
+      bufferSize = sizeof(float) * 4 * sizes[0];
     }
-    buffer_ = std::make_unique<VBuffer>(bufferSize);
+    return bufferSize;
+  }
+
+  void allocate_storage() {
+    buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
   }
 
   void set_data_from_host(const float* const inputData) {
-    if (!has_storage()) {
-      allocate_storage();
-    }
-    buffer_->copy_from_host_to_device(
+    buffer()->copy_from_host_to_device(
         (const void*)inputData, sizeof(float) * numel_);
   }
 
   void copy_data_to_host(float* const outputData) const {
+    sync_image_to_buffer();
+    buffer()->copy_from_device_to_host(outputData, sizeof(float) * numel_);
+  }
+
+  void sync_image_to_buffer() const {
     if (has_image()) {
       copy_image_to_buffer(
           *image(),
           *(const_cast<VBuffer*>(buffer())),
           true /* memory barrier for host memory map */);
     }
-    buffer_->copy_from_device_to_host(outputData, sizeof(float) * numel_);
   }
 
  private:
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
   int64_t numel_;
-  std::unique_ptr<VBuffer> buffer_;
+  mutable std::unique_ptr<VBuffer> buffer_;
   std::unique_ptr<VImage> image_;
 };
 
@@ -1260,6 +1346,10 @@ std::shared_ptr<const VulkanTensor::Impl> VulkanTensor::impl() const {
 
 std::vector<int64_t> VulkanTensor::sizes() const {
   return impl()->sizes();
+}
+
+void VulkanTensor::sync_image_to_buffer() const {
+  return impl()->sync_image_to_buffer();
 }
 
 std::vector<int64_t> VulkanTensor::strides() const {
