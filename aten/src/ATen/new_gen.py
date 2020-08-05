@@ -846,7 +846,7 @@ for f in native_functions:
     kwargs = list(f.func.kwarg_only_arguments)  # short name
     i = 0
     while i < len(kwargs):
-        if i <= len(kwargs) - len(topt_names) and [kwargs[i+j].name for j in range(len(topt_names))] == topt_names:
+        if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
             cpp_args.append('const TensorOptions & options')
             i += len(topt_names)
         else:
