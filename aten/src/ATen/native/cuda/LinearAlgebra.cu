@@ -34,11 +34,12 @@ Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   Tensor tensor_;
   IntArrayRef tensor_strides = tensor.strides();
+  IntArrayRef tensor_sizes = tensor.sizes();
 
-  if ((tensor_strides[0] == 1) && (tensor_strides[1] != 0)) {
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     tensor_ = tensor;
     transpose_tensor = false;
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] != 0)) {
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     tensor_ = tensor;
     transpose_tensor = true;
   } else {
