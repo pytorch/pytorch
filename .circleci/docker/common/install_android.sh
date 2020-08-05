@@ -64,6 +64,32 @@ export ADB_INSTALL_TIMEOUT=120
 export PATH="${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:${PATH}"
 echo "PATH:${PATH}"
 
+# Installing Vulkan Sdk
+_vulkansdk_dir=/var/lib/jenkins/vulkansdk
+mkdir -p $_vulkansdk_dir
+_tmp_vulkansdk_targz=/tmp/vulkansdk.tar.gz
+curl --silent --show-error --location --fail --retry 3 --output $_tmp_vulkansdk_targz $_https_amazon_aws/vulkansdk-linux-x86_64-1.2.148.0.tar.gz
+tar -C $_vulkansdk_dir -xvzf $_tmp_vulkansdk_targz
+export VULKAN_SDK="$_vulkansdk_dir/1.2.148.0/"
+
+
+# Installing SwiftShader for Vulkan
+_swiftshader_root_dir=/var/lib/jenkins
+_tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
+curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
+unzip -qo "$_tmp_swiftshader_zip" "$_swiftshader_root_dir"
+_swiftshader_dir="$_swiftshader_root_dir/swiftshader-master"
+
+pushd "$_swiftshader_dir/build"
+
+cmake ..
+make --jobs=8
+./vk-unittests
+
+popd
+
+export VK_ICD_FILENAMES="$_swiftshader_dir/build/Linux/vk_swiftshader_icd.json"
+
 # Installing Gradle
 echo "GRADLE_VERSION:${GRADLE_VERSION}"
 _gradle_home=/opt/gradle
