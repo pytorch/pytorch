@@ -284,8 +284,9 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       // corresponding sizes of the input tensors, the other dimension have the
       // same sizes.
       auto const& n = v->node();
-      auto inputs = n->inputs()[0]->node()->inputs();
-      int64_t dim = n->inputs()[1]->node()->i(attr::value);
+      auto inputs = n->input(0)->node()->inputs();
+      TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
+      int64_t dim = n->input(1)->node()->i(attr::value);
 
       ExprHandle concat_size = IntImm::make(0);
       for (auto input : inputs) {
