@@ -718,26 +718,37 @@ They are used in specifying strategies for reduction collectives, e.g.,
           R"(
             Returns:
                 A ``torch._C.Future`` object which is associated with the completion of
-                the ``ProcessGroupNCCL::WorkNCCL``. As an example, a future object can
-                be retrieved by ``fut = process_group.allreduce(tensors).get_future()``.
+                the ``ProcessGroup::Work``. As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensors).get_future()``.
 
-            The ``torch._C.Future`` object returned by this API can be used in
-            ``DistributedDataParallel._register_comm_hook``, but it is subject to some
-            subtle differences compared to ``torch.futures.Future`` due to compromises
-            made for performance reasons. This API currently only supports NCCL backend.
-            In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
-            ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
-            with PyTorch's default device streams to ensure we can have asynchronous CUDA
-            execution and it does not wait for the entire operation to complete on GPU.
-            If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
-            operation to complete before returning. In addition, if a callback function was
-            added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
-            the callback inline.
+            Example::
+                Below is an example of a simple allreduce DDP communication hook that uses
+                ``get_future` API to retrieve a Future associated with the completion of
+                ``allreduce`` work.
 
-            Note that ``fut.done()`` returns if the work was completed on the GPU.
+                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
+                >>>     return work.get_future()
+
+                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend.
+                ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
+                returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
+                but it is subject to some subtle differences compared to ``torch.futures.Future``
+                due to compromises made for performance reasons.
+
+                In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
+                ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
+                with PyTorch's default device streams to ensure we can have asynchronous CUDA
+                execution and it does not wait for the entire operation to complete on GPU.
+                If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
+                operation to complete before returning. In addition, if a callback function was
+                added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
+                the callback inline.
+
+                Note that ``fut.done()`` returns if the work was completed on the GPU.
            )");
 
   module.def(

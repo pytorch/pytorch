@@ -642,11 +642,7 @@ class DistributedDataParallel(Module):
                              by the Future and copy grads to individual parameters.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of ``c10d.ProcessGroupNCCL.work``.
-                             Note that ``get_future`` API will return a ``torch._C.Future``
-                             which is an internal type and should be used with caution. It
-                             can still be used by ``_register_comm_hook`` API, but it is subject
-                             to some subtle differences compared to ``torch.futures.Future``.
+                             Future associated with the completion of ``c10d.ProcessGroup.work``.
 
         .. warning ::
             Grad bucket's tensors will not be predivided by world_size. User is responsible
@@ -665,6 +661,12 @@ class DistributedDataParallel(Module):
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
+            ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
+            which is an internal type and should be used with caution. It can still be used by
+            ``_register_comm_hook`` API, but it is subject to some subtle differences compared
+            to ``torch.futures.Future``.
+
+        .. warning ::
             DDP communication hook is experimental and subject to change.
 
         Example::
@@ -678,20 +680,10 @@ class DistributedDataParallel(Module):
             >>> ddp._register_comm_hook(state = None, hook = noop)
 
         Example::
-            Below is an example of a simple allreduce hook.
-
-            >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
-            >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
-            >>>     work = process_group.allreduce(tensors)
-            >>>     return work.get_future()
-
-            >>> ddp._register_comm_hook(state = None, hook = allreduce)
-
-        Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch._C.Future
+            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch.futures.Future
             >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
             >>>     encoded_tensors = encode(tensors) # encode gradients
             >>>     fut = process_group.allreduce(encoded_tensors).get_future()
