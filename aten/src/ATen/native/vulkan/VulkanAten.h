@@ -36,5 +36,7 @@ at::Tensor vulkan_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size);
 
+at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape);
+
 } // namespace native
 } // namespace at

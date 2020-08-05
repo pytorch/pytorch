@@ -276,8 +276,9 @@ endif()
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(USE_DISTRIBUTED)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
-    target_link_libraries(process_group_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+    target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
+    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -424,9 +425,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()

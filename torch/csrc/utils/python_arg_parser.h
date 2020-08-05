@@ -147,6 +147,7 @@ struct PythonArgs {
   inline bool has_torch_function();
   inline std::string get_func_name();
   inline at::Tensor tensor(int i);
+  inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Tensor> tensorlist(int i);
@@ -247,6 +248,15 @@ inline at::Tensor PythonArgs::tensor(int i) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
+}
+
+inline c10::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
+  at::Tensor t = tensor(i);
+  if (t.defined()) {
+    return t;
+  } else {
+    return c10::nullopt;
+  }
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
