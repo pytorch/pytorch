@@ -16908,14 +16908,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_hypot(self, device, dtype):
         inputs = [
-            (torch.randn(10, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)),
-            (torch.randn((3, 3, 3), device=device, dtype=dtype), torch.randn((3, 3, 3), device=device, dtype=dtype)),
-            (torch.randn((10, 1), device=device, dtype=dtype), torch.randn((10, 1), device=device, dtype=dtype).transpose(0, 1)),
-            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.randn(10, device=device, dtype=dtype))
+            (torch.randn(10, device=device).to(dtype), torch.randn(10, device=device).to(dtype)),
+            (torch.randn((3, 3, 3), device=device).to(dtype), torch.randn((3, 3, 3), device=device).to(dtype)),
+            (torch.randn((10, 1), device=device).to(dtype), torch.randn((10, 1), device=device).to(dtype).transpose(0, 1)),
+            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.randn(10, device=device).to(dtype))
         ]
         for input in inputs:
             actual = torch.hypot(input[0], input[1])
-            expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
+            if dtype == torch.bfloat16:
+                expected = torch.sqrt(input[0] * input[0] + input[1] * input[1])
+            else:
+                expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected)
 
     @dtypes(torch.int64, torch.float64)
