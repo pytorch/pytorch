@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/Resize.h>
 
 namespace at {
 
@@ -198,6 +199,12 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     common_dtype_ = compute_common_dtype();
   }
 
+  // Promotes common dtype to the default float scalar type, if needed
+  if (config.promote_integer_inputs_to_float_ &&
+      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+    common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
+  }
+
   // Reviews operands (2/2)
   //   - sets metadata for undefined outputs
   //   - checks that all tensors are on the same device, if requested
@@ -220,7 +227,11 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     // Checks all tensors are on the same device, if requested
     if (config.check_all_same_device_) {
       // Handles CPU scalars on CUDA kernels that support them
-      if (common_device.is_cuda() && op.tensor.dim() == 0 && op.tensor.device().is_cpu()) {
+      if (common_device.is_cuda() &&
+          config.allow_cpu_scalars_ &&
+          !op.is_output &&
+          op.tensor.dim() == 0 &&
+          op.tensor.device().is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_cuda < max_cpu_scalars_on_cuda,
                     "Trying to pass too many CPU scalars to CUDA kernel!");
         ++current_cpu_scalars_on_cuda;
@@ -712,9 +723,10 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     .build();
 }
 
-TensorIterator TensorIterator::nullary_op(Tensor& out) {
+TensorIterator TensorIterator::nullary_op(Tensor& out, bool check_mem_overlap) {
   return TensorIteratorConfig()
     .check_all_same_dtype(false)
+    .set_check_mem_overlap(check_mem_overlap)
     .add_output(out)
     // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
     .resize_outputs(false)
@@ -842,9 +854,7 @@ void TensorIterator::resize_outputs(const TensorIteratorConfig& config) {
     auto& tensor = operands_[i].tensor;
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
       if (config.resize_outputs_ && !operands_[i].is_read_write) {
-        // Preserve legacy resizing behavior of out=... arguments
-        // TODO: issue warning
-        tensor.resize_(shape_);
+        at::native::resize_output(tensor, shape_);
         if (tensor.dim() == 4 && requires_channels_last_2d_output()) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
           tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
