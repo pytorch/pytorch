@@ -59,22 +59,15 @@ void replaceConvBiasWithGetAttr(Module& module) {
 
 void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
+
   const std::string real_typename = t->name()->qualifiedName();
+  const std::string demangled_typename = removeTorchMangle(real_typename);
+  bool is_floating_point_conv = (
+    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+    (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
 
-  // checks if current module name ends with the right suffix
-  bool real_typename_ends_with_pattern_name =
-      real_typename.size() >= pattern_name.size() &&
-      (0 ==
-       real_typename.compare(
-           real_typename.size() - pattern_name.size(),
-           pattern_name.size(),
-           pattern_name));
-  // we need to treat quantized modules in a special way
-  bool real_typename_contains_quantized =
-      real_typename.find("quantized") != std::string::npos;
-
-  if (real_typename_ends_with_pattern_name &&
-      !real_typename_contains_quantized) {
+  if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", optional_tensor_type, true);
