@@ -435,7 +435,7 @@ void Reducer::pushRebuiltParamsForAllIndices() {
           .replica_index = replica_index,
           .variable_index = variable_index,
       };
-      pushRebuiltParams(std::move(index));
+      pushRebuiltParams(index);
     }
   }
 }
