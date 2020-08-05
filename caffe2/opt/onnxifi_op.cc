@@ -395,7 +395,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           real_shape.dims(j),
           ")");
       begin_ptr[j] = 0;
-      if (max_shape[j] > real_shape.dims(j)) {
+      if (max_shape[j] >= real_shape.dims(j)) {
         end_ptr[j] = real_shape.dims(j);
         mismatch += j;
       } else {
