@@ -5526,28 +5526,28 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_exp_cpu
+    CPU: foreach_exp_fallback
     CUDA: foreach_tensor_exp_cuda
 
 - func: _foreach_exp_(Tensor[](a!) self) -> Tensor[](a!)
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_exp__cpu
+    CPU: foreach_exp__fallback
     CUDA: foreach_tensor_exp__cuda
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_sqrt_cpu
+    CPU: foreach_sqrt_fallback
     CUDA: foreach_tensor_sqrt_cuda
 
 - func: _foreach_sqrt_(Tensor[](a!) self) -> Tensor[](a!)
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_sqrt__cpu
+    CPU: foreach_sqrt__fallback
     CUDA: foreach_tensor_sqrt__cuda
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)

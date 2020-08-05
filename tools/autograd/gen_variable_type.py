@@ -114,7 +114,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort',
     # Foreach functions for now.
-    '_foreach_add_'
+    '_foreach_add_', '_foreach_sub_', '_foreach_mul_', '_foreach_div_', '_foreach_exp_', '_foreach_sqrt_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

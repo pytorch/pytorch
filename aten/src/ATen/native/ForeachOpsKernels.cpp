@@ -1,6 +1,50 @@
 #include <ATen/ATen.h>
 namespace at { namespace native {
 
+std::vector<Tensor> foreach_exp_fallback(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  std::vector<Tensor> result;
+  for (auto& t : tensors) {
+    auto temp = t.exp();
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_exp__fallback(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  for (auto& t : tensors) {
+    t.exp_();
+  }
+
+  return tensors.vec();
+}
+
+std::vector<Tensor> foreach_sqrt_fallback(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  std::vector<Tensor> result;
+  for (auto& t : tensors) {
+    auto temp = t.sqrt();
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_sqrt__fallback(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+  for (auto& t : tensors) {
+    t.sqrt_();
+  }
+
+  return tensors.vec();
+}
+
 std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
