@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
-from dataclasses import dataclass
 import errno
 import fcntl
 import itertools
@@ -15,7 +14,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
 from io import StringIO
-from typing import Union
+from typing import Union, NamedTuple
 
 import torch
 import torch.cuda
@@ -2730,8 +2729,7 @@ class _DistTestBase(object):
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
     def test_ddp_uneven_inputs(self):
-        @dataclass
-        class DDPUnevenTestInput:
+        class DDPUnevenTestInput(NamedTuple):
             name: str
             model: nn.Module
             inp: Union[torch.tensor, tuple]
