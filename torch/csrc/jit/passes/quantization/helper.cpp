@@ -99,6 +99,7 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "unsqueeze_",
     "detach",
     "detach_",
+    "stack",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -614,13 +615,16 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
+std::string removeTorchMangle(const std::string& orig_name) {
+  static std::regex mangle_re("\\.___torch_mangle_\\d+");
+  auto qualified_name = std::regex_replace(orig_name, mangle_re, "");
+  return qualified_name;
+}
+
 c10::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-    return qualified_name;
+    return removeTorchMangle(type->name()->qualifiedName());
   }
   return c10::nullopt;
 }
@@ -710,31 +714,6 @@ bool is_batchnorm3d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
-}
-
-bool is_half_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp16")));
-  return (fp16_type->toScalarType() == c10::kHalf);
-}
-
-bool is_float_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp32")));
-  return (fp16_type->toScalarType() == c10::kFloat);
-}
-
-bool is_false_value(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-
-  auto default_param = toIValue(match_vmap.at(vmap.at("false")));
-  return default_param->toBool() == false;
 }
 
 } // namespace jit

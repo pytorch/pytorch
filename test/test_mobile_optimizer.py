@@ -1,5 +1,6 @@
 import unittest
 import torch
+import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 import torch.nn as nn
@@ -113,7 +114,7 @@ class TestOptimizer(unittest.TestCase):
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
-        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 13)
+        self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
@@ -205,6 +206,47 @@ class TestOptimizer(unittest.TestCase):
             bi_module, [(torch.tensor([1]),)], [])
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
+
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
+    def test_quantized_conv_no_asan_failures(self):
+        # There were ASAN failures when fold_conv_bn was run on
+        # already quantized conv modules. Verifying that this does
+        # not happen again.
+
+        class Child(nn.Module):
+            def __init__(self):
+                super(Child, self).__init__()
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv2(x)
+                return x
+
+        class Parent(nn.Module):
+            def __init__(self):
+                super(Parent, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.child = Child()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.child(x)
+                x = self.dequant(x)
+                return x
+
+        model = Parent()
+        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        torch.quantization.prepare(model, inplace=True)
+        model(torch.randn(4, 1, 4, 4))
+        torch.quantization.convert(model, inplace=True)
+        model = torch.jit.script(model)
+        # this line should not have ASAN failures
+        model_optim = optimize_for_mobile(model)
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."

@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 #ifndef C10_MOBILE
-struct OfflineTensor {
+struct CAFFE2_API OfflineTensor {
   // A shell tensor to record shape and dtype
   Tensor shape_tensor{CPU};
 
