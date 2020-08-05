@@ -33,10 +33,6 @@ class Context final {
     return queue_;
   }
 
-  inline Shader::Cache& shader_cache() {
-    return shader_cache_;
-  }
-
  private:
   Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
   VkPhysicalDevice physical_device_;
@@ -44,7 +40,6 @@ class Context final {
   uint32_t compute_queue_family_index_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
-  Shader::Cache shader_cache_;
 };
 
 bool available();
