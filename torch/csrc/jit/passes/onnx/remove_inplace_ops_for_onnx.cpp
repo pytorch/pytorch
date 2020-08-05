@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
-#include <limits>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -421,7 +421,9 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
 //  %3 : Tensor = aten::clone(%0, %2)
 //  %5 : Tensor = aten::zero_(%3)
 
-static void PrepareForRemoveMutations(const std::shared_ptr<Graph>& graph, Block* b) {
+static void PrepareForRemoveMutations(
+    const std::shared_ptr<Graph>& graph,
+    Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PrepareForRemoveMutations(graph, child_block);
