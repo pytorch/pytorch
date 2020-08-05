@@ -454,57 +454,6 @@ class ListType(Type):
         size = f'{self.size}' if self.size else ''
         return f'{self.elem}[{size}]'
 
-# When we interpret things as C++ types, there are a bunch of
-# different modalities we have to consider
-#
-# - Return versus argument type
-# - Mutable type (inplace, out argument)
-# - Public API versus internal calling convention versus legacy calling
-#   convention
-#
-# I'm not really sure how to structure this logic yet, but here is a
-# sketch:
-def cpp_type(t: Type, *, mutable: bool, argument: bool):
-    if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
-            if mutable:
-                return 'Tensor&'
-            else:
-                if argument:
-                    return 'const Tensor&'
-                else:
-                    return 'Tensor'
-        elif t.name == BaseTy.int:
-            return 'int64_t'
-        elif t.name == BaseTy.float:
-            return 'double'
-        elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar, BaseTy.ScalarType]:
-            # These C++ names coincidentally line up with their schema
-            # names
-            return t.name.name
-        else:
-            assert False, f"unsupported type: {t}"
-    elif isinstance(t, OptionalType):
-        assert False, f"unsupported type: {t}"
-    elif isinstance(t, ListType):
-        elem = cpp_return_type_single(t.elem)
-        if argument:
-            assert False, f"unsupported type: {t}"
-        else:
-            assert t.size is None, f"fixed size list returns not supported: {t}"
-            return f"std::vector<{elem}>"
-    else:
-        assert False
-
-def cpp_type_multi(ts: Sequence[Type], *, mutable: bool, argument: bool):
-    if len(ts) == 0:
-        return 'void'
-    elif len(ts) == 1:
-        return cpp_type(ts[0], mutable=mutable, argument=argument)
-    else:
-        args = ', '.join([cpp_type(t, mutable=mutable, argument=argument) for t in ts])
-        return f'std::tuple<{args}>'
-
 # Arguments represent both input arguments, as well as return types from
 # a function (we support named returns, so the data structure works
 # in both caes.)
@@ -573,6 +522,10 @@ class Argument:
         )
         assert str(r) == arg, f'{str(r)} != {arg}'
         return r
+
+    @property
+    def is_write(self) -> bool:
+        return self.annotation is not None and self.annotation.is_write
 
     def __str__(self) -> str:
         type = f'{self.type}'
@@ -780,14 +733,6 @@ def parse_native_yaml(path: str) -> List[NativeFunction]:
 native_functions = parse_native_yaml('aten/src/ATen/native/native_functions.yaml')
 # pprint.pprint([dataclasses.asdict(f) for f in native_functions])
 
-# Some simple code to exercise some of the functions we've been building
-for f in native_functions:
-    print(f.func)
-    for a in f.func.arguments:
-        print(cpp_type(a.type, mutable=False, argument=False))
-    print(cpp_type_multi([r.type for r in f.func.returns], mutable=False, argument=False))
-    print('----')
-
 # TODO: TensorOptions argument detection
 # TODO: Extra enforcement of inplace functions having mutable self
 
@@ -803,13 +748,124 @@ for f in native_functions:
 TEMPLATE_PATH = "aten/src/ATen/templates"
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 
+# When we interpret things as C++ types, there are a bunch of
+# different modalities we have to consider
+#
+# - Return versus argument type
+# - Mutable type (inplace, out argument)
+# - Public API versus internal calling convention versus legacy calling
+#   convention
+#
+# I'm not really sure how to structure this logic yet, but here is a
+# sketch.  This function is ONLY correct for CPUType.h at the moment;
+# I bet I am going to need another parameter before I'm done
+def cpp_type(t: Type, *, mutable: bool, argument: bool) -> str:
+    if isinstance(t, BaseType):
+        if t.name == BaseTy.Tensor:
+            if mutable:
+                return 'Tensor &'
+            else:
+                if argument:
+                    return 'const Tensor &'
+                else:
+                    return 'Tensor'
+        elif t.name == BaseTy.int:
+            return 'int64_t'
+        elif t.name == BaseTy.float:
+            return 'double'
+        elif t.name == BaseTy.str:
+            return 'std::string'
+        elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
+                BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
+                BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat]:
+            # These C++ names coincidentally line up with their schema
+            # names
+            return t.name.name
+        else:
+            assert False, f"unsupported type: {t}"
+    elif isinstance(t, OptionalType):
+        # TODO: these arguments are smoothed over by the hacky wrapper
+        if str(t.elem) == 'Tensor' and argument:
+            if mutable:
+                return 'Tensor &'
+            else:
+                return 'const Tensor &'
+        elem = cpp_type(t.elem, mutable=mutable, argument=argument)
+        return f"c10::optional<{elem}>"
+    elif isinstance(t, ListType):
+        if str(t.elem) == 'bool':
+            assert t.size is not None
+            return f"std::array<bool,{t.size}>"
+        # TODO: remove this special case
+        if str(t.elem) == 'int' and argument:
+            return f"IntArrayRef"
+        elif str(t.elem) == 'Tensor' and argument:
+            return f"TensorList"
+        elem = cpp_type(t.elem, mutable=mutable, argument=argument)
+        if argument:
+            # TODO: explicitly qualify namespace here
+            return f"ArrayRef<{elem}>"
+        else:
+            assert t.size is None, f"fixed size list returns not supported: {t}"
+            return f"std::vector<{elem}>"
+    else:
+        assert False
+
+def cpp_type_return(rs: Sequence[Argument]) -> str:
+    if len(rs) == 0:
+        return 'void'
+    elif len(rs) == 1:
+        return cpp_type(rs[0].type, mutable=rs[0].is_write, argument=False)
+    else:
+        args = ','.join([cpp_type(r.type, mutable=r.is_write, argument=False) for r in rs])
+        return f'std::tuple<{args}>'
+
+# Some simple code to exercise some of the functions we've been building
+type_derived_method_declarations: List[str] = []
+for f in native_functions:
+    if f.dispatch is None or 'CPU' not in f.dispatch:
+        continue
+
+    name = str(f.func.name.name)
+    # TODO: delete this!
+    if f.func.is_out_fn():
+        name += '_out'
+    if f.func.name.overload_name:
+        name += f'_{f.func.name.overload_name}'
+
+    cpp_return = cpp_type_return(f.func.returns)
+
+    def format_arg(a: Argument) -> str:
+        return f"{cpp_type(a.type, mutable=a.is_write, argument=True)} {a.name}"
+    cpp_args: List[str] = []
+    cpp_args.extend(map(format_arg, f.func.out_arguments))
+    cpp_args.extend(map(format_arg, f.func.arguments))
+
+    # Discover TensorOptions
+    topt_names = ['dtype', 'layout', 'device', 'pin_memory']
+    kwargs = list(f.func.kwarg_only_arguments)  # short name
+    i = 0
+    while i < len(kwargs):
+        if i <= len(kwargs) - len(topt_names) and [kwargs[i+j].name for j in range(len(topt_names))] == topt_names:
+            cpp_args.append('const TensorOptions & options')
+            i += len(topt_names)
+        else:
+            cpp_args.append(format_arg(kwargs[i]))
+            i += 1
+
+    type_derived_method_declarations.append(f"{cpp_return} {name}({', '.join(cpp_args)});")
+
+comment = "@" + "generated by aten/src/ATen/gen.py from TypeDerived.h"
+
 env = {
-    'generated_comment': 'LOL',
+    'generated_comment': comment,
     'Type': 'CPUType',
     'Generator': 'CPUGeneratorImpl',
     'Backend': 'CPU',  # TODO: rename this to DispatchKey
     'extra_cuda_headers': '',
     'legacy_th_headers': '#include <ATen/LegacyTHFunctionsCPU.h>',
-    'type_derived_method_definitions': [],
+    'type_derived_method_declarations': type_derived_method_declarations,
     'function_registrations': [],
 }
+
+print(TYPE_DERIVED_CPP.substitute(env))
