@@ -1034,7 +1034,8 @@ Tensor mexp_impl(
 ) {
   auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
-  const auto norm_cpu = norm.to(at::kCPU);
+  const auto norm_cpu = (a.device().type() == at::kCUDA)
+    ? norm.to(at::kCPU) : norm;
 
   if (!compute_highest_degree_approx) {
     constexpr std::array<
