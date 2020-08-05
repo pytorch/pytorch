@@ -150,6 +150,14 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     }
   }
 
+  if (v->type()->isSubtypeOf(FloatType::get()) ||
+      v->type()->isSubtypeOf(IntType::get())) {
+    return {1};
+  }
+  if (v->type()->isSubtypeOf(NoneType::get())) {
+    return {};
+  }
+
   known_sizes_[v] = inferSizesForValue(v);
   return known_sizes_.at(v);
 }
@@ -302,6 +310,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
           "Shape info is not implemented for this kind of node");
 
     default: {
+      GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
+      GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
       throw std::runtime_error("Unhandled node kind");
     }
   }
