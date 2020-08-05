@@ -11,7 +11,7 @@ namespace api {
 
 struct Shader final {
   /*
-    Shader Descriptor
+    Descriptor
   */
 
   struct Descriptor final {
@@ -47,7 +47,7 @@ struct Shader final {
   };
 
   /*
-    Shader Factory
+    Factory
   */
 
   class Factory final {
@@ -85,18 +85,18 @@ struct Shader final {
   };
 
   /*
-    Shader Cache
+    Cache
   */
 
   typedef api::Cache<Factory> Cache;
 
   //
-  // Shader Layout
+  // Layout
   //
 
   struct Layout final {
     /*
-      Shader Layout Descriptor
+      Descriptor
     */
 
     struct Descriptor final {
@@ -129,7 +129,7 @@ struct Shader final {
     };
 
     /*
-      Shader Layout Factory
+      Factory
     */
 
     class Factory final {
@@ -159,7 +159,7 @@ struct Shader final {
     };
 
     /*
-      Shader Layout Cache
+      Cache
     */
 
     typedef api::Cache<Factory> Cache;
