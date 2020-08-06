@@ -54,7 +54,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 //   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
-  class WorkNCCL : public ProcessGroup::Work {
+  class WorkNCCL : public ProcessGroup::Work,
+                   public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
@@ -132,8 +133,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
-    // Store a Future work associated with WorkNCCL.
-    c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
+    // Store a reference to NCCL collective's outputs to be used by getFuture.
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
     friend class ProcessGroupNCCL;
   };
@@ -150,10 +151,10 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     explicit FutureNCCL(
         std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
-        std::vector<at::Tensor>& outputs)
+        std::shared_ptr<std::vector<at::Tensor>> outputs)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           work_(work),
-          outputs_(outputs) {}
+          outputs_(*outputs) {}
 
     // Simply calls WorkNCCL's wait(). It will return after synchronizing
     // the correct GPU streams to ensure we can have async CUDA execution
