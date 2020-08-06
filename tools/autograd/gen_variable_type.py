@@ -95,6 +95,32 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
+# Note [Manual catchAll kernels]
+# For these ops, we want to manually register to dispatch key catchAll and
+# skip codegen-ed registeration to all keys before catchAll.
+# For codegen this means:
+#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
+#     where we skip codegen catchall kernels
+#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
+#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
+# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_CATCHALL = set([
+    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
+    'backward', 'requires_grad_',
+])
+
+# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD_AND_TRACER = set([
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+])
+
+# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
+#   union(MANUAL_CATCHALL, MANUAL_AUTOGRAD_AND_TRACER)
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_CATCHALL | MANUAL_AUTOGRAD_AND_TRACER
+
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
 # not examine or modify requires_grad or grad_fn.
@@ -667,7 +693,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         strategy = dispatch_strategy(declaration)
-        if not declaration['manual_kernel_registration'] and strategy == 'use_derived':
+        if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
@@ -678,6 +704,9 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
+
+        # See Note [Manual catchAll kernels]
+        assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
 
         # Emit ProfiledType code
         profiled_body = emit_profiled_body(declaration)
@@ -693,7 +722,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, class_type='ProfiledType'))
 
         # Emit TraceType code
-        if not declaration['manual_kernel_registration']:
+        if declaration['name'] not in MANUAL_TRACER:
             trace_body = emit_trace_body(declaration)
             trace_method_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=trace_body))

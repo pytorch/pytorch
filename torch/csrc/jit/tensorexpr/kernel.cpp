@@ -17,7 +17,7 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
-static bool fallback_allowed = true;
+static bool fallback_allowed = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -150,6 +150,14 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
     }
   }
 
+  if (v->type()->isSubtypeOf(FloatType::get()) ||
+      v->type()->isSubtypeOf(IntType::get())) {
+    return {1};
+  }
+  if (v->type()->isSubtypeOf(NoneType::get())) {
+    return {};
+  }
+
   known_sizes_[v] = inferSizesForValue(v);
   return known_sizes_.at(v);
 }
@@ -273,12 +281,37 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       return shape;
     }
 
-    case aten::cat:
+    case aten::cat: {
+      // In JIT IR, aten::cat usually appears with the following nodes around
+      // it:
+      //   %dim : int = prim::Constant[value=0]()
+      //   %inputs : Tensor[] = prim::ListConstruct(%a, %b, ...)
+      //   %cat_output : Tensor = aten::cat(%inputs, %dim)
+      // Shapes of the input tensors could only differ at the dimension %dim.
+      // The sizes of the output tensor on that dimension is a sum of the
+      // corresponding sizes of the input tensors, the other dimension have the
+      // same sizes.
+      auto const& n = v->node();
+      auto inputs = n->input(0)->node()->inputs();
+      TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
+      int64_t dim = n->input(1)->node()->i(attr::value);
+
+      ExprHandle concat_size = IntImm::make(0);
+      for (auto input : inputs) {
+        concat_size = concat_size + sizesForValue(input)[dim];
+      }
+      concat_size = IRSimplifier::simplify(concat_size);
+      auto shape = sizesForValue(inputs[0]);
+      shape[dim] = concat_size;
+      return shape;
+    }
     case aten::slice:
       throw std::runtime_error(
           "Shape info is not implemented for this kind of node");
 
     default: {
+      GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
+      GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
       throw std::runtime_error("Unhandled node kind");
     }
   }
