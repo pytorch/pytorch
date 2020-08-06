@@ -284,6 +284,5 @@ class TestEnumFeatureGuard(JitTestCase):
         def enum_comp(x: Color, y: Color) -> bool:
             return x == y
 
-        with self.assertRaisesRegex(NotImplementedError,
-                                    "Enum support is work in progress"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unknown type name 'Color'", "Color"):
             torch.jit.script(enum_comp)
