@@ -648,7 +648,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
             cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
-            sequence_nr = -1):
+            sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
