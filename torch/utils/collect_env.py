@@ -38,12 +38,12 @@ def run(command):
     """Returns (return-code, stdout, stderr)"""
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True)
-    output, err = p.communicate()
+    output, error = p.communicate()
     rc = p.returncode
     enc = locale.getpreferredencoding()
-    output = output.decode(enc)
-    err = err.decode(enc)
-    return rc, output.strip(), err.strip()
+    out = output.decode(enc)
+    err = error.decode(enc)
+    return rc, out.strip(), err.strip()
 
 
 def run_and_read_all(run_lambda, command):
@@ -145,11 +145,12 @@ def get_cudnn_version(run_lambda):
             files.add(fn)
     if not files:
         return None
+
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files))
-    if len(files) == 1:
-        return files[0]
-    result = '\n'.join(files)
+    file_list = list(sorted(files))
+    if len(file_list) == 1:
+        return file_list[0]
+    result = '\n'.join(file_list)
     return 'Probably one of the following:\n{}'.format(result)
 
 
@@ -260,17 +261,18 @@ def get_env_info():
 
     if TORCH_AVAILABLE:
         version_str = torch.__version__
-        debug_mode_str = torch.version.debug
-        cuda_available_str = torch.cuda.is_available()
+        debug_mode = torch.version.debug
+        cuda_available = torch.cuda.is_available()
         cuda_version_str = torch.version.cuda
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+        version_str = cuda_version_str = 'N/A'
+        debug_mode = cuda_available = False
 
     return SystemEnv(
         torch_version=version_str,
-        is_debug_build=debug_mode_str,
+        is_debug_build=debug_mode,
         python_version='{}.{}'.format(sys.version_info[0], sys.version_info[1]),
-        is_cuda_available=cuda_available_str,
+        is_cuda_available=cuda_available,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
         nvidia_gpu_models=get_gpu_info(run_lambda),
