@@ -55,6 +55,7 @@ class Event(object):
         return end_event.time - self.time
 
 
+print_once = True
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
                miniBatch=64, device='cuda', seed=None):
@@ -73,11 +74,15 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         gc.collect()
 
         fwd_start_event.record()
+        #print(modeldef.forward.graph_for(*modeldef.inputs))
         forward_output = modeldef.forward(*modeldef.inputs)
         fwd_end_event.record()
 
         # XXX: Use if need to print something
-        # print(modeldef.forward.graph_for(*modeldef.inputs))
+        global print_once
+        if print_once:
+            print(modeldef.forward.graph_for(*modeldef.inputs))
+            print_once = False
 
         if modeldef.backward_setup is not None:
             backward_input = modeldef.backward_setup(forward_output)
