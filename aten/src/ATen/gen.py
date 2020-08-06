@@ -182,7 +182,7 @@ def backend_to_devicetype(backend):
     return backend
 
 backends = ['CPU', 'CUDA']
-densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
+densities = ['Dense', 'Sparse', 'SparseGCS_', 'Mkldnn']  # TODO: layout instead of densities?
 
 quantized_backends = ['QuantizedCPU', 'QuantizedCUDA']
 

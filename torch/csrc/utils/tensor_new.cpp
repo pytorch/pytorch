@@ -604,6 +604,16 @@ Tensor indexing_tensor_from_data(
 }
 
 Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  // static PythonArgParser parser({
+  //     "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, int[] size, *, Scalar? fill_value=None, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False)"
+  // });
+  // ParsedArgs<10> parsed_args;
+  // auto r = parser.parse(args, kwargs, parsed_args);
+
+  // if (r.idx == 0) {
+    
+  // }
+  
   return at::ones({2,3});
 }
 

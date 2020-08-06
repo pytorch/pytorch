@@ -3544,7 +3544,7 @@
   use_c10_dispatcher: full
   variants: method
 
-- func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, *, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, *, Scalar? fill_value=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
@@ -3677,6 +3677,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: indices_sparse
+    SparseGCS_CPU, SparseGCS_CUDA: indices_sparse_gcs
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
@@ -3684,6 +3685,21 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
+    SparseGCS_CPU, SparseGCS_CUDA: values_sparse_gcs
+  device_guard: False
+
+- func: pointers(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    SparseGCS_CPU, SparseGCS_CUDA: pointers_sparse_gcs
+  device_guard: False
+
+- func: reduction(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    SparseGCS_CPU, SparseGCS_CUDA: reduction_sparse_gcs
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)

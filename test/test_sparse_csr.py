@@ -115,10 +115,9 @@ class TestSparseGCS(TestCase):
         
         sp = make_sparse_gcs([[1, 2], [3, 4]])
         
-        print(sp.pointers)
-        print(sp.indices)
-        print(sp.values)
-        print(sp.fill_value)
+        print(sp.pointers())
+        print(sp.indices())
+        print(sp.values())
     
     def test_sparse_gcs_constructor(self):
         pass

@@ -147,9 +147,9 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
   AT_ASSERT(options.layout() == kSparseGCS);
   DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
-    dispatch_key = DispatchKey::SparseCUDA;
+    dispatch_key = DispatchKey::SparseGCS_CUDA;
   } else {
-    dispatch_key = DispatchKey::SparseCPU;
+    dispatch_key = DispatchKey::SparseGCS_CPU;
   }
   
   return detail::make_tensor<SparseGCSTensorImpl>(
@@ -163,10 +163,28 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   // int64_t sparse_dim = indices.size(0)-1;
 
   SparseTensor self = new_gcs_tensor(options);
-  get_sparse_gcs_impl(self)->resize_and_clear_(size);
+  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(size);
   return self;
 }
 
+Tensor values_sparse_gcs(const Tensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->values().alias();      
+}
+
+Tensor pointers_sparse_gcs(const Tensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->pointers().alias();      
+}
+
+Tensor indices_sparse_gcs(const Tensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->indices().alias();      
+}
+
+Tensor reduction_sparse_gcs(const Tensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->reduction().alias();      
+}
+
+
+    
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
   Tensor values = expand_values_if_needed(values_);
 

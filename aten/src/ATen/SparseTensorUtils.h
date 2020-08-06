@@ -19,19 +19,18 @@ using SparseType = Type;
 // the low level setters/getters that were implemented using this.
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
-inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
-  return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
-}
+// inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
+//   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
+//   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
+//   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
+// }
 
-// TODO: in the future you want to template the above function.
-inline SparseGCSTensorImpl* get_sparse_gcs_impl(const SparseTensor& self) {
+template <typename SparseType=SparseTensorImpl>
+inline SparseType* get_sparse_impl(const SparseTensor& self) {
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseGCSTensorImpl: not a sparse tensor");
-  return static_cast<SparseGCSTensorImpl*>(self.unsafeGetTensorImpl());
+  return static_cast<SparseType*>(self.unsafeGetTensorImpl());
 }
-
 
 // Takes indices and values and directly puts them into the sparse tensor, no
 // copy.  This used to be called THSTensor_(_move)
