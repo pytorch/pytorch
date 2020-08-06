@@ -1404,6 +1404,10 @@
 # has the corresponding backward defined as native functions as well. Therefore,
 # in these functions and their backwards, no more shape checking is done.
 #
+# There is also _grid_sampler_2d_backward_cpu_fallback which is an
+# implementation detail of grid_sampler_2d and is only exposed here for testing
+# purposes.
+#
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
@@ -1423,6 +1427,13 @@
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
+
+# See NOTE [ grid_sample CPU fallback ]
+- func: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _grid_sampler_2d_cpu_fallback_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
 
 - func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   use_c10_dispatcher: full
