@@ -94,6 +94,20 @@ ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
   }
 }
 
+ExcludeDispatchKeySetGuard::ExcludeDispatchKeySetGuard(DispatchKeySet exclude)
+  : tls_(&raw_local_dispatch_key_set)
+  , exclude_(exclude - tls_->excluded()) {
+  if (!exclude_.empty()) {
+    tls_->set_excluded(tls_->excluded() | exclude_);
+  }
+}
+
+ExcludeDispatchKeySetGuard::~ExcludeDispatchKeySetGuard() {
+  if (!exclude_.empty()) {
+    tls_->set_excluded(tls_->excluded() - exclude_);
+  }
+}
+
 // Non-RAII API
 // Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h for details.
 
