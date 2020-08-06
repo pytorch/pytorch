@@ -66,9 +66,9 @@ else
 fi
 
 DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *-cuda* ]]; then
+if [[ "$image" == *cuda* ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
-elif [[ "$image" == *-rocm* ]]; then
+elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
