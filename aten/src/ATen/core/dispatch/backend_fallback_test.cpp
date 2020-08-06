@@ -23,7 +23,7 @@ static int64_t override_call_count = 0;
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::ExcludeDispatchKeySetGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
   op.callBoxed(stack);
 }
 
@@ -83,7 +83,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::IncludeDispatchKeySetGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
@@ -108,7 +108,7 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   auto gm = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   gm.fallback(torch::CppFunction::makeFallthrough());
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::IncludeDispatchKeySetGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   // Doesn't trigger, as we fallthrough
