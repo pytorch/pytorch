@@ -298,10 +298,10 @@ struct ReduceOp {
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
   using project_traits = function_traits<decltype(&ops_t::project)>;
-  static constexpr int num_outputs = is_pair<project_traits::result_type>::value ? 2 : 1;
+  static constexpr int num_outputs = is_pair<typename project_traits::result_type>::value ? 2 : 1;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
-  using OutputCalculator = OffsetCalculator<num_outputs, index_t>;
+  using OutputCalculator = OffsetCalculator<num_outputs + 1, index_t>;
 
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value
@@ -1130,9 +1130,10 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   }
 
   AT_ASSERT(can_use_32bit_indexing);
-  auto output_calc = make_output_calculator<uint32_t>(iter);
+  using ReduceOpType = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>;
+  auto output_calc = make_output_calculator<uint32_t, ReduceOpType::num_outputs>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
-  auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>(
+  auto reduce = ReduceOpType(
       ops,
       config,
       input_calc,
