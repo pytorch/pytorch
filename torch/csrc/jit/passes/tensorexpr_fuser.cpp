@@ -588,12 +588,12 @@ void insertGuards(
     fusion_group->moveBefore(true_block->return_node());
 
     WithInsertPoint guard(false_block->return_node());
-    const auto subgraphOutputs = insertGraph(
-        *b->owningGraph(),
-        *fusion_group->g(attr::Subgraph),
-        fusion_group->inputs());
+    // const auto subgraphOutputs = insertGraph(
+    //     *b->owningGraph(),
+    //     *fusion_group->g(attr::Subgraph),
+    //     fusion_group->inputs());
 
-    /*
+    
     auto graph = b->owningGraph();
     auto fp = new GraphFunction("<tensorexpr>", fusion_group->g(attr::Subgraph), nullptr);
     Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
@@ -601,31 +601,37 @@ void insertGuards(
                            ->output()
                            ->setType(FunctionType::create(fp));
     std::vector<Value*> inputs = {fn_constant};
+
     auto copy_fusion_group = fusion_group->g(attr::Subgraph)->copy();
-    auto otypes = fmap()
-    auto tuple_type = TupleType::create()
-    auto return_tuple = copy_fusion_group->createTuple(copy_fusion_group->return_node()->inputs(), nullptr);
+    auto otypes = c10::fmap(copy_fusion_group->return_node()->inputs(), [](Value* v) {return v->type(); });
+    auto tuple_type = TupleType::create(otypes);
+    auto return_tuple = copy_fusion_group->createTuple(copy_fusion_group->return_node()->inputs());
     copy_fusion_group->appendNode(return_tuple);
-    for (int i = copy_fusion_group->outputs().size() - 1; i >= 0; i++) {
+    for (int i = copy_fusion_group->outputs().size() - 1; i >= 0; i--) {
       copy_fusion_group->eraseOutput(i);
     }
     copy_fusion_group->registerOutput(return_tuple->output());
+    GRAPH_DUMP("copy_fusion_group", copy_fusion_group);
     Value* result = graph->insertNode(graph->create(prim::CallFunction, inputs))
                       ->output()
-                      ->setType(matched.return_types.at(0));
+                      ->setType(tuple_type);
 
-    
-    */
+
     for (size_t i = 0; i < fusion_group->inputs().size(); ++i) {
       Value* inp = fusion_group->input(i);
       if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
-        fusion_group->replaceInput(
-            i, checked_values.at(fusion_group->input(i)));
+        result->node()->addInput(checked_values.at(fusion_group->input(i)));
+      }
+      else {
+        result->node()->addInput(inp);
       }
     }
+
+    auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
+
     for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       true_block->registerOutput(fusion_group->output(i));
-      false_block->registerOutput(subgraphOutputs[i]);
+      false_block->registerOutput(fun_unpack_tuple->output(i));
       if (value_types.count(fusion_group->output(i))) {
         value_types[versioning_if->output(i)] =
             value_types.at(fusion_group->output(i));
@@ -642,8 +648,46 @@ void insertGuards(
             "!\n");
       }
     }
+
+
       GRAPH_DEBUG("Guarded:\n", *versioning_if);
-  }
+    }
+
+    // for (size_t i = 0; fusion_group->inputs().size(); i++) {
+    //     if (checked_values.count(fusion_group->input(i)) != 0) {
+    //       fusion_group->replaceInput(i, checked_values[fusion_group->input(i)]);
+    //     }
+    //   }
+    // }
+
+    // for (size_t i = 0; i < fusion_group->inputs().size(); ++i) {
+    //   Value* inp = fusion_group->input(i);
+    //   if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
+    //     fusion_group->replaceInput(
+    //         i, checked_values.at(fusion_group->input(i)));
+    //   }
+    // }
+  //   for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
+  //     true_block->registerOutput(fusion_group->output(i));
+  //     false_block->registerOutput(subgraphOutputs[i]);
+  //     if (value_types.count(fusion_group->output(i))) {
+  //       value_types[versioning_if->output(i)] =
+  //           value_types.at(fusion_group->output(i));
+  //       GRAPH_DEBUG(
+  //           "%",
+  //           versioning_if->output(i)->debugName(),
+  //           " -> ",
+  //           *value_types.at(versioning_if->output(i)),
+  //           "\n");
+  //     } else {
+  //       GRAPH_DEBUG(
+  //           "No shape info for %",
+  //           versioning_if->output(i)->debugName(),
+  //           "!\n");
+  //     }
+  //   }
+  //     GRAPH_DEBUG("Guarded:\n", *versioning_if);
+  // }
 }
 
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
