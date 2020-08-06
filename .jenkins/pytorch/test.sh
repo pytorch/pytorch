@@ -340,6 +340,18 @@ test_bazel() {
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
+test_benchmarks() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    pip_install --user "pytest-benchmark==3.2.3"
+    pip_install --user "requests"
+    BENCHMARK_DATA="benchmarks/.data"
+    mkdir -p ${BENCHMARK_DATA}
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+    assert_git_not_dirty
+  fi
+}
+
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
@@ -392,5 +404,6 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_distributed
+  test_benchmarks
   test_rpc
 fi
