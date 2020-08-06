@@ -2723,14 +2723,10 @@ class TestAutograd(TestCase):
         for e in p.function_events:
             if e.name == "aten::add":
                 add_seq_nr = e.sequence_nr
-                self.assertGreaterEqual(add_seq_nr, 0)
-                self.assertNotEqual(add_seq_nr, sum_seq_nr)
                 self.assertFalse(found_add)
                 found_add = True
             elif e.name == "aten::sum":
                 sum_seq_nr = e.sequence_nr
-                self.assertGreaterEqual(sum_seq_nr, 0)
-                self.assertNotEqual(add_seq_nr, sum_seq_nr)
                 self.assertFalse(found_sum)
                 found_sum = True
             elif "Add" in e.name and "Backward" in e.name:
@@ -2746,6 +2742,9 @@ class TestAutograd(TestCase):
             if e.name == "aten::empty":
                 self.assertEqual(e.sequence_nr, -1)
                 found_empty = True
+        self.assertGreaterEqual(add_seq_nr, 0)
+        self.assertGreaterEqual(sum_seq_nr, 0)
+        self.assertNotEqual(add_seq_nr, sum_seq_nr)
         self.assertTrue(found_add)
         self.assertTrue(found_sum)
         self.assertTrue(found_bwd_add)
