@@ -37,7 +37,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vmap_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
+  )
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu
@@ -78,7 +79,9 @@ list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp)
 
 list(APPEND ATen_VEC256_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/Vec256Test.cpp  
+  )
 
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)

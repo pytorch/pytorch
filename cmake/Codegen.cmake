@@ -250,3 +250,9 @@ function(append_filelist name outputvar)
   list(APPEND ${outputvar} ${_tempvar})
   set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
 endfunction()
+
+
+
+set(CPU_CAPABILITY_FLAGS ${CPU_CAPABILITY_FLAGS} PARENT_SCOPE)
+set(NUM_CPU_CAPABILITY_NAMES ${NUM_CPU_CAPABILITY_NAMES} PARENT_SCOPE)
+set(CPU_CAPABILITY_FLAGS ${CPU_CAPABILITY_FLAGS} PARENT_SCOPE)
