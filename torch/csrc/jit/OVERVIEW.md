@@ -1177,6 +1177,13 @@ one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 `>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
 higher than `GRAPH_DEBUG`.
 
+By default, types in the graph are printed with maximum verbosity.  The verbosity level can be controlled via the environment variable `PYTORCH_JIT_TYPE_VERBOSITY`.  The available settings are:
+
+* `0`: No type information
+* `1`: Types and shapes only
+* `2`: Also print strides
+* `3`: Also print device type and whether gradient is required
+
 ## DifferentiableGraphOp ##
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)

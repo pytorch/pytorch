@@ -43,8 +43,11 @@ class WindowsJob:
         if base_phase == "test":
             prerequisite_jobs.append("_".join(base_name_parts + ["build"]))
 
+        if self.cuda_version:
+            self.cudnn_version = 8 if self.cuda_version.major == 11 else 7
+
         arch_env_elements = (
-            ["cuda" + str(self.cuda_version.major), "cudnn7"]
+            ["cuda" + str(self.cuda_version.major), "cudnn" + str(self.cudnn_version)]
             if self.cuda_version
             else ["cpu"]
         )
