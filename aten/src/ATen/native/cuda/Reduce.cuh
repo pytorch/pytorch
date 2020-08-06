@@ -231,6 +231,7 @@ __global__ void reduce_kernel(R reduction) {
 
 template <typename index_t, int num_outputs=1>
 static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const TensorIterator& iter) {
+  static_assert(num_outputs == 1 || num_outputs == 2, "At most 2 outputs are supported");
   TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
@@ -244,7 +245,6 @@ static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const T
     };
     return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
   }, /* else */ [&]() {
-    static_assert(num_outputs == 2, "At most 2 outputs are supported");
     std::array<const int64_t*, 3> strides = {
       iter.strides(output_index).data() + num_reduce_dims,
       iter.strides(output_index + 1).data() + num_reduce_dims,
