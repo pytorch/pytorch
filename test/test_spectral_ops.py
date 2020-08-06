@@ -25,6 +25,7 @@ import torch.fft
 class TestFFT(TestCase):
     exact_dtype = True
 
+    @skipCPUIfNoMkl
     @skipCUDAIfRocm
     def test_fft_function_clobbered(self, device):
         t = torch.randn((100, 2), device=device)
@@ -39,6 +40,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(TypeError, "'module' object is not callable"):
             torch.fft(t, 1)
 
+    @skipCPUIfNoMkl
     @skipCUDAIfRocm
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @precisionOverride({torch.complex64: 1e-4})
