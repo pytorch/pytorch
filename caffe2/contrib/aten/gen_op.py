@@ -116,6 +116,7 @@ def expand(o):
 def supports(o, factory_methods):
     # Ignore all families (!) of functions that have TensorOptions (i.e. tensor factory methods).
     if o['name'] in factory_methods:
+        print(">>>> NAME::: ", o['name'])
         if factory_methods[o['name']] == 0:
             print("Skipping {} because it is a factory method".format(o['name']))
         factory_methods[o['name']] += 1
