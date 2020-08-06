@@ -11323,6 +11323,17 @@ class TestNNDeviceType(NNTestCase):
                 res2.backward(torch.randn_like(res2))
                 self.assertTrue(math.isinf(res2.item()))
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_nan_inf(self, device, dtype):
+        input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
+        grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)
+        for padding_mode in ('reflection', 'border', 'zeros'):
+            sample = torch.nn.functional.grid_sample(input=input, grid=grid, mode='nearest',
+                                                     padding_mode=padding_mode, align_corners=False)
+            self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
+
+
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyOnCPUAndCUDA  # TODO: Fails on XLA
