@@ -6269,17 +6269,17 @@ class TestTorchDeviceType(TestCase):
         val = val.to(val_dtype)
 
         if input_dtype == torch.bfloat16:
-            np_input = input.to(torch.float32).detach().cpu().numpy()
+            np_input = input.to(torch.float).detach().cpu().numpy()
         else:
             np_input = input.detach().cpu().numpy()
 
         if val_dtype == torch.bfloat16:
-            np_val = val.to(torch.float32).detach().cpu().numpy()
+            np_val = val.to(torch.float).detach().cpu().numpy()
         else:
             np_val = val.detach().cpu().numpy()
 
         np_result = np.heaviside(np_input, np_val)
-        np_result = torch.from_numpy(np_result).to(torch.float32)
+        np_result = torch.from_numpy(np_result).to(torch.float)
 
         torch_result = torch.heaviside(input, val)
         self.assertEqual(np_result, torch_result)
@@ -6287,12 +6287,14 @@ class TestTorchDeviceType(TestCase):
         torch_result = input.heaviside(val)
         self.assertEqual(np_result, torch_result)
 
-        out = torch.empty_like(input, device=device, dtype=torch.float32)
+        out = torch.empty_like(input, device=device, dtype=torch.float)
         torch.heaviside(input, val, out=out)
         self.assertEqual(np_result, out)
 
         if input.is_floating_point():
             input.heaviside_(val)
+            if self.device_type == 'xla':
+                input = input.to(torch.float)
             self.assertEqual(np_result, input)
         else:
             with self.assertRaisesRegex(RuntimeError, 'heaviside is only implemented for floating point types output.'):
@@ -6324,8 +6326,8 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
     def test_heaviside_non_float_output(self, device, dtype):
         data = [[6, -2, 2], [8, 0, -4], [-8, -8, 6]]
-        input = torch.tensor(data, device=device, dtype=torch.float32)
-        val = torch.tensor(data, device=device, dtype=torch.float32)
+        input = torch.tensor(data, device=device, dtype=torch.float)
+        val = torch.tensor(data, device=device, dtype=torch.float)
         out = torch.empty_like(input, dtype=dtype)
 
         with self.assertRaisesRegex(RuntimeError, 'heaviside is only implemented for floating point types output.'):
