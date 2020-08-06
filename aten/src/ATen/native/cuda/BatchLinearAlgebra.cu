@@ -909,7 +909,7 @@ AT_ERROR("lu: MAGMA library not found in "
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
-    // cusolver_LU and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
+    // magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
     // the partially-pivoted LU decomposition with / without pivots.
     // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
     // The data is later copied back to the appropriate output tensor.
