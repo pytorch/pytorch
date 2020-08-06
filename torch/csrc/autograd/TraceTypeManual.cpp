@@ -121,6 +121,8 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+// Invariant:
+// - Ops registered to DispatchKey::Tracer below must be included in `MANUAL_TRACER` in tools/autograd/gen_variable_type.py
 TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl_UNBOXED("resize_", resize_);
   m.impl_UNBOXED("resize_as_", resize_as_);

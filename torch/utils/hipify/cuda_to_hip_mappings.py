@@ -8069,7 +8069,6 @@ C10_MAPPINGS = collections.OrderedDict(
         # ("cuda::device_count", ("hip::device_count", API_C10)),
         ("cuda::current_device", ("hip::current_device", API_C10)),
         ("cuda::set_device", ("hip::set_device", API_C10)),
-        ("cuda::driver_version", ("hip::driver_version", API_C10)),
         ("cuda::device_synchronize", ("hip::device_synchronize", API_C10)),
         ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
         ("getStreamFromPool", ("getStreamFromPool", API_C10)),

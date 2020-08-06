@@ -150,7 +150,7 @@ class DistributedDataParallel(Module):
 
     .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
         gradient will be ``M`` times smaller when compared to the same model
-        trained on a single node with ``batch=M*N``(because the gradients
+        trained on a single node with ``batch=M*N`` (because the gradients
         between different nodes are averaged). You should take this into
         consideration when you want to obtain a mathematically equivalent
         training process compared to the non-DistributedDataParallel
