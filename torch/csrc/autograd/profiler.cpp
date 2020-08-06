@@ -665,7 +665,7 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 }}}
 
 void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  c10::impl::ExcludeDispatchKeySetGuard key_guard(c10::DispatchKey::Profiler);
+  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
   op.callBoxed(stack);
 }
 

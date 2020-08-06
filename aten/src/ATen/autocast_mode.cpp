@@ -239,7 +239,7 @@ template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class Ar
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeySetGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kHalf, args)...);
   }
 };
@@ -248,7 +248,7 @@ struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeySetGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
@@ -257,7 +257,7 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeySetGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -272,7 +272,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::t
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeySetGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
@@ -282,7 +282,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeySetGuard no_autocasting(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::Autocast);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
