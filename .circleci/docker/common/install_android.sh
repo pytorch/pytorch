@@ -107,7 +107,7 @@ popd
 
 pushd "$_swiftshader_dir/build"
 
-$_cmake_bin_path ..
+$_cmake_bin_path .. -DSWIFTSHADER_BUILD_PVR=0 -DSWIFTSHADER_BUILD_TESTS=0
 make --jobs=8
 ./vk-unittests
 
