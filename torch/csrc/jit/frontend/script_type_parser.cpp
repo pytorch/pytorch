@@ -158,6 +158,8 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
       // Special case for torch.Tensor
       if (isTorch(select.value()) && name == "Tensor") {
         return "Tensor";
+      } else if (isTorch(select.value()) && name == "device") {
+        return "Device";
       } else {
         // Otherwise, it's a fully qualified class name
         return collectQualname(select);
