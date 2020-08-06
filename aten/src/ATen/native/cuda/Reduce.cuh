@@ -84,14 +84,14 @@ struct ReduceConfig {
   static constexpr int MAX_NUM_THREADS = 512;
   static constexpr int input_vec_size = 4;
 
-  ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
+  ReduceConfig(int element_size_bytes, int num_output_elements, int num_inputs)
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
-    , num_outputs(num_outputs) {}
+    , num_output_elements(num_output_elements) {}
 
   int element_size_bytes;
   int num_inputs;
-  int num_outputs;
+  int num_output_elements;
   int step_input = 1;
   int step_output = 1;
   int ctas_per_output = 1;
@@ -132,7 +132,7 @@ struct ReduceConfig {
   }
 
   dim3 grid() const {
-    return dim3(div_up(num_outputs / output_vec_size, step_output), ctas_per_output);
+    return dim3(div_up(num_output_elements / output_vec_size, step_output), ctas_per_output);
   }
 
   C10_HOST_DEVICE bool should_block_x_reduce() const {
@@ -148,7 +148,7 @@ struct ReduceConfig {
   }
 
   C10_DEVICE bool should_store(int output_idx) const {
-    return output_idx < num_outputs &&
+    return output_idx < num_output_elements &&
       (!should_block_x_reduce() || threadIdx.x == 0) &&
       (!should_block_y_reduce() || threadIdx.y == 0);
   }
@@ -202,7 +202,7 @@ struct ReduceConfig {
     if (!should_global_reduce()) {
       return 0;
     }
-    auto size = (int64_t)element_size_bytes * num_outputs * ctas_per_output;
+    auto size = (int64_t)element_size_bytes * num_output_elements * ctas_per_output;
     if (!should_block_x_reduce()) {
       size *= block().x * output_vec_size;
     }
@@ -243,6 +243,7 @@ static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const T
     };
     return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
   }, /* else */ [&]() {
+    static_assert(num_outputs == 2, "At most 2 outputs are supported");
     std::array<const int64_t*, 3> strides = {
       iter.strides(output_index).data() + num_reduce_dims,
       iter.strides(output_index + 1).data() + num_reduce_dims,
@@ -370,7 +371,7 @@ struct ReduceOp {
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     arg_vec_t value;
 
-    if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
+    if (output_idx < config.num_output_elements && input_idx < config.num_inputs) {
       const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets_input);
       value = thread_reduce<output_vec_size>(input_slice);
     }
@@ -992,11 +993,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   // Start by assuming that each thread handles a single output and all
   // the inputs for that output.
-  int64_t num_outputs = iter.num_output_elements();
-  int64_t inputs_per_output = iter.numel() / num_outputs;
+  int64_t num_output_elements = iter.num_output_elements();
+  int64_t inputs_per_output = iter.numel() / num_output_elements;
   int input_index = iter.ntensors() - 1;
 
-  auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
+  auto config = ReduceConfig(sizeof(arg_t), num_output_elements, inputs_per_output);
 
   int64_t dim0;
   int64_t dim1;
@@ -1021,9 +1022,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     if (reduction_on_fastest_striding_dimension) {
       // Map block.x to the fastest reducing dimension. It implies:
       //   1. block_x_reduce is required.
-      //   2. block.y now max out to num_outputs.
+      //   2. block.y now max out to num_output_elements.
       dim0 = iter.shape()[0];
-      dim1 = num_outputs;
+      dim1 = num_output_elements;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
