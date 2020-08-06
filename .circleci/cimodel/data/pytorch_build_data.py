@@ -14,6 +14,7 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
+                    ("vulkan", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -127,6 +128,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
+            "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -143,6 +145,17 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class VulkanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Vulkan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_vulkan"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

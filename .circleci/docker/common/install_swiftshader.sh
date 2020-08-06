@@ -40,6 +40,7 @@ popd
 pushd "$_swiftshader_dir/build"
 
 $_cmake_bin_path .. \
+  -DSWIFTSHADER_BUILD_VULKAN=1 \
   -DSWIFTSHADER_BUILD_EGL=0 \
   -DSWIFTSHADER_BUILD_GLESv2=0 \
   -DSWIFTSHADER_BUILD_GLES_CM=0 \

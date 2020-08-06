@@ -5619,6 +5619,67 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
           resource_class: large
       - pytorch_linux_build:
+          name: pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+          requires:
+            - "docker-pytorch-linux-xenial-py3.6-gcc5.4"
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-vlkan-linux-xenial-py3.6-gcc5.4-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+      - pytorch_linux_test:
+          name: pytorch_vlkan_linux_xenial_py3_6_gcc5_4_test
+          requires:
+            - pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          build_environment: "pytorch-vlkan-linux-xenial-py3.6-gcc5.4-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+          resource_class: large
+      - pytorch_python_doc_build:
+          requires:
+            - pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_doc_push:
+          branch: site
+          context: org-member
+          filters:
+            branches:
+              only:
+                - nightly
+          name: pytorch_python_doc_push
+          requires:
+            - pytorch_python_doc_build
+      - pytorch_cpp_doc_build:
+          requires:
+            - pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_doc_push:
+          branch: master
+          context: org-member
+          filters:
+            branches:
+              only:
+                - nightly
+          name: pytorch_cpp_doc_push
+          requires:
+            - pytorch_cpp_doc_build
+      - pytorch_doc_test:
+          requires:
+            - pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_linux_test:
+          name: pytorch_linux_backward_compatibility_check_test
+          requires:
+            - pytorch_vlkan_linux_xenial_py3_6_gcc5_4_build
+          build_environment: "pytorch-linux-backward-compatibility-check-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+          resource_class: large
+      - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-py3.6-gcc7"
