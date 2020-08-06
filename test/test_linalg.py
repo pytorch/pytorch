@@ -2,9 +2,9 @@ import torch
 import unittest
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, slowTest)
+    (TestCase, run_tests, TEST_NUMPY)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCPU, skipCPUIfNoLapack)
+    (instantiate_device_type_tests, dtypes)
 
 if TEST_NUMPY:
     import numpy as np
