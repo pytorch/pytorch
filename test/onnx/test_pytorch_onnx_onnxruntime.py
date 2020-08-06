@@ -106,6 +106,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def setUp(self):
         torch.manual_seed(0)
+        onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
@@ -166,6 +167,38 @@ class TestONNXRuntime(unittest.TestCase):
                 input_copy = copy.deepcopy(input)
                 ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
+    def run_ort(self, model, batch_size=2, state_dict=None,
+                input=None, use_gpu=True, rtol=0.001, atol=1e-7,
+                example_outputs=None, do_constant_folding=True,
+                dynamic_axes=None, test_with_inputs=None,
+                input_names=None, output_names=None,
+                fixed_batch_size=False, training=None):
+        f = io.BytesIO()
+        torch.onnx._export(model, input, f,
+                           opset_version=self.opset_version,
+                           example_outputs=example_outputs,
+                           do_constant_folding=do_constant_folding,
+                           keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                           dynamic_axes=dynamic_axes,
+                           input_names=input_names, output_names=output_names,
+                           fixed_batch_size=fixed_batch_size, training=training)
+
+        # compute onnxruntime output prediction
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        input, _ = torch.jit._flatten(input)
+
+        def to_numpy(tensor):
+            if tensor.requires_grad:
+                return tensor.detach().cpu().numpy()
+            else:
+                return tensor.cpu().numpy()
+
+        inputs = list(map(to_numpy, input))
+
+        ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+        ort_outs = ort_sess.run(None, ort_inputs)
+
+        return ort_outs
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_embedding_model_with_external_data(self):
@@ -3812,6 +3845,111 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    def test_dropout_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.4)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+
+        ort_outs = self.run_ort(model, input=(input,), training=torch.onnx.TrainingMode.TRAINING)
+        assert x != ort_outs[0]
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_dropout_training_zero(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        torch.manual_seed(0)
+        onnxruntime.set_seed(0)
+
+        model = MyModule()
+
+        # ensure there are no zeros in the input
+        x = torch.randn(10, 3, 128, 128)
+        y = x.numpy()
+        y_mask = np.where(y == 0, 1, y)
+        input = torch.from_numpy(y_mask)
+        nb_elements = torch.numel(input)
+
+        model.train()
+
+        ort_outs = self.run_ort(model, input=(input,), training=torch.onnx.TrainingMode.TRAINING)
+
+        y = model(input)
+        output = y.cpu().numpy()
+
+        ort_mask = np.where(ort_outs[0] != 0, 1, 0)
+        pyt_mask = np.where(output != 0, 1, 0)
+
+        ratio_pytorch = np.sum(pyt_mask) / nb_elements
+        ratio_ort = np.sum(ort_mask) / nb_elements
+
+        np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
+
+    def test_conv_bn(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(16, affine=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)
+        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
+        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
+
+    def test_multiple_conv_bn(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                self.conv2 = torch.nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=0, bias=False)
+                self.conv3 = torch.nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(64)
+                self.bn2 = torch.nn.BatchNorm2d(2)
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                x = self.maxpool(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                x = self.conv3(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                return x
+
+        model = MyModule()
+        x = torch.randn(2, 3, 224, 224)
+        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)      
+        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
+        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
