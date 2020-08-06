@@ -80,7 +80,9 @@ rm "$_tmp_vulkansdk_targz"
 
 # Installing SwiftShader for Vulkan
 # XCB libs
-sudo apt-get install xcb
+apt-get update
+sudo apt-get install -y libxcb xcb-proto
+
 # CMake >= 3.13 is required by SwiftShader
 _cmake_dir=/var/lib/jenkins/swiftshader-cmake
 mkdir -p $_cmake_dir
