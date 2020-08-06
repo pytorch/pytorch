@@ -11,7 +11,9 @@ namespace vulkan {
 namespace api {
 
 struct Resource final {
-  VmaAllocator allocator;
+  struct Pool final {
+
+  };
 };
 
 } // namespace api
