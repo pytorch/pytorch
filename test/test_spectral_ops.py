@@ -25,6 +25,7 @@ import torch.fft
 class TestFFT(TestCase):
     exact_dtype = True
 
+    @skipCUDAIfRocm
     def test_fft_function_clobbered(self, device):
         t = torch.randn((100, 2), device=device)
         eager_result = fft_fn(t, 1)
@@ -38,6 +39,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(TypeError, "'module' object is not callable"):
             torch.fft(t, 1)
 
+    @skipCUDAIfRocm
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @precisionOverride({torch.complex64: 1e-4})
     @dtypes(torch.complex64, torch.complex128)
@@ -65,6 +67,7 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=(dtype is torch.complex128))
 
     # Note: NumPy will throw a ValueError for an empty input
+    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @onlyOnCPUAndCUDA
     @dtypes(torch.complex64, torch.complex128)
