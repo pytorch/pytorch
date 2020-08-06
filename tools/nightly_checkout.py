@@ -4,6 +4,7 @@ binaries into the repo.
 """
 import os
 import re
+import sys
 import json
 import glob
 import time
@@ -26,6 +27,23 @@ SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "ipython", "sphinx")
 def init_logging(level=logging.INFO):
     """Start up the logger"""
     logging.basicConfig(level=level)
+
+
+def check_branch(branch):
+    """Checks that the branch name can be checked out."""
+    # first make sure actual branch name was given
+    if branch is None:
+        return "Branch name to checkout must be supplied with '-b' option"
+    # next check that the local repo is clean
+    cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
+    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    if p.stdout.strip():
+        return "Need to have clean working tree to checkout!\n\n" + p.stdout
+    # next check that the branch name doesn't already exist
+    cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
+    p = subprocess.run(cmd, capture_output=True, check=False)
+    if not p.returncode:
+        return f"Branch {branch!r} already exists"
 
 
 @contextlib.contextmanager
@@ -130,7 +148,7 @@ def _ensure_commit(git_sha1):
 
 
 @timed("Checking out nightly PyTorch")
-def checkout_nightly_version(spdir):
+def checkout_nightly_version(branch, spdir):
     """Get's the nightly version and then checks it out."""
     # first get the git version from the installed module
     version_fname = os.path.join(spdir, "torch", "version.py")
@@ -155,7 +173,7 @@ def checkout_nightly_version(spdir):
     print(f"Found nightly release version {nightly_version}")
     # now checkout nightly version
     _ensure_commit(nightly_version)
-    cmd = ["git", "checkout", nightly_version]
+    cmd = ["git", "checkout", "-b", branch, nightly_version]
     p = subprocess.run(cmd, check=True)
 
 
@@ -252,14 +270,14 @@ def move_nightly_files(spdir, platform):
         _link_files(listing, source_dir, target_dir)
 
 
-def install(name=None, prefix=None):
+def install(branch=None, name=None, prefix=None):
     """Development install of PyTorch"""
     deps, pytorch, platform, existing_env, env_opts = conda_solve(name=name, prefix=prefix)
     if deps:
         deps_install(deps, existing_env, env_opts)
     pytdir = pytorch_install(pytorch)
     spdir = _site_packages(pytdir, platform)
-    checkout_nightly_version(spdir)
+    checkout_nightly_version(branch, spdir)
     move_nightly_files(spdir, platform)
     pytdir.cleanup()
     print("-------\nPyTorch Development Environment set up!\nPlease activate to "
@@ -268,6 +286,8 @@ def install(name=None, prefix=None):
 
 def make_parser():
     p = ArgumentParser("nightly-checkout")
+    p.add_argument("-b", "--branch", help="Branch name to checkout", dest="branch", default=None,
+                   metavar="NAME")
     p.add_argument("-n", "--name", help="Name of environment", dest="name", default=None,
                    metavar="ENVIRONMENT")
     p.add_argument("-p", "--prefix", help="Full path to environment location (i.e. prefix)",
@@ -280,7 +300,10 @@ def main(args=None):
     p = make_parser()
     ns = p.parse_args(args)
     init_logging()
-    install(name=ns.name, prefix=ns.prefix)
+    status = check_branch(ns.branch)
+    if status:
+        sys.exit(status)
+    install(branch=ns.branch, name=ns.name, prefix=ns.prefix)
 
 
 if __name__ == "__main__":
