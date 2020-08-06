@@ -306,7 +306,7 @@ at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape) {
       input.options());
 }
 
-at::Tensor vulkan_cat(TensorList tensors, int64_t dim) {
+at::Tensor vulkan_cat(const TensorList tensors, int64_t dim) {
   TORCH_INTERNAL_ASSERT(
       dim == 0 || dim == 1,
       "Vulkan cat is implemented only for batch and channels dimensions");
