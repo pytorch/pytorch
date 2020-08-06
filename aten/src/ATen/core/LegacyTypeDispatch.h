@@ -43,15 +43,26 @@ namespace at {
 // trace).  To unify the two, we would first have to move profiling and tracing
 // out of VariableType.
 
+// TODO centralize this as part of dispatch key revamp
+static DispatchKeySet autograd_dispatch_keys{
+  DispatchKey::Autograd,
+  DispatchKey::XLAPreAutograd,
+  DispatchKey::PrivateUse1_PreAutograd,
+  DispatchKey::PrivateUse2_PreAutograd,
+  DispatchKey::PrivateUse3_PreAutograd,
+};
+
 struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    guard_(DispatchKey::Autograd) {
+    autograd_guard_(autograd_dispatch_keys) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }
-  c10::impl::ExcludeDispatchKeyGuard guard_;
+
+  // disable all autograd dispatch keys
+  c10::impl::ExcludeDispatchKeySetGuard autograd_guard_;
 };
 
 } // namespace at
