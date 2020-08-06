@@ -321,7 +321,12 @@ template <typename scalar_t>
 struct LessOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
     // If (a == b), then choose the one with lower idx, else min(a, b)
-    return at::_isnan(a) || ((a == b) ? idx_a < idx_b : (a < b));
+    auto a_is_nan = at::_isnan(a);
+    auto b_is_nan = at::_isnan(b);
+    if (a_is_nan && b_is_nan){
+      return idx_a < idx_b;
+    }
+    return a_is_nan || ((a == b) ? idx_a < idx_b : (a < b));
   }
 };
 
@@ -329,7 +334,12 @@ template <typename scalar_t>
 struct GreaterOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) const {
     // If (a == b), then choose the one with lower idx, else max(a, b)
-    return at::_isnan(a) || ((a == b) ? idx_a < idx_b : (a > b));
+    auto a_is_nan = at::_isnan(a);
+    auto b_is_nan = at::_isnan(b);
+    if (a_is_nan && b_is_nan){
+      return idx_a < idx_b;
+    }
+    return a_is_nan || ((a == b) ? idx_a < idx_b : (a > b));
   }
 };
 

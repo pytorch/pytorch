@@ -18361,28 +18361,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Case: Randomly Generated Tensors
         for ndims in range(1, 5):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
-            for contiguous in [False, True]:
-                # Generate Input.
-                x = self._generate_input(shape, dtype, device, False)
+            for with_extremal in [False, True]:
+                for contiguous in [False, True]:
+                    # Generate Input.
+                    x = self._generate_input(shape, dtype, device, with_extremal)
 
-                if dtype == torch.half:
-                    max_val = torch.max(x.to(torch.float))
-                    min_val = torch.min(x.to(torch.float))
-                else:
-                    max_val = torch.max(x)
-                    min_val = torch.min(x)
+                    if dtype == torch.half:
+                        max_val = torch.max(x.to(torch.float))
+                        min_val = torch.min(x.to(torch.float))
+                    else:
+                        max_val = torch.max(x)
+                        min_val = torch.min(x)
 
-                mask = torch.randn(x.shape) > 0.5
-                x[mask] = torch.tensor(max_val + 1, dtype=dtype)
+                    mask = torch.randn(x.shape) > 0.5
+                    x[mask] = torch.tensor(max_val + 1, dtype=dtype)
 
-                mask = torch.randn(x.shape) > 0.5
-                x[mask] = torch.tensor(min_val - 1, dtype=dtype)
+                    mask = torch.randn(x.shape) > 0.5
+                    x[mask] = torch.tensor(min_val - 1, dtype=dtype)
 
-                if not contiguous:
-                    x = x.T
+                    if not contiguous:
+                        x = x.T
 
-                self.compare_with_numpy(torch.argmax, np.argmax, x, device=None, dtype=None)
-                self.compare_with_numpy(torch.argmin, np.argmin, x, device=None, dtype=None)
+                    self.compare_with_numpy(torch.argmax, np.argmax, x, device=None, dtype=None)
+                    self.compare_with_numpy(torch.argmin, np.argmin, x, device=None, dtype=None)
 
         def verify_against_numpy(t):
             # Argmax
