@@ -109,9 +109,10 @@ class _ObserverBase(ObserverBase):
             torch.per_tensor_symmetric,
             torch.per_channel_affine,
             torch.per_channel_symmetric,
+            torch.per_channel_affine_float_qparams,
         ), "Default Observer only works for per_tensor_affine, \
-                per_tensor_symmetric, per_channel_affine and \
-                per_channel_symmetric quantization scheme"
+                per_tensor_symmetric, per_channel_affine, \
+                per_channel_symmetric and per_channel_float_qparams quantization scheme"
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
@@ -214,7 +215,8 @@ class _ObserverBase(ObserverBase):
             )
 
         qmin, qmax = self._calculate_qmin_qmax()
-
+        orig_min = min_val
+        orig_max = max_val
         min_val = torch.min(min_val, torch.zeros_like(min_val))
         max_val = torch.max(max_val, torch.zeros_like(max_val))
 
@@ -232,6 +234,11 @@ class _ObserverBase(ObserverBase):
                     zero_point = zero_point.new_full(zero_point.size(), (qmin + qmax) // 2)
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
+        elif self.qscheme == torch.per_channel_affine_float_qparams:
+            scale = (orig_max - orig_min) / float(qmax - qmin)
+            scale_ones = torch.ones_like(scale)
+            scale = torch.where(scale != 0, scale, scale_ones)
+            zero_point = orig_min
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
@@ -247,6 +254,9 @@ class _ObserverBase(ObserverBase):
         if len(zero_point.shape) == 0:
             # TODO: switch to zero_point.item() after adding JIT support
             zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
+            if self.qscheme == torch.per_channel_affine_float_qparams:
+                zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype)
+
 
         return scale, zero_point
 
