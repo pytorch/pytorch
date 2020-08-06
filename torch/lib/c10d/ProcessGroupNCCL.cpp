@@ -756,7 +756,7 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  return futureWork_;
+  return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -776,8 +776,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
 
-  // Create and store a Future to be associated with completion of of WorkNCCL.
-  work->futureWork_ = c10::make_intrusive<FutureNCCL>(work, outputs);
+  // Store a reference to outputs to be used by WorkNCCL::getFuture.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
