@@ -174,6 +174,15 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
   return result;
 }
 
+// linalg.outer, an alias for ger
+Tensor& linalg_outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  return at::ger_out(result, self, vec2);
+}
+
+Tensor linalg_outer(const Tensor& self, const Tensor& vec2) {
+  return self.ger(vec2);
+}
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, Scalar beta, Scalar alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);

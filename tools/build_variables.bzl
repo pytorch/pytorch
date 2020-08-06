@@ -23,6 +23,7 @@ GENERATED_CPP = [
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
+    "autograd/generated/python_linalg_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -553,6 +554,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_functions.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
+        "autograd/generated/python_linalg_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
