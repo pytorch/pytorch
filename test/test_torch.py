@@ -16808,10 +16808,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         zero = torch.zeros_like(m1)
         if dtype in torch.testing.get_all_int_dtypes():
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(0)
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(zero)
+            self.compare_with_numpy(lambda x: torch.fmod(x, 0), lambda x: np.fmod(x, 0), m1)
+            self.compare_with_numpy(lambda x: torch.fmod(x, zero), lambda x: np.fmod(x, zero), m1)
         else:
             self.assertTrue(torch.all(m1.fmod(0).isnan()))
             self.assertTrue(torch.all(m1.fmod(zero).isnan()))

@@ -624,7 +624,9 @@ void fmod_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
-        TORCH_CHECK(d != 0, "ZeroDivisionError");
+        if (d == 0) {
+          return 0;
+        }
         return x % d;
       });
     });
@@ -646,8 +648,10 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
       const auto div = divisor.to<scalar_t>();
-      TORCH_CHECK(div != 0, "ZeroDivisionError");
       cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
+        if (div == 0){
+          return 0;
+        }
         return x % div;
       });
     });
