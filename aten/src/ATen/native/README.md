@@ -379,7 +379,8 @@ name that we skip in python binding generation, e.g. `*_backward`. Check
 `tools/autograd/gen_python_functions.py` for the latest rules.
 
 The generated bindings are either exposed as methods on python_variable or functions on
-torch._C._nn object(marked with `python_module: nn`).
+the torch._C._nn (marked with `python_module: nn`) or
+torch._C._fft (marked with `python_module: fft`) objects.
 
 ### Can it handle being passed Variables?
 

@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn object.
+# torch._C._nn or torch._C._fft objects.
 #
 
 # Code tries to stick to the following rules:
@@ -85,7 +85,8 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 NATIVE_NAMESPACE_MAPPING = {
     "torch": "THPVariableFunctionsModule",
-    "torch.nn": "THPNNVariableFunctionsModule"
+    "torch.nn": "THPNNVariableFunctionsModule",
+    "torch.fft": "THPFFTVariableFunctionsModule",
 }
 
 def should_generate_python_binding(declaration):
@@ -157,6 +158,31 @@ def gen_py_nn_functions(out, declarations, template_path):
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
+def get_py_fft_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "fft" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_fft_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_fft_functions(out, declarations, template_path):
+    """
+    Generate functions in the "fft" module.
+    """
+    PY_FFT_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_fft_functions.cpp')
+
+    py_fft_functions = get_py_fft_functions(declarations)
+
+    env = create_python_bindings(py_fft_functions, is_python_method=False, module="torch.fft")
+
+    write(out, 'python_fft_functions.cpp', PY_FFT_FUNCTIONS_CPP, env)
+
+
 def get_py_torch_functions(declarations):
     """
     Get declarations (grouped by name) which should be generated
@@ -165,6 +191,7 @@ def get_py_torch_functions(declarations):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 not is_nn_module_function(declaration) and
+                not is_fft_module_function(declaration) and
                 is_torch_function(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -1474,6 +1501,10 @@ def is_torch_function(declaration):
 
 def is_nn_module_function(declaration):
     return declaration.get('python_module') == 'nn'
+
+
+def is_fft_module_function(declaration):
+    return declaration.get('python_module') == 'fft'
 
 
 def function_namespace(declaration):
