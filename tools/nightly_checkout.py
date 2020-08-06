@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """Checks out the nightly development version of PyTorch and installs pre-built
 binaries into the repo.
+
+You can use this script to check out a new nightly branch with the following::
+
+    $ ./tools/nightly_checkout.py -b my-nightly-branch
+    $ conda activate pytorch-deps
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (--name or --prefix)::
+
+    $ ./tools/nightly_checkout.py -b my-nightly-branch -n my-env
+    $ conda activate my-env
 """
 import os
 import re
