@@ -232,7 +232,6 @@ __global__ void reduce_kernel(R reduction) {
 template <typename index_t, int num_outputs=1>
 static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const TensorIterator& iter) {
   static_assert(num_outputs == 1 || num_outputs == 2, "At most 2 outputs are supported");
-  TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
   int input_index = iter.ntensors() - 1;
@@ -1133,7 +1132,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   TORCH_INTERNAL_ASSERT(can_use_32bit_indexing);
   using ReduceOpType = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>;
-  TORCH_INTERNAL_ASSERT(ReduceOpType::num_outputs == iter.noutputs());
   auto output_calc = make_output_calculator<uint32_t, ReduceOpType::num_outputs>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
   auto reduce = ReduceOpType(
