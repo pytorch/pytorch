@@ -852,23 +852,6 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
 }
 
-Tensor cholesky_mod_backward(Tensor grad, bool upper, Tensor L, Tensor jitter) {
-  // L_tag = L - I * jiter[0], then use cholesky_backward
-  Tensor L_tag = L;
-  if (jitter.defined()) {
-    L_tag.copy_(L);
-    if (jitter.dim() > 0) {
-        std::cout << "jitter dim " << jitter.dim() << ", size[0] " << jitter.size(0) << std::endl;
-        L_tag.diagonal().add_(jitter[0]);
-    }
-    else {
-        L_tag.diagonal().add_(jitter);
-    }
-
-  }
-  return cholesky_backward(grad, upper, L_tag);
-}
-
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
   Tensor grad_L;
   if (grad.defined()) {
