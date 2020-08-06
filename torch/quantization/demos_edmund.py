@@ -37,12 +37,6 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
 
 from torch.quantization.adaround import adaround_qconfig
 
-# from  mobilenet_classes import (
-#     ConvBNReLU,
-#     InvertedResidual,
-#     MobileNetV2,
-#     ChainModule
-# )
 
 # Specify random seed for repeatable results
 torch.manual_seed(191009)
@@ -208,6 +202,7 @@ def imagenet_download():
     data_path = '/mnt/fair/imagenet_full_size/'
     data_loader, data_loader_test = prepare_data_loaders(data_path)
 
+    # model = torchvision.models.mobilenet_v2(pretrained=True)
     model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)
     print("done loading")
     return model, data_loader, data_loader_test
@@ -219,11 +214,11 @@ def quantize_model(model, data_loader_test, per_tensor=True):
     num_eval_batches = 10
 
     model = copy.deepcopy(model)
-    # if per_tensor:
-    #     model.qconfig = torch.quantization.default_qconfig
-    # else:
-    #     model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-    model.qconfig = adaround_qconfig
+    if per_tensor:
+        model.qconfig = torch.quantization.default_qconfig
+    else:
+        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+    # model.qconfig = adaround_qconfig
 
     # unquantized_model = copy.deepcopy(model)
     criterion = nn.CrossEntropyLoss()
@@ -254,7 +249,8 @@ def adaround_demo(input_model, data_loader, data_loader_test):
 
     # throwing on the equalization
     model.eval()
-    # model.fuse_model()
+    model.fuse_model()
+    print(model)
 
     quantized_tensor_model = quantize_model(model, data_loader_test, True)
     # quantized_tensor_model = copy.deepcopy(model)
@@ -268,9 +264,8 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     results.append('Per tensor quantization accuracy results, no adaround')
 
     print("starting adaround quick function")
-    # _correct_bias.sequential_bias_correction(quantized_tensor_model, model, data_loader_test)
-    adaround.quick_function(quantized_tensor_model, 0, data_loader_test)
-    # print(model._modules['features']._modules['9'])
+    # adaround.quick_function(quantized_tensor_model, 0, data_loader_test)
+    adaround.quick_function_float(quantized_tensor_model, data_loader_test)
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
     print('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg))

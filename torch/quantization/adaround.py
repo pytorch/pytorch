@@ -6,7 +6,9 @@ from torch.quantization.qconfig import *
 from torch.quantization.fake_quantize import *
 import torch.nn.qat.modules as nnqat
 import torch.quantization._numeric_suite as ns
-from torch.quantization.default_mappings import DEFAULT_QAT_MODULE_MAPPING
+from torch.quantization.default_mappings import DEFAULT_QAT_MODULE_MAPPING, DEFAULT_MODULE_MAPPING
+from torchvision.models.mobilenet import ConvBNReLU
+from torch.quantization import QuantStub, DeQuantStub
 import copy
 _supported_modules = {nn.Conv2d, nn.Linear}
 
@@ -157,18 +159,26 @@ class OuputWrapper(nn.Module):
         self.float_output = None
         self.quantized_output = None
         # self.hacky_input = None
+        self.on = False
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
     def forward(self, x):
-        # self.hacky_input = x.detach()
-        self.wrapped_module.activation_post_process.disable_fake_quant()
-        self.wrapped_module.weight_fake_quant.disable_fake_quant()
-        self.float_output = self.wrapped_module(x).detach()
+        x = self.quant(x)
+        if self.on:
+            # self.hacky_input = x.detach()
+            print(type(self.wrapped_module))
+            self.wrapped_module.activation_post_process.disable_fake_quant()
+            self.wrapped_module.weight_fake_quant.disable_fake_quant()
+            self.float_output = self.wrapped_module(x).detach()
 
-        self.wrapped_module.activation_post_process.enable_fake_quant()
-        self.wrapped_module.weight_fake_quant.enable_fake_quant()
-        self.quantized_output = self.wrapped_module(x)
+            self.wrapped_module.activation_post_process.enable_fake_quant()
+            self.wrapped_module.weight_fake_quant.enable_fake_quant()
+            self.quantized_output = self.wrapped_module(x)
 
-        return self.quantized_output
+            return self.dequant(self.quantized_output)
+        else:
+            return self.dequant(self.wrapped_module(x))
 
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
@@ -181,21 +191,21 @@ adaround_qconfig = QConfig(activation=default_fake_quant,
 default_qat_qconfig22 = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
 
-def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.values()):
-    V_s = []
+def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
+    # V_s = []
     for name, submodule in model.named_modules():
-        # print(type(submodule), white_list)
+        print(type(submodule))
         if type(submodule) in white_list:
-            print("adding wrapper")
+            # print("adding wrapper")
             parent = get_parent_module(model, name)
             submodule_name = name.split('.')[-1]
             parent._modules[submodule_name] = OuputWrapper(submodule)
 
             # submodule.weight_fake_quant.continous_V = copy.deepcopy(submodule.weight)
-            submodule.weight_fake_quant.continous_V = torch.nn.Parameter(torch.ones(submodule.weight.size()) / 10)
-            assert submodule.weight_fake_quant.continous_V is not None
-            V_s.append(parent._modules[submodule_name])
-    return V_s
+            # submodule.weight_fake_quant.continous_V = torch.nn.Parameter(torch.ones(submodule.weight.size()) / 10)
+    #         assert submodule.weight_fake_quant.continous_V is not None
+    #         V_s.append(parent._modules[submodule_name])
+    # return V_s
 
 
 def load_conv():
@@ -210,7 +220,7 @@ def quick_function(qat_model, dummy, data_loader_test):
     # turning off observer and turning on tuning
     for name, submodule in qat_model.named_modules():
         if type(submodule) in _supported_modules:
-            # submodule.weight_fake_quant.disable_observer()
+            submodule.weight_fake_quant.disable_observer()
             # submodule.weight_fake_quant.enable_fake_quant()
             submodule.weight_fake_quant.tuning = True
 
@@ -224,7 +234,7 @@ def quick_function(qat_model, dummy, data_loader_test):
     batch = 0
     for name, submodule in qat_model.named_modules():
         if isinstance(submodule, OuputWrapper):
-            # submodule.wrapped_module.weight_fake_quant.enable_observer()
+            submodule.wrapped_module.weight_fake_quant.enable_observer()
             if batch < 3:
                 def dummy_generator():
                     yield submodule.wrapped_module.weight_fake_quant.continous_V
@@ -248,13 +258,82 @@ def quick_function(qat_model, dummy, data_loader_test):
             if batch == 3:
                 return qat_model
             batch +=1
-            # submodule.wrapped_module.weight_fake_quant.disable_observer()
+            submodule.wrapped_module.weight_fake_quant.disable_observer()
 
 
     # qat_model.eval()
     # torch.quantization.convert(qat_model, inplace=True)
     return qat_model
 
+def quick_function_float(float_model, data_loader_test):
+    # generator to get uniform distribution of images, i.e. not always taking the front 300
+    def uniform_images():
+        while True:
+            for image, target in data_loader_test:
+                yield image
+    generator = uniform_images()
+
+    def optimize_V(leaf_module):
+        '''Takes in a leaf module with an adaround attached to its
+        weight_fake_quant attribute'''
+        # optimizing V step
+        def dummy_generator():
+            yield leaf_module.wrapped_module.weight_fake_quant.continous_V
+        optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
+
+        for count in range(10):
+            output = float_model(next(generator))
+            # loss = loss_function(qat_model, count)
+            loss = loss_function_leaf(leaf_module, count)
+
+            print("loss: ", loss)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            try:
+                print(leaf_module.wrapped_module.weight_fake_quant.continous_V[0][0][:][:])
+            except IndexError:
+                print("ruh roh")
+            print("running count during optimazation: ", count)
+
+    # V_s = add_wrapper_class(float_model, {ConvBNReLU})
+    # V_s = add_wrapper_class(float_model, {nn.Conv2d})
+    # V_s = add_wrapper_class(float_model, {nn.quantized.Conv2d})
+    V_s = add_wrapper_class(float_model, {nnqat.Conv2d})
+    # print(float_model)
+    float_model.qconfig = torch.quantization.default_qconfig
+    torch.quantization.prepare(float_model, inplace=True)
+    print("bruh")
+    batch = 0
+    for name, submodule in float_model.named_modules():
+        if isinstance(submodule, OuputWrapper):
+            batch +=1
+            if batch <= 1:
+                # quick quantization calibration
+                submodule.on = True
+                submodule.wrapped_module.qconfig = adaround_qconfig
+                submodule.wrapped_module.activation_post_process = torch.quantization.fake_quantize.default_fake_quant()
+                submodule.wrapped_module.weight_fake_quant = araround_fake_quant()
+                # torch.quantization.prepare_qat(submodule, inplace=True)
+                # for count in range(10):
+                #     float_model(next(generator))
+                # submodule.wrapped_module.weight_fake_quant.disable_observer()
+                submodule.wrapped_module.weight_fake_quant.continous_V = torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)
+
+                print("quantized submodule")
+                optimize_V(submodule)
+                print("finished optimizing adaround instance")
+                torch.quantization.convert(submodule, inplace=True)
+                submodule.on = False
+            if batch == 1:
+                return float_model
+
+            # submodule.wrapped_module.weight_fake_quant.disable_observer()
+
+
+    # qat_model.eval()
+    # torch.quantization.convert(qat_model, inplace=True)
+    return float_model
 
 if __name__ == "__main__":
     # main()
