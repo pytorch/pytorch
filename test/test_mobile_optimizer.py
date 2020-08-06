@@ -214,6 +214,9 @@ class TestOptimizer(unittest.TestCase):
         # already quantized conv modules. Verifying that this does
         # not happen again.
 
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+
         class Child(nn.Module):
             def __init__(self):
                 super(Child, self).__init__()
@@ -251,6 +254,9 @@ class TestOptimizer(unittest.TestCase):
                          " XNNPACK must be enabled for these tests."
                          " Please build with USE_XNNPACK=1.")
     def test_hoist_conv_packed_params(self):
+
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
 
         class Standalone(nn.Module):
             def __init__(self):
