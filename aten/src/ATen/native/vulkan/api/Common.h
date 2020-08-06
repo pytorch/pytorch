@@ -46,10 +46,31 @@ VK_DELETER_DECLARE_NON_DISPATCHABLE(Pipeline);
 VK_DELETER_DECLARE_NON_DISPATCHABLE(DescriptorSetLayout);
 VK_DELETER_DECLARE_NON_DISPATCHABLE(Sampler);
 VK_DELETER_DECLARE_NON_DISPATCHABLE(DescriptorPool);
-VK_DELETER_DECLARE_NON_DISPATCHABLE(CommandPool);
+VK_DELETER_DECLARE_NON_DISPATCHABLE(CommandPool);\
 
-template <typename Type, typename Deleter>
-using Handle = std::unique_ptr<typename std::remove_pointer<Type>::type, Deleter>;
+template<typename Type, typename Deleter>
+class Handle final {
+ public:
+  inline Handle(const Type payload, Deleter&& deleter)
+    : payload_(payload), deleter_(std::move(deleter)) {}
+  Handle(const Handle&) = delete;
+  Handle& operator=(const Handle&) = delete;
+  Handle(Handle&&) = default;
+  Handle& operator=(Handle&&) = default;
+  inline ~Handle() {
+    if (payload_) {
+      deleter_(payload_);
+    }
+  }
+
+  inline Type get() const {
+    return payload_;
+  }
+
+ private:
+  Type payload_;
+  Deleter deleter_;
+};
 
 } // namespace api
 } // namespace vulkan
