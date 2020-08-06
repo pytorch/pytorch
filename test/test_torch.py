@@ -15,6 +15,7 @@ import types
 import pickle
 import textwrap
 import operator
+import itertools
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -15374,6 +15375,25 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
+
+    @dtypes(torch.float)
+    def test_min_out_different_memory_format(self, device, dtype):
+        permutations = itertools.permutations([0, 1, 2])
+
+        def rev_perm(perm):
+            r = {j: i for i, j in enumerate(perm)}
+            return tuple(r[i] for i, _ in enumerate(perm))
+
+        for perm1 in permutations:
+            for perm2 in permutations:
+                for perm3 in permutations:
+                    input_ = torch.randn(10, 10, 10, dtype=dtype, device=device).permute(*perm1)
+                    expect1, expect2 = input_.min(dim=0, keepdim=True)
+                    out1 = expect1.permute(perm2).clone().contiguous().permute(rev_perm(perm2))
+                    out2 = expect2.permute(perm3).clone().contiguous().permute(rev_perm(perm3))
+                    torch.min(input_, dim=0, keepdim=True, out=(out1, out2))
+                    self.assertEqual(out1, expect1)
+                    self.assertEqual(out2, expect2)
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
