@@ -689,6 +689,153 @@ TEST(VulkanTest, reshape2) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanTest, tensor5d) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({2, 2, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto tv_in = t_in.vulkan();
+}
+
+TEST(VulkanTest, tensor5d_transpose) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 2, 3, 2, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.transpose(1, 2);
+  auto t_out = tv_in.transpose(1, 2).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, view) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::rand({2, 4, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_out_expected = t_in.view({2, 2, 2, 3, 3});
+  auto tv_in = t_in.vulkan();
+  auto tv_out = tv_in.view({2, 2, 2, 3, 3});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, slice) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.slice(1, 2, 4, 1);
+  auto t_out = tv_in.slice(1, 2, 4, 1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, select) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.slice(1, 1);
+  auto t_out = tv_in.slice(1, 1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, unsqueeze) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in =
+      at::empty({1, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto tv_in = t_in.vulkan();
+
+  auto t_out_expected = t_in.unsqueeze(1);
+  auto t_out = tv_in.unsqueeze(1).cpu();
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, cat) {
+  if (!at::vulkan::is_available())
+    return;
+
+  auto t_in0 =
+      at::rand({1, 1, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in1 =
+      at::rand({1, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in2 =
+      at::rand({1, 5, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = at::cat({t_in0, t_in1, t_in2}, 1);
+  auto tv_out = at::cat({t_in0.vulkan(), t_in1.vulkan(), t_in2.vulkan()}, 1);
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanTest, max_pool2d) {
   if (!at::vulkan::is_available())
     return;

@@ -44,7 +44,5 @@ at::Tensor vulkan_max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode);
 
-at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape);
-
 } // namespace native
 } // namespace at
