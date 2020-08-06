@@ -189,8 +189,6 @@ enum class DispatchKey : uint8_t {
   // the bulk of this logic.
   Autograd,
 
-  Profiler,
-
   Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
