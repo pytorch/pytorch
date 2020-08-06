@@ -231,6 +231,7 @@ __global__ void reduce_kernel(R reduction) {
 
 template <typename index_t, int num_outputs=1>
 static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const TensorIterator& iter) {
+  TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
   int input_index = iter.ntensors() - 1;
@@ -938,7 +939,7 @@ int get_output_vec_size(TensorIterator &iter) {
 template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
-  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+  TORCH_INTERNAL_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
@@ -1130,8 +1131,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  AT_ASSERT(can_use_32bit_indexing);
+  TORCH_INTERNAL_ASSERT(can_use_32bit_indexing);
   using ReduceOpType = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>;
+  TORCH_INTERNAL_ASSERT(ReduceOpType::num_outputs == iter.noutputs());
   auto output_calc = make_output_calculator<uint32_t, ReduceOpType::num_outputs>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
   auto reduce = ReduceOpType(
