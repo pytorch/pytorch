@@ -65,7 +65,7 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
 
 IncludeDispatchKeySetGuard::IncludeDispatchKeySetGuard(DispatchKeySet include)
   : tls_(&raw_local_dispatch_key_set)
-  , include_(include) {
+  , include_(include - tls_->included()) {
   if (!include_.empty()) {
     tls_->set_included(tls_->included() | include_);
   }
