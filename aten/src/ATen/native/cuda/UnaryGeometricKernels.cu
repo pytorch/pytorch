@@ -50,13 +50,22 @@ void cos_kernel_cuda(TensorIterator& iter) {
   });
 }
 void sinc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sinc_cuda", [&]() {
+  if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "sinc_cuda", [&]() {
       auto zero = scalar_t(1.0e-20);
       gpu_kernel(iter, [zero]GPU_LAMBDA(scalar_t a) -> scalar_t {
         auto y = M_PI * (a == 0 ? zero : a);
         return ::sin(y) / y;
       });
     });
+  } else {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sinc_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        auto x = static_cast<scalar_t>(M_PI) * a;
+        return ::sin(x) / x;
+      });
+    });
+  }
 }
 
 void sinh_kernel_cuda(TensorIterator& iter) {
