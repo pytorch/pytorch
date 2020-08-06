@@ -2732,7 +2732,7 @@ class TestAutograd(TestCase):
                 self.assertEqual(e.sequence_nr, sum_seq_nr)
             # check that nested ops (e.g. empty) don't have
             # sequence number
-            if "empty" in e.name:
+            if e.name == "aten::empty":
                 self.assertEqual(e.sequence_nr, -1)
 
     def test_profiler_unboxed_only(self):
