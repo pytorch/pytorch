@@ -210,7 +210,8 @@ void unpackQuantizedWeightsHelper(
       // boxing code currently does not support this. Instead, exclude the
       // Profiler dispatch key and go through unboxed dispatch, avoiding boxing
       // altogether
-      c10::impl::ExcludeDispatchKeySetGuard key_guard(c10::DispatchKey::Profiler);
+      c10::impl::ExcludeDispatchKeySetGuard key_guard(
+          c10::DispatchKey::Profiler);
       std::tie(unpacked_weight, bias) = op.call(packed_weight);
     }
 
