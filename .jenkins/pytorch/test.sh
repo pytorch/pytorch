@@ -229,13 +229,17 @@ test_libtorch() {
 }
 
 test_distributed() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    echo "Testing distributed C++ tests"
-    mkdir -p test/test-reports/cpp-distributed
-    build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
-    build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
-    build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+  echo "Testing distributed C++ tests"
+  mkdir -p test/test-reports/cpp-distributed
 
+  build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
+  build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
+  build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+
+  build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-distributed/test_cpp_rpc.xml
+  build/bin/test_dist_autograd --gtest_output=xml:test/test-reports/cpp-distributed/test_dist_autograd.xml
+
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
     build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
