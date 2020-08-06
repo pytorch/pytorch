@@ -342,6 +342,7 @@ def instantiate_configs():
             and fc.find_prop("pyver") == "3.6"
             and cuda_version is None
             and parallel_backend is None
+            and not is_vulkan
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
@@ -354,6 +355,7 @@ def instantiate_configs():
             compiler_name == "gcc"
             and compiler_version == "5.4"
             and not is_libtorch
+            and not is_vulkan
             and parallel_backend is None
         ):
             bc_breaking_check = Conf(
