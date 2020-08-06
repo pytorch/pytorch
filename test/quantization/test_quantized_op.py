@@ -1761,33 +1761,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
-
-    @skipIfNoFBGEMM
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=32, max_numel=10**5),
-                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
-           Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
-    def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
-        with override_quantized_engine("fbgemm"):
-            X, (scale_x, zero_point_x, dtype_x) = X
-
-            X = torch.from_numpy(X)
-            c = X.shape[1]
-
-            mean = torch.rand(c).float()
-            var = torch.rand(c).float()
-            weight = torch.rand(c).float()
-            bias = torch.rand(c).float()
-            eps = 0.001
-            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-            qy = torch.ops.quantized.batch_norm2d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-
-            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
-                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
-            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
-            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
-
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
@@ -1969,9 +1942,9 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
-    def test_batch_norm2d_relu(self):
+    def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (4, 5)
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -1995,7 +1968,10 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 4:
+                if len(X.shape) == 3:
+                    qy = torch.ops.quantized.batch_norm1d_relu(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                elif len(X.shape) == 4:
                     qy = torch.ops.quantized.batch_norm2d_relu(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
                 else:
@@ -2017,17 +1993,17 @@ class TestQuantizedOps(TestCase):
                     msg="{} vs {}".format(qy, quantize_ref))
 
     @skipIfNoFBGEMM
-    def test_batch_norm3d(self):
+    def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
-        combined = [side_lens, torch_types]
+        combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
-                max_side = 5
-                side_len, torch_type = test_case
+                max_side, side_len, torch_type = test_case
                 Y_zero_point = 1
                 Y_scale = 0.5
 
@@ -2043,8 +2019,15 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                qy = torch.ops.quantized.batch_norm3d(
-                    qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 3:
+                    qy = torch.ops.quantized.batch_norm1d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 4:
+                    qy = torch.ops.quantized.batch_norm2d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 5:
+                    qy = torch.ops.quantized.batch_norm3d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
                 float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                          running_mean=mean, running_var=var, training=False,
