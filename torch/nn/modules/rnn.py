@@ -192,7 +192,7 @@ class RNNBase(Module):
     def check_hidden_size(self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
                           msg: str = 'Expected hidden size {}, got {}') -> None:
         if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]):
         self.check_input(input, batch_sizes)

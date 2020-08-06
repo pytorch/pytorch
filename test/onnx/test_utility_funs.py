@@ -607,6 +607,84 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "prim::ListConstruct"
 
+    def test_custom_layer_tuple(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def symbolic(g, input):
+                return g.op('CustomNamespace::Custom', input, outputs=2)
+
+            @staticmethod
+            def forward(ctx, input):
+                return input, input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = utils._model_to_graph(model, batch)
+        iter = graph.nodes()
+        assert next(iter).kind() == "CustomNamespace::Custom"
+
+    def test_fuse_conv_bn(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        x = torch.randn(2, 3, 2, 2, requires_grad=True)
+        graph, _, __ = utils._model_to_graph(Fuse(), (x, ),
+                                             do_constant_folding=True,
+                                             training=TrainingMode.EVAL)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::BatchNormalization"
+            assert node.kind() == "onnx::Conv"
+
+        assert len(list(graph.nodes())) == 1
+
+    def test_fuse_resnet18(self):
+        model = torchvision.models.resnet18(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        graph, _, __ = utils._model_to_graph(model, (x, ),
+                                             do_constant_folding=True)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::BatchNormalization"
+
+    def test_onnx_function_substitution_pass(self):
+
+        @torch.jit.script
+        def f(x : torch.Tensor, y : torch.Tensor):
+            z = x - y
+            return x + z
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                return f(x, y)
+
+        model = MyModule()
+        input_1 = torch.tensor(11)
+        input_2 = torch.tensor(12)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        # Check that the prim::Constant node in the graph for representing the
+        # scripted function `f` is removed and the following prim::CallFunction
+        # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
+        for node in graph.nodes():
+            assert node.kind() != "prim::Constant"
+        assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -624,11 +702,6 @@ TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
 
-
-# opset 12tests
-TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 if __name__ == '__main__':
     run_tests()
