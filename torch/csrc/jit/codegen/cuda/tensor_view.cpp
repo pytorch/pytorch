@@ -490,9 +490,8 @@ TensorView* TensorView::cache_after() {
   } else {
     // Check users of this TV for computeAt for cache_after on inputs
     for (auto expr : fusion()->unordered_uses(consumer)) {
-      auto expr_outputs = expr->outputs();
       for (TensorView* output :
-           ir_utils::filterByType<TensorView>(expr_outputs)) {
+           ir_utils::filterByType<TensorView>(expr->outputs())) {
         if (output->hasComputeAt()) {
           TransformReplay::replayPasC(consumer, output, -1);
           auto output_ca_pos = output->getThisComputeAtAxis();

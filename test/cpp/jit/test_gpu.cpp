@@ -792,7 +792,7 @@ void testGPU_FusionFilterVals() {
   auto scalar1 = new Int(0);
   auto scalar2 = new Int(1);
 
-  std::vector<Val*> vals = {tv0, scalar0, tv1, scalar1, scalar2};
+  const std::vector<Val*> vals = {tv0, scalar0, tv1, scalar1, scalar2};
 
   std::vector<TensorView*> tvs(
       ir_utils::filterByType<TensorView>(vals).begin(),
@@ -813,7 +813,10 @@ void testGPU_FusionFilterVals() {
   TORCH_CHECK(ints.size() == 2);
   TORCH_CHECK(ints[0] == scalar1);
   TORCH_CHECK(ints[1] == scalar2);
-  return;
+
+  for (auto ptr : ir_utils::filterByType<Expr>(vals)) {
+    TORCH_CHECK(false, "Not expecting any results");
+  }
 }
 
 void testGPU_FusionTVSplit() {
