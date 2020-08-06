@@ -18,6 +18,15 @@
 
 namespace at { namespace native {
 
+// torch.fft.fft, analogous to NumPy's numpy.fft.fft
+Tensor fft_fft(const Tensor& self) {
+  TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
+  TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
+
+  auto result = at::fft(at::view_as_real(self), 1, false);
+  return at::view_as_complex(result);
+}
+
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
 // at::_fft_with_size which dispatches to _fft_cufft (CUDA) or _fft_mkl (CPU).
