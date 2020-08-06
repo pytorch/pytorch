@@ -3869,8 +3869,7 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
-.. note:: In case of multiple occurrences of the maximum values,
-the indices corresponding to the first occurrence are returned.
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
     {input}
@@ -4114,8 +4113,7 @@ Returns the indices of the minimum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
 
-.. note:: In case of multiple occurrences of the maximum values,
-the indices corresponding to the first occurrence are returned.
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
     {input}
