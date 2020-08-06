@@ -563,7 +563,7 @@ TEST_F(ModulesTest, Unflatten) {
     return dimnames;
   };
   
-  unflatten = Unflatten(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
+  unflatten = Unflatten(UnflattenOptions("B", UnflattenOptions::namedshape_t{{"B1", 2}, {"B2", 2}}));
   output = unflatten->forward(torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
   expected = torch::tensor({{{1, 2}, {3, 4}}}).refine_names(make_dimnames({"A", "B1", "B2"}));
   ASSERT_TRUE(torch::equal(output, expected));
@@ -3532,7 +3532,7 @@ TEST_F(ModulesTest, PrettyPrintFlatten) {
 TEST_F(ModulesTest, PrettyPrintUnflatten) {
   ASSERT_EQ(c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
     "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
-  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}))),
+  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions("B", UnflattenOptions::namedshape_t{{"B1", 2}, {"B2", 2}}))),
     "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 

@@ -150,8 +150,6 @@ class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
 
   /// The options used to configure this module.
   UnflattenOptions options;
-
-  bool named;
 };
 
 /// A `ModuleHolder` subclass for `UnflattenImpl`.
