@@ -106,6 +106,7 @@ and move it to the desired devices on the callee if necessary.
 .. autofunction:: remote
 .. autofunction:: get_worker_info
 .. autofunction:: shutdown
+.. autofunction:: wait_all
 .. autoclass:: WorkerInfo
     :members:
 
