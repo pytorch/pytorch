@@ -129,7 +129,8 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-       len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
+       len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
+       and type(module) in DEFAULT_QCONFIG_PROPAGATe_WHITE_LIST:
         # observer and hook will be gone after we swap the module
         activation = module.qconfig.activation()
         if device is not None:
