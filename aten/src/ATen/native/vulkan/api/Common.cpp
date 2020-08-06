@@ -7,7 +7,7 @@
     }                                           \
   }
 
-#define VK_DELETER_DEFINE_NON_DISPATCHABLE(Handle) \
+#define VK_DELETER_DEFINE_NON_DISPATCHABLE(Handle)                    \
   destroy_##Handle::destroy_##Handle(const VkDevice device)           \
     : device_(device) {                                               \
   }                                                                   \
