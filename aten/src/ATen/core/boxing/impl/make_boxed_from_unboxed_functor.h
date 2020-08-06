@@ -254,20 +254,48 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     return c10::ivalue::from(std::forward<T>(v));
   }
 
+  // Special case to allow kernels to return `Tensor&`.
+  // TODO Delete this once kernels don't do that anymore
+  template<>
+  inline IValue return_to_ivalue<at::Tensor&, false>(at::Tensor& v) {
+    return c10::ivalue::from(v);
+  }
+
+  // reference_cast allows casting references, e.g. T&& to T&:
+  //    T make_t() {}
+  //    T& v = reference_cast<T&>(make_t()); // make_t() returns a T&& which is cast to T&.
+  // If the target is a non-reference value, then it gets moved:
+  //    T make_t() {}
+  //    T v = reference_cast<T>(make_t()); // no copies involved
+  // The first example actually also shows why reference_cast is usually a very bad idea. v now is a lvalue
+  // reference to a dead temporary. Use with caution!
+  template<class T, class U>
+  T reference_cast(U&& t) {
+      return std::forward<T>(t);
+  }
+
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  std::remove_cv_t<std::remove_reference_t<typename guts::infer_function_traits_t<Functor>::return_type>> call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
-    using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>::call(
-      std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
-    )...);
+    /*
+     * For ops that take "Tensor&" as an argument, ivalue_to_arg would still return a "Tensor" by value
+     * and C++ doesn't allow us to call (*functor) with a temporary "Tensor" when it expects "Tensor&".
+     * We use reference_cast to explicitly cast our temporary to a "Tensor&" and make it pass the compiler.
+     * Even though usually dangerous, this is ok here because temporaries live until the end of the statement.
+     * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
+     */
+    using ArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
+    return (*functor)(reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
+      ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>>, AllowDeprecatedTypes>::call(
+        std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
+    ))...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
+  std::remove_cv_t<std::remove_reference_t<typename guts::infer_function_traits_t<Functor>::return_type>> call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
@@ -275,7 +303,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
     static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>(std::move(output)));
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>(std::forward<OutputType>(output)));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
@@ -307,9 +335,10 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       guts::if_constexpr<has_outputs>([&] (auto _) {
-        auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, _(stack));
+        using ReturnType_ = std::remove_cv_t<std::remove_reference_t<typename decltype(_)::template type_identity<ReturnType>>>;
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, _(stack));
         torch::jit::drop(*stack, num_inputs);
-        push_outputs<ReturnType, AllowDeprecatedTypes>::call(std::move(output), stack);
+        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
       }, /* else */ [&] {
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
         torch::jit::drop(*stack, num_inputs);
