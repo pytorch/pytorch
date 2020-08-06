@@ -105,11 +105,13 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
-  // Re-dispatch copies when src device not implemented here (e.g. XLA).
-  // This includes: cpu_tensor.copy_(xla_tensor) which
-  // calls xla_tensor._copy_from(cpu_tensor)
-  if (!is_supported_device(src.device())) {
-    TORCH_INTERNAL_ASSERT(is_supported_device(self.device()));
+  // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
+  // _copy_from has a proper device dispatch setup.
+  // This includes:
+  //   cpu_tensor.copy_(xla_tensor) => xla_tensor._copy_from(cpu_tensor)
+  //   xla_tensor.copy_(cpu_tensor) => cpu_tensor._copy_from(xla_tensor)
+  // Both the _copy_from calls above will be dispatched to XLA's _copy_from kernels.
+  if (!is_supported_device(src.device()) || !is_supported_device(self.device())) {
     at::_copy_from(src, self, non_blocking);
     return self;
   }
@@ -179,7 +181,6 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) { m.impl_UNBOXED("copy_", copy_); }
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native
