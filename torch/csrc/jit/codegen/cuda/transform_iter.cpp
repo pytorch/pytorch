@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 namespace torch {
 namespace jit {
@@ -233,16 +234,15 @@ BestEffortReplay::BestEffortReplay(
   std::vector<Expr*> r_exprs = Exprs::getFrom(
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
   std::unordered_map<IterDomain*, Expr*> replay_expr_map;
-  for (auto r_expr : r_exprs)
-    for (auto inp : r_expr->inputs())
-      if (inp->getValType().value() == ValType::IterDomain) {
-        auto id = inp->as<IterDomain>();
-        TORCH_INTERNAL_ASSERT(
-            replay_expr_map.find(id) == replay_expr_map.end(),
-            "Error trying to map rfactor root domain during replay. IterDomain's shouldn't have more than one use.");
-        // Only want to forward rfactor in map
-        replay_expr_map[id] = r_expr;
-      }
+  for (auto r_expr : r_exprs) {
+    for (auto id : ir_utils::filterByType<IterDomain>(r_expr->inputs())) {
+      TORCH_INTERNAL_ASSERT(
+          replay_expr_map.find(id) == replay_expr_map.end(),
+          "Error trying to map rfactor root domain during replay. IterDomain's shouldn't have more than one use.");
+      // Only want to forward rfactor in map
+      replay_expr_map[id] = r_expr;
+    }
+  }
 
   std::string err_str(
       "Error during replay, a computeAt was called that conflicts with an rfactor call.");
@@ -255,15 +255,12 @@ BestEffortReplay::BestEffortReplay(
     std::vector<IterDomain*> r_inps;
     std::vector<IterDomain*> t_inps;
 
-    for (auto inp : t_expr->inputs()) {
-      if (inp->getValType() == ValType::IterDomain) {
-        auto t_inp = inp->as<IterDomain>();
-        t_inps.push_back(t_inp);
-        // There might not be a mapping, that could be okay.
-        auto it = id_map_.find(t_inp);
-        if (it != id_map_.end())
-          r_inps.push_back(it->second);
-      }
+    for (auto t_inp : ir_utils::filterByType<IterDomain>(t_expr->inputs())) {
+      t_inps.push_back(t_inp);
+      // There might not be a mapping, that could be okay.
+      auto it = id_map_.find(t_inp);
+      if (it != id_map_.end())
+        r_inps.push_back(it->second);
     }
 
     bool has_rfactor =
@@ -334,13 +331,10 @@ BestEffortReplay::BestEffortReplay(
       continue;
     }
     // Take target_domain inputs out of map:
-    for (auto inp : t_expr->inputs()) {
-      if (inp->getValType() == ValType::IterDomain) {
-        auto t_inp = inp->as<IterDomain>();
-        auto it = id_map_.find(t_inp);
-        if (leaf_ids_.find(it->second) != leaf_ids_.end()) {
-          leaf_ids_.erase(it->second);
-        }
+    for (auto t_inp : ir_utils::filterByType<IterDomain>(t_expr->inputs())) {
+      auto it = id_map_.find(t_inp);
+      if (leaf_ids_.find(it->second) != leaf_ids_.end()) {
+        leaf_ids_.erase(it->second);
       }
     }
 

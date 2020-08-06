@@ -120,6 +120,7 @@ namespace jit {
   _(GPU_FusionRegister)                             \
   _(GPU_FusionTopoSort)                             \
   _(GPU_FusionTensor)                               \
+  _(GPU_FusionFilterVals)                           \
   _(GPU_FusionTVSplit)                              \
   _(GPU_FusionTVMerge)                              \
   _(GPU_FusionTVReorder)                            \

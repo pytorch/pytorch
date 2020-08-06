@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/codegen/cuda/compute_at.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
-
-#include <torch/csrc/jit/codegen/cuda/compute_at.h>
 
 namespace torch {
 namespace jit {
@@ -389,18 +389,16 @@ void ComputeAt::setupOutputs() {
   const auto& terminating_outputs =
       FusionGuard::getCurFusion()->getTerminatingOutputs();
 
-  for (auto out : FusionGuard::getCurFusion()->outputs()) {
-    if (out->getValType() == ValType::TensorView) {
-      if (tv_data.find(out->as<TensorView>()) != tv_data.end()) {
-        if (tv_data[out->as<TensorView>()].touched()) {
-          // No need to adjust computeAt when an output is not
-          // a terminating output.
-          if (std::find(
-                  terminating_outputs.begin(),
-                  terminating_outputs.end(),
-                  out) != terminating_outputs.end()) {
-            touched_output_order.push_back(out->as<TensorView>());
-          }
+  for (auto out : ir_utils::filterByType<TensorView>(
+           FusionGuard::getCurFusion()->outputs())) {
+    if (tv_data.find(out) != tv_data.end()) {
+      if (tv_data[out].touched()) {
+        // No need to adjust computeAt when an output is not
+        // a terminating output.
+        if (std::find(
+                terminating_outputs.begin(), terminating_outputs.end(), out) !=
+            terminating_outputs.end()) {
+          touched_output_order.push_back(out);
         }
       }
     }

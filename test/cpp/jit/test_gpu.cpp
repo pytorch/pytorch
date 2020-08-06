@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
@@ -779,6 +780,40 @@ void testGPU_FusionTensor() {
   auto fuser_tensor = new TensorView(tensor_type);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
   TORCH_CHECK(fuser_tensor->domain() != nullptr);
+}
+
+void testGPU_FusionFilterVals() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeDummyTensor(1);
+  auto tv1 = makeDummyTensor(1);
+  auto scalar0 = new Float(0);
+  auto scalar1 = new Int(0);
+  auto scalar2 = new Int(1);
+
+  std::vector<Val*> vals = {tv0, scalar0, tv1, scalar1, scalar2};
+
+  std::vector<TensorView*> tvs(
+      ir_utils::filterByType<TensorView>(vals).begin(),
+      ir_utils::filterByType<TensorView>(vals).end());
+  TORCH_CHECK(tvs.size() == 2);
+  TORCH_CHECK(tvs[0] == tv0);
+  TORCH_CHECK(tvs[1] == tv1);
+
+  std::vector<Float*> floats(
+      ir_utils::filterByType<Float>(vals).begin(),
+      ir_utils::filterByType<Float>(vals).end());
+  TORCH_CHECK(floats.size() == 1);
+  TORCH_CHECK(floats[0] == scalar0);
+
+  std::vector<Int*> ints(
+      ir_utils::filterByType<Int>(vals).begin(),
+      ir_utils::filterByType<Int>(vals).end());
+  TORCH_CHECK(ints.size() == 2);
+  TORCH_CHECK(ints[0] == scalar1);
+  TORCH_CHECK(ints[1] == scalar2);
+  return;
 }
 
 void testGPU_FusionTVSplit() {

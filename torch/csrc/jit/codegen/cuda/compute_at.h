@@ -11,6 +11,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+class TensorDomain;
 class TensorView;
 
 // We're going to keep data related to the computeAt pass for each TensorView in

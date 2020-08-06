@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 // #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 // Cleanup
 // #include <torch/csrc/jit/codegen/cuda/mutator.h>
@@ -408,18 +409,16 @@ TensorView* TensorView::cache_before() {
     // Before: Prev TV -> This TV
     // After:  Prev TV -> New TV (CB) -> This TV
     // Iterate over origin expression inputs for cache_before on outputs
-    for (Val* v : expr_inputs) {
-      if (v->getValType().value() == ValType::TensorView) {
-        TensorView* origin_input = v->as<TensorView>();
-        if (origin_input->hasComputeAt() &&
-            origin_input->getComputeAtView() == this) {
-          TransformReplay::replayPasC(producer, consumer, -1);
+    for (TensorView* origin_input :
+         ir_utils::filterByType<TensorView>(expr_inputs)) {
+      if (origin_input->hasComputeAt() &&
+          origin_input->getComputeAtView() == this) {
+        TransformReplay::replayPasC(producer, consumer, -1);
 
-          auto origin_ca_pos = origin_input->getThisComputeAtAxis();
-          auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
-          origin_input->computeAt(producer, origin_ca_pos);
-          producer->setComputeAt(consumer, origin_rel_ca_pos);
-        }
+        auto origin_ca_pos = origin_input->getThisComputeAtAxis();
+        auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
+        origin_input->computeAt(producer, origin_ca_pos);
+        producer->setComputeAt(consumer, origin_rel_ca_pos);
       }
     }
   }
@@ -492,14 +491,12 @@ TensorView* TensorView::cache_after() {
     // Check users of this TV for computeAt for cache_after on inputs
     for (auto expr : fusion()->unordered_uses(consumer)) {
       auto expr_outputs = expr->outputs();
-      for (Val* v : expr_outputs) {
-        if (v->getValType().value() == ValType::TensorView) {
-          TensorView* output = v->as<TensorView>();
-          if (output->hasComputeAt()) {
-            TransformReplay::replayPasC(consumer, output, -1);
-            auto output_ca_pos = output->getThisComputeAtAxis();
-            consumer->setComputeAt(output, output_ca_pos);
-          }
+      for (TensorView* output :
+           ir_utils::filterByType<TensorView>(expr_outputs)) {
+        if (output->hasComputeAt()) {
+          TransformReplay::replayPasC(consumer, output, -1);
+          auto output_ca_pos = output->getThisComputeAtAxis();
+          consumer->setComputeAt(output, output_ca_pos);
         }
       }
     }
