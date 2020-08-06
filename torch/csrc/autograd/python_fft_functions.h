@@ -2,6 +2,6 @@
 
 namespace torch { namespace autograd {
 
-void initNNFunctions(PyObject* module);
+void initFFTFunctions(PyObject* module);
 
 }} // namespace torch::autograd
