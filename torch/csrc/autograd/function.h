@@ -91,7 +91,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// a (currently THE) hint to prioritization in the backward() pass, with
   /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Node(
-      int64_t sequence_nr,
+      uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
       next_edges_(std::move(next_edges)) {
@@ -218,7 +218,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /// The sequence number of this `Node`.
-  int64_t sequence_nr() const noexcept {
+  uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
   }
 
@@ -341,7 +341,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
-  const int64_t sequence_nr_;
+  const uint64_t sequence_nr_;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
