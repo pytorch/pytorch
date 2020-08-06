@@ -3,15 +3,37 @@
 #include <atomic>
 #include <thread>
 
-#include <tensorpipe/tensorpipe.h>
-
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
+// Forward-declare the TensorPipe classes we need, to avoid including its
+// headers in PyTorch's ones and thus have it become a public dependency.
+
+namespace tensorpipe {
+
+class Context;
+class Error;
+class Listener;
+class Message;
+class Pipe;
+
+namespace transport {
+class Context;
+namespace uv {
+class Context;
+} // namespace uv
+} // namespace transport
+
+namespace channel {
+class Context;
+} // namespace channel
+
+} // namespace tensorpipe
+
+ namespace torch {
 namespace distributed {
 namespace rpc {
 
@@ -138,10 +160,6 @@ class TensorPipeAgent : public RpcAgent {
 
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
-
-#ifdef TP_ENABLE_SHM
-  static std::string createUniqueShmAddr();
-#endif
 
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
