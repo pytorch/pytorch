@@ -48,6 +48,19 @@ VK_DELETER_NON_DISPATCHABLE_DECLARE(Sampler);
 VK_DELETER_NON_DISPATCHABLE_DECLARE(DescriptorPool);
 VK_DELETER_NON_DISPATCHABLE_DECLARE(CommandPool);
 
+// Vulkan objects are referenced via handles.  The spec defines Vulkan handles
+// under two categories: dispatchable and non-dispatchable.  Dispatchable handles
+// are required to be strongly typed as a result of being pointers to unique
+// opaque types.  Since dispatchable handles are pointers at the heart,
+// std::unique_ptr can be used to manage their lifetime with a custom deleter.
+// Non-dispatchable handles on the other hand, are not required to have strong
+// types, and even though they default to the same implementation as dispatchable
+// handles on some platforms - making the use of std::unique_ptr possible - they
+// are only required by the spec to weakly aliases 64-bit integers which is the
+// implementations some platforms default to.  This makes the use of std::unique_ptr
+// difficult since semantically unique_ptrs store pointers to their payload
+// which is also what passed onto the custom deleters.
+
 template<typename Type, typename Deleter>
 class Handle final {
  public:
