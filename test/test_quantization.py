@@ -69,5 +69,8 @@ from quantization.test_backward_compatibility import TestSerialization  # noqa: 
 # Equalization
 from quantization.test_equalize import TestEqualizeEager  # noqa: F401
 
+# Bias Correction
+from quantization.test_bias_correction import TestBiasCorrection
+
 if __name__ == '__main__':
     run_tests()

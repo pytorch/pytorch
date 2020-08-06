@@ -15,6 +15,7 @@ from torch.quantization import (
 import copy
 
 _supported_modules = {nn.Linear, nn.Conv2d}
+_supported_modules_q = {nnq.Linear, nnq.Conv2d}
 
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
@@ -22,6 +23,8 @@ def get_module(model, name):
     curr = model
     name = name.split('.')
     for subname in name:
+        # print(curr)
+        # print(subname)
         if subname == '':
             return curr
         curr = curr._modules[subname]
@@ -101,9 +104,11 @@ class MeanShadowLogger(ns.Logger):
             y = y[0]
         if x.is_quantized:
             x = x.dequantize()
+
+        self.count += 1
         if self.stats["quantized"] is None:
             self.stats["quantized"] = x
-            self.count = 1
+            # self.count = 1
             self.quant_sum = x
         else:
             # self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
@@ -112,12 +117,15 @@ class MeanShadowLogger(ns.Logger):
 
         if self.stats["float"] is None:
             self.stats["float"] = y
-            self.count = 1
+            # self.count = 1
             self.float_sum = y
         else:
             # self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
             self.float_sum += y
-            self.stats["quantized"] = self.float_sum / self.count
+            self.stats["float"] = self.float_sum / self.count
+
+        # print("recorded difference: ", x-y)
+        # print("rolling mean difference: ", )
 
 class ShadowModule(nn.Module):
     def __init__(self, float_module=None, quantized_module=None):
@@ -196,8 +204,8 @@ def sequential_bias_correction(float_model, quantized_model, img_data, white_lis
     with torch.no_grad():
         quantized_model(stack)
 
-    remove_hooks(quantized_model)
-    remove_shadow(quantized_model)
+    # remove_hooks(quantized_model)
+    # remove_shadow(quantized_model)
 
 def parallel_bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
     ''' Applies bias correction on the whitelisted submodules of the quantized model
@@ -273,6 +281,7 @@ def correct_quantized_bias(expected_output, expected_input, float_model, quantiz
                     quantized_submodule.bias.data = updated_bias
                 else:
                     quantized_submodule.bias().data = updated_bias
+                print(quantized_submodule.bias)
 
 
 def get_logger_entries(mod, target_dict, prefix=""):
@@ -317,43 +326,55 @@ def get_inputs_n_outputs(float_module, q_module):
     return output_logger, input_logger
 
 
-def bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules):
+def bias_correction(float_model, quantized_model, img_data, neval_batches=30, white_list=_supported_modules):
     # marking what modules to do bias correction on
     biased_modules = {}
-    for name, submodule in float_model.named_modules():
-        if type(submodule) in white_list:
+    for name, submodule in quantized_model.named_modules():
+        if type(submodule) in _supported_modules_q:
+            print("hi :), ", name, type(submodule))
             biased_modules[name] = submodule
-
     # TODO: figure out way to ensure the order of biased_modules is the same
     # as their order of execution, and/or a way to reorder if not
 
-    #
     for biased_module in biased_modules:
         float_submodule = get_module(float_model, biased_module )
         quantized_submodule = get_module(quantized_model, biased_module)
         bias = get_param(quantized_submodule, 'bias')
-        # print(quantized_submodule.__dict__.keys())
+        # print(type(float_submodule))
+        # print(type(quantized_submodule))
+
         if bias is not None:
             # Collecting data
             ns.prepare_model_with_stubs(float_model, quantized_model, white_list, MeanShadowLogger)
+            # print(quantized_model)
+            # print(float_model)
+            count = 0
             for data in img_data:
                 quantized_model(data[0])
+                count += 1
+                if count == neval_batches:
+                    break
             ob_dict = ns.get_logger_dict(quantized_model)
+            # print("break keys from ob_dict: ", ob_dict.keys())
             float_data = ob_dict[biased_module + '.stats']['float']
             quant_data = ob_dict[biased_module + '.stats']['quantized']
+            # print(ob_dict)
 
 
 
             # calculuating bias deviation
-            epsilon_x = float_data - quant_data
+            epsilon_x =  quant_data - float_data
+            # print("difference: ", epsilon_x)
             dims = list(range(epsilon_x.dim()))
             dims.remove(0)
             expected_epsilon_x = torch.mean(epsilon_x, dims)
+            # print(expected_epsilon_x)
 
             # calculating new value for bias parameter
 
             updated_bias = bias.data - expected_epsilon_x
             updated_bias = updated_bias.reshape(bias.data.size())
+            print("update: ", updated_bias)
 
             # setting new bias
             if isinstance(quantized_submodule.bias, torch.nn.parameter.Parameter):
@@ -361,6 +382,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
             else:
                 quantized_submodule.bias().data = updated_bias
             print("change-oo happened")
+            print("bias: ", quantized_submodule.bias())
 
             # need to remove shadows down here
             for name, submodule in quantized_model.named_modules():
