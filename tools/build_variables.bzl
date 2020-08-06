@@ -22,6 +22,7 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
+    "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -525,6 +526,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
+    "torch/csrc/utils/disable_torch_function.cpp",
 ]
 
 libtorch_python_distributed_sources = [
@@ -550,6 +552,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
         "autograd/generated/python_functions.cpp",
         "autograd/generated/python_nn_functions.cpp",
+        "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
