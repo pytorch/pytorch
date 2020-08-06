@@ -636,6 +636,14 @@ jobs:
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
+    - run:
+        name: Save test times
+        no_output_timeout: "5m"
+        command: |
+          set -e
+          echo "Uploading test times to Scuba..."
+          echo "cd workspace; SCRIBE_GRAPHQL_ACCESS_TOKEN=\"${SCRIBE_GRAPHQL_ACCESS_TOKEN}\" python .circleci/scripts/upload_test_times_to_scuba.py" | docker exec -u jenkins -i "$id" bash
+        when: always
     - store_test_results:
         path: test-reports
 
