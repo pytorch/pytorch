@@ -71,7 +71,6 @@ class TestSparseGCS(TestCase):
                 return tuple(strides)
 
             def apply_reduction(index, strides, dims):
-                print(index, strides, dims)
                 return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
             
             shape = get_shape(data)
@@ -92,7 +91,6 @@ class TestSparseGCS(TestCase):
             # <row>: <list of (colindex, value)>
             col_value = defaultdict(list)
             for index in itertools.product(*map(range, shape)):
-                print(index)
                 v = data
                 for i in index:
                     v = v[i]
@@ -104,7 +102,7 @@ class TestSparseGCS(TestCase):
             ro = [0]
             co = []
             values = []
-            for i in range(max(col_value)):
+            for i in range(max(col_value)+1):
                 cv = col_value.get(i, [])
                 ro.append(ro[-1] + len(cv))
                 cv.sort()
@@ -112,6 +110,7 @@ class TestSparseGCS(TestCase):
                 co.extend(c)
                 values.extend(v)
 
+            print(f"{ro} {co} {values} {reduction} {shape}")
             return torch.sparse_gcs_tensor(ro, co, values, reduction, shape, fill_value)
         
         sp = make_sparse_gcs([[1, 2], [3, 4]])
