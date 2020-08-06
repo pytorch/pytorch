@@ -365,13 +365,13 @@ struct ReduceOp {
     extern __shared__ char shared_memory[];
     index_t output_idx = config.output_idx<output_vec_size>();
     index_t input_idx = config.input_idx();
-    auto base_offsets1 = output_calc.get(output_idx)[1];
+    auto base_offsets_input = output_calc.get(output_idx)[num_outputs];
 
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     arg_vec_t value;
 
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
-      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets1);
+      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets_input);
       value = thread_reduce<output_vec_size>(input_slice);
     }
 
@@ -383,14 +383,14 @@ struct ReduceOp {
     }
 
     using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+    using offset_vec_t = at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size>;
     offset_vec_t base_offsets;
     out_ptr_vec_t out;
 
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      base_offsets[i] = output_calc.get(output_idx + i)[0];
-      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i]);
+      base_offsets[i] = output_calc.get(output_idx + i);
+      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i][0]);
     }
 
     arg_vec_t* acc = nullptr;
@@ -398,7 +398,7 @@ struct ReduceOp {
       size_t numerator = sizeof(arg_t);
       size_t denominator = sizeof(out_scalar_t);
       reduce_fraction(numerator, denominator);
-      acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0] * numerator / denominator));
+      acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0][0] * numerator / denominator));
     }
 
     if (config.should_global_reduce()) {
@@ -725,29 +725,29 @@ struct ReduceOp {
   }
 
   template<class T>
-  C10_DEVICE void set_results(const T x, const index_t base_offset) const {
+  C10_DEVICE void set_results(const T x, const at::detail::Array<index_t, num_outputs + 1> base_offset) const {
     assert(noutputs == 1);
-    auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
+    auto res = (out_scalar_t*)((char*)dst[0] + base_offset[0]);
     *res = x;
   }
 
   //Currently implemented for max of two outputs
   template<class T1, class T2>
-  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const at::detail::Array<index_t, num_outputs + 1> base_offset) const {
     if (noutputs >= 1) {
-      auto res0 = (T1*)((char*)dst[0] + base_offset);
+      auto res0 = (T1*)((char*)dst[0] + base_offset[0]);
       *res0 = x.first;
     }
     if (noutputs >= 2) {
       // base offset is computed assuming element size being sizeof(T1), so we need to make a
       // correction to obtain the correct base offset
-      auto res1 = (T2*) ((char *) dst[1] + base_offset / sizeof(T1) * sizeof(T2));
+      auto res1 = (T2*) ((char *) dst[1] + base_offset[1]);
       *res1 = x.second;
     }
   }
 
   template <int output_vec_size>
-  C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<index_t, output_vec_size> base_offset) const {
+  C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size> base_offset) const {
     assert(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
@@ -759,7 +759,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> global_reduce(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<arg_t, output_vec_size> *acc, char* shared_memory) const {
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+    using offset_vec_t = at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size>;
 
     arg_vec_t* reduce_buffer = (arg_vec_t*)cta_buf;
     index_t output_idx = config.output_idx<output_vec_size>();
@@ -768,8 +768,8 @@ struct ReduceOp {
 
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      base_offsets[i] = output_calc.get(output_idx + i)[0];
-      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i]);
+      base_offsets[i] = output_calc.get(output_idx + i);
+      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i][0]);
     }
 
     bool should_store = config.should_store(output_idx);
