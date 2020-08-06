@@ -915,12 +915,13 @@ AT_ERROR("lu: MAGMA library not found in "
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::zeros_like(pivots, at::device(at::kCUDA).dtype(at::kInt));
-      cusolver_LU<scalar_t>(
-        m, n, self_data, m, piv_tmp.data_ptr<int>(), info_tmp.data_ptr<int>());
+      Tensor piv_tmp = at::zeros_like(pivots, self.options().dtype(at::kInt));
+      cusolver_LU<scalar_t>(m, n, self_data, m, piv_tmp.data_ptr<int>(), info_tmp.data_ptr<int>());
       pivots.copy_(piv_tmp);
     } else {
       magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
+      // cusolverDnXgetrf LU impl without pivoting is unstable and may create NaN.
+      // cusolver_LU<scalar_t>(m, n, self_data, m, nullptr, info_tmp.data_ptr<int>());
     }
     infos.copy_(info_tmp);
   } else {
