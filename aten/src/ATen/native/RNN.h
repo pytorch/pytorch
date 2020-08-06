@@ -27,7 +27,7 @@ DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_miopen_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_miopen_stub);
 
-inline void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens, bool check_dtype=false) {
+inline void check_attributes(const Tensor& input, const TensorList& params, const TensorList& hiddens, bool check_dtype=false) {
   auto input_device = input.device();
   auto input_dtype = input.scalar_type();
 

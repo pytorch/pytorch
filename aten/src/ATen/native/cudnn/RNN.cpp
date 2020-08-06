@@ -465,7 +465,7 @@ namespace {
             // and informative check that all params are laid out the way we think they are.  If include_bias is false,
             // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
             // cudnnGetRNNLinLayerBiasParams iteration.
-            if (include_bias || cudnn_method == cudnnGetRNNLinLayerMatrixParams) {
+            if (include_bias || cudnn_method != cudnnGetRNNLinLayerBiasParams) {
               // Generate a new parameter tensor which is a view into the weight_buf.
               std::initializer_list<int64_t> size = {
                 mat_numel * num_linear_layers / 2, 1};
@@ -545,10 +545,10 @@ namespace {
         auto param_from = *a, param_to = *b;
         // if copying, allow_type_change may be true or false.
         // if viewing, allow_type_change must be false.
-        AT_ASSERTM(copy || !allow_type_change,
-                   "if viewing, type change is not allowed.");
-        AT_ASSERTM(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
-                   "parameter types mismatch");
+        TORCH_INTERNAL_ASSERT(copy || !allow_type_change,
+                              "if viewing, type change is not allowed.");
+        TORCH_INTERNAL_ASSERT(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
+                              "parameter types mismatch");
         if (copy) {
             param_to.copy_(param_from.view_as(param_to));
         } else {
@@ -733,7 +733,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& fn_dropout_state
     ) {
 
-  check_device(input_r, weight, {hx, cx}, /*check_dtype=*/true);
+  check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
   if (!weight_buf.defined()) {
@@ -1287,8 +1287,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
-  // TODO:  This can go in _cudnn_rnn, but if so, we should remove weight_buf from _cudnn_rnn's
-  // arglist, and schema changes are unpleasant
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
   // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
   // instead of a defined or undefined Tensor?

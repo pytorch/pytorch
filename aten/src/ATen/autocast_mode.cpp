@@ -330,7 +330,7 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::op
 CuDNN RNNs (the weight reflattening needs special attention)
 ***********************************************************/
 
-// To be registered for the "_cudnn_rnn..." schema.
+// To be registered for the "_cudnn_rnn(...)" schema.
 // _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
 std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
 _cudnn_rnn_cast_reflatten(const Tensor & input,
@@ -354,18 +354,31 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   for (const auto& t : weight) {
     TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");
   }
+  // weight_stride0 is the number of weight tensors per layer and direction, as seen by model.parameters().
+  // If bias is enabled, there are 4 such tensors (ih and hh weights, ih and hh biases).
+  // If bias is not enabled, there are 2 (ih and hh weights).
+  // This organization holds for all rnn types (RNN, GRU, and LSTM).
   TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
                         "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
                         weight_stride0);
 
-  Tensor redispatch_weight_buf;
+  Tensor weight_buf, redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
-  const auto& weight_buf = *weight_buf_opt;
+  // There's an implicit contract here with native/cudnn/RNN.cpp:_cudnn_impl, which calls at:_cudnn_rnn.
+  // Code here assumes if _cudnn_impl passes weight_buf_opt containing a defined tensor, that tensor
+  // is valid flat storage of the weights in their incoming dtype.
+  if (weight_buf_opt.has_value()) {
+    weight_buf = *weight_buf_opt;
+  }
   bool needs_cast_and_flatten = (weight_buf.defined() ?
+                                 // weight_buf is valid.  Only change it if it's eligible and not already FP16.
                                  is_eligible(weight_buf) && (weight_buf.scalar_type() != at::kHalf) :
+                                 // weight_buf is not valid.  Only create it if other weights are eligible and not already FP16.
                                  is_eligible(weight[0]) && (weight[0].scalar_type() != at::kHalf));
   if (needs_cast_and_flatten) {
-    // this is (and should be) autograd-exposed.
+    // Casts weight tensors to FP16 and ensures all weights for all layers are views into a large flat buffer,
+    // with the right locations and layouts expected by cudnn.
+    // This is (and should be) autograd-exposed.
     std::tie(redispatch_weight_buf, redispatch_weight) =
         at::native::cudnn_rnn::copy_weights_to_flat_buf_views(
             weight,
@@ -488,8 +501,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   m.impl("_cudnn_rnn",
-         c10::impl::hacky_wrapper_for_legacy_signatures<std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> (const Tensor &, TensorList, int64_t, const c10::optional<Tensor>&, const Tensor &, const c10::optional<Tensor>&, int64_t, int64_t, int64_t, bool, double, bool, bool, IntArrayRef, const c10::optional<Tensor>&)>(TORCH_FN(at::autocast::_cudnn_rnn_cast_reflatten))
-  );
+         TORCH_FN((&at::autocast::_cudnn_rnn_cast_reflatten)));
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
@@ -525,7 +537,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(layer_norm), "layer_norm", Tensor (const Tensor &, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   // The macro doesn't like this one so I had to write it out manually.
   m.impl("native_layer_norm",
-        TORCH_FN((&WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)));
+         TORCH_FN((&WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double), &ADD_NS(native_layer_norm)>::type::call)));
   KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
@@ -593,7 +605,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
 
   m.impl("binary_cross_entropy",
-    TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
 
 }
