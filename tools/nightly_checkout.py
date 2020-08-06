@@ -14,11 +14,13 @@ import functools
 import contextlib
 import subprocess
 from ast import literal_eval
+from argparse import ArgumentParser
 
 
 LOGGER = logging.getLogger("conda-pytorch")
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
+SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "ipython", "sphinx")
 
 
 def init_logging(level=logging.INFO):
@@ -46,12 +48,31 @@ def timed(prefix):
     return dec
 
 
-@timed("Solving conda envrionment")
-def conda_solve():
+@timed("Solving conda environment")
+def conda_solve(name=None, prefix=None):
     """Performs the conda solve and splits the deps from the package."""
-    cmd = ["conda", "create", "--yes", "--dry-run", "--json",
-           "--name", "__pytorch__", "-c", "pytorch-nightly", "pytorch"]
+    # compute what environment to use
+    if prefix is not None:
+        existing_env = True
+        env_opts = ["--prefix", prefix]
+    elif name is not None:
+        existing_env = True
+        env_opts = ["--name", name]
+    else:
+        # create new environment
+        existing_env = False
+        env_opts = ["--name", "pytorch-deps"]
+    # run solve
+    if existing_env:
+        cmd = ["conda", "install", "--yes", "--dry-run", "--json",
+               "-c", "pytorch-nightly", "-c", "conda-forge"]
+        cmd.extend(env_opts)
+    else:
+        cmd = ["conda", "create", "--yes", "--dry-run", "--json",
+               "--name", "__pytorch__", "-c", "pytorch-nightly", "-c", "conda-forge"]
+    cmd.extend(SPECS_TO_INSTALL)
     p = subprocess.run(cmd, capture_output=True, check=True)
+    # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
     deps = []
@@ -62,17 +83,19 @@ def conda_solve():
             platform = pkg["platform"]
         else:
             deps.append(url)
-    return deps, pytorch, platform
+    return deps, pytorch, platform, existing_env, env_opts
 
 
 @timed("Installing dependencies")
-def deps_install(deps):
+def deps_install(deps, existing_env, env_opts):
     """Install dependencies to deps environment"""
-    # first remove previous env
-    cmd = ["conda", "env", "remove", "--yes", "--name", "pytorch-deps"]
-    p = subprocess.run(cmd, check=True)
+    if not existing_env:
+        # first remove previous pytorch-deps env
+        cmd = ["conda", "env", "remove", "--yes"] + env_opts
+        p = subprocess.run(cmd, check=True)
     # install new deps
-    cmd = ["conda", "create", "--yes", "--no-deps", "--name", "pytorch-deps"] + deps
+    inst_opt = "install" if existing_env else "create"
+    cmd = ["conda", inst_opt, "--yes", "--no-deps"] + env_opts + deps
     p = subprocess.run(cmd, check=True)
 
 
@@ -229,23 +252,35 @@ def move_nightly_files(spdir, platform):
         _link_files(listing, source_dir, target_dir)
 
 
-def install():
+def install(name=None, prefix=None):
     """Development install of PyTorch"""
-    deps, pytorch, platform = conda_solve()
-    deps_install(deps)
+    deps, pytorch, platform, existing_env, env_opts = conda_solve(name=name, prefix=prefix)
+    if deps:
+        deps_install(deps, existing_env, env_opts)
     pytdir = pytorch_install(pytorch)
     spdir = _site_packages(pytdir, platform)
     checkout_nightly_version(spdir)
     move_nightly_files(spdir, platform)
     pytdir.cleanup()
     print("-------\nPyTorch Development Environment set up!\nPlease activate to "
-          "enable this environment:\n  $ conda activate pytorch-deps")
+          f"enable this environment:\n  $ conda activate {env_opts[1]}")
+
+
+def make_parser():
+    p = ArgumentParser("nightly-checkout")
+    p.add_argument("-n", "--name", help="Name of environment", dest="name", default=None,
+                   metavar="ENVIRONMENT")
+    p.add_argument("-p", "--prefix", help="Full path to environment location (i.e. prefix)",
+                   dest="prefix", default=None, metavar="PATH")
+    return p
 
 
 def main(args=None):
     """Main entry point"""
+    p = make_parser()
+    ns = p.parse_args(args)
     init_logging()
-    install()
+    install(name=ns.name, prefix=ns.prefix)
 
 
 if __name__ == "__main__":
