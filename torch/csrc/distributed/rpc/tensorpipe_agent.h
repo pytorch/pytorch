@@ -117,7 +117,7 @@ struct AggregatedNetworkData {
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
 // memory (linux) and TCP (linux & mac) support. CUDA support is in progress.
-class TORCH_API TensorPipeAgent : public RpcAgent {
+class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
       const std::shared_ptr<::c10d::Store>& store,
