@@ -605,7 +605,9 @@ void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
 }
 
 void BoundShapeInferencer::InferFC(const OperatorDef& op) {
-  CAFFE_ENFORCE_EQ(op.input_size(), 3, "FC has to have 3 inputs");
+  CAFFE_ENFORCE(
+      op.input_size() == 3 || op.input_size() == 4,
+      "FC has to have 3 or 4 inputs");
   const auto w_it = shape_info_.find(op.input(1));
   CAFFE_ENFORCE(
       w_it != shape_info_.end(),
@@ -670,6 +672,16 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   // Standard shape inference for outputs
   std::vector<TensorShape> input_shapes{
       shape_info_[op.input(0)].shape, w_shape_info.shape, b_shape_info.shape};
+  if (op.input_size() == 4) {
+    const auto quant_param_it = shape_info_.find(op.input(3));
+    CAFFE_ENFORCE(
+        quant_param_it != shape_info_.end(),
+        "Shape of quant_param input of FC ",
+        op.input(3),
+        " needs to be presented");
+    const ShapeInfo& quant_param_shape_info = quant_param_it->second;
+    input_shapes.emplace_back(quant_param_shape_info.shape);
+  }
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
   CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
   TensorProto::DataType output_data_type;
@@ -795,29 +807,43 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
   try {
+    const static std::unordered_set<std::string>
+        types_with_independent_output_shape = {"Int8GenQuantParams",
+                                               "Int8QuantSchemeBlobFill"};
     std::vector<TensorShape> input_shapes;
     for (const auto& input : op.input()) {
       const auto it = shape_info_.find(input);
-      if (it == shape_info_.end()) {
+      if (it == shape_info_.end() &&
+          !types_with_independent_output_shape.count(op.type())) {
         LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
                      << op.type();
         return;
       }
-      input_shapes.emplace_back(it->second.shape);
+      if (types_with_independent_output_shape.count(op.type())) {
+        TensorShape input_shape;
+        input_shapes.emplace_back(std::move(input_shape));
+
+      } else {
+        input_shapes.emplace_back(it->second.shape);
+      }
     }
 
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
     CAFFE_ENFORCE(schema);
     std::vector<TensorShape> output_shapes;
     output_shapes = schema->InferTensor(op, input_shapes);
-    bool is_quantized =
-        !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
+    bool is_quantized = !(op.type().compare(0, 4, "Int8")) &&
+        (op.type() != "Int8Dequantize") &&
+        (op.type() != "Int8QuantSchemeBlobFill") &&
+        (op.type() != "Int8GenQuantParams");
     float scale = 1;
     int offset = 0;
     TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
     if (is_quantized) {
       const static std::map<std::string, int> type_info_from_input = {
           {"Int8Quantize", -1}, // Force this op's output to be uint8
+          {"Int8FCPackWeight", 0},
+          {"Int8ConvPackWeight", 0},
           {"Int8ConvRelu", 1},
           {"Int8MaxPool", 0},
           {"Int8AveragePool", 0},

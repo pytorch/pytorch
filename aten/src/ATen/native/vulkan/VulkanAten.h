@@ -20,10 +20,6 @@ Tensor convolution_prepacked(
     const float output_min,
     const float output_max);
 
-Tensor vulkan_adaptive_avg_pool2d(
-    const at::Tensor& input,
-    IntArrayRef output_size);
-
 } // namespace vulkan
 } // namespace native
 } // namespace at

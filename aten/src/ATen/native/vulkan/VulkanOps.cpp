@@ -75,6 +75,23 @@ void upsample_nearest2d(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape) {
+  const auto shapeNumel = std::accumulate(
+      std::begin(shape), std::end(shape), 1, std::multiplies<int64_t>());
+  TORCH_INTERNAL_ASSERT(
+      shapeNumel == input.numel(),
+      "reshape_copy expects shape with equal number of elements with input Vulkan tensor");
+
+  input.sync_image_to_buffer();
+
+  VulkanTensor output{shape};
+  copy_buffer_to_buffer(
+      *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
+  return output;
+}
+
 void adaptive_avg_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
@@ -122,6 +139,73 @@ void adaptive_avg_pool2d(
   computeUnit.createCommandBuffer(descriptorSet);
   input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
+void max_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW,
+    const int dilationH,
+    const int dilationW) {
+  auto device = context().device();
+  const auto c = _n * _c;
+  struct ConstBlock {
+    int32_t inputSize[4];
+    int32_t outputSize[4];
+    int32_t kernelSize[2];
+    int32_t stride[2];
+    int32_t padding[2];
+    int32_t dilate[2];
+  };
+  ConstBlock cb{
+      {iW, iH, c, 0},
+      {oW, oH, c, 0},
+      {kW, kH},
+      {dW, dH},
+      {padW, padH},
+      {dilationW, dilationH},
+  };
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(max_pool2d), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
+  computeUnit.dispatchCommandBuffer(oW, oH, c, workGroupSize);
   computeUnit.endCommandBuffer();
   computeUnit.submitAndWaitCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -252,12 +336,20 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
 
 VBuffer bufferFromOptionalHostData(
     c10::optional<const float*> data,
-    const uint32_t size) {
+    const uint32_t dataSize,
+    const uint32_t bufferSize) {
+  TORCH_INTERNAL_ASSERT(
+      dataSize <= bufferSize,
+      "buffer size(",
+      bufferSize,
+      ") is not enough for data(",
+      dataSize,
+      ")");
   const auto sizeAligned =
-      ROUND_UP(size, context().limits().minStorageBufferOffsetAlignment);
+      ROUND_UP(bufferSize, context().limits().minStorageBufferOffsetAlignment);
   VBuffer buffer{sizeAligned};
   if (data.has_value()) {
-    buffer.copy_from_host_to_device((void*)*data, size);
+    buffer.copy_from_host_to_device(*data, dataSize);
   } else {
     buffer.set_zeros();
   }
@@ -268,10 +360,6 @@ VBuffer bufferZeros(const uint32_t size) {
   VBuffer buffer{size};
   buffer.set_zeros();
   return buffer;
-}
-
-uint32_t conv2d_biasBufferSize(uint32_t oc) {
-  return sizeof(float) * ALIGN_UP4(oc);
 }
 
 void conv2d_depthwise(
@@ -365,7 +453,10 @@ void conv2d_depthwise(
       output,
       input,
       weight,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -385,7 +476,10 @@ void conv2d_depthwise(
       output,
       input,
       weightTensor,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -592,7 +686,10 @@ void conv2d(
       output,
       input,
       kernelImage,
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      bufferFromOptionalHostData(
+          bias,
+          sizeof(float) * params.OC,
+          sizeof(float) * ALIGN_UP4(params.OC)),
       params,
       output_min,
       output_max);
@@ -611,7 +708,10 @@ void conv2d(
         output,
         input,
         weight_prepacked,
-        bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+        bufferFromOptionalHostData(
+            bias,
+            sizeof(float) * params.OC,
+            sizeof(float) * ALIGN_UP4(params.OC)),
         params,
         output_min,
         output_max);
