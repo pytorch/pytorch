@@ -21,20 +21,25 @@ instructions in the ``README.md`` in that directory.
 import __future__
 
 import collections
-import torch
+import functools
 import types
+from typing import Dict, Set, List, Any, Callable, Iterable
 
-def get_ignored_functions():
-    """Return public functions that cannot be overrided by __torch_function__
+import torch
+from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
+
+@functools.lru_cache(None)
+def get_ignored_functions() -> Set[Callable]:
+    """Return public functions that cannot be overridden by __torch_function__
 
     Returns
     -------
     A tuple of functions that are publicly available in the torch API but cannot
-    be overrided with __torch_function__. Mostly this is because none of the
+    be overridden with __torch_function__. Mostly this is because none of the
     arguments of these functions are tensors or tensor-likes.
-
     """
-    return (
+    Tensor = torch.Tensor
+    return {
         torch.typename,
         torch.is_tensor,
         torch.is_storage,
@@ -150,10 +155,33 @@ def get_ignored_functions():
         torch.is_vulkan_available,
         torch.is_deterministic,
         torch.set_deterministic,
-        torch.unify_type_list
-    )
+        torch.unify_type_list,
+        Tensor.__delitem__,
+        Tensor.__dir__,
+        Tensor.__getattribute__,
+        Tensor.__init__,
+        Tensor.__init_subclass__,
+        Tensor.__delattr__,
+        Tensor.__setattr__,
+        Tensor.__torch_function__,
+        Tensor.__new__,
+        Tensor.__class__,
+        Tensor.__subclasshook__,
+        Tensor.as_subclass,
+        Tensor.reinforce,
+        Tensor.new,
+        Tensor.new_tensor,
+        Tensor.new_empty,
+        Tensor.new_zeros,
+        Tensor.new_ones,
+        Tensor.new_full,
+        Tensor._make_subclass,
+        Tensor.stride,
+        Tensor.unflatten,
+    }
 
-def get_testing_overrides():
+@functools.lru_cache(None)
+def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -162,7 +190,6 @@ def get_testing_overrides():
     lambda functions that have the same signature as the real function
     and unconditionally return -1. These lambda functions are useful
     for testing API coverage for a type that defines __torch_function__.
-
     """
     # Every function in the PyTorch API that can be overriden needs an entry
     # in this dict.
@@ -171,7 +198,8 @@ def get_testing_overrides():
     # the lambda function procedurally but that is blocked by generating
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
-    return {
+    Tensor = torch.Tensor
+    ret = {
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
@@ -688,9 +716,203 @@ def get_testing_overrides():
         torch.var_mean: lambda input, dim=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        Tensor.__floordiv__: lambda self, other: -1,
+        Tensor.__rfloordiv__: lambda self, other: -1,
+        Tensor.__ifloordiv__: lambda self, other: -1,
+        Tensor.__truediv__: lambda self, other: -1,
+        Tensor.__rtruediv__: lambda self, other: -1,
+        Tensor.__itruediv__: lambda self, other: -1,
+        Tensor.__lshift__: lambda self, other: -1,
+        Tensor.__ilshift__: lambda self, other: -1,
+        Tensor.__rshift__: lambda self, other: -1,
+        Tensor.__irshift__: lambda self, other: -1,
+        Tensor.__float__: lambda self: -1,
+        Tensor.__array__: lambda self, dtype: -1,
+        Tensor.__bool__: lambda self: -1,
+        Tensor.__contains__: lambda self, other: -1,
+        Tensor.__neg__: lambda self: -1,
+        Tensor.__invert__: lambda self: -1,
+        Tensor.__mod__: lambda self, other: -1,
+        Tensor.__array_wrap__: lambda self, array: -1,
+        Tensor.__getitem__: lambda self, idx: -1,
+        Tensor.__deepcopy__: lambda self, memo: -1,
+        Tensor.__iter__: lambda self: -1,
+        Tensor.__int__: lambda self: -1,
+        Tensor.__long__: lambda self: -1,
+        Tensor.__hash__: lambda self: -1,
+        Tensor.__index__: lambda self: -1,
+        Tensor.__len__: lambda self: -1,
+        Tensor.__format__: lambda self, format_spec: -1,
+        Tensor.__reduce_ex__: lambda self, proto: -1,
+        Tensor.__reversed__: lambda self: -1,
+        Tensor.__repr__: lambda self: -1,
+        Tensor.__setitem__: lambda self, k, v: -1,
+        Tensor.__setstate__: lambda self, d: -1,
+        Tensor.T.__get__: lambda self: -1,
+        Tensor._backward_hooks.__get__: lambda self: -1,
+        Tensor._base.__get__: lambda self: -1,
+        Tensor._cdata.__get__: lambda self: -1,
+        Tensor.grad.__get__: lambda self: -1,
+        Tensor._grad.__get__: lambda self: -1,
+        Tensor._grad_fn.__get__: lambda self: -1,
+        Tensor.grad_fn.__get__: lambda self: -1,
+        Tensor._version.__get__: lambda self: -1,
+        Tensor.data.__get__: lambda self: -1,
+        Tensor.device.__get__: lambda self: -1,
+        Tensor.dtype.__get__: lambda self: -1,
+        Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_leaf.__get__: lambda self: -1,
+        Tensor.is_meta.__get__: lambda self: -1,
+        Tensor.is_mkldnn.__get__: lambda self: -1,
+        Tensor.is_quantized.__get__: lambda self: -1,
+        Tensor.is_sparse.__get__: lambda self: -1,
+        Tensor.layout.__get__: lambda self: -1,
+        Tensor.name.__get__: lambda self: -1,
+        Tensor.names.__get__: lambda self: -1,
+        Tensor.ndim.__get__: lambda self: -1,
+        Tensor.output_nr.__get__: lambda self: -1,
+        Tensor.requires_grad.__get__: lambda self: -1,
+        Tensor.shape.__get__: lambda self: -1,
+        Tensor.volatile.__get__: lambda self: -1,
+        Tensor.real.__get__: lambda self: -1,
+        Tensor.imag.__get__: lambda self: -1,
+        Tensor.__cuda_array_interface__.__get__: lambda self: -1,
+        Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
+        Tensor._coalesced_: lambda self: -1,
+        Tensor._dimI: lambda self: -1,
+        Tensor._dimV: lambda self: -1,
+        Tensor._indices: lambda self: -1,
+        Tensor._is_view: lambda self: -1,
+        Tensor._nnz: lambda self: -1,
+        Tensor._update_names: lambda self, names, inplace: -1,
+        Tensor._values: lambda self: -1,
+        Tensor.align_as: lambda self, other: -1,
+        Tensor.align_to: lambda self, order, ellipsis_idx: -1,
+        Tensor.apply_: lambda self, callable: -1,
+        Tensor.as_strided: lambda self, size, stride: -1,
+        Tensor.as_strided_: lambda self, size, stride: -1,
+        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False: -1,
+        Tensor.bfloat16: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.bool: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.byte: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.char: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.cauchy_: lambda self, median=0, sigma=1, *, generator=None: -1,
+        Tensor.coalesce: lambda self: -1,
+        Tensor._coalesced_: lambda self, coalesced: -1,
+        Tensor.contiguous: lambda self, memory_format=torch.contiguous_format: -1,
+        Tensor.copy_: lambda self, src, non_blocking=False: -1,
+        Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.data_ptr: lambda self: -1,
+        Tensor.dense_dim: lambda self: -1,
+        Tensor.dim: lambda self: -1,
+        Tensor.double: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.element_size: lambda self: -1,
+        Tensor.expand: lambda self, size: -1,
+        Tensor.expand_as: lambda self, other: -1,
+        Tensor.exponential_: lambda self, lambd=1, *, generator=None: -1,
+        Tensor.fill_: lambda self, value: -1,
+        Tensor.fill_diagonal_: lambda self, value: -1,
+        Tensor.float: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.geometric_: lambda self, p, *, generator=None: -1,
+        Tensor.get_device: lambda self: -1,
+        Tensor.half: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.has_names: lambda self: -1,
+        Tensor.indices: lambda self: -1,
+        Tensor.int: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.is_coalesced: lambda self: -1,
+        Tensor.is_contiguous: lambda self: -1,
+        Tensor.is_pinned: lambda self: -1,
+        Tensor.is_set_to: lambda self, tensor: -1,
+        Tensor.is_shared: lambda self: -1,
+        Tensor.item: lambda self: -1,
+        Tensor.log_normal_: lambda self, mean=1, std=2, *, generator=None: -1,
+        Tensor.log_softmax: lambda self, dim: -1,
+        Tensor.long: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.map_: lambda self, tensor, callable: -1,
+        Tensor.map2_: lambda self, x, y, callable: -1,
+        Tensor.mm: lambda self, mat2: -1,
+        Tensor.narrow_copy: lambda self, dimension, start, length: -1,
+        Tensor.ndimension: lambda self: -1,
+        Tensor.nelement: lambda self: -1,
+        Tensor.normal_: lambda self: -1,
+        Tensor.numpy: lambda self: -1,
+        Tensor.permute: lambda self, dim: -1,
+        Tensor.pin_memory: lambda self: -1,
+        Tensor.put_: lambda self, indices, tensor, accumulate=False: -1,
+        Tensor.qscheme: lambda self: -1,
+        Tensor.random_: lambda self, from_=0, to=None, *, generator=None: -1,
+        Tensor.record_stream: lambda self, stream: -1,
+        Tensor.refine_names: lambda self, names: -1,
+        Tensor.register_hook: lambda self, hook: -1,
+        Tensor.rename: lambda self, name: -1,
+        Tensor.repeat: lambda self, *size: -1,
+        Tensor.requires_grad_: lambda self, requires_grad=True: -1,
+        Tensor.reshape_as: lambda self, other: -1,
+        Tensor.resize: lambda self, *size: -1,
+        Tensor.resize_: lambda self, size: -1,
+        Tensor.resize_as: lambda self, other: -1,
+        Tensor.retain_grad: lambda self: -1,
+        Tensor.set_: lambda self, source=None, storage_offset=0, size=None, stride=None: -1,
+        Tensor.share_memory_: lambda self: -1,
+        Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.size: lambda self: -1,
+        Tensor.sparse_dim: lambda self: -1,
+        Tensor.sparse_mask: lambda self, mask: -1,
+        Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
+        Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
+        Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
+        Tensor.storage: lambda self: -1,
+        Tensor.storage_offset: lambda self: -1,
+        Tensor.storage_type: lambda self: -1,
+        Tensor.sum_to_size: lambda self, size: -1,
+        Tensor.to: lambda self, dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format: -1,
+        Tensor.to_dense: lambda self: -1,
+        Tensor.to_sparse: lambda self: -1,
+        Tensor.tolist: lambda self: -1,
+        Tensor.to_mkldnn: lambda self: -1,
+        Tensor.type_as: lambda self, other: -1,
+        Tensor.unfold: lambda self, dimension, size, step: -1,
+        Tensor.uniform_: lambda self, from_=0, to=1: -1,
+        Tensor.values: lambda self: -1,
+        Tensor.view: lambda self, shape: -1,
+        Tensor.view_as: lambda self, other: -1,
+        Tensor.zero_: lambda self: -1,
     }
 
-def _get_overloaded_args(relevant_args):
+    ret2 = {}
+    ignored = get_ignored_functions()
+
+    for k, v in ret.items():
+        # Generate methods like __add__ and add_ by default from add
+        names = [
+            k.__name__,  # Default method
+            k.__name__ + "_",  # Inplace variant
+            "__" + k.__name__ + "__",  # Dunder method
+            "__i" + k.__name__ + "__",  # Inplace dunder method
+            "__r" + k.__name__ + "__",  # Reverse dunder method
+        ]
+
+        if k.__name__.startswith("bitwise_"):
+            # bitwise_<op> have dunder methods of the form __<op>__
+            # And so on.
+            subname = k.__name__[len("bitwise_"):]
+            names.extend([
+                "__" + subname + "__",
+                "__i" + subname + "__",
+                "__r" + subname + "__"
+            ])
+
+        for name in names:
+            func = getattr(Tensor, name, None)
+            if callable(func) and func not in ret and func not in ignored:
+                ret2[func] = v
+
+    ret.update(ret2)
+    return ret
+
+
+def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -754,7 +976,7 @@ def _get_overloaded_args(relevant_args):
 
 
 def handle_torch_function(
-        public_api, relevant_args, *args, **kwargs):
+        public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs) -> Any:
     """Implement a function with checks for __torch_function__ overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this
@@ -802,7 +1024,7 @@ def handle_torch_function(
                     '__torch_function__: {}'
                     .format(func_name, list(map(type, overloaded_args))))
 
-def has_torch_function(relevant_args):
+def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     """Check for __torch_function__ implementations in the elements of an iterable
 
     Arguments
@@ -815,41 +1037,64 @@ def has_torch_function(relevant_args):
     True if any of the elements of relevant_args have __torch_function__
     implementations, False otherwise.
     """
-    return any(hasattr(a, '__torch_function__') for a in relevant_args)
+    return _is_torch_function_enabled() and any(
+        type(a) is not torch.Tensor and
+        getattr(a, '__torch_function__', _disabled_torch_function_impl)
+        is not _disabled_torch_function_impl
+        for a in relevant_args
+    )
 
-def get_overridable_functions():
+@functools.lru_cache(None)
+def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
     -------
     A dictionary that maps namespaces that contain overridable functions
-    to functions in that namespace that can be overrided.
-
+    to functions in that namespace that can be overridden.
     """
     overridable_funcs = collections.defaultdict(list)
     tested_namespaces = [
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
         (torch.functional, torch.functional.__all__),
         (torch.nn.functional, dir(torch.nn.functional)),
+        (torch.Tensor, dir(torch.Tensor))
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
             # ignore private functions or functions that are deleted in torch.__init__
-            if func_name.startswith('_') or func_name == 'unique_dim':
-                continue
-            # ignore in-place operators
-            if func_name.endswith('_'):
-                continue
-            # only consider objects with lowercase names
-            if not func_name.islower():
-                continue
+            if namespace is not torch.Tensor:
+                if func_name.startswith('_'): 
+                    continue
+                elif func_name.endswith('_'):
+                    continue
+                elif not func_name[0].islower():
+                    continue
+                elif func_name == 'unique_dim':
+                    continue
+            else:
+                func = getattr(namespace, func_name)
+                if getattr(object, func_name, None) == func:
+                    continue
+                if func_name == '__weakref__':
+                    continue
             func = getattr(namespace, func_name)
+            if namespace is torch.Tensor and getattr(object, func_name, None) == func:
+                continue
             # ignore re-exported modules
             if isinstance(func, types.ModuleType):
                 continue
             # ignore __future__ imports
             if isinstance(func, __future__._Feature):
                 continue
+
+            if not callable(func) and hasattr(func, "__get__"):
+                overridable_funcs[func].append(func.__get__)
+                continue
+
+            if not callable(func):
+                continue
+
             # cannot be overriden by __torch_function__
             if func in get_ignored_functions():
                 msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
@@ -858,3 +1103,27 @@ def get_overridable_functions():
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs
+
+@functools.lru_cache(None)
+def get_tensor_methods() -> Set[Callable]:
+    """ Returns a set of the overridable methods on ``torch.Tensor`` """
+    overridable_funcs = get_overridable_functions()
+    methods = set(overridable_funcs[torch.Tensor])
+    return methods
+
+def is_tensor_method_or_property(func: Callable) -> bool:
+    """
+    Returns True if the function passed in is a handler for a
+    method or property belonging to ``torch.Tensor``, as passed
+    into ``__torch_function__``.
+
+    .. note::
+       For properties, their ``__get__`` method must be passed in.
+
+    This may be needed, in particular, for the following reasons:
+
+    1. Methods/properties sometimes don't contain a `__module__` slot.
+    2. They require that the first passed-in argument is an instance
+       of ``torch.Tensor``.
+    """
+    return func in get_tensor_methods() or func.__name__ == "__get__"

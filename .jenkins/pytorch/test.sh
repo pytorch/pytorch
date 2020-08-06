@@ -242,6 +242,12 @@ test_distributed() {
   fi
 }
 
+test_rpc() {
+    echo "Testing RPC C++ tests"
+    mkdir -p test/test-reports/cpp-rpc
+    build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
+}
+
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
@@ -386,4 +392,5 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_distributed
+  test_rpc
 fi
