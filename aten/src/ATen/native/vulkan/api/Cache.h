@@ -26,7 +26,7 @@ class Cache final {
   // Factory is used to create the object, after which point the object is added
   // to the cache.  Regardless, this function returns with the object in the cache.
 
-  Handle retrieve(const Descriptor& descriptor);
+  auto retrieve(const Descriptor& descriptor);
 
  private:
   struct Configuration final {
@@ -44,11 +44,11 @@ inline Cache<Factory>::Cache(Factory factory)
 }
 
 template<typename Factory>
-inline typename Cache<Factory>::Handle Cache<Factory>::retrieve(
+inline auto Cache<Factory>::retrieve(
     const Descriptor& descriptor) {
   auto iterator = cache_.find(descriptor);
   if (cache_.cend() == iterator) {
-    iterator = cache_.insert({descriptor, factory_(*descriptor)}).first;
+    iterator = cache_.insert({descriptor, factory_(descriptor)}).first;
   }
 
   return iterator->second.get();
