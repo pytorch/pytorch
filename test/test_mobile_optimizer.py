@@ -216,6 +216,9 @@ class TestOptimizer(unittest.TestCase):
         # already quantized conv modules. Verifying that this does
         # not happen again.
 
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+
         class Child(nn.Module):
             def __init__(self):
                 super(Child, self).__init__()
