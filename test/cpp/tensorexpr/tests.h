@@ -202,6 +202,13 @@ namespace jit {
   _(LoopNestReorderLongStringFull)          \
   _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
+  _(Unroll)                                 \
+  _(UnrollOuter)                            \
+  _(UnrollInner)                            \
+  _(UnrollMultipleStatements)               \
+  _(UnrollEmpty)                            \
+  _(NoUnroll)                               \
+  _(UnrollWithVarMap)                       \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
