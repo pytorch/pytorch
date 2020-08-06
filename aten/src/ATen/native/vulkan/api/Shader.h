@@ -10,6 +10,103 @@ namespace vulkan {
 namespace api {
 
 struct Shader final {
+  //
+  // Layout
+  //
+
+  struct Layout final {
+    /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      struct Slot final {
+        VkDescriptorSetLayoutBinding binding;
+
+        inline bool operator==(const Slot& slot) const {
+          return (binding.binding == slot.binding.binding) &&
+                 (binding.descriptorType == slot.binding.descriptorType) &&
+                 (binding.descriptorCount == slot.binding.descriptorCount) &&
+                 (binding.stageFlags == slot.binding.stageFlags) &&
+                 (binding.pImmutableSamplers == slot.binding.pImmutableSamplers);
+        }
+
+        inline size_t hash() const {
+          return c10::get_hash(
+              binding.binding,
+              binding.descriptorType,
+              binding.descriptorCount,
+              binding.stageFlags,
+              binding.pImmutableSamplers);
+        }
+      };
+
+      std::array<Slot, 8u> slots;
+
+      inline bool operator==(const Descriptor& descriptor) const {
+        return (slots == descriptor.slots);
+      }
+    };
+
+    /*
+      Factory
+    */
+
+    class Factory final {
+     public:
+      explicit Factory(VkDevice device);
+
+      typedef Layout::Descriptor Descriptor;
+      typedef VK_DELETER(DescriptorSetLayout) Deleter;
+      typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
+
+      struct Hasher {
+        inline size_t operator()(const Descriptor& descriptor) const {
+          size_t hash = 0u;
+
+          for (const Descriptor::Slot& slot : descriptor.slots) {
+            hash = c10::hash_combine(hash, slot.hash());
+          }
+
+          return hash;
+        }
+      };
+
+      Handle operator()(const Descriptor& descriptor) const;
+
+     private:
+      VkDevice device_;
+    };
+
+    /*
+      Cache
+    */
+
+    typedef api::Cache<Factory> Cache;
+    Cache cache;
+
+    explicit Layout(const VkDevice device)
+      : cache(Factory(device)) {
+    }
+
+  } layout;
+
+  //
+  // Work Group
+  //
+
+  struct WorkGroup final {
+    uint32_t x;
+    uint32_t y;
+    uint32_t z;
+
+    inline bool operator==(const WorkGroup& work_group) const {
+      return (x == work_group.x) &&
+             (y == work_group.y) &&
+             (z == work_group.z);
+    }
+  };
+
   /*
     Descriptor
   */
@@ -89,95 +186,12 @@ struct Shader final {
   */
 
   typedef api::Cache<Factory> Cache;
+  Cache cache;
 
-  //
-  // Layout
-  //
-
-  struct Layout final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      struct Slot final {
-        VkDescriptorSetLayoutBinding binding;
-
-        inline bool operator==(const Slot& slot) const {
-          return (binding.binding == slot.binding.binding) &&
-                 (binding.descriptorType == slot.binding.descriptorType) &&
-                 (binding.descriptorCount == slot.binding.descriptorCount) &&
-                 (binding.stageFlags == slot.binding.stageFlags) &&
-                 (binding.pImmutableSamplers == slot.binding.pImmutableSamplers);
-        }
-
-        inline size_t hash() const {
-          return c10::get_hash(
-              binding.binding,
-              binding.descriptorType,
-              binding.descriptorCount,
-              binding.stageFlags,
-              binding.pImmutableSamplers);
-        }
-      };
-
-      std::array<Slot, 8u> slots;
-
-      inline bool operator==(const Descriptor& descriptor) const {
-        return (slots == descriptor.slots);
-      }
-    };
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(VkDevice device);
-
-      typedef Layout::Descriptor Descriptor;
-      typedef VK_DELETER(DescriptorSetLayout) Deleter;
-      typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
-
-      struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          size_t hash = 0u;
-
-          for (const Descriptor::Slot& slot : descriptor.slots) {
-            hash = c10::hash_combine(hash, slot.hash());
-          }
-
-          return hash;
-        }
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-  };
-
-  //
-  // Work Group
-  //
-
-  struct WorkGroup final {
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-
-    inline bool operator==(const WorkGroup& work_group) const {
-      return (x == work_group.x) && (y == work_group.y) && (z == work_group.z);
-    }
-  };
+  explicit Shader(const VkDevice device)
+    : layout(device),
+      cache(Factory(device)) {
+  }
 };
 
 } // namespace api
