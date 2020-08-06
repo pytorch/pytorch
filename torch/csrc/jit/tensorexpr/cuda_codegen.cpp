@@ -717,8 +717,9 @@ class NoThreadIdxRewriter : public IRMutator {
   bool need_rewrite_ = false;
 };
 
-std::ostream& operator<<(
-    std::ostream& out, const std::vector<const Expr*>& exprs) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<const Expr*>& exprs) {
   size_t i = 0;
   for (auto expr : exprs) {
     if (i++ > 0) {
@@ -816,10 +817,16 @@ void CudaCodeGen::Initialize() {
     }
   }
 
-  GRAPH_DEBUG("Fused TE CUDA kernel:\n",
-              oss_.str(), "\n",
-              "gpu_block_extents: (", gpu_block_extents, ")\n",
-              "gpu_thread_extents: (", gpu_thread_extents, ")");
+  GRAPH_DEBUG(
+      "Fused TE CUDA kernel:\n",
+      oss_.str(),
+      "\n",
+      "gpu_block_extents: (",
+      gpu_block_extents,
+      ")\n",
+      "gpu_thread_extents: (",
+      gpu_thread_extents,
+      ")");
   CompileToNVRTC(oss_.str(), func_name);
   USE_TRIGGER(cuda_codegen_created);
 }
