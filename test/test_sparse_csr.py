@@ -47,7 +47,74 @@ class TestSparseGCS(TestCase):
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
     def test_sparse_gcs_from_dense(self):
-        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_gcs(torch.empty(0,1), 1)
+        def make_sparse_gcs(data, reduction=None, fill_value=None):
+            import itertools
+            from collections import defaultdict
+
+            def get_shape(data):
+                if isinstance(data, (list, tuple)):
+                    dims = len(data)
+                    if dims == 0:
+                        return (0,)
+                    return (dims, ) + get_shape(data[0])
+                return ()
+
+            def make_strides(shape, dims=None):
+                if dims is None:
+                    dims = tuple(range(len(shape)))
+                ndims = len(dims)
+                if ndims == 0:
+                    return ()
+                strides = [1]
+                for i in range(ndims - 1):
+                    strides.insert(0, strides[0] * shape[dims[ndims - i - 1]])
+                return tuple(strides)
+
+            def apply_reduction(index, strides, dims):
+                print(index, strides, dims)
+                return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
+            
+            shape = get_shape(data)
+            N = len(shape)
+            # TODO: N=0, N=1
+            if reduction is None:
+                dims1 = tuple(range(N//2))
+                dims2 = tuple(range(N//2, N))
+                reduction = dims1 + dims2 + (N//2,)
+            else:
+                l = reduction[-1]
+                dims1 = reduction[:l]
+                dims2 = reduction[l:-1]
+
+            strides1 = make_strides(dims1)
+            strides2 = make_strides(dims2)
+            print(f'{shape} {strides1} {strides2} {dims1} {dims2}')
+            # <row>: <list of (colindex, value)>
+            col_value = defaultdict(list)
+            for index in itertools.product(*map(range, shape)):
+                print(index)
+                v = data
+                for i in index:
+                    v = v[i]
+                if v == fill_value:
+                    continue
+                p1 = apply_reduction(index, strides1, dims1)
+                p2 = apply_reduction(index, strides2, dims2)
+                col_value[p1].append((p2, v))
+            ro = [0]
+            co = []
+            values = []
+            for i in range(max(col_value)):
+                cv = col_value.get(i, [])
+                ro.append(ro[-1] + len(cv))
+                cv.sort()
+                c, v = zip(*cv)
+                co.extend(c)
+                values.extend(v)
+
+            return torch.sparse_gcs_tensor(ro, co, values, reduction, shape, fill_value)
+        
+        sp = make_sparse_gcs([[1, 2], [3, 4]])
         
         print(sp.pointers)
         print(sp.indices)
