@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
-import torch.nn as nn
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
