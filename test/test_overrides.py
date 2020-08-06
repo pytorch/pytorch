@@ -6,11 +6,12 @@ import functools
 import pprint
 
 from torch.testing._internal.common_utils import TestCase
-from torch._overrides import (
+from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
+    is_tensor_method_or_property
 )
 
 Tensor = torch.Tensor
@@ -210,6 +211,15 @@ class SubTensor(torch.Tensor):
             return NotImplemented
         return HANDLED_FUNCTIONS_SUB[func](*args, **kwargs)
 
+class SubTensor2(torch.Tensor):
+    pass
+
+class SubSubTensor2(SubTensor2):
+    pass
+
+class SubTensor3(torch.Tensor):
+    pass
+
 @implements_sub(torch.mean)
 def sub_mean(mat):
     return 0
@@ -275,6 +285,16 @@ def sub_diagonal_foo(a, b, c=None):
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
+HANDLED_FUNCTIONS_WRAPPERS = {}
+
+def triggered_wrapper(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        wrapped._triggered = True
+        return f(*args, **kwargs)
+
+    wrapped._triggered = False
+    return wrapped
 
 def implements_tensor_like(torch_function):
     "Register a torch function override for TensorLike"
@@ -301,8 +321,14 @@ def generate_tensor_like_torch_implementations():
     )
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in testing_overrides.items():
-        # decorate the overrides with implements_tensor_like
-        implements_tensor_like(func)(override)
+        # decorate the overrides with implements_tensor_like if it's not a
+        # torch.Tensor method
+        wrapped = triggered_wrapper(override)
+        HANDLED_FUNCTIONS_WRAPPERS[func] = wrapped
+        if is_tensor_method_or_property(func):
+            implements_sub(func)(wrapped)
+        else:
+            implements_tensor_like(func)(wrapped)
 
 generate_tensor_like_torch_implementations()
 
@@ -461,21 +487,73 @@ class TestTorchFunctionOverride(TestCase):
         with self.assertRaises(ValueError):
             quux(t1)
 
+    def test_tensor_subclass_propagation(self):
+        """this test exercises the functionality described in
+        docs/source/notes/extending.rst#subclassing-torchtensor"""
+        t1 = torch.tensor([5])
+        t2 = torch.tensor([6])
+
+        s1 = SubTensor2([5])
+        s2 = SubTensor2([6])
+
+        ss1 = SubSubTensor2([5])
+        ss2 = SubSubTensor2([6])
+
+        sn1 = SubTensor3([5])
+        sn2 = SubTensor3([6])
+
+        # Check that leaf subclass is kept regardless of order
+        self.assertTrue(isinstance(s1 + t2, SubTensor2))
+        self.assertTrue(isinstance(t1 + s2, SubTensor2))
+        self.assertTrue(isinstance(s1 + s2, SubTensor2))
+
+        # Check indexing subclass is kept
+        self.assertTrue(isinstance(s1[0], SubTensor2))
+
+        # Check case for subclass of subclass.
+        self.assertTrue(isinstance(ss1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + s2, SubSubTensor2))
+        self.assertTrue(isinstance(s1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1 + t2, SubSubTensor2))
+        self.assertTrue(isinstance(t1 + ss2, SubSubTensor2))
+        self.assertTrue(isinstance(ss1[0], SubSubTensor2))
+
+        # Make sure unrelated class trees are not merged.
+        with self.assertRaises(TypeError):
+            s1 + sn2
+        with self.assertRaises(TypeError):
+            sn1 + s2
+
+
 def generate_tensor_like_override_tests(cls):
     from torch.testing._internal.generated.annotated_fn_args import annotated_args
 
     def test_generator(func, override):
+        # If func corresponds to a torch.Tensor method or property.
+        if is_tensor_method_or_property(func):
+            # Generate an instance by using SubTensor,
+            def instance_gen():
+                return SubTensor([5])
+        else:
+            # Otherwise, TensorLike.
+            def instance_gen():
+                return TensorLike()
+
         func_args = []
-        if inspect.isbuiltin(func) and func in annotated_args:
+        if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg['simple_type']
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    func_args.append(TensorLike())
+                    if arg['name'] == 'self' and is_tensor_method_or_property(func):
+                        func = func.__get__(instance_gen())
+                        continue
+                    func_args.append(instance_gen())
                 elif t == 'TensorList':
-                    func_args.append([TensorLike(), TensorLike()])
+                    func_args.append([instance_gen(), instance_gen()])
                 elif t == 'IntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
@@ -503,18 +581,49 @@ def generate_tensor_like_override_tests(cls):
             nargs = len(args.args)
             if args.defaults is not None:
                 nargs -= len(args.defaults)
-            func_args += [TensorLike() for _ in range(nargs)]
+            func_args = [instance_gen() for _ in range(nargs)]
             if args.varargs is not None:
-                func_args += [TensorLike(), TensorLike()]
+                func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            self.assertEqual(func(*func_args), -1)
+            ret = func(*func_args)
+            # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
+            # This is currently the best check but doesn't work for, for example,
+            # Tensor.__add__ because it redirects to Tensor.add.
+            if ret is None:
+                self.assertTrue(HANDLED_FUNCTIONS_WRAPPERS[func]._triggered)
+                return
+
+            self.assertEqual(ret, -1)
 
         return test
 
     for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
-        module = func.__module__
+        if func.__name__ == "__get__":
+            # __get__ is part of the descriptor protocol.
+            # https://docs.python.org/3/howto/descriptor.html
+            # This is used for properties of the form
+            # torch.Tensor.<property>, with the method __get__
+            # In this case we get the property name in two ways:
+
+            # This case for properties defined in C.
+            module = getattr(
+                func.__self__,
+                "__qualname__",
+                None
+            )
+
+            # This one for properties defined in Python.
+            if module is None:
+                module = "Tensor." + func.__self__.fget.__name__
+
+            # Unfortunately I couldn't find a way to unify these two cases
+            # and there is no way for general descriptors.
+        elif is_tensor_method_or_property(func):
+            module = "Tensor"
+        else:
+            module = func.__module__
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
         else:
