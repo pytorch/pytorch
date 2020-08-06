@@ -822,10 +822,10 @@ void CudaCodeGen::Initialize() {
       oss_.str(),
       "\n",
       "gpu_block_extents: (",
-      gpu_block_extents,
+      printer_->gpu_block_extents(),
       ")\n",
       "gpu_thread_extents: (",
-      gpu_thread_extents,
+      printer_->gpu_thread_extents(),
       ")");
   CompileToNVRTC(oss_.str(), func_name);
   USE_TRIGGER(cuda_codegen_created);
