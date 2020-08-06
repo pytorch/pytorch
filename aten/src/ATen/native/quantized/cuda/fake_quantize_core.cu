@@ -121,8 +121,6 @@ void _fake_quantize_grad_learnable_zero_point_tensor_kernel_cuda(
 
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub, &_fake_quantize_grad_learnable_scale_tensor_kernel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub, &_fake_quantize_grad_learnable_zero_point_tensor_kernel_cuda);
 
 // Fake quantize per channel
 
