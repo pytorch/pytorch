@@ -499,7 +499,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
 # update_jit_scripting_passes is a flag which enables new jit scripting API for ONNX export.
-# This purpose of this flag is to enable the new API temporarily for testing purposes.
+# The purpose of this flag is to enable the new API temporarily for testing purposes.
 # Once these jit APIs are fully tested, they will become part of production code-path by
 # removing this flag.
 def _export(model, args, f, export_params=True, verbose=False, training=None,
