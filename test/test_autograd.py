@@ -2705,6 +2705,36 @@ class TestAutograd(TestCase):
                 last_end = info.cpu_interval.end
             self.assertEqual(info.name, expected_name)
 
+    def test_profiler_seq_nr(self):
+        with profile() as p:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = z.sum()
+            s.backward()
+        # expecting aten::add, aten::sum to have the sequence numbers,
+        # expecting the corresponding backward nodes to have the same numbers
+        # as the forward ops
+        add_seq_nr = -1
+        sum_seq_nr = -1
+        for e in p.function_events:
+            if e.name == "aten::add":
+                add_seq_nr = e.sequence_nr
+                self.assertGreaterEqual(add_seq_nr, 0)
+                self.assertNotEqual(add_seq_nr, sum_seq_nr)
+            elif e.name == "aten::sum":
+                sum_seq_nr = e.sequence_nr
+                self.assertGreaterEqual(sum_seq_nr, 0)
+                self.assertNotEqual(add_seq_nr, sum_seq_nr)
+            elif "Add" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, add_seq_nr)
+            elif "Sum" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, sum_seq_nr)
+            # check that nested ops (e.g. empty) don't have
+            # sequence number
+            if "empty" in e.name:
+                self.assertEqual(e.sequence_nr, -1)
+
     def test_profiler_unboxed_only(self):
         x = torch.rand(3, 4)
 

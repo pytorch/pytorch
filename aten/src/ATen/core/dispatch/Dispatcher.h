@@ -359,10 +359,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
-        std::vector<c10::IValue> stack;
-        stack.reserve(sizeof...(Args));
-        impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
-
+        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
         guard.before(op.schema().name(), stack, seq_num);
       } else {
         guard.before(op.schema().name(), seq_num);
