@@ -4,6 +4,7 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
   ${TORCH_RPC_TEST_DIR}/test_tensorpipe_serialization.cpp
   ${TORCH_RPC_TEST_DIR}/test_e2e_process_group.cpp
+  ${TORCH_RPC_TEST_DIR}/test_e2e_tensorpipe.cpp
 )
 
 add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
