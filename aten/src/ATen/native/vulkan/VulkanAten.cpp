@@ -173,25 +173,23 @@ Tensor vulkan_avg_pool2d(
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 2,
       "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1
-      ? kH
-      : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kH = safe_downcast<int>(kernel_size[0]);
+  const int kW =
+      kernel_size.size() == 1 ? kH : safe_downcast<int>(kernel_size[1]);
 
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
   const int dW = stride.empty()
       ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
 
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
       "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW =
-      padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int padH = safe_downcast<int>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int>(padding[1]);
 
   const auto& x = vtensor_from_vulkan(self);
   auto inputSize = self.sizes();
