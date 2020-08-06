@@ -1,6 +1,7 @@
 import ast
 import enum
 import inspect
+import warnings
 import os
 import re
 import torch
@@ -314,8 +315,9 @@ def try_ann_to_type(ann, loc):
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if not is_enum_support_enabled():
-            raise NotImplementedError(
-                "Enum support is work in progress, please do not use it now")
+            warnings.warn("Enum support is work in progress, enum class {}"
+                          " is not compiled".format(ann))
+            return None
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
