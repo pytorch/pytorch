@@ -611,6 +611,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           ${PARALLEL_FLAGS}
           source ./workspace/env
           cd workspace
@@ -7222,7 +7223,7 @@ workflows:
           vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11"
           name: pytorch_windows_vs2019_py36_cuda11.0_build
           python_version: "3.6"
@@ -7231,7 +7232,7 @@ workflows:
           vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11"
           executor: windows-with-nvidia-gpu
           name: pytorch_windows_vs2019_py36_cuda11.0_test1
@@ -7244,7 +7245,7 @@ workflows:
           vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11"
           executor: windows-with-nvidia-gpu
           name: pytorch_windows_vs2019_py36_cuda11.0_test2
@@ -7257,7 +7258,7 @@ workflows:
           vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn7-py3
+          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11"
           executor: windows-with-nvidia-gpu
           name: pytorch_windows_vs2019_py36_cuda11.0_test-jit-profiling-tests
