@@ -636,6 +636,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         GRAPH_DEBUG("Optimizing diff node ", idx);
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        GRAPH_DUMP("Forward graph:", gradient.f);
+        GRAPH_DUMP("Backward graph:", gradient.df);
         // Run post differentiation optimizations, Autodiff will replace some
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape

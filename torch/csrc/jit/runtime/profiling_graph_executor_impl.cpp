@@ -285,6 +285,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DEBUG("Optimizing diff node ", idx);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
+      GRAPH_DUMP("Forward graph:", gradient.f);
+      GRAPH_DUMP("Backward graph:", gradient.df);
       runDiffGraphPasses(gradient.f);
       packGradient(gradient, dnode);
       GRAPH_DEBUG("Finished optimizing diff node ", idx++);
