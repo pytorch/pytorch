@@ -19,6 +19,7 @@ from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+from typing_extensions import Final
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -688,31 +689,9 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
-try:
-    import typing_extensions
-    from typing_extensions import Final
-
-    def is_final(ann):
-        return ann.__module__ == 'typing_extensions' and \
-            (getattr(ann, '__origin__', None) is typing_extensions.Final)
-except ImportError:
-    # Same as above, this polyfill is only for `typing_extensions`
-    class FinalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class FinalCls(object):
-        def __getitem__(self, types):
-            return FinalInstance(types)
-
-    # Issue #38221: "type: ignore" should be removed after one decides if
-    # typing_extensions needs to be a dependency of pytorch
-    Final = FinalCls()  # type:ignore # noqa: T484
-
-    def is_final(ann):
-        return isinstance(ann, FinalInstance)
+def is_final(ann):
+    return ann.__module__ == 'typing_extensions' and \
+        (getattr(ann, '__origin__', None) is Final)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):

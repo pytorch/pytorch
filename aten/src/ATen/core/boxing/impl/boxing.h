@@ -5,7 +5,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/core/TensorOptions.h>
-#include <ATen/core/Dimname.h>
 
 #include <ATen/core/boxing/KernelFunction.h>
 
@@ -72,44 +71,17 @@ using can_unbox =
   >;
 
 //
-// profiling support: until boxing support is complete, we push placeholder
-// "cannot box" values for unboxable args
-//
-
-template <typename T, std::enable_if_t<!c10::impl::can_box<T>::value>* = nullptr>
-inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
-  torch::jit::push(stack, "cannot box");
-  return false;
-}
-template <typename T, std::enable_if_t<c10::impl::can_box<T>::value>* = nullptr>
-inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
-  torch::jit::push(stack, v);
-  return true;
-}
-
-// boxArgumentsOrCannotBoxIntoStack takes the arguments and pushes them as IValues onto the stack.
-// In case the argument cannot be converted to IValue, the function pushes "cannot box"
-// IValue string. Return value - whether all of the arguments could be converted to IValues
-inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack) {
-  return true;
-}
-template <typename Item>
-inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item) {
-  return pushIValueOrCannotBox(stack, item);
-}
-template <typename Item, typename... Rest>
-inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
-  auto res = pushIValueOrCannotBox(stack, item);
-  return boxArgumentsOrCannotBoxIntoStack(stack, other_items...) && res;
-}
-
-//
 // BoxedKernelWrapper
 //
 // For a given function type FT, BoxedKernelWrapper<FT> implements
-// a `call` method that
+//
+// 1. a `boxArgs` method that boxes the function's arguments - i.e.,
+//    inserts each argument into an IValue that it pushes onto a
+//    torch::jit::Stack, which it returns
+//
+// 2. a `call` method that
 // - takes a boxed kernel and unboxed arguments as specified by FT,
-// - boxes the arguments
+// - calls `boxArgs` to box the arguments
 // - calls the boxed kernel
 // - unboxes and returns the result
 //
@@ -118,10 +90,10 @@ inline bool boxArgumentsOrCannotBoxIntoStack(std::vector<c10::IValue>& stack, co
 // and ops returning references have nonstandard wrapper implementations.
 //
 
-// base definition should never be instantiated.
+// 1. The base specialization of BoxedKernelWrapper should never be instantiated.
 // A "no call method defined on BoxedKernelWrapper" compile error means that
 // an op signature has failed to trigger any of the partial specializations
-// that follow.
+// that follow this one.
 //
 template <class FuncType, class Enable = void>
 struct BoxedKernelWrapper {
@@ -130,30 +102,6 @@ struct BoxedKernelWrapper {
     "Look for a nearby error like "
     "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
     "- (your function type) is the unsupported signature.");
-};
-
-//
-// 1. Unsupported type traps.
-//
-// These specializations capture the remaining gaps in boxing support.
-// Rather than triggering compile errors, we generate boxed kernels that
-// raise runtime errors. As support for these types is added, the
-// specializations can be removed.
-//
-
-// at::Quantizer
-template <class... Args>
-using has_quantizer_arg =
-  guts::disjunction<
-    std::is_same<at::Quantizer, std::decay_t<Args>>...,
-    std::is_same<c10::intrusive_ptr<at::Quantizer>, std::decay_t<Args>>...
-  >;
-
-template <class Result, class... Args>
-struct BoxedKernelWrapper<Result(Args...), std::enable_if_t<has_quantizer_arg<Args...>::value, void>> {
-  static Result call(KernelFunction::InternalBoxedKernelFunction*, OperatorKernel*, const OperatorHandle&, Args... args) {
-    TORCH_INTERNAL_ASSERT(false, "Unboxed call to a boxed kernel with unboxable parameter type at::Quantizer.");
-  }
 };
 
 //
@@ -205,17 +153,21 @@ struct BoxedKernelWrapper<
     void
   >
 > {
+  static torch::jit::Stack boxArgs(Args... args) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
+    torch::jit::push(stack, std::forward<Args>(args)...);
+    return stack;
+  }
+
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
     Args... args
   ) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
-    torch::jit::push(stack, std::forward<Args>(args)...);
-
+    torch::jit::Stack stack = boxArgs(args...);
     (*boxed_kernel_func)(functor, opHandle, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
@@ -249,6 +201,15 @@ struct BoxedKernelWrapper<
   at::Tensor&(at::Tensor&, OtherArgs...),
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
+  static torch::jit::Stack boxArgs(at::Tensor& outArg, OtherArgs... otherArgs) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(1 + sizeof...(OtherArgs));
+    torch::jit::push_one(stack, outArg);
+    torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
+    return stack;
+  }
+
   static at::Tensor& call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
@@ -256,12 +217,7 @@ struct BoxedKernelWrapper<
     at::Tensor& outArg,
     OtherArgs... otherArgs
   ) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(1 + sizeof...(OtherArgs));
-    torch::jit::push_one(stack, outArg);
-    torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
-
+    torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
     (*boxed_kernel_func)(functor, opHandle, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
@@ -290,6 +246,14 @@ struct BoxedKernelWrapper<
     void
   >
 > {
+  static torch::jit::Stack boxArgs(Args... args) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
+    torch::jit::push(stack, std::forward<Args>(args)...);
+    return stack;
+  }
+
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
@@ -299,11 +263,7 @@ struct BoxedKernelWrapper<
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
-    torch::jit::push(stack, std::forward<Args>(args)...);
-
+    torch::jit::Stack stack = boxArgs(args...);
     (*boxed_kernel_func)(functor, opHandle, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,

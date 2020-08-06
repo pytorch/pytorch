@@ -136,7 +136,6 @@ at::Tensor upsample_nearest2d_vulkan(
   const float width_scale = compute_scales_value<float>(scales_w, iw, ow);
   Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
   VulkanTensor& y = vtensor_from_vulkan(output);
-  y.allocate_storage();
   vulkan::detail::upsample_nearest2d(
       y, x, ih, iw, oh, ow, in, ic, height_scale, width_scale);
   return output;
@@ -159,7 +158,6 @@ at::Tensor vulkan_adaptive_avg_pool2d(
   auto ow = outputSize[1];
   Tensor output = empty_vulkan({in, ic, oh, ow}, input.options(), {});
   VulkanTensor& y = vtensor_from_vulkan(output);
-  y.allocate_storage();
   vulkan::detail::adaptive_avg_pool2d(y, x, ih, iw, oh, ow, in, ic);
   return output;
 }
@@ -264,7 +262,6 @@ Tensor vulkan_add(const Tensor& self, const Tensor& other, const Scalar alpha) {
   const float a = alpha.to<float>();
 
   VulkanTensor output{self.sizes().vec()};
-  output.allocate_storage();
   vulkan::detail::add(output, x, y, a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
@@ -289,7 +286,6 @@ at::Tensor vulkan_convolution(
 
   const VulkanTensor& vinput = vtensor_from_vulkan(input);
   VulkanTensor voutput = VulkanTensor{params.output_sizes()};
-  voutput.allocate_storage();
 
   vulkan::detail::conv2d(
       voutput,
@@ -313,7 +309,6 @@ at::Tensor vulkan_convolution_prepack_weights(const at::Tensor& weight) {
   const int64_t KW = wsizes[3];
   VulkanTensor voutput =
       VulkanTensor{{UP_DIV(OC, 4), UP_DIV(C, 4), KH * KW, 16}};
-  voutput.allocate_storage();
 
   vulkan::detail::conv2d_prepack_weights(
       voutput, weight.data_ptr<float>(), OC, C, KH, KW);
@@ -346,7 +341,6 @@ at::Tensor vulkan_convolution_prepacked(
   const VulkanTensor& vweight = vtensor_from_vulkan(weight_prepacked_vulkan);
   VulkanTensor voutput =
       VulkanTensor{{params.N, params.OC, params.OH, params.OW}};
-  voutput.allocate_storage();
   const bool hasBias = bias.has_value() && bias->defined();
   if (hasBias && bias->is_vulkan()) {
     const VulkanTensor& vbias = vtensor_from_vulkan(*bias);
@@ -382,7 +376,6 @@ Tensor vulkan_addmm(
   const float a = alpha.to<float>();
 
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
-  output.allocate_storage();
   vulkan::detail::addmm(output, t, m1, m2, b, a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
@@ -401,7 +394,6 @@ Tensor vulkan_mm(const Tensor& self, const Tensor& mat2) {
   const auto& m2 = vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
 
   VulkanTensor output{{m1Sizes[0], m2Sizes[1]}};
-  output.allocate_storage();
   vulkan::detail::addmm(output, c10::nullopt, m1, m2, 0.f, 1.f);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
@@ -412,7 +404,6 @@ Tensor vulkan_clamp(
     const c10::optional<Scalar> max) {
   VulkanTensor& x = vtensor_from_vulkan(self);
   VulkanTensor output = VulkanTensor{self.sizes().vec()};
-  output.allocate_storage();
   float minValue = min.has_value() ? min.value().to<float>()
                                    : std::numeric_limits<float>::min();
   float maxValue = max.has_value() ? max.value().to<float>()
@@ -450,7 +441,6 @@ Tensor mean_vulkan(
   VulkanTensor& x = vtensor_from_vulkan(self);
   const auto sizes = self.sizes();
   VulkanTensor output = VulkanTensor{std::vector<int64_t>{sizes[0], sizes[1]}};
-  output.allocate_storage();
   vulkan::detail::mean(output, x);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
