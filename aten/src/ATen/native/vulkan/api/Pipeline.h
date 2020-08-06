@@ -11,6 +11,60 @@ namespace vulkan {
 namespace api {
 
 struct Pipeline final {
+  //
+  // Layout
+  //
+
+  struct Layout final {
+    /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      VkDescriptorSetLayout descriptor_set_layout;
+
+      inline bool operator==(const Descriptor& descriptor) const{
+        return (descriptor_set_layout == descriptor.descriptor_set_layout);
+      }
+    };
+
+    /*
+      Factory
+    */
+
+    class Factory final {
+     public:
+      explicit Factory(VkDevice device);
+
+      typedef Layout::Descriptor Descriptor;
+      typedef VK_DELETER(PipelineLayout) Deleter;
+      typedef Handle<VkPipelineLayout, Deleter> Handle;
+
+      struct Hasher {
+        inline size_t operator()(const Descriptor& descriptor) const {
+          return c10::get_hash(descriptor.descriptor_set_layout);
+        }
+      };
+
+      Handle operator()(const Descriptor& descriptor) const;
+
+     private:
+      VkDevice device_;
+    };
+
+    /*
+      Cache
+    */
+
+    typedef api::Cache<Factory> Cache;
+    Cache cache;
+
+    explicit Layout(const VkDevice device)
+      : cache(Factory(device)) {
+    }
+
+  } layout;
+
   /*
     Descriptor
   */
@@ -62,54 +116,12 @@ struct Pipeline final {
   */
 
   typedef api::Cache<Factory> Cache;
+  Cache cache;
 
-  //
-  // Layout
-  //
-
-  struct Layout final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      VkDescriptorSetLayout descriptor_set_layout;
-
-      inline bool operator==(const Descriptor& descriptor) const{
-        return (descriptor_set_layout == descriptor.descriptor_set_layout);
-      }
-    };
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(VkDevice device);
-
-      typedef Layout::Descriptor Descriptor;
-      typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef Handle<VkPipelineLayout, Deleter> Handle;
-
-      struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          return c10::get_hash(descriptor.descriptor_set_layout);
-        }
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-  };
+  explicit Pipeline(const VkDevice device)
+    : layout(device),
+      cache(Factory(device)) {
+  }
 };
 
 } // namespace api
