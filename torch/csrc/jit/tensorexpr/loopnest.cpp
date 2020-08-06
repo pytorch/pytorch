@@ -1165,6 +1165,38 @@ void LoopNest::reorderAxis(For* a, For* b) {
   }
 } // namespace tensorexpr
 
+void LoopNest::unroll(For* f, Stmt** unrolled) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!f) {
+    throw malformed_input("unroll attempted on null loop");
+  } else if (!p) {
+    throw malformed_input("unroll attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+  }
+  if (!f->stop()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+  }
+
+  std::vector<Stmt*> unrolled_stmts;
+  int start_val = immediateAs<int>(f->start());
+  int stop_val = immediateAs<int>(f->stop());
+  for (int current = start_val; current < stop_val; ++current) {
+    for (const auto stmt : f->body()->stmts()) {
+      auto stmt_copy = Stmt::clone(stmt);
+      unrolled_stmts.push_back(Substitute(
+          stmt_copy,
+          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+    }
+  }
+  *unrolled = new Block(f->body()->varBindings(), unrolled_stmts);
+  *unrolled = IRSimplifier::simplify(*unrolled);
+
+  p->replace_stmt(f, *unrolled);
+}
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
   Stmt* cur_stmt = tensor_to_stmt_.at(t);
