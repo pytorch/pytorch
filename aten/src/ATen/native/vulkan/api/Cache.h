@@ -33,8 +33,8 @@ class Cache final {
     static constexpr uint32_t kReserve = 64u;
   };
 
-  Factory factory_;
   ska::flat_hash_map<Descriptor, Handle, Hasher> cache_;
+  Factory factory_;
 };
 
 template<typename Factory>
