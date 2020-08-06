@@ -294,7 +294,7 @@ class _TensorBase(object):
     grad_fn: Any
     ${tensor_method_hints}
 
-# Defined in torch/csrs/cuda/Module.cpp
+# Defined in torch/csrc/cuda/Module.cpp
 class _CudaDeviceProperties:
     name: str
     major: _int
@@ -329,3 +329,9 @@ class _CudaEventBase:
     def elapsed_time(self, other: _CudaEventBase) -> _float: ...
     def synchronize(self) -> None: ...
     def ipc_handle(self) -> bytes: ...
+
+# Defined in torch/csrc/DataLoader.cpp
+def _set_worker_signal_handlers(*arg: Any) -> None: ...  # THPModule_setWorkerSignalHandlers
+def _set_worker_pids(key: _int, child_pids: Tuple[_int, ...]) -> None: ...  # THPModule_setWorkerPIDs
+def _remove_worker_pids(loader_id: _int) -> None: ...  # THPModule_removeWorkerPIDs
+def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails

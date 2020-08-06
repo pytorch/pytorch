@@ -348,20 +348,7 @@ The stuff below could be codegenned.  Ed said
 Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
-// Workaround for a compiler bug in VS 2017 (versions < 15.8).  See comments in autocast_VS2017_helper.h.
-#ifdef _MSC_VER
-  #if _MSC_VER >= 1915
-    // With VS 15.8+, template directly on at:: functions.
-    #define ADD_NS(RAW_OP) at::RAW_OP
-  #else
-    // If we're compiling with the buggy VS, pull in local wrappers to template on.
-    #include <ATen/autocast_VS2017_helper.h>
-    #define ADD_NS(RAW_OP) autocastVS2017Helper::RAW_OP
-  #endif
-#else
-  // With other compilers, template directly on at:: functions.
-  #define ADD_NS(RAW_OP) at::RAW_OP
-#endif
+#define ADD_NS(RAW_OP) at::RAW_OP
 
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)

@@ -65,15 +65,11 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::BackendSelect:
       return "BackendSelect";
-
     case DispatchKey::Named:
       return "Named";
 
     case DispatchKey::Autograd:
       return "Autograd";
-
-    case DispatchKey::Profiler:
-      return "Profiler";
 
     case DispatchKey::Tracer:
       return "Tracer";
