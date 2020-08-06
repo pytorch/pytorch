@@ -9983,13 +9983,14 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     def test_nuclear_norm_exceptions(self, device):
         for lst in [], [1], [1, 2]:
-            for axes in (), (0,), (0, 1):
-                x = torch.tensor(lst, dtype=torch.double, device=device)
+            x = torch.tensor(lst, dtype=torch.double, device=device)
+            for axes in (), (0,):
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
+            self.assertRaises(IndexError, torch.norm, x, "nuc", (0, 1))
 
         x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
-        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 2))
+        self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
