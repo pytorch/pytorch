@@ -49,6 +49,22 @@ void max_pool2d(
     const int dilationH,
     const int dilationW);
 
+void avg_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW);
+
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape);

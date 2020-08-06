@@ -162,6 +162,59 @@ at::Tensor vulkan_adaptive_avg_pool2d(
   return output;
 }
 
+Tensor vulkan_avg_pool2d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  TORCH_CHECK(
+      kernel_size.size() == 1 || kernel_size.size() == 2,
+      "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1
+      ? kH
+      : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  TORCH_CHECK(
+      stride.empty() || stride.size() == 1 || stride.size() == 2,
+      "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty()
+      ? kW
+      : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+
+  TORCH_CHECK(
+      padding.size() == 1 || padding.size() == 2,
+      "avg_pool2d: padding must either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW =
+      padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  const auto& x = vtensor_from_vulkan(self);
+  auto inputSize = self.sizes();
+  const int64_t iN = inputSize[0];
+  const int64_t iC = inputSize[1];
+  const int64_t iH = inputSize[2];
+  const int64_t iW = inputSize[3];
+
+  const int64_t oH =
+      pooling_output_shape<int64_t>(iH, kH, padH, dH, 1, ceil_mode);
+  const int64_t oW =
+      pooling_output_shape<int64_t>(iW, kW, padW, dW, 1, ceil_mode);
+
+  pool2d_shape_check(
+      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW);
+
+  VulkanTensor y{{iN, iC, oH, oW}};
+  y.allocate_storage();
+  vulkan::detail::avg_pool2d(
+      y, x, iH, iW, oH, oW, iN, iC, kH, kW, dH, dW, padH, padW);
+  return new_with_vtensor_vulkan(std::move(y), self.options());
+}
+
 at::Tensor vulkan_max_pool2d(
     const at::Tensor& self,
     IntArrayRef kernel_size,
@@ -483,6 +536,7 @@ Tensor mean_vulkan(
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("mul.Scalar", TORCH_FN(vulkan_mul_scalar));
   m.impl("add.Scalar", TORCH_FN(vulkan_add_scalar));
+  m.impl("avg_pool2d", TORCH_FN(vulkan_avg_pool2d));
 }
 
 } // namespace native
