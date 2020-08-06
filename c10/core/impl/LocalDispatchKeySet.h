@@ -93,6 +93,21 @@ private:
   bool prev_state_;
 };
 
+class C10_API ExcludeDispatchKeySetGuard {
+public:
+  ExcludeDispatchKeySetGuard(DispatchKeySet);
+  ExcludeDispatchKeySetGuard(const ExcludeDispatchKeySetGuard&) = delete;
+  ExcludeDispatchKeySetGuard operator=(const ExcludeDispatchKeySetGuard&) = delete;
+  ExcludeDispatchKeySetGuard(ExcludeDispatchKeySetGuard&&) = delete;
+  ExcludeDispatchKeySetGuard operator=(ExcludeDispatchKeySetGuard&&) = delete;
+  ~ExcludeDispatchKeySetGuard();
+private:
+  // A little micro-optimization to save us from tls_get_addr call
+  // on destruction
+  PODLocalDispatchKeySet* tls_;
+  DispatchKeySet exclude_;
+};
+
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
 // the included/excluded state of a given DispatchKey must span

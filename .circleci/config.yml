@@ -611,6 +611,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           ${PARALLEL_FLAGS}
           source ./workspace/env
           cd workspace
