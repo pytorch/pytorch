@@ -15,9 +15,11 @@
 // Using these APIs in any other systems will result in compile-time or run-time failures.
 // Their support will be extended in the next releases.
 
-#define IS_SPMM_AVAILABLE() (defined(__CUDACC__) &&                              \
-                             (CUSPARSE_VERSION >= 11000 ||                       \
-                              (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301)))
+#if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))
+#define IS_SPMM_AVAILABLE() 1
+#else
+#define IS_SPMM_AVAILABLE() 0
+#endif
 
 #if IS_SPMM_AVAILABLE()
 #include <library_types.h>
