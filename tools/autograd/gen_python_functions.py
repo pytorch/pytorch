@@ -812,7 +812,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -833,7 +833,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
@@ -847,6 +847,7 @@ PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   ${method_header}
+  ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
 }
@@ -855,7 +856,13 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 TORCH_FUNCTION_CHECK = CodeTemplate("""\
 if(_r.has_torch_function()) {
-  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
+  return handle_torch_function(_r, ${self_}, args, kwargs, ${namespace}, ${modulename});
+}
+""")
+
+TORCH_FUNCTION_CHECK_NOARGS = CodeTemplate("""\
+if(check_has_torch_function(self_)) {
+  return handle_torch_function(self_, ${name});
 }
 """)
 
@@ -881,6 +888,10 @@ def method_impl(name, declarations, is_python_method, module):
 
     method_footer = ['END_HANDLE_TH_ERRORS']
 
+    check_has_torch_function = TORCH_FUNCTION_CHECK_NOARGS.substitute(
+        name='"' + name + '"',
+    ) if is_python_method else ''
+
     # emit dispatch
     if is_noarg_binding(declarations):
         dispatch = emit_single_dispatch(declaration, is_python_method)
@@ -890,6 +901,7 @@ def method_impl(name, declarations, is_python_method, module):
             method_header=method_header,
             dispatch=dispatch,
             method_footer=method_footer,
+            check_has_torch_function=check_has_torch_function,
         )
 
     method_footer = ['Py_RETURN_NONE;'] + method_footer
@@ -914,9 +926,14 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
             namespace=NATIVE_NAMESPACE_MAPPING[module],
             modulename='"' + module + '"',
+            self_="self_" if is_python_method else "nullptr",
         )
     else:
-        check_has_torch_function = ''
+        check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
+            namespace="THPVariableClass",
+            modulename='"torch.Tensor"',
+            self_="self_" if is_python_method else "nullptr",
+        )
 
     max_args = max([get_python_argc(decl) for decl in declarations])
     traceable = 'true' if all(should_trace(d) for d in declarations) else 'false'
@@ -931,6 +948,7 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function=check_has_torch_function,
         dispatch=dispatch,
         method_footer=method_footer,
+        self_="self_" if is_python_method else "nullptr",
     )
 
 
