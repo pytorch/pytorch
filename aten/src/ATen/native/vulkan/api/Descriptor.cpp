@@ -5,32 +5,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Descriptor::Cache::Cache(const VkDevice device, const VkDescriptorPool descriptor_pool)
-  : device_(device),
-    descriptor_pool_(descriptor_pool) {
-}
-
-VkDescriptorSet Descriptor::Cache::allocate(
-    const VkDescriptorSetLayout descriptor_set_layout) {
-  const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-    nullptr,
-    descriptor_pool_,
-    1u,
-    &descriptor_set_layout,
-  };
-
-  VkDescriptorSet descriptor_set{};
-  VK_CHECK(vkAllocateDescriptorSets(
-      device_, &descriptor_set_allocate_info, &descriptor_set));
-
-  return descriptor_set;
-}
-
-void Descriptor::Cache::purge() {
-  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_, 0u));
-}
-
 Descriptor::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
 }
@@ -59,6 +33,32 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
     descriptor_pool,
     Deleter(device_),
   };
+}
+
+Descriptor::Cache::Cache(const VkDevice device, const VkDescriptorPool descriptor_pool)
+  : device_(device),
+    descriptor_pool_(descriptor_pool) {
+}
+
+VkDescriptorSet Descriptor::Cache::allocate(
+    const VkDescriptorSetLayout descriptor_set_layout) {
+  const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
+    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+    nullptr,
+    descriptor_pool_,
+    1u,
+    &descriptor_set_layout,
+  };
+
+  VkDescriptorSet descriptor_set{};
+  VK_CHECK(vkAllocateDescriptorSets(
+      device_, &descriptor_set_allocate_info, &descriptor_set));
+
+  return descriptor_set;
+}
+
+void Descriptor::Cache::purge() {
+  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_, 0u));
 }
 
 } // namespace api

@@ -4,6 +4,33 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+Pipeline::Layout::Factory::Factory(const VkDevice device)
+ : device_(device) {
+}
+
+typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
+    const Descriptor& descriptor) const {
+  const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
+    VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    nullptr,
+    0u,
+    1u,
+    &descriptor.descriptor_set_layout,
+    0u,
+    nullptr,
+  };
+
+  VkPipelineLayout pipeline_layout{};
+  VK_CHECK(vkCreatePipelineLayout(
+      device_, &pipeline_layout_create_info, nullptr, &pipeline_layout));
+
+  return Handle{
+    pipeline_layout,
+    Deleter(device_),
+  };
+}
+
 namespace {
 
 VkPipelineCache create_pipeline_cache(const VkDevice device) {
@@ -90,32 +117,6 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
 
   return Handle{
     pipeline,
-    Deleter(device_),
-  };
-}
-
-Pipeline::Layout::Factory::Factory(const VkDevice device)
- : device_(device) {
-}
-
-typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
-    const Descriptor& descriptor) const {
-  const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
-    VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    nullptr,
-    0u,
-    1u,
-    &descriptor.descriptor_set_layout,
-    0u,
-    nullptr,
-  };
-
-  VkPipelineLayout pipeline_layout{};
-  VK_CHECK(vkCreatePipelineLayout(
-      device_, &pipeline_layout_create_info, nullptr, &pipeline_layout));
-
-  return Handle{
-    pipeline_layout,
     Deleter(device_),
   };
 }
