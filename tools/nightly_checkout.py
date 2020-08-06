@@ -181,10 +181,10 @@ def _remove_existing(trg, is_dir):
         else:
             os.remove(trg)
 
-def _move_single(src, target_dir, mover, verb):
+def _move_single(src, source_dir, target_dir, mover, verb):
     is_dir = os.path.isdir(src)
-    base = os.path.basename(src)
-    trg = os.path.join(target_dir, base)
+    relpath = os.path.relpath(src, source_dir)
+    trg = os.path.join(target_dir, relpath)
     _remove_existing(trg, is_dir)
     # move over new files
     if is_dir:
@@ -205,14 +205,14 @@ def _move_single(src, target_dir, mover, verb):
         mover(src, trg)
 
 
-def _copy_files(listing, target_dir):
+def _copy_files(listing, source_dir, target_dir):
     for src in listing:
-        _move_single(src, target_dir, shutil.copy2, "Copying")
+        _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 
-def _link_files(listing, target_dir):
+def _link_files(listing, source_dir, target_dir):
     for src in listing:
-        _move_single(src, target_dir, os.link, "Linking")
+        _move_single(src, source_dir, target_dir, os.link, "Linking")
 
 
 @timed("Moving nightly files into repo")
@@ -224,9 +224,9 @@ def move_nightly_files(spdir, platform):
     target_dir = os.path.abspath("torch")
     # copy / link files
     if platform.startswith("win"):
-        _copy_files(listing, target_dir)
+        _copy_files(listing, source_dir, target_dir)
     else:
-        _link_files(listing, target_dir)
+        _link_files(listing, source_dir, target_dir)
 
 
 def install():
