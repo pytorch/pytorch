@@ -15378,7 +15378,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float)
     def test_min_out_different_memory_format(self, device, dtype):
-        permutations = itertools.permutations([0, 1, 2])
+        permutations = itertools.permutations([0, 1, 2, 3])
 
         def rev_perm(perm):
             r = {j: i for i, j in enumerate(perm)}
@@ -15387,7 +15387,7 @@ class TestTorchDeviceType(TestCase):
         for perm1 in permutations:
             for perm2 in permutations:
                 for perm3 in permutations:
-                    input_ = torch.randn(10, 10, 10, dtype=dtype, device=device).permute(*perm1)
+                    input_ = torch.randn(10, 10, 10, 1, dtype=dtype, device=device).expand(10, 10, 10, 10).permute(*perm1)
                     expect1, expect2 = input_.min(dim=0, keepdim=True)
                     out1 = expect1.permute(perm2).clone().contiguous().permute(rev_perm(perm2))
                     out2 = expect2.permute(perm3).clone().contiguous().permute(rev_perm(perm3))
