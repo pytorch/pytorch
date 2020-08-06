@@ -132,7 +132,11 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and not is_static_fn(cls, m.__name__) and m.__name__ in cls.__dict__)
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
     method_defs = [get_jit_def(method[1],
                                method[0],
                                self_name=self_name) for method in methods]
