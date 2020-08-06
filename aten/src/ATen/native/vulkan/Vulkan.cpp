@@ -1041,10 +1041,9 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
     int32_t w;
     int32_t h;
   };
-  const ConstBlock constBlock{static_cast<int32_t>(image.w()),
-                              static_cast<int32_t>(image.h())};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  const ConstBlock constBlock{safe_downcast<int32_t, int64_t>(image.w()),
+                              safe_downcast<int32_t, int64_t>(image.h())};
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1103,10 +1102,9 @@ void copy_image_to_buffer(
     int32_t w;
     int32_t h;
   };
-  const ConstBlock constBlock{static_cast<int32_t>(image.w()),
-                              static_cast<int32_t>(image.h())};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  const ConstBlock constBlock{safe_downcast<int32_t, int64_t>(image.w()),
+                              safe_downcast<int32_t, int64_t>(image.h())};
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   const VkDescriptorSetLayoutBinding bindings[] = {

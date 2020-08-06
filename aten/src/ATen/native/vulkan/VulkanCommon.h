@@ -54,6 +54,21 @@ struct ContextConv2D final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
+namespace detail {
+template <typename To, typename From>
+inline constexpr To safe_downcast(From v) {
+  if (std::is_signed<From>::value && std::is_unsigned<To>::value) {
+    TORCH_CHECK(v >= From{}, "Cast failed");
+  }
+  typedef std::common_type_t<From, To> Type;
+  constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
+  const Type value{static_cast<Type>(v)};
+  constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
+  TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range");
+  return static_cast<To>(v);
+}
+} // namespace detail
+
 } // namespace vulkan
 } // namespace native
 } // namespace at
