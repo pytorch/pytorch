@@ -445,6 +445,64 @@ Also see the ``MetadataTensor`` example below for another variation on this
 pattern but instead always returns a ``MetadataTensor`` to propagate metadata
 through operations in the :mod:`torch` API.
 
+The ``__torch_function__`` protocol is designed for full coverage of the API,
+partial coverage may lead to undesirable results, in particular, certain
+functions raising a ``TypeError``. This is especially true for subclasses,
+where all three of `torch.add`, `torch.Tensor.__add__` and `torch.Tensor.add`
+must be covered, even if they return exactly the same result. Failing to do
+this may also lead to infinite recursion. If one requires the implementation
+of a function from ``torch.Tensor`` subclasses, they must use
+``super().__torch_function__`` inside their implementation.
+
+
+Subclassing ``torch.Tensor``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+As of version 1.7.0, methods and functions applied on ``torch.Tensor`` subclasses
+will return subclass instances instead of ``torch.Tensor`` instances::
+
+  >>> class SubTensor(torch.Tensor):
+  ...     pass
+  >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
+  'SubTensor'
+  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  'SubTensor'
+
+If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
+default. If there is no unique way to determine such a case, then a
+``TypeError`` is raised::
+
+  >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
+  'SubTensor2'
+  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  'SubTensor2'
+  >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
+  Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+  TypeError: no implementation found for 'torch.add' on types that implement __torch_function__: [SubTensor, OtherSubTensor]
+
+If one wishes to have a global override for all tensor methods, one can use
+``__torch_function__``. Here is an example that logs all function/method
+calls::
+
+  class LoggingTensor(torch.Tensor):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
+          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          if kwargs is None:
+              kwargs = {}
+          return super().__torch_function__(func, types, args, kwargs)
+
+However, if one instead wishes to override a method on the Tensor subclass,
+there one can do so either by directly overriding the method (by defining
+it for a subclass), or by using ``__torch_function__`` and matching with
+``func``.
+
+One should be careful within ``__torch_function__`` for subclasses to always
+call ``super().__torch_function__(func, ...)`` instead of ``func`` directly,
+as was the case before version 1.7.0. Failing to do this may cause ``func``
+to recurse back into ``__torch_function__`` and therefore cause infinite
+recursion.
+
 Extending :mod:`torch` with a :class:`Tensor` wrapper type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
