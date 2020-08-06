@@ -9,7 +9,7 @@ import threading
 import unittest
 import warnings
 from copy import deepcopy
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from itertools import product
 from operator import mul
 from functools import reduce
@@ -36,18 +36,14 @@ from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, Test
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from torch.testing._internal.common_methods_invocations import (method_tests,
-                                                                create_input, unpack_variables,
-                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                                                EXCLUDE_GRADGRADCHECK,
-                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                                                exclude_tensor_method,
-                                                                mask_not_all_zeros,
-                                                                S)
+from torch.testing._internal.common_methods_invocations import \
+    (method_tests, create_input, unpack_variables, EXCLUDE_FUNCTIONAL,
+     EXCLUDE_GRADCHECK, EXCLUDE_GRADGRADCHECK, EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+     exclude_tensor_method, mask_not_all_zeros, S, M, op_db, get_op_metadata, unary_ufuncs)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf)
+                                                        skipCUDAIf, variants, Variant)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -5670,8 +5666,79 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
+# Creates variants for autograd test
+_op_tested_set = set()
+_unary_ufunc_autograd_variants = []
+
+for op in unary_ufuncs:
+    if not op.test_autograd:
+        continue
+
+    # Creates tensor variant
+    variant_name = op.name + "_tensor"
+    variant = Variant(variant_name)
+    variant.op = op
+    variant.size = (3, 3, 3)
+    _unary_ufunc_autograd_variants.append(variant)
+    _op_tested_set.add(op)
+
+Spec = namedtuple('Spec', 'op_name, sizes')
+_autograd_test_specs = [
+    Spec('addmm', sizes=((S, M), (S, S), (S, M))),
+]
+
+_bespoke_autograd_variants = []
+
+for spec in _autograd_test_specs:
+    op = get_op_metadata(spec.op_name)
+
+    # Creates (multi)tensor variant
+    variant_name = op.name + "_tensor"
+    variant = Variant(variant_name)
+    variant.op = op
+    variant.sizes = spec.sizes
+
+    _bespoke_autograd_variants.append(variant)
+    _op_tested_set.add(op)
+
+# Verifies all ops that should be tested are tested
+for op in op_db:
+    if op.test_autograd and op not in _op_tested_set:
+        assert False, "Found op {0} without an autograd test!".format(op.name)
+
+
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+
+    @dtypes(torch.double)
+    @variants(_bespoke_autograd_variants)
+    def test_bespoke_autograd(self, device, dtype, variant):
+        tensors = []
+        for size in variant.sizes:
+            t = torch.randn(size, device=device, dtype=dtype, requires_grad=True)
+            tensors.append(t)
+        self.assertTrue(gradcheck(variant.op, tensors))
+
+    @dtypes(torch.double)
+    @variants(_unary_ufunc_autograd_variants)
+    def test_unary_ufunc_autograd(self, device, dtype, variant):
+        gen = torch.randn if variant.op.generator_override is None else variant.op.generator_override
+        t = gen((2, 2), device=device, dtype=dtype)
+        t.requires_grad = True
+        self.assertTrue(gradcheck(variant.op, t))
+
+    @dtypes(torch.cdouble)
+    @variants(_unary_ufunc_autograd_variants)
+    def test_unary_ufunc_autograd_complex(self, device, dtype, variant):
+        gen = torch.randn if op.generator_override is None else op.generator_override
+        t = gen(variant.size, device=device, dtype=dtype)
+        t.requires_grad = True
+        if variant.op.supports_complex_autograd:
+            self.assertTrue(gradcheck(variant.op, t))
+        else:
+            with self.assertRaises(RuntimeError):
+                gradcheck(variant.op, t)
+
 
     def test_min_max_median_backprops_to_single_value(self, device):
         for f in [torch.min, torch.max, torch.median]:

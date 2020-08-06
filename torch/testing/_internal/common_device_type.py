@@ -4,6 +4,7 @@ import inspect
 import runpy
 import threading
 from functools import wraps
+from itertools import product
 import unittest
 import os
 import torch
@@ -213,11 +214,60 @@ class DeviceTypeTestBase(TestCase):
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test):
+
+        def instantiate_test_helper(cls, name, *, test, dtype, op, variant):
+            assert op is None or variant is None
+
+            # Constructs the test's name
+            test_name = name
+            if op is not None:
+                test_name += "_" + op.name
+            if variant is not None:
+                test_name += "_" + variant.name
+            test_name += "_" + cls.device_type
+            if dtype is not None:
+                if isinstance(dtype, (list, tuple)):
+                    for d in dtype:
+                        test_name += "_" + str(d).split('.')[1]
+                else:
+                    test_name += "_" + str(dtype).split('.')[1]
+
+            # Constructs the test
+            @wraps(test)
+            def instantiated_test(self, test=test, dtype=dtype, op=op, variant=variant):
+                device_arg = cls.get_primary_device()
+                if hasattr(test, 'num_required_devices'):
+                    device_arg = cls.get_all_devices()
+
+                # Sets precision and runs test
+                # Note: precision is reset after the test is run
+                guard_precision = self.precision
+                try :
+                    self.precision = self._get_precision_override(test, dtype)
+                    args = (device_arg, dtype, op, variant)
+                    args = (arg for arg in args if arg is not None)
+                    result = test(self, *args)
+                finally:
+                    self.precision = guard_precision
+
+                return result
+
+            # wraps with op decorators
+            if op is not None and op.decorators is not None:
+                for decorator in op.decorators:
+                    instantiated_test = decorator(instantiated_test)
+
+            # wraps with variant decorators
+            if variant is not None and variant.decorators is not None:
+                for decorator in variant.decorators:
+                    instantiated_test = decorator(instantiated_test)
+
+            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+            setattr(cls, test_name, instantiated_test)
+
         # Handles tests using the ops decorator
         if hasattr(test, "op_list"):
             for op in test.op_list:
-                base_op_test_name = name + "_" + op.name + "_" + cls.device_type
-
                 # Acquires dtypes, using the op data if unspecified
                 dtypes = cls._get_dtypes(test)
                 if dtypes is None:
@@ -236,78 +286,31 @@ class DeviceTypeTestBase(TestCase):
                 if test.unsupported_dtypes_only is True:
                     dtypes = [d for d in get_all_dtypes() if d not in dtypes]
 
+                dtypes = dtypes if dtypes is not None else (None,)
                 for dtype in dtypes:
-                    # Constructs dtype suffix
-                    if isinstance(dtype, (list, tuple)):
-                        dtype_str = ""
-                        for d in dtype:
-                            dtype_str += "_" + str(d).split('.')[1]
-                    else:
-                        dtype_str = "_" + str(dtype).split('.')[1]
-
-                    test_name = base_op_test_name + dtype_str
-                    assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
-
-                    @wraps(test)
-                    def instantiated_test(self, test=test, dtype=dtype, op=op):
-                        device_arg = cls.get_primary_device()
-                        if hasattr(test, 'num_required_devices'):
-                            device_arg = cls.get_all_devices()
-
-                        # Sets precision and runs test
-                        # Note: precision is reset after the test is run
-                        guard_precision = self.precision
-                        try :
-                            self.precision = self._get_precision_override(test, dtype)
-                            result = test(self, device_arg, dtype, op)
-                        finally:
-                            self.precision = guard_precision
-
-                        return result
-
-                    setattr(cls, test_name, instantiated_test)
-            return
-
-        # Handles tests that don't use the ops decorator
-        test_name = name + "_" + cls.device_type
-        dtypes = cls._get_dtypes(test)
-        if dtypes is None:  # Test has no dtype variants
-            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
-
-            @wraps(test)
-            def instantiated_test(self, test=test):
-                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                return test(self, device_arg)
-
-            setattr(cls, test_name, instantiated_test)
-        else:  # Test has dtype variants
+                    instantiate_test_helper(cls,
+                                            name,
+                                            test=test,
+                                            dtype=dtype,
+                                            op=op,
+                                            variant=None)
+        elif hasattr(test, "variants"):
+            # Handles tests using the variants decorator
+            dtypes = cls._get_dtypes(test)
+            dtypes = tuple(dtypes) if dtypes is not None else (None,)
+            for dtype, variant in product(dtypes, test.variants):
+                instantiate_test_helper(cls,
+                                        name,
+                                        test=test,
+                                        dtype=dtype,
+                                        op=None,
+                                        variant=variant)
+        else:
+            # Handles tests that don't use the ops or variants decorators
+            dtypes = cls._get_dtypes(test)
+            dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
-                # Constructs dtype suffix
-                if isinstance(dtype, (list, tuple)):
-                    dtype_str = ""
-                    for d in dtype:
-                        dtype_str += "_" + str(d).split('.')[1]
-                else:
-                    dtype_str = "_" + str(dtype).split('.')[1]
-
-                dtype_test_name = test_name + dtype_str
-                assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
-
-                @wraps(test)
-                def instantiated_test(self, test=test, dtype=dtype):
-                    device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                    # Sets precision and runs test
-                    # Note: precision is reset after the test is run
-                    guard_precision = self.precision
-                    try :
-                        self.precision = self._get_precision_override(test, dtype)
-                        result = test(self, device_arg, dtype)
-                    finally:
-                        self.precision = guard_precision
-
-                    return result
-
-                setattr(cls, dtype_test_name, instantiated_test)
+                instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None, variant=None)
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -447,6 +450,35 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
+
+class Variant(object):
+    def __init__(self,
+                 name,
+                 *,
+                 decorators=None,
+                 **kwargs):
+        self.name = name
+        self.decorators = decorators
+
+        for key, val in kwargs.items():
+            setattr(self, key, val)
+
+# Decorator that defines the variants a test should be run with
+# Requires an iterable of TestVariants
+class variants(object):
+    def __init__(self, variants):
+        if isinstance(variants, (list, tuple)):
+            for variant in variants:
+                assert isinstance(variant, Variant)
+        else:
+            assert isinstance(variants, Variant)
+            variants = tuple(variants)
+        self.variants = variants
+
+    def __call__(self, fn):
+        fn.variants = self.variants
+        return fn
+
 # Decorator that defines the ops a test should be run with
 # The test signature must be:
 #   <test_name>(self, device, dtype, op_meta)
@@ -458,10 +490,12 @@ class ops(object):
     def __init__(self, op_list, *, unsupported_dtypes_only=False):
         self.op_list = op_list
         self.unsupported_dtypes_only = unsupported_dtypes_only
+        self.variants = variants
 
     def __call__(self, fn):
         fn.op_list = self.op_list
         fn.unsupported_dtypes_only = self.unsupported_dtypes_only
+        fn.variants = self.variants
         return fn
 
 # Decorator that skips a test if the given condition is true.

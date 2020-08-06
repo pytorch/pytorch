@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
-
 # Classes and methods for the operator database
 # The OpMeta class contains metadata and helpers for acquiring properties of
 # operations, like what dtypes they support.
@@ -32,24 +31,32 @@ class OpMeta(object):
     def __init__(self,
                  name,  # the string name of the function
                  *,
-                 dtypes=None,  # dtypes this function is expected to work with
+                 dtypes=get_common_float_types(),  # dtypes this function is expected to work with
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  has_out_kwarg=None,  # whether this function has an out kwarg
+                 test_autograd=True,  # whether this function's autograd should be tested
+                 supports_complex_autograd=None,  # whether this function supports complex autograd
                  decorators=None,  # decorators to apply to generated tests
                  tests_to_skip=None):  # regular expressions describing tests to skip
         self.name = name
 
         self.dtypes = dtypes
-        self.dtypesIfCPU = dtypesIfCPU
-        self.dtypesIfCUDA = dtypesIfCUDA
-        self.dtypesIfROCM = dtypesIfROCM
+        self.dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
+        self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
+        self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
 
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
         self.has_out_kwarg = has_out_kwarg
+
+        self.test_autograd = test_autograd
+        self.supports_complex_autograd = supports_complex_autograd
+        if self.supports_complex_autograd is None:
+            self.supports_complex_autograd = (torch.cfloat in self.dtypesIfCPU or
+                                              torch.cdouble in self.dtypesIfCPU)
 
         self.decorators = decorators
         self.tests_to_skip = tests_to_skip
@@ -57,6 +64,9 @@ class OpMeta(object):
     # Returns the op (currently only supports torch.<op_name>)
     def getOp(self):
         return getattr(torch, self.name)
+
+    def __call__(self, *args, **kwargs):
+        return self.getOp()(*args, **kwargs)
 
     # Returns the method variant of the op (torch.Tensor.<op_name>)
     # or None if the op has no method variant
@@ -109,6 +119,7 @@ class UnaryUfuncMeta(OpMeta):
                  dtypesIfCUDA=get_common_float_and_complex_types_plus_half(),
                  dtypesIfROCM=get_all_float_types(),
                  has_out_kwarg=True,
+                 generator_override=None,  # callable(size, **kwargs) -> tensor in domain
                  **kwargs):
         super(UnaryUfuncMeta, self).__init__(name,
                                              dtypes=dtypes,
@@ -117,17 +128,45 @@ class UnaryUfuncMeta(OpMeta):
                                              dtypesIfROCM=dtypesIfROCM,
                                              has_out_kwarg=has_out_kwarg,
                                              **kwargs)
+        self.generator_override = generator_override
+
+L = 20
+M = 10
+S = 5
+
+_domain_epsilon = 1e-3
+def domain_generator(domain):
+    def generator(size, **kwargs):
+        t = torch.randn(size, **kwargs)
+        t.add_(domain[0])
+        return t.clamp_(domain[0] + _domain_epsilon, domain[1] - _domain_epsilon)
+
+    return generator
 
 # Operator database
 op_db = [
+    OpMeta('addmm'),
+    UnaryUfuncMeta('acosh',
+                   dtypesIfCPU=get_common_float_types(),
+                   dtypesIfCUDA=get_common_float_types_plus_half(),
+                   generator_override=domain_generator((1, float('inf')))),
     UnaryUfuncMeta('cos',
                    dtypesIfCUDA=get_all_float_and_complex_types()),
     UnaryUfuncMeta('cosh',
                    dtypesIfCPU=get_common_float_and_complex_types()),
     UnaryUfuncMeta('floor',
                    dtypesIfCPU=get_common_float_types_plus_bfloat16(),
-                   dtypesIfCUDA=get_common_float_types_plus_half()),
+                   dtypesIfCUDA=get_common_float_types_plus_half(),
+                   test_autograd=False),
 ]
+
+def get_op_metadata(name):
+    for op in op_db:
+        if name == op.name:
+            return op
+
+    assert False
+
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncMeta)]
@@ -212,9 +251,6 @@ class NoArgsClass(object):
         return 0
 
 NO_ARGS = NoArgsClass()
-L = 20
-M = 10
-S = 5
 
 def ident(x):
     return x
