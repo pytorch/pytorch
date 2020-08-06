@@ -16,7 +16,7 @@ namespace nn {
 /// ```
 struct TORCH_API TransformerEncoderLayerOptions {
 
-  using activation_var = c10::variant<enumtype::kReLU, enumtype::kGELU>;
+  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
   /* implicit */ TransformerEncoderLayerOptions(int64_t d_model, int64_t nhead);
 
@@ -33,7 +33,7 @@ struct TORCH_API TransformerEncoderLayerOptions {
   TORCH_ARG(double, dropout) = 0.1;
 
   /// the activation function of intermediate layer, either ``torch::kReLU`` or ``torch::GELU``, default is ``torch::kReLU``
-  TORCH_ARG(activation_var, activation) = torch::kReLU;
+  TORCH_ARG(activation_t, activation) = torch::kReLU;
 };
 
 
