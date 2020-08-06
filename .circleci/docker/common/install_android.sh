@@ -73,7 +73,7 @@ _vulkansdk_dir=/var/lib/jenkins/vulkansdk
 mkdir -p $_vulkansdk_dir
 _tmp_vulkansdk_targz=/tmp/vulkansdk.tar.gz
 curl --silent --show-error --location --fail --retry 3 --output "$_tmp_vulkansdk_targz" "$_https_amazon_aws/vulkansdk-linux-x86_64-1.2.148.0.tar.gz"
-tar -C "$_vulkansdk_dir" -xvzf "$_tmp_vulkansdk_targz"
+tar -C "$_vulkansdk_dir" -xzf "$_tmp_vulkansdk_targz"
 export VULKAN_SDK="$_vulkansdk_dir/1.2.148.0/"
 rm "$_tmp_vulkansdk_targz"
 
@@ -81,14 +81,14 @@ rm "$_tmp_vulkansdk_targz"
 # Installing SwiftShader for Vulkan
 # XCB libs
 apt-get update
-sudo apt-get install -y libx11-xcb1 libxcb1-dev
+sudo apt-get install -y libx11-dev libxcb1-dev libx11-xcb-dev
 
 # CMake >= 3.13 is required by SwiftShader
 _cmake_dir=/var/lib/jenkins/swiftshader-cmake
 mkdir -p $_cmake_dir
 _tmp_cmake_targz=/tmp/cmake.tar.gz
 curl --silent --show-error --location --fail --retry 3 --output $_tmp_cmake_targz https://cmake.org/files/v3.16/cmake-3.16.8-Linux-x86_64.tar.gz
-tar -C "$_cmake_dir" -xvzf "$_tmp_cmake_targz"
+tar -C "$_cmake_dir" -xzf "$_tmp_cmake_targz"
 _cmake_bin_path="$_cmake_dir/cmake-3.16.8-Linux-x86_64/bin/cmake"
 rm "$_tmp_cmake_targz"
 
