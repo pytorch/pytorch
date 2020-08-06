@@ -3,6 +3,8 @@
 #include <limits>
 
 #include <fmt/format.h>
+#include <tensorpipe/tensorpipe.h>
+
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -87,9 +89,20 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #ifdef TP_ENABLE_SHM
 
+std::string createUniqueShmAddr() {
+  thread_local uint32_t threadLocalId = 0;
+  return c10::str(
+      "shm://tensorpipe_rpc_agent_",
+      std::this_thread::get_id(),
+      "_",
+      ::getpid(),
+      "_",
+      threadLocalId++);
+}
+
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = std::make_shared<tensorpipe::transport::shm::Context>();
-  std::string address = TensorPipeAgent::createUniqueShmAddr();
+  std::string address = createUniqueShmAddr();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kShmTransportPriority, std::move(address)});
 }
@@ -891,19 +904,6 @@ const std::string& TensorPipeAgent::findWorkerURL(
       it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
   return it->second;
 }
-
-#ifdef TP_ENABLE_SHM
-std::string TensorPipeAgent::createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-#endif
 
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
