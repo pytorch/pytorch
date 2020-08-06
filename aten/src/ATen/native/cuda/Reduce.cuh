@@ -740,8 +740,6 @@ struct ReduceOp {
       *res0 = x.first;
     }
     if (noutputs >= 2) {
-      // base offset is computed assuming element size being sizeof(T1), so we need to make a
-      // correction to obtain the correct base offset
       auto res1 = (T2*) ((char *) dst[1] + base_offset[1]);
       *res1 = x.second;
     }
