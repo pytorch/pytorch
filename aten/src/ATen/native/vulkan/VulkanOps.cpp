@@ -37,10 +37,10 @@ void upsample_nearest2d(
     float scaleX;
     float scaleY;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(IW),
-                safe_downcast<int32_t, int64_t>(IH),
-                safe_downcast<int32_t, int64_t>(OW),
-                safe_downcast<int32_t, int64_t>(OH),
+  ConstBlock cb{safe_downcast<int32_t>(IW),
+                safe_downcast<int32_t>(IH),
+                safe_downcast<int32_t>(OW),
+                safe_downcast<int32_t>(OH),
                 scaleW,
                 scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
@@ -109,10 +109,10 @@ void adaptive_avg_pool2d(
     int32_t OW;
     int32_t OH;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(IW),
-                safe_downcast<int32_t, int64_t>(IH),
-                safe_downcast<int32_t, int64_t>(OW),
-                safe_downcast<int32_t, int64_t>(OH)};
+  ConstBlock cb{safe_downcast<int32_t>(IW),
+                safe_downcast<int32_t>(IH),
+                safe_downcast<int32_t>(OW),
+                safe_downcast<int32_t>(OH)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -254,9 +254,9 @@ void add(
     int32_t C;
     float alpha;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(W),
-                safe_downcast<int32_t, int64_t>(H),
-                safe_downcast<int32_t, int64_t>(C),
+  ConstBlock cb{safe_downcast<int32_t>(W),
+                safe_downcast<int32_t>(H),
+                safe_downcast<int32_t>(C),
                 alpha};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
@@ -385,21 +385,17 @@ void conv2d_depthwise(
     float outputMax;
   };
   ConstBlock cb{
-      {safe_downcast<int32_t, int64_t>(params.PX),
-       safe_downcast<int32_t, int64_t>(params.PY)},
-      {safe_downcast<int32_t, int64_t>(params.KW),
-       safe_downcast<int32_t, int64_t>(params.KH)},
-      {safe_downcast<int32_t, int64_t>(params.SX),
-       safe_downcast<int32_t, int64_t>(params.SY)},
-      {safe_downcast<int32_t, int64_t>(params.DX),
-       safe_downcast<int32_t, int64_t>(params.DY)},
-      {safe_downcast<int32_t, int64_t>(params.OW),
-       safe_downcast<int32_t, int64_t>(params.OH),
-       safe_downcast<int32_t, int64_t>(params.OC_4),
+      {safe_downcast<int32_t>(params.PX), safe_downcast<int32_t>(params.PY)},
+      {safe_downcast<int32_t>(params.KW), safe_downcast<int32_t>(params.KH)},
+      {safe_downcast<int32_t>(params.SX), safe_downcast<int32_t>(params.SY)},
+      {safe_downcast<int32_t>(params.DX), safe_downcast<int32_t>(params.DY)},
+      {safe_downcast<int32_t>(params.OW),
+       safe_downcast<int32_t>(params.OH),
+       safe_downcast<int32_t>(params.OC_4),
        0},
-      {safe_downcast<int32_t, int64_t>(params.W),
-       safe_downcast<int32_t, int64_t>(params.H),
-       safe_downcast<int32_t, int64_t>(params.C_4),
+      {safe_downcast<int32_t>(params.W),
+       safe_downcast<int32_t>(params.H),
+       safe_downcast<int32_t>(params.C_4),
        0},
       output_min ? *output_min : -std::numeric_limits<float>::infinity(),
       output_max ? *output_max : std::numeric_limits<float>::infinity()};
@@ -520,8 +516,7 @@ void conv2d_prepack_weights_to_image(
     int32_t KWxKH;
     int32_t C_4;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(KW * KH),
-                safe_downcast<int32_t, int64_t>(C_4)};
+  ConstBlock cb{safe_downcast<int32_t>(KW * KH), safe_downcast<int32_t>(C_4)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -618,24 +613,21 @@ void conv2d(
       output_min ? *output_min : -std::numeric_limits<float>::infinity();
   float outputMax =
       output_max ? *output_max : std::numeric_limits<float>::infinity();
-  ConstBlock cb{{safe_downcast<int32_t, int64_t>(params.PX),
-                 safe_downcast<int32_t, int64_t>(params.PY)},
-                {safe_downcast<int32_t, int64_t>(params.KW),
-                 safe_downcast<int32_t, int64_t>(params.KH)},
-                {safe_downcast<int32_t, int64_t>(params.SX),
-                 safe_downcast<int32_t, int64_t>(params.SY)},
-                {safe_downcast<int32_t, int64_t>(params.DX),
-                 safe_downcast<int32_t, int64_t>(params.DY)},
-                {safe_downcast<int32_t, int64_t>(params.OW),
-                 safe_downcast<int32_t, int64_t>(params.OH),
-                 safe_downcast<int32_t, int64_t>(params.OC_4),
-                 safe_downcast<int32_t, int64_t>(params.OC)},
-                {safe_downcast<int32_t, int64_t>(params.W),
-                 safe_downcast<int32_t, int64_t>(params.H),
-                 safe_downcast<int32_t, int64_t>(params.C_4),
-                 safe_downcast<int32_t, int64_t>(params.C)},
-                outputMin,
-                outputMax};
+  ConstBlock cb{
+      {safe_downcast<int32_t>(params.PX), safe_downcast<int32_t>(params.PY)},
+      {safe_downcast<int32_t>(params.KW), safe_downcast<int32_t>(params.KH)},
+      {safe_downcast<int32_t>(params.SX), safe_downcast<int32_t>(params.SY)},
+      {safe_downcast<int32_t>(params.DX), safe_downcast<int32_t>(params.DY)},
+      {safe_downcast<int32_t>(params.OW),
+       safe_downcast<int32_t>(params.OH),
+       safe_downcast<int32_t>(params.OC_4),
+       safe_downcast<int32_t>(params.OC)},
+      {safe_downcast<int32_t>(params.W),
+       safe_downcast<int32_t>(params.H),
+       safe_downcast<int32_t>(params.C_4),
+       safe_downcast<int32_t>(params.C)},
+      outputMin,
+      outputMax};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   auto device = context().device();
@@ -815,10 +807,10 @@ void clamp(
     float min;
     float max;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(W),
-                safe_downcast<int32_t, int64_t>(H),
-                safe_downcast<int32_t, int64_t>(C_4),
-                safe_downcast<int32_t, int64_t>(C),
+  ConstBlock cb{safe_downcast<int32_t>(W),
+                safe_downcast<int32_t>(H),
+                safe_downcast<int32_t>(C_4),
+                safe_downcast<int32_t>(C),
                 min,
                 max};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
@@ -863,29 +855,27 @@ void addmm(
     float beta,
     float alpha) {
   bool hasT = t.has_value();
-  auto m1Sizes = m1.sizes();
-  auto m2Sizes = m2.sizes();
+  const auto m1Sizes = m1.sizes();
+  const auto m2Sizes = m2.sizes();
   TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
   TORCH_INTERNAL_ASSERT(m2Sizes.size() == 2);
-  uint32_t m1H = m1Sizes[0];
-  uint32_t m1W = m1Sizes[1];
-  uint32_t m1C = 1;
-  uint32_t m1C_4 = UP_DIV(m1C, 4);
-
-  uint32_t m2H = m2Sizes[0];
-  uint32_t m2W = m2Sizes[1];
-  uint32_t m2C = 1;
-  uint32_t m2C_4 = UP_DIV(m2C, 4);
-
-  uint32_t OH = m1Sizes[0];
-  uint32_t OW = m2Sizes[1];
+  const auto m1H = m1Sizes[0];
+  const auto m1W = m1Sizes[1];
+  const auto m1C = 1;
+  const auto m1C_4 = UP_DIV(m1C, 4);
+  const auto m2H = m2Sizes[0];
+  const auto m2W = m2Sizes[1];
+  const auto m2C = 1;
+  const auto m2C_4 = UP_DIV(m2C, 4);
+  const auto OH = m1Sizes[0];
+  const auto OW = m2Sizes[1];
 
   TORCH_INTERNAL_ASSERT(m1W == m2H);
   TORCH_INTERNAL_ASSERT(m1C == m2C);
 
-  uint32_t C = m1C;
-  uint32_t C_4 = UP_DIV(C, 4);
-  uint32_t K = m1W;
+  const auto C = m1C;
+  const auto C_4 = UP_DIV(C, 4);
+  const auto K = m1W;
 
   auto device = context().device();
 
@@ -898,13 +888,13 @@ void addmm(
     float alpha;
     int32_t K;
   };
-  ConstBlock cb{safe_downcast<int32_t, int64_t>(OW),
-                safe_downcast<int32_t, int64_t>(OH),
-                safe_downcast<int32_t, int64_t>(C_4),
-                safe_downcast<int32_t, int64_t>(C),
+  ConstBlock cb{safe_downcast<int32_t>(OW),
+                safe_downcast<int32_t>(OH),
+                safe_downcast<int32_t>(C_4),
+                safe_downcast<int32_t>(C),
                 beta,
                 alpha,
-                safe_downcast<int32_t, int64_t>(K)};
+                safe_downcast<int32_t>(K)};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -974,10 +964,10 @@ void addmm(
 
 void mean(VulkanTensor& output, const VulkanTensor& input) {
   auto isizes = input.sizes();
-  int32_t N = safe_downcast<int32_t, int64_t>(isizes[0]);
-  int32_t C = safe_downcast<int32_t, int64_t>(isizes[1]);
-  int32_t H = safe_downcast<int32_t, int64_t>(isizes[2]);
-  int32_t W = safe_downcast<int32_t, int64_t>(isizes[3]);
+  int32_t N = safe_downcast<int32_t>(isizes[0]);
+  int32_t C = safe_downcast<int32_t>(isizes[1]);
+  int32_t H = safe_downcast<int32_t>(isizes[2]);
+  int32_t W = safe_downcast<int32_t>(isizes[3]);
   int32_t C_4 = UP_DIV(N * C, 4);
 
   auto device = context().device();
