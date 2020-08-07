@@ -56,10 +56,7 @@ struct ContextConv2D final {
 
 namespace detail {
 template <typename To, typename From>
-inline constexpr To safe_downcast(From v) {
-  if (std::is_signed<From>::value && std::is_unsigned<To>::value) {
-    TORCH_CHECK(v >= From{}, "Cast failed");
-  }
+inline constexpr To safe_downcast_internal(From v) {
   typedef std::common_type_t<From, To> Type;
   constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
   const Type value{static_cast<Type>(v)};
@@ -67,8 +64,30 @@ inline constexpr To safe_downcast(From v) {
   TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range");
   return static_cast<To>(v);
 }
-} // namespace detail
 
+template <typename To, typename From>
+inline constexpr bool IsSignedToUnsigned() {
+  return std::is_signed<From>::value && std::is_unsigned<To>::value;
+}
+
+template <
+    typename To,
+    typename From,
+    std::enable_if_t<IsSignedToUnsigned<To, From>(), bool> = true>
+inline constexpr To safe_downcast(From v) {
+  TORCH_CHECK(v >= From{}, "Cast failed: negative signed to unsigned");
+  return safe_downcast_internal<To, From>(v);
+}
+
+template <
+    typename To,
+    typename From,
+    std::enable_if_t<!IsSignedToUnsigned<To, From>(), bool> = true>
+inline constexpr To safe_downcast(From v) {
+  return safe_downcast_internal<To, From>(v);
+}
+
+} // namespace detail
 } // namespace vulkan
 } // namespace native
 } // namespace at
