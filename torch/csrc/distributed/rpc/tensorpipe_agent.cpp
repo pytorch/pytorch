@@ -644,35 +644,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     throw std::runtime_error(err);
   }
 
-  const auto& iter = opts_.mapLocations.find(toWorkerInfo.name_);
-  if (iter == opts_.mapLocations.end()) {
-    for (const auto& tensor : requestMessage.tensors()) {
-      TORCH_CHECK(
-          tensor.device().is_cpu(),
-          "TensorPipe RPC backend only supports CPU tensors by default, please "
-          "move your tensors to CPU before sending them over RPC, or call "
-          "`set_map_location` on `TensorPipeRpcBackendOptions` to explicitly "
-          "configure device mapping. Device mapping is not available for "
-          "destination ",
-          toWorkerInfo.name_,
-          ", but found tensor on device: ",
-          tensor.device());
-    }
-  } else {
-    const auto& mapLocation = iter->second;
-    for (const auto& tensor : requestMessage.tensors()) {
-      TORCH_CHECK(
-          tensor.device().is_cpu() ||
-              mapLocation.find(tensor.device().index()) != mapLocation.end(),
-          "TensorPipe RPC backend only supports CPU tensors by default. Device "
-          "mapping is not available for destination ",
-          toWorkerInfo.name_,
-          " for device ",
-          tensor.device(),
-          " but received a tensor on that device.");
-    }
-  }
-
   const auto& url = findWorkerURL(toWorkerInfo);
 
   std::unique_lock<std::mutex> lock(mutex_);

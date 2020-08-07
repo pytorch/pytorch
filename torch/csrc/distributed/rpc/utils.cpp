@@ -484,7 +484,7 @@ constexpr int kTpMessagePickleIdx = 4;
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage,
-    const std::vector<c10::DeviceIndex> deviceIndices) {
+    std::vector<c10::DeviceIndex> deviceIndices) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
@@ -510,13 +510,14 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
 
   // Device indices
   buffers.deviceIndices = std::move(deviceIndices);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto indicesPtr = const_cast<c10::DeviceIndex*>(buffers.deviceIndices.data());
   auto size = buffers.deviceIndices.size() * sizeof(c10::DeviceIndex);
   // kTpMessageDevicesIdx = 3
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{indicesPtr, size});
 
   // Tensors
-  if (deviceIndices.empty()) {
+  if (buffers.deviceIndices.empty()) {
     buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
   } else {
     std::vector<torch::Tensor> tensors;

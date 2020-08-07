@@ -2514,44 +2514,6 @@ class RpcTest(RpcAgentTestFixture):
     def _gpu_tensor_list_arg(tensor_list):
         return torch.rand(3, 3)
 
-    def _test_cuda(
-        self,
-        errMsg = "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"
-    ):
-        dst = worker_name((self.rank + 1) % self.world_size)
-        t1 = torch.rand(3, 3).cuda(0)
-        t2 = torch.rand(3, 3).cuda(1)
-        t3 = torch.rand(3, 3)
-
-        # cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
-
-        # mix of cpu and cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
-
-        # gpu tensor list as args fails.
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
-
-        # cuda tensors as return values fail.
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
-
-        # cuda tensors as a list of return value fails
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
-
-        # Sending to self should fail too.
-        with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
-
-    @skip_if_lt_x_gpu(2)
-    @dist_init
-    def test_cuda(self):
-        self._test_cuda()
-
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
         return rpc.remote(
@@ -3130,6 +3092,39 @@ class RpcTest(RpcAgentTestFixture):
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_cuda(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(3, 3).cuda(0)
+        t2 = torch.rand(3, 3).cuda(1)
+        t3 = torch.rand(3, 3)
+
+        # cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
+
+        # mix of cpu and cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
+
+        # gpu tensor list as args fails.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
+
+        # cuda tensors as return values fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
+
+        # cuda tensors as a list of return value fails
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
+
+
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
         dist.init_process_group(
@@ -3691,12 +3686,6 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
-    # override error message
-    @skip_if_lt_x_gpu(2)
-    @dist_init
-    def test_cuda(self):
-        self._test_cuda(errMsg="TensorPipe RPC backend.*set_map_location")
-
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_set_and_get_num_worker_threads(self):
@@ -3915,4 +3904,73 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst, fn, args=(torch.zeros(2), torch.ones(2).to(0)))
         self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(0))
         rpc.shutdown()
+
+    @staticmethod
+    def _add_to_gpu(x, y):
+        return (x + y).to(0)
+
+    def _test_map_locations_missing_config(self, mode):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        errMsg = (
+            "TensorPipe RPC backend only supports CPU tensors by default.*"
+            "please move your tensors to CPU before sending them over RPC.*"
+            "or call `set_map_location` on `TensorPipeRpcBackendOptions`"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            if mode == RPCExecMode.SYNC:
+                rpc.rpc_sync(dst, torch.add, args=(torch.zeros(2).to(0), 1))
+            elif mode == RPCExecMode.REMOTE:
+                rpc.remote(dst, torch.add, args=(torch.zeros(2).to(0), 1)).to_here()
+            else:
+                raise ValueError(f"unexpected mode {mode}")
+
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            if mode == RPCExecMode.SYNC:
+                rpc.rpc_sync(
+                    dst,
+                    TensorPipeAgentRpcTest._add_to_gpu,
+                    args=(torch.zeros(2), 1)
+                )
+            elif mode == RPCExecMode.REMOTE:
+                rpc.remote(
+                    dst,
+                    TensorPipeAgentRpcTest._add_to_gpu,
+                    args=(torch.zeros(2), 1)
+                ).to_here()
+            else:
+                raise ValueError(f"unexpected mode {mode}")
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_map_locations_missing_config(self):
+        self._test_map_locations_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_map_locations_missing_config_remote(self):
+        self._test_map_locations_missing_config(RPCExecMode.REMOTE)
+
+    @skip_if_lt_x_gpu(2)
+    def test_map_locations_remote(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_map_location(dst, {1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rref = rpc.remote(
+            dst,
+            TensorPipeAgentRpcTest._add_to_gpu,
+            args=(torch.zeros(2), 1)
+        )
+
+        self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
 

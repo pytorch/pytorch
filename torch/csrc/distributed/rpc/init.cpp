@@ -507,7 +507,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
           R"(The device map locations.)")
       .def(
           "set_map_location",
-          &TensorPipeRpcBackendOptions::setMapLocation);
+          &TensorPipeRpcBackendOptions::setMapLocation,
+          R"(
+              Set device mapping between each RPC caller and callee pairs. This
+              function can be called multiple times to incrementally update
+              device placement configurations.
+
+              Arguments:
+                  worker_name (str): Callee name.
+                  map_location (Dict[int, int]): Device placment mappings from
+                  this worker to the callee. This map must be invertible.
+          )");
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
