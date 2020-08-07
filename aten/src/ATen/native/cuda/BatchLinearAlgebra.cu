@@ -688,7 +688,7 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret) {
+static void apply_single_inverse(const Tensor& self, Tensor& self_inv, int64_t& info) {
   auto self_data = self.data_ptr<scalar_t>();
   int n = cuda_int_cast(self.size(-2), "self.size(-2)");
   int info_tmp = 0;
@@ -699,33 +699,32 @@ static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret)
     info = info_tmp;
     return;
   }
-  ret = at::eye(n, self.options());
-  ret.unsafeGetTensorImpl()->set_stride(0, 1);
-  ret.unsafeGetTensorImpl()->set_stride(1, n);
-  cusolver_getrs<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), ret.data_ptr<scalar_t>(), n, &info_tmp);
+  self_inv = at::eye(n, self.options());
+  self_inv.unsafeGetTensorImpl()->set_stride(0, 1); // These two lines set self_inv to column-major
+  self_inv.unsafeGetTensorImpl()->set_stride(1, n);
+  cusolver_getrs<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), self_inv.data_ptr<scalar_t>(), n, &info_tmp);
   info = info_tmp;
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
-  auto self_inv_working_copy = cloneBatchedColumnMajor(self);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
+    auto self_inv_working_copy = at::empty_like(self_working_copy);
     Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
-    auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
-
     return self_inv_working_copy;
   } else {
-    Tensor ret;
+    Tensor self_inv;
     int64_t info = 0;
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse<scalar_t>(self_inv_working_copy, info, ret);
+      apply_single_inverse<scalar_t>(self_working_copy, self_inv, info);
     });
     singleCheckErrors(info, "inverse_cuda");
-    return ret;
+    return self_inv;
   }
 }
 
