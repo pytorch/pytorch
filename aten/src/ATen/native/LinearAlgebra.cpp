@@ -764,12 +764,12 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
-inline Tensor _pin_and_move_memory_if_cuda_input(
+inline Tensor _move_memory_if_cuda_input(
   const Tensor& mem,
   const Tensor& in
 ) {
   return (in.device().type() == at::kCUDA)
-    ? mem.pin_memory().to(at::device_of(in).value(), /*non_blocking=*/true)
+    ? mem.to(at::device_of(in).value())
     : mem;
 }
 
@@ -787,7 +787,7 @@ inline Tensor _blob_to_Tensor(
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
   auto tensor = at::from_blob((void*)blob.begin(), {1, blob.size()}, in.dtype());
-  return _pin_and_move_memory_if_cuda_input(tensor, in);
+  return _move_memory_if_cuda_input(tensor, in);
 }
 
 // I + A
@@ -921,7 +921,7 @@ Tensor compute_T12(const Tensor& A) {
     {num_prods, 1},
     A.dtype()
   );
-  bs = _pin_and_move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -985,7 +985,7 @@ Tensor compute_T18(const Tensor& A) {
     {num_prods, 1},
     A.dtype()
   );
-  bs = _pin_and_move_memory_if_cuda_input(bs, A);
+  bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
@@ -1058,8 +1058,7 @@ Tensor mexp_impl(
       ).nonzero().squeeze(-1);
 
       if (idx_curr_norm_interval.numel()) {
-        // We pin memory to make the transfer to CUDA faster and async
-        auto idx_to_device = _pin_and_move_memory_if_cuda_input(
+        auto idx_to_device = _move_memory_if_cuda_input(
           idx_curr_norm_interval, a
         );
         auto sub_a = at::index_select(a, 0, idx_to_device);
@@ -1072,8 +1071,7 @@ Tensor mexp_impl(
       .nonzero().squeeze(-1);
 
     if (idx_large_norm.numel()) {
-      // We pin memory to make the transfer to CUDA faster and async
-      auto idx_to_device = _pin_and_move_memory_if_cuda_input(
+      auto idx_to_device = _move_memory_if_cuda_input(
         idx_large_norm, a
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
