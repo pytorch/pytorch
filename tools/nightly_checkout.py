@@ -190,31 +190,39 @@ def checkout_nightly_version(branch, spdir):
 
 def _get_listing_linux(source_dir):
     listing = glob.glob(os.path.join(source_dir, "*.so"))
-    listing.append(os.path.join(source_dir, "version.py"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.so")))
-    listing.append(os.path.join(source_dir, "bin"))
     return listing
 
 
 def _get_listing_osx(source_dir):
     # oddly, these are .so files even on Mac
     listing = glob.glob(os.path.join(source_dir, "*.so"))
-    listing.append(os.path.join(source_dir, "version.py"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dylib")))
-    listing.append(os.path.join(source_dir, "bin"))
     return listing
 
 
 def _get_listing_win(source_dir):
     listing = glob.glob(os.path.join(source_dir, "*.pyd"))
-    listing.append(os.path.join(source_dir, "version.py"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.lib")))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dll")))
-    listing.append(os.path.join(source_dir, "bin"))
     return listing
 
 
-def _get_listing(source_dir, platform):
+def _glob_pyis(d):
+    search = os.path.join(d, "**", "*.pyi")
+    pyis = {os.path.relpath(p, d) for p in glob.iglob(search)}
+    return pyis
+
+
+def _find_missing_pyi(source_dir, target_dir):
+    source_pyis = _glob_pyis(source_dir)
+    target_pyis = _glob_pyis(target_dir)
+    missing_pyis = [os.path.join(source_dir, p) for p in (source_pyis - target_pyis)]
+    missing_pyis.sort()
+    return missing_pyis
+
+
+def _get_listing(source_dir, target_dir, platform):
     if platform.startswith("linux"):
         listing = _get_listing_linux(source_dir)
     elif platform.startswith("osx"):
@@ -223,6 +231,9 @@ def _get_listing(source_dir, platform):
         listing = _get_listing_win(source_dir)
     else:
         raise RuntimeError(f"Platform {platform!r} not recognized")
+    listing.extend(_find_missing_pyi(source_dir, target_dir))
+    listing.append(os.path.join(source_dir, "version.py"))
+    listing.append(os.path.join(source_dir, "bin"))
     return listing
 
 
@@ -272,8 +283,8 @@ def move_nightly_files(spdir, platform):
     """Moves PyTorch files from temporary installed location to repo."""
     # get file listing
     source_dir = os.path.join(spdir, "torch")
-    listing = _get_listing(source_dir, platform)
     target_dir = os.path.abspath("torch")
+    listing = _get_listing(source_dir, target_dir, platform)
     # copy / link files
     if platform.startswith("win"):
         _copy_files(listing, source_dir, target_dir)
