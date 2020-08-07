@@ -25,6 +25,7 @@ namespace c10 {
 struct IValue;
 struct ClassType;
 struct TupleType;
+struct EnumType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -80,6 +81,14 @@ inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const & {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return toIntrusivePtr<c10::RRefInterface>();
+}
+inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() && {
+  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  return moveToIntrusivePtr<at::Quantizer>();
+}
+inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() const & {
+  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  return toIntrusivePtr<at::Quantizer>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
@@ -230,7 +239,7 @@ struct EnumHolder;
 }
 
 // Future
-struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
+struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
  private:
   c10::intrusive_ptr<Future> intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
@@ -258,7 +267,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   /**
    * Wait on the future until it completes.
    */
-  void wait() {
+  virtual void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -268,7 +277,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   /**
    * Explicitly mark the future as completed with the output value.
    */
-  void markCompleted(IValue value) {
+  virtual void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -315,7 +324,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Get the result of the current future.
-  IValue value() {
+  virtual IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (error_) {
@@ -326,7 +335,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  virtual const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!error_);
@@ -339,7 +348,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
+  virtual void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -374,11 +383,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() const{
+  virtual bool completed() const{
     return completed_;
   }
 
-  bool hasValue() const {
+  virtual bool hasValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return completed_ && !error_;
   }
@@ -537,22 +546,20 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
  public:
-  EnumHolder(c10::QualifiedName qualified_class_name, std::string name, IValue value)
-      : qualified_class_name_(std::move(qualified_class_name)),
-        name_(std::move(name)), value_(std::move(value)) {}
+  EnumHolder(std::shared_ptr<EnumType> type, std::string name, IValue value)
+      : type_(std::move(type)), name_(std::move(name)), value_(std::move(value)) {}
 
   bool is(const ivalue::EnumHolder& rhs) {
     return *this == rhs;
   }
 
-  bool operator==(const ivalue::EnumHolder& o) const {
-    return qualified_class_name_ == o.qualifiedClassName() &&
-        name_ == o.name() && value_ == o.value();
-  }
+  friend bool operator==(const ivalue::EnumHolder&lhs, const ivalue::EnumHolder& rhs);
 
-  const std::string& qualifiedClassName() const {
-    return qualified_class_name_.qualifiedName();
-  }
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const EnumHolder& v);
+
+  const std::string qualifiedClassName() const;
 
   const std::string& name() const {
     return name_;
@@ -562,8 +569,12 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
     return value_;
   }
 
+  std::shared_ptr<EnumType> type() const {
+    return type_;
+  }
+
 private:
-  c10::QualifiedName qualified_class_name_;
+  std::shared_ptr<EnumType> type_;
   std::string name_;
   IValue value_;
 };
@@ -628,12 +639,14 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
+DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
@@ -1018,8 +1031,15 @@ inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
 : tag(Tag::RRef), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
+inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
+: tag(Tag::Quantizer), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline const std::string& IValue::toStringRef() const {
-  return toString()->string();
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  return static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string();
 }
 
 inline PyObject* IValue::toPyObject() const {

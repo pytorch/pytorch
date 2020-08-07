@@ -52,6 +52,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kInt, ncclInt32},
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
+    {at::kBool, ncclUint8},
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     {at::kBFloat16, ncclBfloat16},
 #endif
@@ -59,11 +60,22 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
-  try {
-    return ncclDataType.at(type);
-  } catch (std::out_of_range& e) {
-    throw std::runtime_error("Unsupported data type for NCCL process group");
+  auto it = ncclDataType.find(type);
+  TORCH_CHECK(
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
+  return it->second;
+}
+
+ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
+  if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+    // For bool tensors, map sum to max, which both represent a bitwise or.
+    // This is to prevent overflow issues with sum, since we use uint8 to
+    // represent a bool (see ncclDataType mapping).
+    return ncclMax;
   }
+  return ncclOp[reduceOp];
 }
 
 // Get the deviceList String from the list of devices
@@ -129,6 +141,74 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
+#ifdef ENABLE_NCCL_P2P_SUPPORT
+ncclResult_t ncclAlltoall(
+    void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    size_t size,
+    ncclDataType_t type,
+    ncclComm_t comm,
+    cudaStream_t stream) {
+  int numranks;
+  size_t rankdiff = count * size;
+  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
+  C10D_NCCL_CHECK(ncclGroupStart());
+  for (int r = 0; r < numranks; r++) {
+    // NCCL uses 0 byte message for synchronization
+    // Avoid send/recv when message size is zero
+    if (count != 0) {
+      C10D_NCCL_CHECK(ncclSend(
+          ((char*)sendbuff) + r * rankdiff, count, type, r, comm, stream));
+      C10D_NCCL_CHECK(ncclRecv(
+          ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
+    }
+  }
+  C10D_NCCL_CHECK(ncclGroupEnd());
+  return ncclSuccess;
+}
+
+ncclResult_t ncclAlltoallv(
+    void* sendbuff,
+    const int* sendcounts,
+    const int* senddispls,
+    void* recvbuff,
+    const int* recvcounts,
+    const int* recvdispls,
+    size_t size,
+    ncclDataType_t type,
+    ncclComm_t comm,
+    cudaStream_t stream) {
+  int numranks;
+  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
+  C10D_NCCL_CHECK(ncclGroupStart());
+  for (int r = 0; r < numranks; r++) {
+    // NCCL uses 0 byte message for synchronization
+    // Avoid send/recv when message size is zero
+    if (sendcounts[r] != 0) {
+      C10D_NCCL_CHECK(ncclSend(
+          ((char*)sendbuff) + senddispls[r] * size,
+          sendcounts[r],
+          type,
+          r,
+          comm,
+          stream));
+    }
+    if (recvcounts[r] != 0) {
+      C10D_NCCL_CHECK(ncclRecv(
+          ((char*)recvbuff) + recvdispls[r] * size,
+          recvcounts[r],
+          type,
+          r,
+          comm,
+          stream));
+    }
+  }
+  C10D_NCCL_CHECK(ncclGroupEnd());
+  return ncclSuccess;
+}
+#endif
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -143,9 +223,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   cudaEvents_.resize(devices.size());
   ncclComms_.resize(devices.size());
-
-  futureWork_ = c10::make_intrusive<c10::ivalue::Future>(
-      c10::ListType::create(c10::TensorType::get()));
 }
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
@@ -306,10 +383,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateWatchdog_(false),
-      opTimeout_(opTimeout),
-      checkFutObjs_(
-          std::make_shared<std::unordered_set<
-              std::shared_ptr<ProcessGroupNCCL::CheckFutureWork>>>(0)) {
+      opTimeout_(opTimeout) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -581,6 +655,16 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
 namespace {
 
+// Check validity of tensor
+void check_gpu_single_tensor(const at::Tensor& tensor) {
+  if (!tensor.is_cuda() || tensor.is_sparse()) {
+    throw std::runtime_error("Tensors must be CUDA and dense");
+  }
+  if (!tensor.is_contiguous()) {
+    throw std::runtime_error("Tensors must be contiguous");
+  }
+}
+
 // Check that all `tensors' have the same type and shape and are distributed
 // across distinct GPUs.
 void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
@@ -672,21 +756,8 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  return futureWork_;
+  return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
 }
-
-void ncclKernelCompletionCallback(
-    cudaStream_t /* unused */,
-    cudaError_t /* unused */,
-    void* userData) {
-  auto castedUserData =
-      static_cast<ProcessGroupNCCL::CheckFutureWork*>(userData);
-
-  TORCH_CHECK(
-      castedUserData, "Null castedUserData in ncclKernelCompletionCallback.");
-
-  castedUserData->markFutureCompleted();
-};
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
@@ -704,6 +775,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
+
+  // Store a reference to outputs to be used by WorkNCCL::getFuture.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -725,14 +799,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
-  // Create and store a CheckFutureWork object to be used in
-  // ncclKernelCompletionCallback function.
-  auto checkFutObj = std::make_shared<ProcessGroupNCCL::CheckFutureWork>(
-      work, outputs, checkFutObjs_, checkFutObjMutex_);
-
-  std::unique_lock<std::mutex> lock(checkFutObjMutex_);
-  checkFutObjs_->insert(checkFutObj);
-
   {
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -740,13 +806,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
-
-      // Add a cudaStreamCallback on the same stream. CUDA will automatically
-      // call ncclKernelCompletionCallback once the appropriate NCCL kernel
-      // is done and workNCCL's Future work will be marked as completed
-      // using this callback.
-      cudaStreamAddCallback(
-          ncclStream, ncclKernelCompletionCallback, checkFutObj.get(), 0);
     }
   }
 
@@ -795,7 +854,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       });
@@ -849,7 +908,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             root,
             comm,
             stream.stream());
@@ -931,7 +990,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
             output.data_ptr(),
             output.numel(),
             getNcclDataType(input.scalar_type()),
-            ncclOp[opts.reduceOp],
+            getNcclReduceOp(opts.reduceOp, input),
             comm,
             stream.stream());
       },
@@ -989,6 +1048,87 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   ncclWork->barrierTensors_ = std::move(barrierTensors);
 
   return work;
+}
+
+#ifdef ENABLE_NCCL_P2P_SUPPORT
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    std::vector<int64_t>& outputSplitSizes,
+    std::vector<int64_t>& inputSplitSizes,
+    const AllToAllOptions& /* unused */) {
+  check_gpu_single_tensor(outputTensor);
+  check_gpu_single_tensor(inputTensor);
+  if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
+    std::vector<at::Tensor> inputTensors = {inputTensor};
+    std::vector<at::Tensor> outputTensors = {outputTensor};
+    return collective(
+        inputTensors,
+        outputTensors,
+        [&](at::Tensor& input,
+            at::Tensor& output,
+            ncclComm_t comm,
+            at::cuda::CUDAStream& stream) {
+          return ncclAlltoall(
+              input.data_ptr(),
+              output.data_ptr(),
+              input.numel() / size_,
+              input.element_size(),
+              getNcclDataType(input.scalar_type()),
+              comm,
+              stream.stream());
+        });
+  } else {
+    ProcessGroup::checkSplitSizes(inputSplitSizes, inputTensor, size_);
+    ProcessGroup::checkSplitSizes(outputSplitSizes, outputTensor, size_);
+    std::vector<at::Tensor> inputTensors = {inputTensor};
+    std::vector<at::Tensor> outputTensors = {outputTensor};
+    return collective(
+        inputTensors,
+        outputTensors,
+        [&](at::Tensor& input,
+            at::Tensor& output,
+            ncclComm_t comm,
+            at::cuda::CUDAStream& stream) {
+          std::vector<int> send_lengths(size_);
+          std::vector<int> recv_lengths(size_);
+          std::vector<int> send_offsets(size_);
+          std::vector<int> recv_offsets(size_);
+          ProcessGroup::computeLengthsAndOffsets(
+              inputSplitSizes, input, &send_lengths, &send_offsets);
+          ProcessGroup::computeLengthsAndOffsets(
+              outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          return ncclAlltoallv(
+              input.data_ptr(),
+              send_lengths.data(),
+              send_offsets.data(),
+              output.data_ptr(),
+              recv_lengths.data(),
+              recv_offsets.data(),
+              input.element_size(),
+              getNcclDataType(input.scalar_type()),
+              comm,
+              stream.stream());
+        });
+  }
+}
+#else
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
+    at::Tensor& /* unused */,
+    at::Tensor& /* unused */,
+    std::vector<int64_t>& /* unused */,
+    std::vector<int64_t>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
+}
+#endif
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
