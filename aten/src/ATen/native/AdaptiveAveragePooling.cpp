@@ -2,6 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <tuple>
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 
 namespace at {
@@ -325,6 +328,11 @@ namespace {
     if (input.is_mkldnn()) {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
+#ifdef USE_VULKAN
+    if (input.is_vulkan()) {
+      return at::native::vulkan_adaptive_avg_pool2d(input, output_size);
+    }
+#endif
 
     // TODO: fastpath for Channels_last should be explored later;
     if (input.suggest_memory_format() == at::MemoryFormat::Contiguous && !input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {

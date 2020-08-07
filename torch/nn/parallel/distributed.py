@@ -148,6 +148,14 @@ class DistributedDataParallel(Module):
         ``map_location``, ``torch.load`` would recover the module to devices
         where the module was saved from.
 
+    .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
+        gradient will be ``M`` times smaller when compared to the same model
+        trained on a single node with ``batch=M*N`` (because the gradients
+        between different nodes are averaged). You should take this into
+        consideration when you want to obtain a mathematically equivalent
+        training process compared to the non-DistributedDataParallel
+        counterpart.
+
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
 
@@ -602,6 +610,7 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+        return self
 
     def _register_comm_hook(self, state: object, hook: callable):
         r"""
@@ -685,7 +694,10 @@ class DistributedDataParallel(Module):
                         # to zero the grads on all model replicas as well.
                         # This snippet is copied from torch.optim.Optimizer.
                         if param.grad is not None:
-                            param.grad.detach_()
+                            if param.grad.grad_fn is not None:
+                                param.grad.detach_()
+                            else:
+                                param.grad.requires_grad_(False)
                             param.grad.zero_()
 
             # module buffer sync

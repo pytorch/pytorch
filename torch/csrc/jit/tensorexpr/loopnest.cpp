@@ -1165,6 +1165,38 @@ void LoopNest::reorderAxis(For* a, For* b) {
   }
 } // namespace tensorexpr
 
+void LoopNest::unroll(For* f, Stmt** unrolled) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!f) {
+    throw malformed_input("unroll attempted on null loop");
+  } else if (!p) {
+    throw malformed_input("unroll attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+  }
+  if (!f->stop()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+  }
+
+  std::vector<Stmt*> unrolled_stmts;
+  int start_val = immediateAs<int>(f->start());
+  int stop_val = immediateAs<int>(f->stop());
+  for (int current = start_val; current < stop_val; ++current) {
+    for (const auto stmt : f->body()->stmts()) {
+      auto stmt_copy = Stmt::clone(stmt);
+      unrolled_stmts.push_back(Substitute(
+          stmt_copy,
+          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+    }
+  }
+  *unrolled = new Block(f->body()->varBindings(), unrolled_stmts);
+  *unrolled = IRSimplifier::simplify(*unrolled);
+
+  p->replace_stmt(f, *unrolled);
+}
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
   Stmt* cur_stmt = tensor_to_stmt_.at(t);
@@ -1385,10 +1417,13 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // exit early.
   TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == st->buf()) {
-      store_bounds_info = p;
-      found = true;
+  for (const auto& pair : loop_bounds_info) {
+    const Buf* buf = pair.first;
+    for (const TensorAccessBoundsInfo& p : pair.second) {
+      if (buf == st->buf()) {
+        store_bounds_info = p;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -1451,8 +1486,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   f->body()->prepend_stmt(bd);
 
   // Rewrite accesses to producer in consumer with accesses to temp
-  LoopComputeAtRewriter lr(
-      store_bounds_info.buf, temp_buf, store_bounds_info.start);
+  LoopComputeAtRewriter lr(st->buf(), temp_buf, store_bounds_info.start);
   Stmt* new_f = f->accept_mutator(&lr);
   if (f != new_f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
@@ -1703,24 +1737,43 @@ void LoopNest::rfactor(
   }
 
   auto loop_bounds_info = inferBounds(root_stmt_);
-  found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == tmp_buf) {
-      found = true;
-      std::vector<const Expr*> dims;
-      for (size_t i = 0; i < p.start.size(); i++) {
-        const Expr* dim = IRSimplifier::simplify(
-            new Add(new Sub(p.stop[i], p.start[i]), new IntImm(1)));
-        dims.push_back(dim);
-      }
-      tmp_buf->set_dims(dims);
-    }
-  }
-  if (!found) {
+  auto bounds_it = loop_bounds_info.find(tmp_buf);
+  if (bounds_it == loop_bounds_info.end()) {
     throw std::runtime_error(
         "Hit undefined behavior in rfactor -- couldn't infer bounds.");
   }
 
+  std::vector<const Expr*> starts;
+  std::vector<const Expr*> stops;
+
+  // Find the safe size of the temprorary buffer by determining the outer
+  // extents of a union of all bounds.
+  for (const TensorAccessBoundsInfo& p : bounds_it->second) {
+    for (size_t i = 0; i < p.start.size(); i++) {
+      if (starts.size() <= i) {
+        starts.push_back(p.start[i]);
+      } else {
+        starts[i] =
+            IRSimplifier::simplify(new Min(starts[i], p.start[i], true));
+      }
+
+      if (stops.size() <= i) {
+        stops.push_back(p.stop[i]);
+      } else {
+        stops[i] = IRSimplifier::simplify(new Max(stops[i], p.stop[i], true));
+      }
+    }
+  }
+
+  std::vector<const Expr*> tmp_dims;
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
+
+    tmp_dims.push_back(dim);
+  }
+
+  tmp_buf->set_dims(tmp_dims);
   temp_bufs_.emplace_back(tmp_buf);
 }
 
