@@ -40,7 +40,7 @@ class TestFX(TestCase):
 
         class T(torch.nn.Module):
 
-            def forward(self, A, b=4,  *args, c=5, **kwargs):
+            def forward(self, A, b=4, *args, c=5, **kwargs):
                 x = A + 1 + args[0] + kwargs['3']
                 return x
 
