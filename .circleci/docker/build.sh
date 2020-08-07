@@ -58,6 +58,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    VULKAN_SDK=1.2.148.0
+    SWIFTSHADER=yes
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6
