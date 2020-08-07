@@ -10,11 +10,6 @@ GENERATED_CPP = [
     "jit/generated/generated_unboxing_wrappers_0.cpp",
     "jit/generated/generated_unboxing_wrappers_1.cpp",
     "jit/generated/generated_unboxing_wrappers_2.cpp",
-    "autograd/generated/ProfiledType_0.cpp",
-    "autograd/generated/ProfiledType_1.cpp",
-    "autograd/generated/ProfiledType_2.cpp",
-    "autograd/generated/ProfiledType_3.cpp",
-    "autograd/generated/ProfiledType_4.cpp",
     "autograd/generated/TraceType_0.cpp",
     "autograd/generated/TraceType_1.cpp",
     "autograd/generated/TraceType_2.cpp",
@@ -22,6 +17,7 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
+    "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -37,11 +33,6 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/VariableType_2.cpp",
         "autograd/generated/VariableType_3.cpp",
         "autograd/generated/VariableType_4.cpp",
-        "autograd/generated/ProfiledType_0.cpp",
-        "autograd/generated/ProfiledType_1.cpp",
-        "autograd/generated/ProfiledType_2.cpp",
-        "autograd/generated/ProfiledType_3.cpp",
-        "autograd/generated/ProfiledType_4.cpp",
         "autograd/generated/TraceType_0.cpp",
         "autograd/generated/TraceType_1.cpp",
         "autograd/generated/TraceType_2.cpp",
@@ -486,8 +477,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
-    "torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp",
-    "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+    "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
@@ -526,6 +516,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
+    "torch/csrc/utils/disable_torch_function.cpp",
 ]
 
 libtorch_python_distributed_sources = [
@@ -551,6 +542,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
         "autograd/generated/python_functions.cpp",
         "autograd/generated/python_nn_functions.cpp",
+        "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
