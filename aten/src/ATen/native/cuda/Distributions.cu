@@ -69,7 +69,13 @@ struct curand_uniform_wrapper {
   curandStatePhilox4_32_10_t &state;
   __device__ curand_uniform_wrapper(curandStatePhilox4_32_10_t &state): state(state) {}
   __device__ float operator()() {
-    return curand_uniform(&state);
+    auto val = curand_uniform(&state);
+    // val is from 0.0 to 1.0, where 1.0 is included and 0.0 is excluded
+    // We want 1.0 excluded and 0.0 included
+    if (val == 1.0F) {
+        val = 0.0F;
+    }
+    return val;
   }
 };
 

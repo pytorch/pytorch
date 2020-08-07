@@ -166,13 +166,7 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSample
 
   while (1) {
     U = standard_uniform.sample();
-    // Cuda's curand_uniform can return 1.0 but not 0.0
-    // Reject 1.0 since it will produce geom == 0.0
-    accscalar_t logU = compat_log(U);
-    if (logU == 0.0) {
-      continue;
-    }
-    accscalar_t geom = compat_ceil(logU / logprob);
+    accscalar_t geom = compat_ceil(compat_log(U) / logprob);
     geom_sum += geom;
     if (geom_sum > count) {
       break;
