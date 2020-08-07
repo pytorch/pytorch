@@ -3,14 +3,10 @@ import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.quantization import QuantStub, DeQuantStub
 import torch.quantization._correct_bias as _correct_bias
-from torch.quantization._correct_bias import _supported_modules, _supported_modules_q
+from torch.quantization._correct_bias import _supported_modules, _supported_modules_quantized
 from torchvision.models.quantization import mobilenet_v2
 import copy
-from torch.quantization import (
-    default_eval_fn,
-    default_qconfig,
-    quantize,
-)
+from torch.quantization import default_qconfig
 
 class TestBiasCorrection(QuantizationTestCase):
     def compute_sqnr(self, x, y):
@@ -19,38 +15,34 @@ class TestBiasCorrection(QuantizationTestCase):
         return 20 * torch.log10(Ps / Pn)
 
     def correct_artificial_bias(self, float_model, bias_correction, img_data):
+        ''' Adding artificial bias and testing if bias persists after bias
+            correction
+        '''
         artificial_model = copy.deepcopy(float_model)
         artificial_model.qconfig = default_qconfig
-
         torch.quantization.prepare(artificial_model, inplace=True)
         artificial_model(img_data[0][0])
         torch.quantization.convert(artificial_model, inplace=True)
+
+        # manually changing bias
         for name, submodule in artificial_model.named_modules():
-            if type(submodule) in _supported_modules_q:
+            if type(submodule) in _supported_modules_quantized:
                 x = _correct_bias.get_param(submodule, 'bias')
                 if x is not None:
                     x.data = x.data * 10
-                    print(x.data)
-
 
         bias_correction(float_model, artificial_model, img_data)
 
-        for name, submodule in float_model.named_modules():
-            if type(submodule) in _correct_bias._supported_modules:
-                artificial_submodule = _correct_bias.get_module(artificial_model, name)
-                float_weight = _correct_bias.get_param(submodule, 'bias')
-                artificial_weight = _correct_bias.get_param(artificial_submodule, 'bias')
-                print(name, type(submodule))
-                print("float bias: ", float_weight)
-                print("articifial bias: ", artificial_weight)
-                if float_weight is not None and artificial_weight is not None:
-                    print("difference: ", float_weight - artificial_weight)
+        for name, artificial_submodule in artificial_model.named_modules():
+            if type(artificial_submodule) in _correct_bias._supported_modules_quantized:
+                submodule = _correct_bias.get_module(float_model, name)
+                float_bias = _correct_bias.get_param(submodule, 'bias')
+                artificial_bias = _correct_bias.get_param(artificial_submodule, 'bias')
 
                 if artificial_submodule in _supported_modules:
-                    if artificial_weight.is_quantized:
-                        artificial_weight = artificial_weight.dequantize()
-
-                    self.assertTrue(self.computeSqnr(float_weight, artificial_weight) > 35,
+                    if artificial_bias.is_quantized:
+                        artificial_bias = artificial_bias.dequantize()
+                    self.assertTrue(self.computeSqnr(float_bias, artificial_bias) > 35,
                                     "Correcting quantized bias produced too much noise, sqnr score too low")
 
     def test_linear_chain(self):
