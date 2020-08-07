@@ -183,7 +183,7 @@ def checkout_nightly_version(branch, spdir):
     else:
         raise RuntimeError(f"Could not find git_version in {version_fname}")
     print(f"Found released git version {git_version}")
-    # now cross refernce with nightly version
+    # now cross reference with nightly version
     _ensure_commit(git_version)
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
     p = subprocess.run(cmd, capture_output=True, check=True, text=True)

@@ -126,7 +126,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 
 The `tools/nightly_checkout.py` script is provided to ease pure Python development of
 PyTorch. This uses conda and git to check out the nightly development version of PyTorch
-and installs pre-built binaries into the current repository. This is is like a development
+and installs pre-built binaries into the current repository. This is like a development
 or editable install, but without needing the ability to compile any C++ code.
 
 You can use this script to check out a new nightly branch with the following::
