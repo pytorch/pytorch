@@ -279,9 +279,17 @@ struct TORCH_API Event final {
 
   void setCudaUs(int64_t cuda_us) {
     cuda_us_ = cuda_us;
-}
+  }
 
-private:
+  void setSequenceNr(int64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
+  }
+
+  int64_t sequence_nr() const {
+    return sequence_nr_;
+  }
+
+ private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
@@ -296,6 +304,7 @@ private:
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
+  int64_t sequence_nr_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
