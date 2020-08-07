@@ -214,14 +214,15 @@ struct ProfilerThreadLocalState
       cuda_stubs->nvtxRangePushA(getNvtxStr(
           name, msg, sequence_nr, shapes).c_str());
     } else {
-      getEventList().record(
-          EventKind::PushRange,
+      Event evt(EventKind::PushRange,
           name,
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
           handle,
           std::move(shapes),
           at::RecordFunction::getDefaultNodeId());
+      evt.setSequenceNr(sequence_nr);
+      getEventList().record(std::move(evt));
     }
   }
 
