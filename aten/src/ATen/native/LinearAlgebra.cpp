@@ -725,9 +725,14 @@ Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
 // ...
 // buffer[num_matrices - 1, ...] = l[num_matries - 1]
 void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
+  auto a_sizes_minus_last = a.sizes().vec();
+  a_sizes_minus_last.pop_back();
   // fill I
   buffer.select(0, 0).copy_(
-    at::eye(a.size(-1), buffer.options()).expand_as(a)
+    at::diag_embed(
+      at::ones({1}, buffer.options())
+        .expand(a_sizes_minus_last)
+    )
   );
 
   // fill a
