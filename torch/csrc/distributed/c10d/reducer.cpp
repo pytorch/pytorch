@@ -357,7 +357,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       }
       // See Note [DDP Communication Hook]
       // Check whether default communication hook was overridden by user.
-      if (!dynamic_cast<AllreduceHook*>(comm_hook_.get())) {
+      if (dynamic_cast<AllreduceHook*>(comm_hook_.get())) {
         // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
         auto wrapped =
             c10::scalar_to_tensor(double(1.) / process_group_->getSize());
@@ -397,7 +397,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
     replica.contents = grad;
     // See Note [DDP Communication Hook]
     // Check whether default communication hook was overridden by user.
-    if (!dynamic_cast<AllreduceHook*>(comm_hook_.get())) {
+    if (dynamic_cast<AllreduceHook*>(comm_hook_.get())) {
       replica.contents.div_(process_group_->getSize());
     }
     // The grad is modified in place and needs to be written back.
