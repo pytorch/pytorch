@@ -2736,11 +2736,11 @@ class TestQuantizedEmbeddingBag(TestCase):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
-        # Call the quantize+prepack function to check results of observer and prepack.
         w_packed = pack_fn(weights)
         w_unpacked = unpack_fn(w_packed)
 
         if bit_rate == 8:
+            # Check numerics of prepack function that accepts qtensor as input.
             # We use min-max observer to mimic the quantization performed in the original function.
             from torch.quantization import PerChannelMinMaxObserver
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
