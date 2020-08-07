@@ -27,24 +27,22 @@ inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
     // again.
     // Try again.
     ptr = c10::alloc_cpu(bytes);
+    TORCH_CHECK(ptr, "Memory allocation failed for ", bytes, " bytes.");
   }
   allocation_map_[ptr] = bytes;
   return ptr;
 }
 
 inline void* CPUCachingAllocator::use_cached(const size_t bytes) {
-  void* ptr = available_map_[bytes].front();
-  available_map_[bytes].pop_front();
-  // Is this assert necessary?
-  TORCH_INTERNAL_ASSERT(allocation_map_.find(ptr) == allocation_map_.end());
-  allocation_map_[ptr] = bytes;
+  void* ptr = available_map_[bytes].back();
+  available_map_[bytes].pop_back();
   return ptr;
 }
 
 void* CPUCachingAllocator::allocate(const size_t bytes) {
   std::lock_guard<std::mutex> guard(mutex_);
-  if (available_map_.find(bytes) == available_map_.end() ||
-      available_map_[bytes].empty()) {
+  const auto& it = available_map_.find(bytes);
+  if (it == available_map_.end() || it->second.empty()) {
     return allocate_and_cache(bytes);
   }
   return use_cached(bytes);
@@ -66,21 +64,31 @@ void CPUCachingAllocator::free(void* ptr) {
     return;
   }
   const size_t alloc_size = allocation_map_[ptr];
-  allocation_map_.erase(ptr);
-  if (available_map_.find(alloc_size) == available_map_.end()) {
-    available_map_[alloc_size] = std::deque<void*>({ptr});
-  } else {
-    available_map_[alloc_size].push_back(ptr);
+  available_map_[alloc_size].push_back(ptr);
+}
+
+void CPUCachingAllocator::record_free(void* ptr) {
+  // This function captures the case when the allocated memory
+  // is being freed outside the scope of this allocator.
+  // At the moment only way to capture this is to have the allocator,
+  // that uses this CachingAllocator as the backing allocator,
+  // call this function explicity upon freeing memory while
+  // outside the scope of caching allocator.
+  // If the memory is freed in some other way, then we will likely
+  // have undefined behavior or page fault. But this can be
+  // the case without caching allocator as well.
+  const auto& it = allocation_map_.find(ptr);
+  if (it != allocation_map_.end()) {
+    allocation_map_.erase(it);
   }
 }
 
 void CPUCachingAllocator::free_cached() {
-  for (const auto& it : available_map_) {
-    for (void* ptr : it.second) {
-      free(ptr);
-    }
+  for (const auto& it : allocation_map_) {
+    c10::free_cpu(it.first);
   }
   available_map_.clear();
+  allocation_map_.clear();
 }
 
 CPUCachingAllocator::~CPUCachingAllocator() {
@@ -108,9 +116,13 @@ void CachingAllocatorInfo::disable() {
   is_enabled_ = false;
 }
 
-WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard() {
+WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(bool enabled) {
   prev_info_ = GetThreadLocalCachingAllocatorInfo();
-  GetThreadLocalCachingAllocatorInfo().enable();
+  if (enabled) {
+    GetThreadLocalCachingAllocatorInfo().enable();
+  } else {
+    GetThreadLocalCachingAllocatorInfo().disable();
+  }
 }
 
 WithCPUCachingAllocatorGuard::~WithCPUCachingAllocatorGuard() {
