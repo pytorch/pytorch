@@ -9,6 +9,7 @@ class TestFX(TestCase):
             def __init__(self):
                 super().__init__()
                 self.w = torch.nn.Parameter(torch.rand(4, 3))
+
             def forward(self, x):
                 return self.w + x
 
@@ -18,6 +19,7 @@ class TestFX(TestCase):
                 self.lin = torch.nn.Linear(4, 3)
                 self.sub_mod = MySub()
                 self.w = torch.nn.Parameter(torch.rand(3))
+
             def forward(self, A, B, c):
                 t = torch.sigmoid(A) + self.lin(c)
                 return self.sub_mod(t.data + self.w + t + 1 - A + B // A + -A + A.add(B, alpha=3))
@@ -37,6 +39,7 @@ class TestFX(TestCase):
         print(m2(torch.rand(3, 4)))
 
         class T(torch.nn.Module):
+
             def forward(self, A, b=4,  *args, c=5, **kwargs):
                 x = A + 1 + args[0] + kwargs['3']
                 return x
