@@ -294,6 +294,10 @@ Tensor & detach_(Tensor & self) {
 // Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
 // skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
 // (and that don't use dispatch), we register them as catch-all kernels instead.
+// Invariant:
+// - Ops registered to catchAll below must match `MANUAL_CATCHALL` set in tools/autograd/gen_variable_type.py.
+//   and they have manual_kernel_registration=True in native_functions.yaml.
+// - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
