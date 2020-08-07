@@ -18,10 +18,6 @@
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
 
-#ifdef USE_VULKAN
-#include <ATen/native/vulkan/VulkanAten.h>
-#endif
-
 namespace at {
 namespace native {
 
@@ -843,11 +839,6 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, shape);
   }
-#ifdef USE_VULKAN
-    if (self.is_vulkan()) {
-      return at::native::vulkan_reshape(self, shape);
-    }
-#endif
 
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), shape);
