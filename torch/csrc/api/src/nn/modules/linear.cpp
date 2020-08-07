@@ -85,19 +85,17 @@ UnflattenImpl::UnflattenImpl(UnflattenOptions options_) : options(std::move(opti
 void UnflattenImpl::reset() {}
 
 void UnflattenImpl::pretty_print(std::ostream& stream) const {
-  auto dim_str = c10::get_if<std::string>(&options.dim());
-  if (dim_str) {
-    auto namedshape = c10::get<UnflattenOptions::namedshape_t>(options.unflattened_size());
-    stream << "torch::nn::Unflatten(dim=\"" << *dim_str << "\", unflattened_size={";
+  auto namedshape = options.namedshape();
+  if (!namedshape.empty()) {
+    stream << "torch::nn::Unflatten(dim=\"" << options.dimname() << "\", unflattened_size={";
     size_t i = 0;
     for (; i < namedshape.size() - 1; ++i) {
       stream << "{\"" << std::get<0>(namedshape[i]) << "\", " << std::get<1>(namedshape[i]) << "}, ";
     }
     stream << "{\"" << std::get<0>(namedshape[i]) << "\", " << std::get<1>(namedshape[i]) << "}})";
   } else {
-    auto dim = c10::get<int64_t>(options.dim());
-    auto sizes = c10::get<std::vector<int64_t>>(options.unflattened_size());
-    stream << "torch::nn::Unflatten(dim=" << dim << ", unflattened_size={";
+    stream << "torch::nn::Unflatten(dim=" << options.dim() << ", unflattened_size={";
+    auto sizes = options.sizes();
     size_t i = 0;
     for (; i < sizes.size() - 1; ++i) {
       stream << sizes[i] << ", ";
@@ -107,21 +105,18 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor UnflattenImpl::forward(const Tensor& input) {
-  auto dim_str = c10::get_if<std::string>(&options.dim());
-  if (dim_str) {
-    auto unflattened_size = c10::get<UnflattenOptions::namedshape_t>(options.unflattened_size());
-    auto dimname = torch::Dimname::fromSymbol(torch::Symbol::dimname(*dim_str));
+  auto namedshape = options.namedshape();
+  if (!namedshape.empty()) {
+    auto dimname = torch::Dimname::fromSymbol(torch::Symbol::dimname(options.dimname()));
     std::vector<int64_t> sizes;
     std::vector<torch::Dimname> names;
-    for (auto i : unflattened_size) {
+    for (auto i : namedshape) {
       names.push_back(torch::Dimname::fromSymbol(torch::Symbol::dimname(std::get<0>(i))));
       sizes.push_back(std::get<1>(i));
     }
     return input.unflatten(dimname, sizes, names);
   }
-  auto dim = c10::get<int64_t>(options.dim());
-  auto sizes = c10::get<std::vector<int64_t>>(options.unflattened_size());
-  return input.unflatten(dim, sizes, torch::nullopt);
+  return input.unflatten(options.dim(), options.sizes(), torch::nullopt);
 }
 
 // ============================================================================

@@ -45,23 +45,27 @@ struct TORCH_API FlattenOptions {
 
 /// Options for the `Unflatten` module.
 ///
+/// Note: If input tensor is named, use dimname and namedshape arguments.
+///
 /// Example:
 /// ```
-/// Unflatten model(UnflattenOptions(0, {2, 2}));
-/// Unflatten model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
+/// Unflatten unnamed_model(UnflattenOptions(0, {2, 2}));
+/// Unflatten named_model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
 /// ```
 struct TORCH_API UnflattenOptions {
-  typedef std::vector<std::tuple<std::string, int64_t>> namedshape_t;
-  typedef c10::variant<std::vector<int64_t>, namedshape_t> sizes_t;
-  typedef c10::variant<int64_t, std::string> dim_t;
-  
-  UnflattenOptions(int64_t dim, std::vector<int64_t> unflattened_size);
-  UnflattenOptions(std::string dim, namedshape_t unflattened_size);
+  typedef std::vector<std::pair<std::string, int64_t>> namedshape_t;
+
+  UnflattenOptions(int64_t dim, std::vector<int64_t> sizes);
+  UnflattenOptions(std::string dimname, namedshape_t namedshape);
 
   /// dim to unflatten
-  TORCH_ARG(dim_t, dim);
+  TORCH_ARG(int64_t, dim);
+  /// name of dim to unflatten, for use with named tensors
+  TORCH_ARG(std::string, dimname);
   /// new shape of unflattened dim
-  TORCH_ARG(sizes_t, unflattened_size);
+  TORCH_ARG(std::vector<int64_t>, sizes);
+  /// new shape of unflattened dim with names, for use with named tensors
+  TORCH_ARG(namedshape_t, namedshape);
 };
 
 // ============================================================================
