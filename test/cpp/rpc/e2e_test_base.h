@@ -19,11 +19,13 @@ namespace rpc {
 using torch::distributed::autograd::DistAutogradContainer;
 using torch::distributed::autograd::DistAutogradContext;
 
+DistAutogradContainer* getDistAutogradContainer();
+
 class TestE2EBase : public ::testing::Test {
  protected:
   void SetUp() override {
     // Setup distributed autograd.
-    autogradContainer = &DistAutogradContainer::init(0);
+    autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
     store = std::make_shared<c10d::TCPStore>(
