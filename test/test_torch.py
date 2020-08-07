@@ -16582,6 +16582,30 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          atol=precision_4dps, rtol=0)
 
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardglu(self, device, dtype):
+        input_values = [-1000, -4, -3, -2, 0, 1, 2, 3, 4, 1000]
+        input_two_dim = np.array([
+            np.repeat(input_values, len(input_values)),
+            np.tile(input_values, len(input_values))]).T
+        expectedOutput = input_two_dim[:, 0] * np.minimum(np.maximum((np.add(input_two_dim[:, 1], 3)), 0), 6) / 6.0
+        expectedOutput = expectedOutput.reshape(-1, 1)
+
+        inputTensor = torch.tensor(input_two_dim, dtype=dtype, device=device)
+        precision_4dps = 0.0002
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardglu(inputTensor),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device),
+                         atol=precision_4dps, rtol=0)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        self.assertEqual(torch.nn.functional.hardglu(inputTensorCpy),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device),
+                         atol=precision_4dps, rtol=0)
+
+    @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
         expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]

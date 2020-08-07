@@ -279,6 +279,40 @@ class TestQuantizedOps(TestCase):
         ]
         self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
+    """Tests the correctness of the quantized::glu op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(2, 6, 2, 6),
+                       qparams=hu.qparams()))
+    def test_qglu(self, X):
+        for ax in X[0].shape:
+            assume(ax % 2 == 0)
+        glu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.nn.functional.glu
+                ],
+                'reference_fn': torch.nn.functional.glu,
+            }
+        ]
+        self._test_activation_function(X, 'glu', glu_test_configs)
+
+    """Tests the correctness of the quantized::hardglu op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(2, 6, 2, 6),
+                       qparams=hu.qparams()))
+    def test_qhardglu(self, X):
+        for ax in X[0].shape:
+            assume(ax % 2 == 0)
+        hardglu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.nn.functional.hardglu
+                ],
+                'reference_fn': torch.nn.functional.hardglu,
+            }
+        ]
+        self._test_activation_function(X, 'hardglu', hardglu_test_configs)
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
