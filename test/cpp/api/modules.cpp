@@ -555,17 +555,23 @@ TEST_F(ModulesTest, Unflatten) {
   ASSERT_TRUE(torch::equal(output, expected));
 
   // Named tensor
-  auto make_dimnames = [] (std::vector<std::string> names) {
+  auto make_dimnames = [](std::vector<std::string> names) {
     std::vector<torch::Dimname> dimnames;
     for (auto name : names) {
-      dimnames.push_back(torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
+      dimnames.push_back(
+          torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
     }
     return dimnames;
   };
-  
-  unflatten = Unflatten(UnflattenOptions("B", UnflattenOptions::namedshape_t{{"B1", 2}, {"B2", 2}}));
-  output = unflatten->forward(torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
-  expected = torch::tensor({{{1, 2}, {3, 4}}}).refine_names(make_dimnames({"A", "B1", "B2"}));
+
+  unflatten = Unflatten(UnflattenOptions(
+      "B",
+      {std::tuple<std::string, int64_t>{"B1", 2},
+       std::tuple<std::string, int64_t>{"B2", 2}}));
+  output = unflatten->forward(
+      torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
+  expected = torch::tensor({{{1, 2}, {3, 4}}})
+                 .refine_names(make_dimnames({"A", "B1", "B2"}));
   ASSERT_TRUE(torch::equal(output, expected));
 }
 
@@ -3530,10 +3536,15 @@ TEST_F(ModulesTest, PrettyPrintFlatten) {
 }
 
 TEST_F(ModulesTest, PrettyPrintUnflatten) {
-  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
-    "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
-  ASSERT_EQ(c10::str(Unflatten(UnflattenOptions("B", UnflattenOptions::namedshape_t{{"B1", 2}, {"B2", 2}}))),
-    "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
+  ASSERT_EQ(
+      c10::str(Unflatten(UnflattenOptions(0, {2, 2}))),
+      "torch::nn::Unflatten(dim=0, unflattened_size={2, 2})");
+  ASSERT_EQ(
+      c10::str(Unflatten(UnflattenOptions(
+          "B",
+          {std::tuple<std::string, int64_t>{"B1", 2},
+           std::tuple<std::string, int64_t>{"B2", 2}}))),
+      "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 
 TEST_F(ModulesTest, ReflectionPad1d) {

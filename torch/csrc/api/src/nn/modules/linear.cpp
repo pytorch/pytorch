@@ -80,7 +80,7 @@ Tensor FlattenImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
-UnflattenImpl::UnflattenImpl(const UnflattenOptions& options_) : options(options_) {}
+UnflattenImpl::UnflattenImpl(UnflattenOptions options_) : options(std::move(options_)) {}
 
 void UnflattenImpl::reset() {}
 
@@ -89,8 +89,8 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
   if (dim_str) {
     auto namedshape = c10::get<UnflattenOptions::namedshape_t>(options.unflattened_size());
     stream << "torch::nn::Unflatten(dim=\"" << *dim_str << "\", unflattened_size={";
-    size_t i;
-    for (i = 0; i < namedshape.size() - 1; ++i) {
+    size_t i = 0;
+    for (; i < namedshape.size() - 1; ++i) {
       stream << "{\"" << std::get<0>(namedshape[i]) << "\", " << std::get<1>(namedshape[i]) << "}, ";
     }
     stream << "{\"" << std::get<0>(namedshape[i]) << "\", " << std::get<1>(namedshape[i]) << "}})";
@@ -98,8 +98,8 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
     auto dim = c10::get<int64_t>(options.dim());
     auto sizes = c10::get<std::vector<int64_t>>(options.unflattened_size());
     stream << "torch::nn::Unflatten(dim=" << dim << ", unflattened_size={";
-    size_t i;
-    for (i = 0; i < sizes.size() - 1; ++i) {
+    size_t i = 0;
+    for (; i < sizes.size() - 1; ++i) {
       stream << sizes[i] << ", ";
     }
     stream << sizes[i] << "})";

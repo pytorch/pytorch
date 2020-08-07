@@ -214,24 +214,34 @@
   variants: function, method
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
+  variants: method
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# Note [Adding an alias]
+# To add an alias do the following:
+#
+# 1) Copy the original functions native_functions.yaml entry, but replace the
+#      original function's name with their own.
+# 2) Implement the corresponding functions and have them redispatch to the
+#      original function.
+# 3) Add docstrings to the new functions that reference the original function.
+# 4) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
+# 5) Update the op_alias_mappings in torch/testing/_internal/jit_utils.py.
+# 6) Add a test validating the alias's behavior is the same as the original
+#      function's.
+#
+# See torch.absolute, an alias for torch.abs, as an example.
+
+# Absolute, alias for abs
 - func: absolute(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU, CUDA: abs
 
 - func: absolute_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
-  dispatch:
-    CPU, CUDA: abs_
+  variants: method
 
 - func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: abs_out
 
 - func: angle(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1404,6 +1414,10 @@
 # has the corresponding backward defined as native functions as well. Therefore,
 # in these functions and their backwards, no more shape checking is done.
 #
+# There is also _grid_sampler_2d_backward_cpu_fallback which is an
+# implementation detail of grid_sampler_2d and is only exposed here for testing
+# purposes.
+#
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
@@ -1423,6 +1437,13 @@
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
+
+# See NOTE [ grid_sample CPU fallback ]
+- func: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _grid_sampler_2d_cpu_fallback_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
 
 - func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   use_c10_dispatcher: full

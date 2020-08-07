@@ -138,7 +138,7 @@ class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
     : UnflattenImpl(UnflattenOptions(dim, unflattened_size)) {}
   UnflattenImpl(std::string dim, UnflattenOptions::namedshape_t unflattened_size)
     : UnflattenImpl(UnflattenOptions(dim, unflattened_size)) {}
-  explicit UnflattenImpl(const UnflattenOptions& options_);
+  explicit UnflattenImpl(UnflattenOptions options_);
 
   void reset() override;
 
