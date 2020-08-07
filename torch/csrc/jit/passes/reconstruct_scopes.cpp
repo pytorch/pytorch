@@ -19,7 +19,7 @@ class ReconstructScopesPass {
   std::string prefix_;
 
   // This boolean indicates whether there are two submodules of the same
-  // class type. This issue may occur in q scripted module and make it
+  // class type. This issue may occur in a scripted module and make it
   // difficult to exactly track module information corresponding to each
   // Node* after inlining the graph. Consider the following example:
 

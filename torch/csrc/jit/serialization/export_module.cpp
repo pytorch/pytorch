@@ -158,25 +158,21 @@ c10::IValue getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  std::vector<std::pair<std::string, IValue>> entries = {
-      {"instructions", Tup(instructions)},
-      {"operators", Tup(operators)},
-      {"constants", Tup(constants)},
-      {"types", Tup(types)},
-      {"register_size", register_size}};
-
+  // module debug info
+  std::vector<IValue> module_paths;
   if (save_debug_info_in_bytecode) {
-    // module debug info
-    std::vector<IValue> module_paths;
     module_paths.reserve(op_module_paths.size());
     for (auto& path : op_module_paths) {
       module_paths.emplace_back(std::move(path));
     }
-
-    entries.emplace_back("module_debug_info", Tup(module_paths));
   }
 
-  auto table = Table(entries);
+  auto table = Table({{"instructions", Tup(instructions)},
+                      {"operators", Tup(operators)},
+                      {"constants", Tup(constants)},
+                      {"types", Tup(types)},
+                      {"register_size", register_size},
+                      {"module_debug_info", Tup(module_paths)}});
   return Tup({func.qualname().qualifiedName(), table});
 }
 

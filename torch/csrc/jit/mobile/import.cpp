@@ -139,9 +139,12 @@ void parseMethods(
               table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
               .toTuple()
               ->elements();
-      TORCH_CHECK(
-          module_debug_info_list.size() == ops_list.size(),
-          "The numbers of operators and module info strings do not match.");
+      hasDebugInfo = module_debug_info_list.size() > 0;
+      if (hasDebugInfo) {
+        TORCH_CHECK(
+            module_debug_info_list.size() == ops_list.size(),
+            "The numbers of operators and module info strings do not match.");
+      }
     }
 
     function->set_module_debug_info_list_size(ins_list.size());
