@@ -3885,7 +3885,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         model.train()
 
-        ort_outs = self.run_ort(model, input=(input,), training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
         assert x != ort_outs[0]
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -3940,8 +3940,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = MyModule()
         x = torch.randn(10, 3, 128, 128)
-        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)
-        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
     def test_multiple_conv_bn(self):
@@ -3972,8 +3972,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = MyModule()
         x = torch.randn(2, 3, 224, 224)
-        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)      
-        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs1 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.TRAINING)      
+        ort_outs2 = self.run_ort(model, input=(x,), training=torch.onnx.TrainingMode.EVAL)
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
 def make_test(name, base, layer, bidirectional, initial_state,
