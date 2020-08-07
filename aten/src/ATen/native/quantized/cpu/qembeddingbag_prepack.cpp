@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include "ATen/Parallel.h"
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
