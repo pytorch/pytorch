@@ -1556,6 +1556,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
 
 @requires_nccl()
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
