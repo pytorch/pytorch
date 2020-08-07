@@ -42,6 +42,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(NoneType)               \
   _(StringType)             \
   _(GeneratorType)          \
+  _(QuantizerType)          \
   _(BoolType)               \
   _(OptionalType)           \
   _(VarType)                \
@@ -1428,6 +1429,28 @@ struct CAFFE2_API GeneratorType : public Type {
 
  private:
   GeneratorType() : Type(TypeKind::GeneratorType) {}
+};
+
+struct QuantizerType;
+using QuantizerTypePtr = std::shared_ptr<QuantizerType>;
+// This type represents a Quantizer
+struct CAFFE2_API QuantizerType : public Type {
+  static QuantizerTypePtr create() {
+    return QuantizerTypePtr(
+        new QuantizerType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Quantizer";
+  }
+  static const TypeKind Kind = TypeKind::QuantizerType;
+  // global singleton
+  static QuantizerTypePtr get();
+
+ private:
+  QuantizerType() : Type(TypeKind::QuantizerType) {}
 };
 
 struct QSchemeType;
