@@ -18,25 +18,6 @@ class TestBiasCorrection(QuantizationTestCase):
         Pn = torch.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
-    def correct_quantized_bias(self, float_model, bias_correction, img_data):
-        # needs fixing
-        quantized_model = copy.deepcopy(float_model)
-        quantized_model.qconfig = default_qconfig
-        quantized_model = quantize(float_model, default_eval_fn, img_data, inplace=True)
-
-        bias_correction(float_model, quantized_model, img_data)
-
-        for name, submodule in float_model.named_modules():
-            quantized_submodule = _correct_bias.get_module(quantized_model, name)
-            float_weight = _correct_bias.get_param(submodule, 'weight')
-            quantized_weight = _correct_bias.get_param(quantized_submodule, 'weight')
-            if quantized_submodule in _supported_modules:
-                if quantized_weight.is_quantized:
-                    quantized_weight = quantized_weight.dequantize()
-
-                self.assertTrue(self.computeSqnr(float_weight, quantized_weight) > 35,
-                                "Correcting quantized bias produced too much noise, sqnr score too low")
-
     def correct_artificial_bias(self, float_model, bias_correction, img_data):
         artificial_model = copy.deepcopy(float_model)
         artificial_model.qconfig = default_qconfig
@@ -89,17 +70,10 @@ class TestBiasCorrection(QuantizationTestCase):
                 x = self.linear3(x)
                 x = self.dequant(x)
                 return x
-        model = LinearChain()
+        float_model = LinearChain()
         img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.sequential_bias_correction, img_data)
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.parallel_bias_correction, img_data)
-        float_model = copy.deepcopy(model)
         self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
-        # float_model = copy.deepcopy(model)
-        # self.correct_artificial_bias(float_model, _correct_bias.sequential_bias_correction, img_data)
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
@@ -118,32 +92,15 @@ class TestBiasCorrection(QuantizationTestCase):
                 x = self.conv2d3(x)
                 x = self.dequant(x)
                 return x
-        model = ConvChain()
+        float_model = ConvChain()
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.sequential_bias_correction, img_data)
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.parallel_bias_correction, img_data)
-        float_model = copy.deepcopy(model)
         self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
-        float_model = copy.deepcopy(model)
-        self.correct_artificial_bias(float_model, _correct_bias.sequential_bias_correction, img_data)
-
 
     def test_mobilenet(self):
-        model = mobilenet_v2(pretrained=True, quantize=False)
-        model.eval()
-        model.fuse_model()
-        # print(model)
-        # return
+        float_model = mobilenet_v2(pretrained=True, quantize=False)
+        float_model.eval()
+        float_model.fuse_model()
         img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.sequential_bias_correction, img_data)
-        # float_model = copy.deepcopy(model)
-        # self.correct_quantized_bias(float_model, _correct_bias.parallel_bias_correction, img_data)
-        float_model = copy.deepcopy(model)
         self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
-        float_model = copy.deepcopy(model)
-        self.correct_artificial_bias(float_model, _correct_bias.sequential_bias_correction, img_data)

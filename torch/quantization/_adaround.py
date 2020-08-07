@@ -12,9 +12,6 @@ from torch.quantization import QuantStub, DeQuantStub
 import copy
 _supported_modules = {nn.Conv2d, nn.Linear}
 
-
-
-
 def clipped_sigmoid(continous_V):
     sigmoid_applied = torch.sigmoid(continous_V)
     scale_n_add = (sigmoid_applied * 1.2) - 0.1
@@ -26,7 +23,6 @@ def modified_quantized(model, x):
     continous_V = model.continous_V
     scale = model.scale
 
-    # W_over_s = torch.floor_divide(weight, scale)
     W_over_S = torch.div(weight, scale)
     W_over_S = torch.floor(W_over_S)
     W_plus_H = W_over_S + clipped_sigmoid(continous_V)
@@ -44,14 +40,6 @@ def loss_function_leaf(model, count):
     adaround_instance = model.wrapped_module.weight_fake_quant
     float_weight = model.wrapped_module.weight
     clipped_weight = modified_quantized(adaround_instance, float_weight)
-    # FW_over_scale = torch.div(float_weight, adaround_instance.scale)
-    # _w_Floor = torch.floor(FW_over_scale)
-    # W_plus_sig = _w_Floor + clipped_sigmoid(adaround_instance.continous_V)
-    # clipp = torch.clamp(W_plus_sig, adaround_instance.quant_min, adaround_instance.quant_max)
-    # scaled_final_answer = adaround_instance.scale * clipp
-    # clipped_weight = scaled_final_answer
-    ## next is clippy
-
 
     quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(adaround_instance.scale),
                                                 int(adaround_instance.zero_point), adaround_instance.quant_min,
@@ -63,13 +51,9 @@ def loss_function_leaf(model, count):
     clip_V = clipped_sigmoid(continous_V)
     spreading_range = torch.abs((2 * clip_V) - 1)
     one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
-    print(one_minus_beta.size())
     regulization = torch.sum(one_minus_beta)
 
-    # Frobenius_norm = torch.norm(continous_V- float_weight)
-    # up to clip is ok, scaled_final _answer isn't ok
     Frobenius_norm = torch.norm(float_weight - quantized_weight)
-    # Frobenius_norm = torch.norm(model.float_output - model.quantized_output)
     print("float size: ", float_weight.size())
 
     print("loss function break down: ", Frobenius_norm*100, _lambda * regulization)
@@ -166,7 +150,6 @@ class OuputWrapper(nn.Module):
     def forward(self, x):
         x = self.quant(x)
         if self.on:
-            # self.hacky_input = x.detach()
             print(type(self.wrapped_module))
             self.wrapped_module.activation_post_process.disable_fake_quant()
             self.wrapped_module.weight_fake_quant.disable_fake_quant()
@@ -180,33 +163,20 @@ class OuputWrapper(nn.Module):
         else:
             return self.dequant(self.wrapped_module(x))
 
-default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
 araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
 adaround_qconfig = QConfig(activation=default_fake_quant,
                           weight=araround_fake_quant)
-default_qat_qconfig22 = QConfig(activation=default_fake_quant,
-                              weight=default_weight_fake_quant)
 
 def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
-    # V_s = []
     for name, submodule in model.named_modules():
         print(type(submodule))
         if type(submodule) in white_list:
-            # print("adding wrapper")
             parent = get_parent_module(model, name)
             submodule_name = name.split('.')[-1]
             parent._modules[submodule_name] = OuputWrapper(submodule)
-
-            # submodule.weight_fake_quant.continous_V = copy.deepcopy(submodule.weight)
-            # submodule.weight_fake_quant.continous_V = torch.nn.Parameter(torch.ones(submodule.weight.size()) / 10)
-    #         assert submodule.weight_fake_quant.continous_V is not None
-    #         V_s.append(parent._modules[submodule_name])
-    # return V_s
-
 
 def load_conv():
     model = ConvChain()
@@ -265,7 +235,7 @@ def quick_function(qat_model, dummy, data_loader_test):
     # torch.quantization.convert(qat_model, inplace=True)
     return qat_model
 
-def quick_function_float(float_model, data_loader_test):
+def learn_adaround(float_model, data_loader_test):
     # generator to get uniform distribution of images, i.e. not always taking the front 300
     def uniform_images():
         while True:
@@ -296,11 +266,8 @@ def quick_function_float(float_model, data_loader_test):
                 print("ruh roh")
             print("running count during optimazation: ", count)
 
-    # V_s = add_wrapper_class(float_model, {ConvBNReLU})
-    # V_s = add_wrapper_class(float_model, {nn.Conv2d})
-    # V_s = add_wrapper_class(float_model, {nn.quantized.Conv2d})
-    V_s = add_wrapper_class(float_model, {nnqat.Conv2d})
-    # print(float_model)
+    V_s = add_wrapper_class(float_model, {nnqat.Linear, nnqat.Conv2d})
+
     float_model.qconfig = torch.quantization.default_qconfig
     torch.quantization.prepare(float_model, inplace=True)
     print("bruh")
@@ -337,4 +304,4 @@ def quick_function_float(float_model, data_loader_test):
 
 if __name__ == "__main__":
     # main()
-    quick_function(*load_conv())
+    learn_adaround(*load_conv())
