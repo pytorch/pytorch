@@ -9,9 +9,8 @@ set(TORCH_RPC_TEST_SOURCES
 add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
 target_include_directories(
   test_cpp_rpc PRIVATE
-  ${ATen_CPU_INCLUDE}
-  ${TORCH_ROOT}/third_party/tensorpipe)
-target_link_libraries(test_cpp_rpc PRIVATE torch c10d gtest process_group_agent)
+  ${ATen_CPU_INCLUDE})
+target_link_libraries(test_cpp_rpc PRIVATE torch c10d tensorpipe gtest process_group_agent)
 
 if(USE_CUDA)
   target_link_libraries(test_cpp_rpc PRIVATE

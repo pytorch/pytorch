@@ -174,6 +174,15 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
   return result;
 }
 
+// linalg.outer, an alias for ger
+Tensor& linalg_outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  return at::ger_out(result, self, vec2);
+}
+
+Tensor linalg_outer(const Tensor& self, const Tensor& vec2) {
+  return self.ger(vec2);
+}
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, Scalar beta, Scalar alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -470,15 +479,16 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES(batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX(batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES(batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX(batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
-  } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
+  } else if (at::hasMKL() && (at::native::is_floating_point(self_or_result) ||
+            at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)
             && self_or_result.is_contiguous()) {

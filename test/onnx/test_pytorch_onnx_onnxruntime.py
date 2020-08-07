@@ -492,6 +492,47 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1, 2]})
 
+    def test_tensor(self):
+        class ScalarInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(ScalarInputModel(), x)
+
+        class TensorInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], input.shape[1]]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(TensorInputModel(), x)
+
+        class FloatInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([float(input)])
+
+        x = torch.randn(1)
+        self.run_test(FloatInputModel(), x)
+
+        class InputWithDtypeModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1], dtype=torch.long) 
+
+        x = torch.randn(3, 4)
+        self.run_test(InputWithDtypeModel(), x)
+
+        class MixedInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], int(input)]) 
+
+        x = torch.randn(1)
+        self.run_test(MixedInputModel(), x)
+
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
         x = torch.arange(-5, 5).to(dtype=torch.float32)
@@ -2465,6 +2506,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                out1, out2, out3 = input.split([2, 1, 2])
+                return out3, out1
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(torch.jit.script(SplitModel3()), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):
@@ -3573,6 +3622,30 @@ class TestONNXRuntime(unittest.TestCase):
         mat1 = torch.randn(2, 3)
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_bool_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, mat1, mat2):
+                out = torch.where(mat1 > 0, mat1, mat2)
+                return out
+
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_byte_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, cond, mat1, mat2):
+                out = torch.where(cond, mat1, mat2)
+                return out
+
+        cond = torch.ones(2, 3, dtype=torch.uint8)
+        cond[1, 2] = 0
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(cond, mat1, mat2))
 
     def test_dropout(self):
         class M(torch.nn.Module):
