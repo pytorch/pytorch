@@ -16988,6 +16988,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(actual, expected)
 
     @onlyOnCPUAndCUDA
+    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_nextafter(self, device, dtype):
@@ -16997,6 +16998,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         actual = torch.nextafter(t1, t2)
         expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
+        
+        actual = np.nextafter(t2, t1)
+        expected = np.nextafter(t2.cpu().numpy(), t1.cpu().numpy())
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        t1 = torch.tensor([0, nan], device=device, dtype=dtype)
+        t2 = torch.tensor([nan, 0], device=device, dtype=dtype)
+        self.assertTrue(torch.nextafter(t1, t2).isnan().all())
 
         a = torch.randn(100, device=device, dtype=dtype)
         b = torch.randn(100, device=device, dtype=dtype)
