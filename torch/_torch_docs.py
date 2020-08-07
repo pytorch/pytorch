@@ -4560,7 +4560,7 @@ add_docstr(torch.nextafter,
            r"""
 nextafter(input, other, *, out=None) -> Tensor
 
-Return the next floating-point value after input towards other, elementwise.
+Return the next floating-point value after :attr:`input` towards :attr:`other`, elementwise.
 
 The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
