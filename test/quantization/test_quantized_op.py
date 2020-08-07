@@ -2735,8 +2735,23 @@ class TestQuantizedEmbeddingBag(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        # Call the quantize+prepack function to check results of observer and prepack.
         w_packed = pack_fn(weights)
         w_unpacked = unpack_fn(w_packed)
+
+        if bit_rate == 8:
+            # We use min-max observer to mimic the quantization performed in the original function.
+            from torch.quantization import PerChannelMinMaxObserver
+            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+            np.testing.assert_equal(w_packed.numpy(), real_packed_weight.numpy())
 
         # compare against C2 to ensure numerical equivalency.
         from caffe2.python import core, workspace
