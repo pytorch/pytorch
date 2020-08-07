@@ -114,8 +114,8 @@ def grab_names(model):
             curr_feature = []
     input_revised = []
     for feature in input:
-        for i in range(len(feature)-1):
-            input_revised.append([feature[i], feature[i+1]])
+        for i in range(len(feature) - 1):
+            input_revised.append([feature[i], feature[i + 1]])
     return input_revised
 
 

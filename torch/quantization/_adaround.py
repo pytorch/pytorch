@@ -39,8 +39,8 @@ def loss_function_leaf(model, count):
     clipped_weight = modified_quantized(adaround_instance, float_weight)
 
     quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(adaround_instance.scale),
-                                                            int(adaround_instance.zero_point), adaround_instance.quant_min,
-                                                            adaround_instance.quant_max)
+                                                             int(adaround_instance.zero_point), adaround_instance.quant_min,
+                                                             adaround_instance.quant_max)
 
     scale = model.wrapped_module.weight_fake_quant.scale
     continous_V = model.wrapped_module.weight_fake_quant.continous_V
@@ -64,9 +64,9 @@ def loss_function(model, count, white_list=(nnqat.Conv2d,)):
     return result
 
 def computeSqnr(x, y):
-        Ps = torch.norm(x)
-        Pn = torch.norm(x - y)
-        return 20 * torch.log10(Ps / Pn)
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
 
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
@@ -160,10 +160,10 @@ class OuputWrapper(nn.Module):
 
 
 araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                        dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+                                         dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
 adaround_qconfig = QConfig(activation=default_fake_quant,
-                          weight=araround_fake_quant)
+                           weight=araround_fake_quant)
 
 def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
     for name, submodule in model.named_modules():
@@ -270,7 +270,7 @@ def learn_adaround(float_model, data_loader_test):
     batch = 0
     for name, submodule in float_model.named_modules():
         if isinstance(submodule, OuputWrapper):
-            batch +=1
+            batch += 1
             if batch <= 1:
                 # quick quantization calibration
                 submodule.on = True
