@@ -135,7 +135,7 @@ TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   int64_t KW = 2;
   auto t_in = at::rand({1, C, H, W}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_w =
-      at::rand({groups, 1, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+      at::rand({groups, 1, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::zeros({groups}, at::device(at::kCPU).dtype(at::kFloat));
   auto stride = c10::IntArrayRef{1};
   auto padding = c10::IntArrayRef{0};
@@ -318,7 +318,6 @@ class OpsList {
     at::Tensor t = in;
     at::Tensor tv = vin;
     int i = 0;
-    auto size = ops.size();
     for (const auto& op : ops) {
       t = op->run(t);
       tv = op->run(tv);
@@ -337,7 +336,6 @@ class OpsList {
   auto run(at::Tensor& in) {
     at::Tensor t = in;
     int i = 0;
-    auto size = ops.size();
     for (const auto& op : ops) {
       t = op->run(t);
       i++;
