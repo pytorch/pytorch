@@ -702,18 +702,16 @@ Tensor operator_1_norm(const Tensor& tensor) {
 // Allocates a buffers of uninitialized or zero values
 // of shape [n_copies, a.size()]
 Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
+  auto res = at::empty(
+    {n_copies, a.size(0), a.size(1), a.size(2)},
+    a.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+  
   if (is_zero) {
-    return at::zeros(
-      {n_copies, a.size(0), a.size(1), a.size(2)},
-      a.options().memory_format(at::MemoryFormat::Contiguous)
-    );
+    res.zero_();
   }
-  else {
-    return at::empty(
-      {n_copies, a.size(0), a.size(1), a.size(2)},
-      a.options().memory_format(at::MemoryFormat::Contiguous)
-    );
-  }
+
+  return res;
 }
 
 // Makes `buffer` to store `num_matrices` number of matrices needed for
@@ -788,8 +786,7 @@ inline Tensor _blob_to_Tensor(
   // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
-    .unsqueeze(0);
+  auto tensor = at::from_blob((void*)blob.begin(), {1, blob.size()}, in.dtype());
   return _pin_and_move_memory_if_cuda_input(tensor, in);
 }
 
