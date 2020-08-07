@@ -66,6 +66,8 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, EnumName)                  \
+  _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
