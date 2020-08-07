@@ -1187,7 +1187,7 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
     def test_learnable_backward_per_channel_cuda(self, X):
