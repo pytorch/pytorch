@@ -25,10 +25,8 @@ class TestFX(TestCase):
                 return self.sub_mod(t.data + self.w + t + 1 - A + B // A + -A + A.add(B, alpha=3))
 
         m = GraphModule(MyModule())
-        print(m(torch.rand(3), torch.rand(4, 3), torch.rand(4)))
 
         ms = torch.jit.script(m)
-        print(ms.code)
 
         class M2(torch.nn.Module):
             def forward(self, A):
@@ -36,7 +34,6 @@ class TestFX(TestCase):
                 return m + 1, idx + 1
 
         m2 = GraphModule(M2())
-        print(m2(torch.rand(3, 4)))
 
         class T(torch.nn.Module):
 
@@ -45,7 +42,20 @@ class TestFX(TestCase):
                 return x
 
         GraphModule(T())
-        print('foo')
+
+    def test_fx_shifts(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x << 3, x >> 3
+
+        input = torch.LongTensor(10).random_(0, 1024)
+
+        m = MyModule()
+        ref_outs = m(input)
+        gm = GraphModule(m)
+        test_outs = gm(input)
+
+        self.assertEqual(ref_outs, test_outs)
 
 if __name__ == '__main__':
     run_tests()
