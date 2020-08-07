@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn object.
+# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
 #
 
 # Code tries to stick to the following rules:
@@ -85,7 +85,9 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 NATIVE_NAMESPACE_MAPPING = {
     "torch": "THPVariableFunctionsModule",
-    "torch.nn": "THPNNVariableFunctionsModule"
+    "torch.nn": "THPNNVariableFunctionsModule",
+    "torch.fft": "THPFFTVariableFunctionsModule",
+    "torch.linalg": "THPLinalgVariableFunctionsModule",
 }
 
 def should_generate_python_binding(declaration):
@@ -157,6 +159,55 @@ def gen_py_nn_functions(out, declarations, template_path):
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
+def get_py_fft_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "fft" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_fft_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_fft_functions(out, declarations, template_path):
+    """
+    Generate functions in the "fft" module.
+    """
+    PY_FFT_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_fft_functions.cpp')
+
+    py_fft_functions = get_py_fft_functions(declarations)
+
+    env = create_python_bindings(py_fft_functions, is_python_method=False, module="torch.fft")
+
+    write(out, 'python_fft_functions.cpp', PY_FFT_FUNCTIONS_CPP, env)
+
+def get_py_linalg_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "linalg" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_linalg_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_linalg_functions(out, declarations, template_path):
+    """
+    Generate functions in the "linalg" module.
+    """
+    PY_LINALG_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_linalg_functions.cpp')
+
+    py_linalg_functions = get_py_linalg_functions(declarations)
+
+    env = create_python_bindings(py_linalg_functions, is_python_method=False, module="torch.linalg")
+
+    write(out, 'python_linalg_functions.cpp', PY_LINALG_FUNCTIONS_CPP, env)
+
+
 def get_py_torch_functions(declarations):
     """
     Get declarations (grouped by name) which should be generated
@@ -165,6 +216,8 @@ def get_py_torch_functions(declarations):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 not is_nn_module_function(declaration) and
+                not is_fft_module_function(declaration) and
+                not is_linalg_module_function(declaration) and
                 is_torch_function(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -812,7 +865,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -833,7 +886,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
@@ -847,6 +900,7 @@ PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   ${method_header}
+  ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
 }
@@ -855,7 +909,13 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 TORCH_FUNCTION_CHECK = CodeTemplate("""\
 if(_r.has_torch_function()) {
-  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
+  return handle_torch_function(_r, ${self_}, args, kwargs, ${namespace}, ${modulename});
+}
+""")
+
+TORCH_FUNCTION_CHECK_NOARGS = CodeTemplate("""\
+if(check_has_torch_function(self_)) {
+  return handle_torch_function(self_, ${name});
 }
 """)
 
@@ -881,6 +941,10 @@ def method_impl(name, declarations, is_python_method, module):
 
     method_footer = ['END_HANDLE_TH_ERRORS']
 
+    check_has_torch_function = TORCH_FUNCTION_CHECK_NOARGS.substitute(
+        name='"' + name + '"',
+    ) if is_python_method else ''
+
     # emit dispatch
     if is_noarg_binding(declarations):
         dispatch = emit_single_dispatch(declaration, is_python_method)
@@ -890,6 +954,7 @@ def method_impl(name, declarations, is_python_method, module):
             method_header=method_header,
             dispatch=dispatch,
             method_footer=method_footer,
+            check_has_torch_function=check_has_torch_function,
         )
 
     method_footer = ['Py_RETURN_NONE;'] + method_footer
@@ -914,9 +979,14 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
             namespace=NATIVE_NAMESPACE_MAPPING[module],
             modulename='"' + module + '"',
+            self_="self_" if is_python_method else "nullptr",
         )
     else:
-        check_has_torch_function = ''
+        check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
+            namespace="THPVariableClass",
+            modulename='"torch.Tensor"',
+            self_="self_" if is_python_method else "nullptr",
+        )
 
     max_args = max([get_python_argc(decl) for decl in declarations])
     traceable = 'true' if all(should_trace(d) for d in declarations) else 'false'
@@ -931,6 +1001,7 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function=check_has_torch_function,
         dispatch=dispatch,
         method_footer=method_footer,
+        self_="self_" if is_python_method else "nullptr",
     )
 
 
@@ -1456,6 +1527,13 @@ def is_torch_function(declaration):
 
 def is_nn_module_function(declaration):
     return declaration.get('python_module') == 'nn'
+
+
+def is_fft_module_function(declaration):
+    return declaration.get('python_module') == 'fft'
+
+def is_linalg_module_function(declaration):
+    return declaration.get('python_module') == 'linalg'
 
 
 def function_namespace(declaration):

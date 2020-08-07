@@ -205,12 +205,6 @@ void unpackQuantizedWeightsHelper(
                     .findSchemaOrThrow(unpack_fn.c_str(), "")
                     .typed<std::tuple<at::Tensor, c10::optional<at::Tensor>>(
                         at::Tensor)>();
-      // Temporary hack: when the `Profiler` dispatch key is inserted, this call
-      // will fail since the `unpack()` ops return multiple values, however the
-      // boxing code currently does not support this. Instead, exclude the
-      // Profiler dispatch key and go through unboxed dispatch, avoiding boxing
-      // altogether
-      c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
       std::tie(unpacked_weight, bias) = op.call(packed_weight);
     }
 
