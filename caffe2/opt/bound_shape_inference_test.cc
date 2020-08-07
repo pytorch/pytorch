@@ -325,7 +325,7 @@ TEST(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
           {16, 101},
-          TensorProto_DataType_UINT8,
+          TensorProto_DataType_INT8,
           true));
   shape_map.emplace(
       "B0",
