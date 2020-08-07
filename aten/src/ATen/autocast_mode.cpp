@@ -9,13 +9,6 @@
 #include <iostream>
 #include <exception>
 
-// pulls in AT_CUDNN_ENABLED() as defined by cmake
-#include <ATen/cuda/CUDAConfig.h>
-
-#if AT_CUDNN_ENABLED()
-#include <ATen/native/cudnn/RNNUtils.h>
-#endif
-
 namespace at {
 namespace autocast {
 
@@ -84,149 +77,6 @@ enum class CastPolicy : uint8_t {
                      // type-aware overload.
   promote, // Run in the widest dtype among several args.
 };
-
-/********************************************************************
-Logic to extract the promote type from any Tensor or TensorList args.
-********************************************************************/
-
-// Overload to catch Tensor args.
-// If nextArg is floating-point, compare its scalar_type with our
-// current best guess for the promote type, and update if necessary.
-inline at::ScalarType prioritize(at::ScalarType current, const Tensor& nextArg) {
-  if (current == at::kDouble) {
-    AT_ERROR("promote type is double in at::autocast::prioritize");
-    return current;
-  }
-  if (nextArg.is_cuda() && nextArg.is_floating_point()) {
-    auto next = nextArg.scalar_type();
-    if (next == at::kDouble) {
-      return current; // ignores double tensors
-    } else if (current == at::kFloat || next == at::kFloat) {
-      return at::kFloat; // prioritizes float over half
-    } else if (current == at::kHalf && next == at::kHalf) {
-      return at::kHalf;
-    } else {
-      AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
-      return current;
-    }
-  } else {
-    return current;
-  }
-}
-
-// Overload to catch TensorList args (for e.g. cat, stack).
-// Reuses the overload above to process each Tensor in the list.
-inline at::ScalarType prioritize(at::ScalarType current, const TensorList& list) {
-  for (const auto& tensor : list) {
-    current = prioritize(current, tensor);
-  }
-  return current;
-}
-
-// Template to catch non-Tensor args (no-op that returns current best guess)
-template<typename T>
-inline at::ScalarType prioritize(at::ScalarType current, T nextArg) {
-  return current;
-}
-
-// Overload for the tail case.
-inline at::ScalarType promote_type(at::ScalarType current) {
-  return current;
-}
-
-// Unpack args and determine if incoming float16 tensors need to be promoted to float32.
-// Non-Tensor arguments are ignored.
-template<typename Arg0, typename... Args>
-inline at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
-  auto new_current = prioritize(current, arg0);
-  return promote_type(new_current, args...);
-}
-
-/****************************************************
-Logic to apply cached casting to any Tensor argument.
-****************************************************/
-inline bool is_eligible(const Tensor& arg) {
-  return (arg.defined() && arg.is_cuda() && arg.is_floating_point() && (arg.scalar_type() != at::kDouble));
-}
-
-// Overload to catch Tensor args
-Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
-    // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
-    // See cached_casts declaration above for detailed strategy.
-    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
-    if (can_try_cache) {
-      auto it = cached_casts.find(arg.unsafeGetTensorImpl());
-      if (it != cached_casts.end()) {
-        return std::get<1>(it->second);
-      } else {
-        auto casted_arg = arg.to(to_type);
-        cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
-        return casted_arg;
-      }
-    } else {
-      return arg.to(to_type);
-    }
-  } else {
-    return arg;
-  }
-}
-
-// Overload to process optional<Tensor>
-c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg) {
-  if (arg.has_value()) {
-    return cached_cast(to_type, *arg);
-  } else {
-    return c10::nullopt;
-  }
-}
-
-// Overload to process TensorLists
-std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
-  std::vector<Tensor> vec;
-  vec.reserve(arg.size());
-  for (const auto& t : arg) {
-    vec.push_back(cached_cast(to_type, t));
-  }
-  return vec;
-}
-
-// Template to catch non-Tensor args.
-template<typename T>
-T cached_cast(at::ScalarType to_type, T arg) {
-  return arg;
-}
-
-/*******************************************************
-Logic to flip an output dtype flag.
-Keep it simple for now by assuming only one such flag is
-present in the argument list.  If I ever need a function
-with more than flag I'll figure out something else.
-The policy is:
-If the user has explicity specified a dtype, respect it.
-Otherwise, set it to the autocast type.
-********************************************************/
-
-// Overload to catch dtype flags
-c10::optional<ScalarType> set_opt_dtype(at::ScalarType to_type, const c10::optional<ScalarType>& dtype) {
-  return dtype.has_value() ? dtype : to_type;
-}
-
-// Template to catch other args
-template<typename T>
-inline T set_opt_dtype(at::ScalarType to_type, T arg) {
-  return arg;
-}
-
-template<typename... Args>
-inline bool firstarg_is_eligible(const Tensor& arg, Args... args) {
-  return is_eligible(arg);
-}
-
-template<typename... Args>
-inline at::ScalarType type_from_firstarg(at::ScalarType to_type, const Tensor& arg, Args... args) {
-  return (is_eligible(arg) ? to_type : arg.scalar_type());
-}
 
 /********************************************************************************************************
 Templates to provide wrapper functions
@@ -326,98 +176,6 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::op
            "safe to autocast.");
 }
 
-/***********************************************************
-CuDNN RNNs (the weight reflattening needs special attention)
-***********************************************************/
-
-// To be registered for the "_cudnn_rnn(...)" schema.
-// _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
-_cudnn_rnn_cast_reflatten(const Tensor & input,
-                          TensorList weight,
-                          int64_t weight_stride0,
-                          const c10::optional<Tensor>& weight_buf_opt,
-                          const Tensor& hx,
-                          const c10::optional<Tensor>& cx,
-                          int64_t mode,
-                          int64_t hidden_size,
-                          int64_t num_layers,
-                          bool batch_first,
-                          double dropout,
-                          bool train,
-                          bool bidirectional,
-                          IntArrayRef batch_sizes,
-                          const c10::optional<Tensor>& dropout_state) {
-#if AT_CUDNN_ENABLED()
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
-
-  for (const auto& t : weight) {
-    TORCH_CHECK(weight[0].scalar_type() == t.scalar_type(), "Weight scalar types do not match.");
-  }
-  // weight_stride0 is the number of weight tensors per layer and direction, as seen by model.parameters().
-  // If bias is enabled, there are 4 such tensors (ih and hh weights, ih and hh biases).
-  // If bias is not enabled, there are 2 (ih and hh weights).
-  // This organization holds for all rnn types (RNN, GRU, and LSTM).
-  TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
-                        "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
-                        weight_stride0);
-
-  Tensor weight_buf, redispatch_weight_buf;
-  std::vector<Tensor> redispatch_weight;
-  // There's an implicit contract here with native/cudnn/RNN.cpp:_cudnn_impl, which calls at:_cudnn_rnn.
-  // Code here assumes if _cudnn_impl passes weight_buf_opt containing a defined tensor, that tensor
-  // is valid flat storage of the weights in their incoming dtype.
-  if (weight_buf_opt.has_value()) {
-    weight_buf = *weight_buf_opt;
-  }
-  bool needs_cast_and_flatten = (weight_buf.defined() ?
-                                 // weight_buf is valid.  Only change it if it's eligible and not already FP16.
-                                 is_eligible(weight_buf) && (weight_buf.scalar_type() != at::kHalf) :
-                                 // weight_buf is not valid.  Only create it if other weights are eligible and not already FP16.
-                                 is_eligible(weight[0]) && (weight[0].scalar_type() != at::kHalf));
-  if (needs_cast_and_flatten) {
-    // Casts weight tensors to FP16 and ensures all weights for all layers are views into a large flat buffer,
-    // with the right locations and layouts expected by cudnn.
-    // This is (and should be) autograd-exposed.
-    std::tie(redispatch_weight_buf, redispatch_weight) =
-        at::native::cudnn_rnn::copy_weights_to_flat_buf_views(
-            weight,
-            weight_stride0,
-            input.size(-1),
-            mode,
-            hidden_size,
-            num_layers,
-            batch_first,
-            bidirectional,
-            /*flat_buf_datatype=*/at::native::getCudnnDataTypeFromScalarType(at::kHalf), // could just hardcode CUDNN_DATA_HALF
-            /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
-            /*set_orig_weights_to_flat_buf=*/false,
-            /*allow_type_change=*/true,
-            /*include_bias=*/weight_stride0 == 4);
-  }
-
-  return at::_cudnn_rnn(
-      cached_cast(at::kHalf, input),
-      needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,
-      weight_stride0,
-      needs_cast_and_flatten ? redispatch_weight_buf : weight_buf,
-      cached_cast(at::kHalf, hx),
-      cached_cast(at::kHalf, cx),
-      mode,
-      hidden_size,
-      num_layers,
-      batch_first,
-      dropout,
-      train,
-      bidirectional,
-      batch_sizes,
-      dropout_state);
-#else // AT_CUDNN_ENABLED()
-  AT_ERROR("autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
-  return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // never reached, placates the compiler
-#endif // AT_CUDNN_ENABLED()
-}
-
 
 #ifndef USE_STATIC_DISPATCH
 namespace {
@@ -500,8 +258,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose.deprecated", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution), "cudnn_convolution", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
   KERNEL(ADD_NS(cudnn_convolution_transpose), "cudnn_convolution_transpose", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), fp16)
-  m.impl("_cudnn_rnn",
-         TORCH_FN((&at::autocast::_cudnn_rnn_cast_reflatten)));
   KERNEL(ADD_NS(prelu), "prelu", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(ADD_NS(addmm), "addmm", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
