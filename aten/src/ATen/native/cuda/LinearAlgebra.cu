@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
-#include <ATen/cuda/CUDABlas.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/cuda/CUDABlas.h>
 
 namespace at { namespace native {
 
@@ -34,11 +34,12 @@ Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   Tensor tensor_;
   IntArrayRef tensor_strides = tensor.strides();
+  IntArrayRef tensor_sizes = tensor.sizes();
 
-  if ((tensor_strides[0] == 1) && (tensor_strides[1] != 0)) {
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     tensor_ = tensor;
     transpose_tensor = false;
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] != 0)) {
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     tensor_ = tensor;
     transpose_tensor = true;
   } else {
@@ -106,7 +107,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t result_ld = result_.stride(transpose_result ? 0 : 1);
   at::ScalarType scalar_type = self_.scalar_type();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
     scalar_t* mat1_ptr = mat1_.data_ptr<scalar_t>();
@@ -337,11 +338,76 @@ Tensor& addbmm__cuda(Tensor& self,
 
 Tensor addbmm_cuda(const Tensor& self,
                    const Tensor& batch1, const Tensor& batch2,
-                   Scalar beta, Scalar alpha) 
+                   Scalar beta, Scalar alpha)
 {
   Tensor out = at::empty({0}, self.options());
   addbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
   return out;
+}
+
+Tensor dot_cuda(const Tensor& self, const Tensor& other) {
+  at::NoNamesGuard guard;
+
+  TORCH_CHECK(
+      self.dim() == 1 && other.dim() == 1,
+      "1D tensors expected, but got ",
+      self.dim(),
+      "D and ",
+      other.dim(),
+      "D tensors");
+  TORCH_CHECK(
+      self.scalar_type() == other.scalar_type(),
+      "dot : expected both vectors to have same dtype, but found ",
+      self.scalar_type(),
+      " and ",
+      other.scalar_type());
+  TORCH_CHECK(
+      self.numel() == other.numel(),
+      "inconsistent tensor size, expected tensor [",
+      self.numel(),
+      "] and src [",
+      other.numel(),
+      "] to have the same number of elements, but got ",
+      self.numel(),
+      " and ",
+      other.numel(),
+      " elements respectively");
+  TORCH_CHECK(
+      self.device() == other.device(),
+      "expected all tensors to be on the same device. Found: ",
+      self.device(),
+      ", ",
+      other.device());
+  TORCH_CHECK(
+      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
+          (other.stride(0) <= INT_MAX),
+      "dot only supports n, incx, incy with the bound [val] <= %d",
+      INT_MAX);
+
+  const int n = static_cast<int>(self.numel());
+  int incx = static_cast<int>(self.stride(0));
+  int incy = static_cast<int>(other.stride(0));
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "dot", [&] {
+    Tensor result = at::empty({}, self.options());
+
+    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
+    at::cuda::blas::dot<scalar_t>(
+        handle,
+        n,
+        self.data_ptr<scalar_t>(),
+        incx,
+        other.data_ptr<scalar_t>(),
+        incy,
+        result.data_ptr<scalar_t>());
+
+    return result;
+  });
 }
 
 } }

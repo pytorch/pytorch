@@ -306,10 +306,7 @@ struct ExitTransformer {
   // Recursively transforms the With node.
   ExitPair transformWith(Node* node) {
     auto body_block = node->blocks().at(0);
-    auto exit_block = node->blocks().at(1);
-
     auto body_pair = transformExits(body_block);
-
     return body_pair;
   }
 

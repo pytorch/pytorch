@@ -1,7 +1,7 @@
 #include <type_traits>
 #include <tuple>
 #include <sstream>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
 #include <gtest/gtest.h>
 

@@ -1,8 +1,3 @@
-:orphan:
-
-.. contents:: :local:
-    :depth: 2
-
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework
@@ -17,6 +12,9 @@ machines.
      APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
 
 Basics
 ------
@@ -97,10 +95,11 @@ applications can always explicitly move the input tensors to CPU on the caller
 and move it to the desired devices on the callee if necessary.
 
 .. warning::
-  TorchScript support in RPC is experimental and subject to change. Since
+  TorchScript support in RPC is a prototype feature and subject to change. Since
   v1.5.0, ``torch.distributed.rpc`` supports calling TorchScript functions as
   RPC target functions, and this will help improve parallelism on the callee
   side as executing TorchScript functions does not require GIL.
+
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -115,7 +114,7 @@ The RPC package also provides decorators which allow applications to specify
 how a given function should be treated on the callee side.
 
 .. warning::
-  The ``rpc.functions`` package is experimental and subject to change.
+  The ``rpc.functions`` package is a prototype feature and subject to change.
 
 .. autofunction:: torch.distributed.rpc.functions.async_execution
 
@@ -204,12 +203,8 @@ The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
 developed. At the moment, it only supports CPU tensors, with GPU support coming
 soon. It comes with a TCP-based transport, just like Gloo. It is also able to
 automatically chunk and multiplex large tensors over multiple sockets and
-threads in order to achieve very high bandwidths. In addition to that, it packs
-two Linux-specific transports for communication between processes on a same
-machine (one based on ringbuffers stored in shared memory, the other on the
-cross-memory attach syscalls) which can achieve lower latencies than TCP.
-The agent will be able to pick the best transport on its own, with no
-intervention required.
+threads in order to achieve very high bandwidths. The agent will be able to pick
+the best transport on its own, with no intervention required.
 
 Example::
 
@@ -252,7 +247,7 @@ parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
 .. autoclass:: RRef
-    :inherited-members:
+    :members:
 
 
 .. toctree::

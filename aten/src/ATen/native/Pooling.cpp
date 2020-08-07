@@ -135,9 +135,7 @@ Tensor max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
 
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
                              dilation, ceil_mode)) {
     return xnnpack::max_pool2d(

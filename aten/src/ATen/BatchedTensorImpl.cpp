@@ -15,6 +15,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , bdims_(std::move(bdims))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
@@ -59,6 +60,14 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   // of dims a BatchedTensorImpl can have to kVmapMaxTensorDims so this should
   // never be hit.
   TORCH_INTERNAL_ASSERT(false);
+}
+
+void BatchedTensorImpl::checkInvariants() const {
+  int64_t prev_level = -1;
+  for (const auto& bdim : bdims_) {
+    TORCH_INTERNAL_ASSERT(bdim.level() > prev_level);
+    prev_level = bdim.level();
+  }
 }
 
 // The following are publically exposed as methods of Tensor

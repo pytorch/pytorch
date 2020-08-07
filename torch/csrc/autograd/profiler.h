@@ -20,7 +20,8 @@
 
 #include <ATen/record_function.h>
 
-typedef struct CUevent_st* CUDAEventStub;
+struct CUevent_st;
+typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
 namespace torch { namespace autograd {
 
@@ -32,7 +33,7 @@ struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
   }
-  virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
+  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) {
     fail();
     return 0.f;
   }
@@ -278,9 +279,17 @@ struct TORCH_API Event final {
 
   void setCudaUs(int64_t cuda_us) {
     cuda_us_ = cuda_us;
-}
+  }
 
-private:
+  void setSequenceNr(int64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
+  }
+
+  int64_t sequence_nr() const {
+    return sequence_nr_;
+  }
+
+ private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
@@ -291,10 +300,11 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* cuda_event = nullptr;
+  CUDAEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
+  int64_t sequence_nr_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid

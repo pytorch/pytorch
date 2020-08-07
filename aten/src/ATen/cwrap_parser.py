@@ -1,4 +1,6 @@
 import yaml
+import copy
+
 try:
     # use faster C loader if available
     from yaml import CLoader as Loader
@@ -24,4 +26,13 @@ def parse(filename):
                 declarations.append(declaration)
             elif in_declaration:
                 declaration_lines.append(line)
+        declarations = [process_declaration(declaration) for declaration in declarations]
         return declarations
+
+def process_declaration(declaration):
+    declaration = copy.deepcopy(declaration)
+    if "arguments" in declaration:
+        declaration["schema_order_arguments"] = copy.deepcopy(declaration["arguments"])
+    if "options" in declaration:
+        declaration["options"] = [process_declaration(option) for option in declaration["options"]]
+    return declaration

@@ -13,6 +13,7 @@ from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedEmbeddingBag  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -64,6 +65,9 @@ from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F
 
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
+
+# Equalization
+from quantization.test_equalize import TestEqualizeEager  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()

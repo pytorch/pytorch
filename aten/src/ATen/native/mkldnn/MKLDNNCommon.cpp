@@ -53,7 +53,7 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options)
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
-             "mkldnn_to_dense expects MKL-DNN tensor input");
+             "itensor_from_mkldnn expects MKL-DNN tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();

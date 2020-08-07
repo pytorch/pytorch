@@ -11,6 +11,8 @@
 
 #include <c10d/Types.hpp>
 
+constexpr auto kNoTimeout = std::chrono::milliseconds(0);
+
 namespace c10d {
 
 // ProcessGroup is a base class that captures collective and point to
@@ -83,12 +85,18 @@ class ProcessGroup {
     //   if (!success) { std::rethrow_exception(exception()); }
     //   return success;
     //
-    virtual bool wait();
+    virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
 
     virtual void abort();
 
    protected:
+    // Completes the work object and optionally sets the exception in a
+    // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
+
+    // Similar to finish, but throws an exception if one is already set or
+    // provided by the user.
+    void finishAndThrow(std::exception_ptr exception);
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
@@ -196,6 +204,22 @@ class ProcessGroup {
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
  protected:
+  void checkSplitSizes(
+      const std::vector<int64_t>& split_sizes,
+      const at::Tensor& tensor,
+      int group_size);
+
+  int64_t computeLengthsAndOffsets(
+      const std::vector<int64_t>& split_sizes,
+      const at::Tensor& tensor,
+      std::vector<int>* lengths,
+      std::vector<int>* offsets);
+
+  int64_t computeLengthsAndOffsets(
+      const std::vector<at::Tensor>& tensors,
+      std::vector<int>* lengths,
+      std::vector<int>* offsets);
+
   const int rank_;
   const int size_;
 };

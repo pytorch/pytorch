@@ -8,8 +8,10 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 
 namespace torch {
@@ -23,6 +25,7 @@ namespace c10 {
 struct IValue;
 struct ClassType;
 struct TupleType;
+struct EnumType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -79,6 +82,14 @@ inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const & {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return toIntrusivePtr<c10::RRefInterface>();
 }
+inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() && {
+  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  return moveToIntrusivePtr<at::Quantizer>();
+}
+inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() const & {
+  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  return toIntrusivePtr<at::Quantizer>();
+}
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return moveToIntrusivePtr<ivalue::ConstantString>();
@@ -96,12 +107,20 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return moveToIntrusivePtr<ivalue::PyObjectHolder>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
-  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got ", tagKind());
   return toIntrusivePtr<ivalue::PyObjectHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() && {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::EnumHolder>();
+}
+inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const & {
+  TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
+  return toIntrusivePtr<ivalue::EnumHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
@@ -216,6 +235,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
 struct Object;
 struct PyObjectHolder;
+struct EnumHolder;
 }
 
 // Future
@@ -524,6 +544,41 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual ~PyObjectHolder() {};
 };
 
+struct ivalue::EnumHolder : c10::intrusive_ptr_target {
+ public:
+  EnumHolder(std::shared_ptr<EnumType> type, std::string name, IValue value)
+      : type_(std::move(type)), name_(std::move(name)), value_(std::move(value)) {}
+
+  bool is(const ivalue::EnumHolder& rhs) {
+    return *this == rhs;
+  }
+
+  friend bool operator==(const ivalue::EnumHolder&lhs, const ivalue::EnumHolder& rhs);
+
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const EnumHolder& v);
+
+  const std::string qualifiedClassName() const;
+
+  const std::string& name() const {
+    return name_;
+  }
+
+  const IValue& value() const {
+    return value_;
+  }
+
+  std::shared_ptr<EnumType> type() const {
+    return type_;
+  }
+
+private:
+  std::shared_ptr<EnumType> type_;
+  std::string name_;
+  IValue value_;
+};
+
 #undef TORCH_FORALL_TAGS
 
 namespace detail {
@@ -584,12 +639,14 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
+DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
+DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 
 template <class T>
@@ -930,10 +987,17 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
+: tag(Tag::Enum), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob) {
   IValue iv;
   iv.tag = Tag::Capsule;
@@ -967,19 +1031,48 @@ inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
 : tag(Tag::RRef), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+
+inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
+: tag(Tag::Quantizer), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline const std::string& IValue::toStringRef() const {
-  return toString()->string();
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  return static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string();
+}
+inline c10::optional<std::reference_wrapper<const std::string>> IValue::toOptionalStringRef() const {
+  if (isNone()) {
+    return c10::nullopt;
+  }
+  AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  return std::reference_wrapper<const std::string>(static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)->string());
 }
 
 inline PyObject* IValue::toPyObject() const {
   return toPyObjectHolder()->getPyObject();
 }
+
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {
     return nullopt;
   }
   return this->to<T>();
+}
+
+inline OptionalArray<int64_t> IValue::toOptionalIntArray() {
+  if (this->isNone()) {
+    return {};
+  }
+  return this->toIntVector();
+}
+
+inline OptionalArray<double> IValue::toOptionalDoubleArray() {
+  if (this->isNone()) {
+    return {};
+  }
+  return this->toDoubleVector();
 }
 
 inline bool IValue::isCustomClass() const {

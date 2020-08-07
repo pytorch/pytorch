@@ -289,6 +289,7 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
     mul
     mvlgamma
     neg
@@ -302,6 +303,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    signbit
     sin
     sinh
     sqrt
@@ -333,6 +335,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -349,7 +352,10 @@ Comparison Ops
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
     lt
@@ -385,6 +391,9 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
@@ -407,8 +416,10 @@ Other Operations
     fliplr
     flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave
@@ -421,6 +432,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations

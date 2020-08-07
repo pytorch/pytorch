@@ -104,7 +104,6 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
-
 class MkldnnConv3d(_MkldnnConvNd):
     def __init__(self, dense_module):
         super(MkldnnConv3d, self).__init__(dense_module)

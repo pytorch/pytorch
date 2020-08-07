@@ -76,5 +76,28 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
   TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
+// Create an empty quantized Tensor with size, based on the options
+// and quantization parameters of the input quantized Tensor
+Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor) {
+  Tensor output;
+  if (qtensor.qscheme() == kPerTensorAffine) {
+    output = at::_empty_affine_quantized(size, qtensor.options(),
+                                         qtensor.q_scale(),
+                                         qtensor.q_zero_point());
+  } else if (qtensor.qscheme() == kPerChannelAffine) {
+    output = at::_empty_per_channel_affine_quantized(
+        size,
+        qtensor.q_per_channel_scales(),
+        qtensor.q_per_channel_zero_points(),
+        qtensor.q_per_channel_axis(),
+        qtensor.options());
+  } else {
+    TORCH_CHECK(false,
+                "QScheme not supported by empty_quantized:",
+                toString(qtensor.qscheme()));
+  }
+  return output;
+}
+
 } // namespace native
 } // namespace at

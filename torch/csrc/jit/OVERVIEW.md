@@ -761,10 +761,10 @@ All builtin operators are represented using a stack machine concept. An operator
 
 ```cpp
 using Stack = std::vector<IValue>;
-using Operation = std::function<int(Stack&)>;
+using Operation = std::function<void(Stack*)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
-int example_add(Stack& stack) {
+void example_add(Stack* stack) {
     Tensor a, b;
     // stack before: ? ? ? a b <- back
     pop(stack, a, b); //Templated helper function
@@ -1176,6 +1176,13 @@ one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in `>alias_analysis`.
 `>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
 higher than `GRAPH_DEBUG`.
+
+By default, types in the graph are printed with maximum verbosity.  The verbosity level can be controlled via the environment variable `PYTORCH_JIT_TYPE_VERBOSITY`.  The available settings are:
+
+* `0`: No type information
+* `1`: Types and shapes only
+* `2`: Also print strides
+* `3`: Also print device type and whether gradient is required
 
 ## DifferentiableGraphOp ##
 

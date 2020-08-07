@@ -4,6 +4,10 @@
 Distributed communication package - torch.distributed
 =====================================================
 
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
+
 .. automodule:: torch.distributed
 .. currentmodule:: torch.distributed
 

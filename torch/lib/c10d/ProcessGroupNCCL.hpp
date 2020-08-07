@@ -68,7 +68,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -109,6 +109,8 @@ class ProcessGroupNCCL : public ProcessGroup {
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
    private:
+    // Helper function for synchronize
+    void synchronizeInternal(std::chrono::milliseconds timeout);
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -201,6 +203,18 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -282,6 +296,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   void ncclCommWatchdog();
 
   void ncclCommWatchdogInternal();
+
+  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
+  // accordingly.
+  void parseNcclBlockingWait();
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

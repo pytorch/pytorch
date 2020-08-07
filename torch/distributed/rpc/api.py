@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import functools
+import inspect
 import logging
 import numbers
 import threading
@@ -82,58 +83,123 @@ def _require_initialized(func):
     return wrapper
 
 
-class WaitAllWorkersStates(object):
+class AllGatherStates(object):
     def __init__(self):
-        # Each `intent_worker_names` is an empty set at beginning.
-        # It's only used by leader worker. Leader worker is user-specified or
-        # elected as the first worker in a sorted worker name list.
-        # Whenever there is a worker showing shutdown intention to the leader, by
-        # calling `_wait_all_workers()`, the leader adds this worker's name to the set.
-        # The leader also adds itself's name to the set on calling
-        # `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
-        # to be called only once, by examing if leader's name has been added to the set.
-        self.intent_worker_names = set()
-        # Once `intent_worker_names == _ALL_WORKER_NAMES`,
-        # we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
-        # to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+        # Each `gathered_objects` is an empty dict at beginning.
+        # The leader worker is elected as the first worker in a sorted worker
+        # name list. Whenever there is a worker entering `_all_gather()`, it
+        # runs `_gather_to_leader()` on the leader to add its own name and
+        # data obj to this dict. The leader also adds itself's name to the dict
+        # on calling `_all_gather()`.
+        # Once `set(gathered_objects.keys()) == _ALL_WORKER_NAMES`, the leader
+        # will broadcast the gathered dict to all follower workers and set their
+        # `gathered_objects` field and the `proceed_signal` field.
+        self.gathered_objects = {}
+        # All workers wait on this signal until it receives all gathered
+        # objects.
         self.proceed_signal = threading.Event()
 
 
-# States used by `def _wait_all_workers()`.
+# States used by `def _all_gather()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_wait_all_workers_dict_lock = threading.RLock()
-_wait_all_workers_sequence_id = 0
-_wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
+_all_gather_dict_lock = threading.RLock()
+_all_gather_sequence_id = 0
+_all_gather_sequence_id_to_states = collections.defaultdict(AllGatherStates)
 
 
-def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
-    with _wait_all_workers_dict_lock:
+def _gather_to_leader(sequence_id, worker_name, obj):
+    with _all_gather_dict_lock:
         assert (
             worker_name in _ALL_WORKER_NAMES
         ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
-        intent_worker_names = _wait_all_workers_sequence_id_to_states[
-            sequence_id
-        ].intent_worker_names
+        states = _all_gather_sequence_id_to_states[sequence_id]
         assert (
-            worker_name not in intent_worker_names
+            worker_name not in states.gathered_objects
         ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
             worker_name=worker_name, sequence_id=sequence_id
         )
-        intent_worker_names.add(worker_name)
-        if _ALL_WORKER_NAMES == intent_worker_names:
-            _set_proceed_shutdown_signal(sequence_id)
+        states.gathered_objects[worker_name] = obj
+        if _ALL_WORKER_NAMES == set(states.gathered_objects.keys()):
+            states.proceed_signal.set()
 
 
-def _set_proceed_shutdown_signal(sequence_id):
-    with _wait_all_workers_dict_lock:
-        proceed_signal = _wait_all_workers_sequence_id_to_states[
-            sequence_id
-        ].proceed_signal
+def _broadcast_to_followers(sequence_id, objects_map):
+    with _all_gather_dict_lock:
+        states = _all_gather_sequence_id_to_states[sequence_id]
+
     assert (
-        not proceed_signal.is_set()
+        not states.proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
-    proceed_signal.set()
+    states.gathered_objects = objects_map
+    states.proceed_signal.set()
+
+
+@_require_initialized
+def _all_gather(obj):
+    r"""
+    This is similar to torch.distributed.all_gather(), but is using RPC. It
+    picks the worker with the smallest name (alphabetic order) as the leader.
+    Then all followers send their data ``obj`` to the leader. After the leader
+    has received all, it will broadcast the results back to all followers. This
+    function blocks until all workers have received the gathered results.
+    """
+    assert (
+        _ALL_WORKER_NAMES is not None
+    ), "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
+    leader_name = sorted(_ALL_WORKER_NAMES)[0]
+
+    self_name = _get_current_rpc_agent().get_worker_info().name
+
+    global _all_gather_sequence_id
+    with _all_gather_dict_lock:
+        sequence_id = _all_gather_sequence_id
+        _all_gather_sequence_id += 1
+
+    is_leader = leader_name == self_name
+    # Set a long enough timeout for all shutdown messages to be processed.
+    timeout = 5  # second
+
+    # Phase 1: Followers send it's object to the leader
+    if is_leader:
+        _gather_to_leader(sequence_id, self_name, obj)
+    else:
+        rpc_sync(
+            leader_name,
+            _gather_to_leader,
+            args=(sequence_id, self_name, obj),
+            timeout=timeout,
+        )
+
+    with _all_gather_dict_lock:
+        states = _all_gather_sequence_id_to_states[
+            sequence_id
+        ]
+    states.proceed_signal.wait()
+
+    # Phase 2: Leader broadcast gathered results to all followers
+    # Leader's signal is the first to be unblocked, after receiving all
+    # followers' data objects.
+    if is_leader:
+        worker_name_to_response_future_dict = dict()
+        for follower_name in _ALL_WORKER_NAMES - {leader_name}:
+            fut = rpc_async(
+                follower_name,
+                _broadcast_to_followers,
+                args=(sequence_id, states.gathered_objects),
+                timeout=timeout
+            )
+            worker_name_to_response_future_dict[follower_name] = fut
+        for follower_name, fut in worker_name_to_response_future_dict.items():
+            try:
+                fut.wait()
+            except RuntimeError as ex:
+                logger.error(
+                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
+                        worker_name=follower_name, timeout=timeout
+                    )
+                )
+    return states.gathered_objects
 
 
 @_require_initialized
@@ -145,59 +211,7 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    assert (
-        _ALL_WORKER_NAMES is not None
-    ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
-    leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
-
-    self_worker_name = _get_current_rpc_agent().get_worker_info().name
-
-    global _wait_all_workers_sequence_id
-    with _wait_all_workers_dict_lock:
-        sequence_id = _wait_all_workers_sequence_id
-        _wait_all_workers_sequence_id += 1
-
-    is_leader_worker = leader_worker_name == self_worker_name
-    # Set a long enough timeout for all shutdown messages to be processed.
-    timeout = 5  # seconds
-
-    # Phase 1: Followers send intents.
-    # All followers report intents to the leader.
-    if is_leader_worker:
-        _on_leader_follower_report_shutdown_intent(sequence_id, self_worker_name)
-    else:
-        rpc_sync(
-            leader_worker_name,
-            _on_leader_follower_report_shutdown_intent,
-            args=(sequence_id, self_worker_name,),
-            timeout=timeout,
-        )
-
-    with _wait_all_workers_dict_lock:
-        proceed_signal = _wait_all_workers_sequence_id_to_states[
-            sequence_id
-        ].proceed_signal
-    proceed_signal.wait()
-
-    # Phase 2: Leader asks followers to proceed.
-    # Leader's signal is the first to be unblocked,
-    # after receiving all followers' intents.
-    if is_leader_worker:
-        # The leader sends out proceeed signals to all followers.
-        worker_name_to_response_future_dict = dict()
-        for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
-                            args=(sequence_id,), timeout=timeout)
-            worker_name_to_response_future_dict[follower_worker_name] = fut
-        for follower_worker_name, fut in worker_name_to_response_future_dict.items():
-            try:
-                fut.wait()
-            except RuntimeError as ex:
-                logger.error(
-                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_worker_name, timeout=timeout
-                    )
-                )
+    _all_gather(None)
 
 
 @_require_initialized
@@ -359,8 +373,8 @@ GenericWithOneTypeVar = Generic[T]
 
 
 try:
+    # Combine the implementation class and the type class.
     class RRef(PyRRef, GenericWithOneTypeVar):
-        # Combine the implementation class and the type class.
         pass
 except TypeError as exc:
     # TypeError: metaclass conflict: the metaclass of a derived class
@@ -368,9 +382,49 @@ except TypeError as exc:
     class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
         pass
 
+    # Combine the implementation class and the type class.
     class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
-        # Combine the implementation class and the type class.
         pass
+
+
+# Install docstrings from `PyRRef` to `RRef`.
+#
+# This is for the fact that pybind11 generates the parameter
+# `self` as type `rpc.PyRRef`, so a `:inherited-members:`
+# under `.. autoclass:: RRef` does not work.
+# we have to do the following process to replacee `rpc.PyRRef` with `rpc.RRef`.
+#
+def method_factory(method_name, docstring):
+    def method(self, *args, **kwargs):
+        return getattr(super(RRef, self), method_name)(*args, **kwargs)
+
+    method.__doc__ = docstring
+    return method
+
+
+for method_name, method in inspect.getmembers(PyRRef):
+    # Ignore magic methods, except "__str__".
+    if method_name.startswith("_") and method_name != "__str__":
+        continue
+
+    # Get pybind11 generated docstring.
+    # It's like,
+    """
+    to_here(self: torch.distributed.rpc.PyRRef, timeout: float=-1.0) -> object
+
+        Blocking call that copies the value of the RRef from the owner
+        to the local node and returns it. If the current node is the
+        owner, returns a reference to the local value.
+    """
+    docstring = getattr(method, "__doc__", None)
+    assert docstring is not None, "RRef user-facing methods should all have docstrings."
+
+    # Do surgery on pybind11 generated docstrings.
+    docstring = docstring.replace("torch.distributed.rpc.PyRRef", "torch.distributed.rpc.RRef")
+
+    # Attach user-facing RRef method with modified docstring.
+    new_method = method_factory(method_name, docstring)
+    setattr(RRef, method_name, new_method)
 
 
 @_require_initialized
@@ -481,7 +535,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    qualified_name = torch.jit._find_builtin(func)
+    qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
     should_profile = torch.autograd._profiler_enabled()
 
@@ -491,7 +545,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         # (builtin, script, python)
         if qualified_name is None:
             func_name = (
-                torch.jit._qualified_name(func)
+                torch._jit_internal._qualified_name(func)
                 if isinstance(func, torch.jit.ScriptFunction)
                 else func.__qualname__
             )
@@ -553,7 +607,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
     if not callable(func):
         raise TypeError("function should be callable.")
 
-    qualified_name = torch.jit._find_builtin(func)
+    qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
 
     # TODO: profiling logic does not really belong in invoke_rpc, it should be
@@ -566,7 +620,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         # (builtin, script, python)
         if qualified_name is None:
             func_name = (
-                torch.jit._qualified_name(func)
+                torch._jit_internal._qualified_name(func)
                 if isinstance(func, torch.jit.ScriptFunction)
                 else func.__qualname__
             )
@@ -604,7 +658,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
                 dst_worker_info.name,
-                torch.jit._qualified_name(func),
+                torch._jit_internal._qualified_name(func),
                 args,
                 kwargs,
                 rpc_timeout,

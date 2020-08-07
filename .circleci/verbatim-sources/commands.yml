@@ -1,23 +1,13 @@
 commands:
 
-  # Must be run after attaching workspace from previous steps
-  load_shared_env:
-    description: "Loads .circleci/shared/env_file into ${BASH_ENV}"
-    parameters:
-      # For some weird reason we decide to reattach our workspace to ~/workspace so
-      # in the vein of making it simple let's assume our share env_file is here
-      root:
-        type: string
-        default: "~/workspace"
+  calculate_docker_image_tag:
+    description: "Calculates the docker image tag"
     steps:
       - run:
-          name: "Load .circleci/shared/env_file into ${BASH_ENV}"
+          name: "Calculate docker image hash"
           command: |
-            if [[ -f  "<< parameters.root >>/.circleci/shared/env_file" ]]; then
-              cat << parameters.root >>/.circleci/shared/env_file >> ${BASH_ENV}
-            else
-              echo "We didn't have a shared env file, that's weird"
-            fi
+            DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+            echo "export DOCKER_TAG=${DOCKER_TAG}" >> ${BASH_ENV}
 
   # This system setup script is meant to run before the CI-related scripts, e.g.,
   # installing Git client, checking out code, setting up CI env, and
@@ -130,4 +120,46 @@ commands:
               echo "This is not a pull request, skipping..."
             fi
 
-
+  upload_binary_size_for_android_build:
+    description: "Upload binary size data for Android build"
+    parameters:
+      build_type:
+        type: string
+        default: ""
+      artifacts:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: "Binary Size - Set Python Version"
+          no_output_timeout: "1m"
+          command: pyenv global 3.7.0
+      - run:
+          name: "Binary Size - Install Dependencies"
+          no_output_timeout: "5m"
+          command: |
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry pip3 install requests
+      - run:
+          name: "Binary Size - Untar Artifacts"
+          no_output_timeout: "5m"
+          command: |
+            # The artifact file is created inside docker container, which contains the result binaries.
+            # Now unpackage it into the project folder. The subsequent script will scan project folder
+            # to locate result binaries and report their sizes.
+            # If artifact file is not provided it assumes that the project folder has been mounted in
+            # the docker during build and already contains the result binaries, so this step can be skipped.
+            export ARTIFACTS="<< parameters.artifacts >>"
+            if [ -n "${ARTIFACTS}" ]; then
+              tar xf "${ARTIFACTS}" -C ~/project
+            fi
+      - run:
+          name: "Binary Size - Upload << parameters.build_type >>"
+          no_output_timeout: "5m"
+          command: |
+            cd ~/project
+            export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
+            export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            python3 .circleci/scripts/upload_binary_size_to_scuba.py android

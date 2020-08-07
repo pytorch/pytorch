@@ -39,6 +39,8 @@ def skip_if_no_gpu(func):
         if not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
+            message = "Need at least {} CUDA devices".format(os.environ["WORLD_SIZE"])
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
             sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
 
         return func(*args, **kwargs)
@@ -63,10 +65,25 @@ def skip_if_not_multigpu(func):
     def wrapper(*args, **kwargs):
         if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
             return func(*args, **kwargs)
+        message = "Need at least {} CUDA devices".format(2)
+        TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
         sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
     return wrapper
 
+def require_n_gpus_for_nccl_backend(n, backend):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if backend == "nccl" and torch.cuda.device_count() < n:
+                message = "Need at least {} CUDA devices".format(n)
+                TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+                sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
 
 def skip_if_lt_x_gpu(x):
     def decorator(func):
@@ -74,6 +91,8 @@ def skip_if_lt_x_gpu(x):
         def wrapper(*args, **kwargs):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(x)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         return wrapper
 
@@ -230,6 +249,11 @@ class MultiProcessTestCase(TestCase):
         super().tearDown()
         for p in self.processes:
             p.terminate()
+        # Each Process instance holds a few open file descriptors. The unittest
+        # runner creates a new TestCase instance for each test method and keeps
+        # it alive until the end of the entire suite. We must thus reset the
+        # processes to prevent an effective file descriptor leak.
+        self.processes = []
 
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'

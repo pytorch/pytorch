@@ -1,5 +1,6 @@
 #include <torch/library.h>
 #include <ATen/VmapTransforms.h>
+#include <ATen/BatchedFallback.h>
 #include <ATen/ATen.h>
 
 namespace at {
@@ -98,12 +99,135 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.newLogicalFromPhysical(result);
 }
 
-void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
+std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::chunk(self_physical.tensor(), chunks, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // NB: unsqueeze has some special handling of its `dim` argument so we can't call
+  // self_physical.getPhysicalDim directly. In particular, native::unsqueeze
+  // wraps the dim to (the logical dimension) + 1, so we need to do that here too.
+  // https://github.com/pytorch/pytorch/blob/b623bdeabb0aa8da44285d303246e7f8ac06c2a9/aten/src/ATen/native/TensorShape.cpp#L1413
+  auto dim_physical =
+      self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
+  auto result = self_physical.tensor().unsqueeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().squeeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim0_physical = self_physical.getPhysicalDim(dim0);
+  auto dim1_physical = self_physical.getPhysicalDim(dim1);
+  auto result = self_physical.tensor().transpose(dim0_physical, dim1_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dims_physical = self_physical.getPhysicalDims(dims);
+
+  VmapDimVector all_dims_physical;
+  all_dims_physical.reserve(self_physical.tensor().dim());
+  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
+    all_dims_physical.push_back(bdim); 
+  }
+  all_dims_physical.insert(
+      all_dims_physical.end(),
+      dims_physical.begin(),
+      dims_physical.end());
+  auto result = self_physical.tensor().permute(all_dims_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().select(dim_physical, index);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().slice(dim_physical, start, end, step);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim1_physical = self_physical.getPhysicalDim(dim1);
+  auto dim2_physical = self_physical.getPhysicalDim(dim2);
+  auto result = at::diagonal(self_physical.tensor(), offset, dim1_physical, dim2_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef destination) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto source_physical = self_physical.getPhysicalDims(source);
+  auto destination_physical = self_physical.getPhysicalDims(destination);
+  auto result = at::movedim(self_physical.tensor(), source_physical, destination_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto shape_physical = self_physical.getPhysicalShape(shape);
+  auto result = self_physical.tensor().reshape(shape_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::split(self_physical.tensor(), split_size, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::split_with_sizes(self_physical.tensor(), split_sizes, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::unbind(self_physical.tensor(), dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+Tensor unfold_batching_rule(const Tensor& self, int64_t dim, int64_t size, int64_t step) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().unfold(dim_physical, size, step);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto size_physical = self_physical.getPhysicalShape(size);
+  auto result = self_physical.tensor().view(size_physical);
+  return self_physical.newLogicalFromPhysical(result);
 }
 
 TORCH_LIBRARY_IMPL(_, Batched, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorFallback>());
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
 
 TORCH_LIBRARY_IMPL(aten, Batched, m) {
@@ -112,10 +236,38 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
   // here is to just directly call the underlying implementation.
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
+  m.impl("_add_batch_dim", native::_add_batch_dim);
+  m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
+
+  // view operations
+  m.impl("chunk", chunk_batching_rule);
+  m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("expand_as", native::expand_as); // composite wrt autograd
+  m.impl("movedim.intlist", movedim_batching_rule);
+  m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
+  // NB: static_cast because there's another variant of narrow. However, we don't
+  // want to support the other variant yet bc it isn't documented...
+  m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
+  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
+  m.impl("permute", permute_batching_rule);
+  m.impl("reshape", reshape_batching_rule);
+  m.impl("reshape_as", native::reshape_as); // composite wrt autograd
+  m.impl("select.int", select_batching_rule);
+  m.impl("slice.Tensor", slice_batching_rule);
+  m.impl("split.Tensor", split_batching_rule);
+  m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("t", native::t); // composite wrt autograd
+  m.impl("transpose.int", transpose_int_batching_rule);
+  m.impl("unbind.int", unbind_batching_rule);
+  m.impl("unfold", unfold_batching_rule);
+  m.impl("unsqueeze", unsqueeze_batching_rule);
+  m.impl("view", view_batching_rule);
+  m.impl("view_as", native::view_as); // composite wrt autograd
 }
 
 } // namespace at

@@ -152,6 +152,14 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
 
+        # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
+        # However, there are nodes that cannot be converted without additional context.
+        # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
+        # until the point where it is unpacked by listUnpack node.
+        # This pass does a preprocess, and prepares the nodes such that enough context can be received
+        # by the symbolic function.
+        torch._C._jit_pass_onnx_preprocess(graph)
+
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
@@ -201,9 +209,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # to look up if an operator has side effects, but we can run a dead code
     # elimination variant that doesn't need to look up if an op has side effects.
     torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
-    torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_fixup_onnx_loops(graph)
-    torch._C._jit_pass_fixup_onnx_conditionals(graph)
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
@@ -278,8 +283,16 @@ def _decide_add_node_names(add_node_names, operator_export_type):
     return _resolve_args_by_export_type("add_node_names", add_node_names, operator_export_type)
 
 
-def _decide_constant_folding(do_constant_folding, operator_export_type):
-    return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+def _decide_constant_folding(do_constant_folding, operator_export_type, training):
+    do_constant_folding = _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+    if do_constant_folding and (training is not None and training is not TrainingMode.EVAL):
+        warnings.warn("It is recommended that constant folding be turned off ('do_constant_folding=False') "
+                      "when exporting the model in training-amenable mode, i.e. with 'training=TrainingMode.TRAIN' "
+                      "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
+                      "learnable model parameters may not translate correctly in the exported ONNX model "
+                      "because constant folding mutates model parameters. Please consider "
+                      "turning off constant folding or setting the training=TrainingMode.EVAL.")
+    return do_constant_folding
 
 
 def _decide_external_data_format(use_external_data_format, operator_export_type, f):
@@ -331,7 +344,7 @@ def _model_to_graph(model, args, verbose=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=True,
-                    _disable_torch_constant_prop=False, fixed_batch_size=False):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False, training=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -341,7 +354,6 @@ def _model_to_graph(model, args, verbose=False,
         example_outputs = [example_outputs]
 
     torch_out = None
-
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
@@ -403,6 +415,9 @@ def _model_to_graph(model, args, verbose=False,
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
+
+    if training is None or training == TrainingMode.EVAL or (training == TrainingMode.PRESERVE and not is_originally_training):
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
@@ -467,11 +482,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          operator_export_type,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
-                                                        output_names, operator_export_type,
-                                                        example_outputs, propagate, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size)
+                                                        output_names, operator_export_type, example_outputs,
+                                                        propagate, _retain_param_name, val_do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size, training=training)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
@@ -521,7 +536,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              operator_export_type,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+            val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
@@ -529,7 +544,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                             output_names, operator_export_type,
                                                             example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,
-                                                            fixed_batch_size=fixed_batch_size)
+                                                            fixed_batch_size=fixed_batch_size, training=training)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
@@ -818,6 +833,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 for b in n.blocks():
                     new_block = new_node.addBlock()
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
+                new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
                 return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
@@ -919,7 +935,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
-                           and sould start with a letter and contain only \
+                           and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')

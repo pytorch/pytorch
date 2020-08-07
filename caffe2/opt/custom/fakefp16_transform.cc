@@ -27,6 +27,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
       {"Int8Dequantize", "Int8DequantizeNNPI"},
       {"LayerNorm", "LayerNormFakeFP16NNPI"},
       {"FbFCPacked", "Fp16FCAcc32NNPI"},
+      {"Logit", "LogitFakeFp16NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
       {"SparseLengthsWeightedSum", "SparseLengthsWeightedSumFakeFP16AccFP16"},
       {"SparseLengthsMean", "SparseLengthsMeanFakeFP16AccFP16"},
@@ -43,6 +44,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
       {"SpatialBN", "SpatialBNFakeFp16NNPI"},
+      {"Swish", "SwishFakeFp16NNPI"},
       {"Tanh", "TanhFakeFp16"},
       {"Relu", "ReluFakeFp16"},
       {"Add", "AddFakeFp16"},
@@ -62,6 +64,77 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     fake_fp16_op_conversion_map["Tanh"] = "TanhFakeFp16NNPI";
   }
   return fake_fp16_op_conversion_map;
+}
+
+std::vector<OperatorDef*> findMutableOperatorByInput(
+    NetDef* net,
+    const std::string& input) {
+  std::vector<OperatorDef*> ops;
+
+  for (auto& op : *net->mutable_op()) {
+    for (const auto& i : op.input()) {
+      if (input == i) {
+        ops.push_back(&op);
+      }
+    }
+  }
+  return ops;
+}
+
+void fakeFp16FoldLayerNorm(NetDef* net) {
+  for (auto& op : *net->mutable_op()) {
+    if (op.type() == "LayerNormFakeFP16NNPI") {
+      LOG(INFO) << "Attemping to fuse LayerNormFakeFP16NNPI at "
+                << ArgumentHelper::GetSingleArgument<OperatorDef, int>(
+                       op, "net_pos", -1);
+      if (op.input().size() != 1) {
+        LOG(INFO) << "input isn't 1, skipping";
+        continue;
+      }
+
+      const std::string& lm_output = op.output(0);
+      auto next_ops = findMutableOperatorByInput(net, lm_output);
+
+      if (next_ops.size() != 1 || next_ops[0]->type() != "MulFakeFp16") {
+        LOG(INFO) << "next op isn't MulFakeFp16, skipping";
+        continue;
+      }
+
+      auto* mul_op = next_ops[0];
+
+      auto next_next_ops = findMutableOperatorByInput(net, mul_op->output(0));
+
+      if (next_next_ops.size() != 1 ||
+          next_next_ops[0]->type() != "AddFakeFp16") {
+        LOG(INFO) << "next op isn't AddFakeFp16, skipping";
+        continue;
+      }
+
+      auto* add_op = next_next_ops[0];
+
+      *(op.mutable_input()->Add()) = mul_op->input(1);
+      *(op.mutable_input()->Add()) = add_op->input(1);
+      *op.mutable_output(0) = add_op->output(0);
+
+      mul_op->set_type("delete_me_optimized_away");
+      add_op->set_type("delete_me_optimized_away");
+
+      LOG(INFO) << "Fused LayerNormFakeFP16NNPI";
+    }
+  }
+}
+
+void fakeFp16FuseOps(NetDef* net) {
+  fakeFp16FoldLayerNorm(net);
+
+  auto iter = net->mutable_op()->begin();
+  while (iter != net->mutable_op()->end()) {
+    if (iter->type() == "delete_me_optimized_away") {
+      iter = net->mutable_op()->erase(iter);
+    } else {
+      ++iter;
+    }
+  }
 }
 
 void fakeFp16Transform(NetDef* net) {
@@ -99,6 +172,8 @@ void fakeFp16Transform(NetDef* net) {
       op->set_type(it->second);
     }
   }
+
+  fakeFp16FuseOps(net);
 }
 
 } // namespace opt

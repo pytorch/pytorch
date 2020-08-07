@@ -82,30 +82,11 @@ class ReLU6(torch.nn.ReLU):
         return ReLU6(mod.inplace)
 
 class Hardswish(torch.nn.Hardswish):
-    r"""Applies the hardswish function, element-wise, as described in the paper:
+    r"""This is the quantized version of :class:`~torch.nn.Hardswish`.
 
-    `Searching for MobileNetV3`_.
-
-    .. math::
-        \text{Hardswish}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
-        \end{cases}
-
-    Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
-
-    Examples::
-
-        >>> m = nn.Hardswish()
-        >>> input = torch.randn(2)
-        >>> output = m(input)
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
     """
     def __init__(self, scale, zero_point):
         super(Hardswish, self).__init__()
@@ -125,7 +106,12 @@ class Hardswish(torch.nn.Hardswish):
         return Hardswish(float(scale), int(zero_point))
 
 class ELU(torch.nn.ELU):
-    r"""This is the quantized equivalent of :class:`torch.nn.ELU`.
+    r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
     """
     def __init__(self, scale, zero_point, alpha=1.):
         super(ELU, self).__init__(alpha)
