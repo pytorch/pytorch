@@ -530,8 +530,10 @@ bool hitGraphInput(Value* value) {
 // Get the module access path for a Value representing a module instance
 // by tracing back the GetAttr nodes and recording all the attribute
 // names along the way.
-// For example, the module access path will be ['sub', 'basic_block', 'conv1']
-// for `self.sub.basic_block.conv1`
+// Assuming 'self.sub.basic_block.conv1',
+// Input1: Value instance of conv1
+// Input2: Value instance of self
+// Output: ['sub', 'basic_block', 'conv1']
 std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   std::vector<std::string> path;
   // Iterator to traverse back the GetAttr calls
@@ -555,6 +557,10 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   return path;
 }
 
+// Assuming self.foo.bar.conv1,
+// Input1: Module instance of self
+// Input2: ['foo', 'bar', 'conv1']
+// Output: Module instance of conv1
 Module findChildModule(
     const Module& module,
     const std::vector<std::string>& path) {

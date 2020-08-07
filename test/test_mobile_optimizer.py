@@ -121,8 +121,6 @@ class TestOptimizer(unittest.TestCase):
         optimization_blacklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
         bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blacklist_no_prepack)
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-                   .run(str(get_forward_graph(bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
@@ -201,8 +199,6 @@ class TestOptimizer(unittest.TestCase):
             model = torch.jit.script(model)
             # this line should not have ASAN failures
             model_optim = optimize_for_mobile(model)
-            self.assertFalse(hasattr(model_optim.conv1, "bias"))
-            self.assertFalse(hasattr(model_optim.child.conv2, "bias"))
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
@@ -258,18 +254,39 @@ class TestOptimizer(unittest.TestCase):
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
                          " Please build with USE_XNNPACK=1.")
-    def test_quantized_conv_no_asan_failures(self):
-        # There were ASAN failures when fold_conv_bn was run on
-        # already quantized conv modules. Verifying that this does
-        # not happen again.
+    def test_hoist_conv_packed_params(self):
+
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+
+        class Standalone(nn.Module):
+            def __init__(self):
+                super(Standalone, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+                self.relu = nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.conv2(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+            def fuse_model(self):
+                torch.quantization.fuse_modules(self, [['conv2', 'relu']], inplace=True)
+                pass
 
         class Child(nn.Module):
             def __init__(self):
                 super(Child, self).__init__()
-                self.conv2 = nn.Conv2d(1, 1, 1)
+                self.conv1 = nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
-                x = self.conv2(x)
+                x = self.conv1(x)
                 return x
 
         class Parent(nn.Module):
@@ -278,6 +295,7 @@ class TestOptimizer(unittest.TestCase):
                 self.quant = torch.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
+                # TODO: test nn.Sequential after #42039 is fixed
                 self.dequant = torch.quantization.DeQuantStub()
 
             def forward(self, x):
@@ -287,16 +305,48 @@ class TestOptimizer(unittest.TestCase):
                 x = self.dequant(x)
                 return x
 
-        model = Parent()
-        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        torch.quantization.prepare(model, inplace=True)
-        model(torch.randn(4, 1, 4, 4))
-        torch.quantization.convert(model, inplace=True)
-        model = torch.jit.script(model)
-        # this line should not have ASAN failures
-        model_optim = optimize_for_mobile(model)
-        self.assertFalse(hasattr(model_optim.conv1, "bias"))
-        self.assertFalse(hasattr(model_optim.child.conv2, "bias"))
+            def fuse_model(self):
+                pass
+
+        with override_quantized_engine('qnnpack'):
+            def _quant_script_and_optimize(model):
+                model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+                model.fuse_model()
+                torch.quantization.prepare(model, inplace=True)
+                model(torch.randn(4, 1, 4, 4))
+                torch.quantization.convert(model, inplace=True)
+                model = torch.jit.script(model)
+                model_optim = optimize_for_mobile(model)
+                return model, model_optim
+
+            # basic case
+
+            m, m_optim = _quant_script_and_optimize(Standalone())
+            FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .run(m_optim.graph)
+            self.assertFalse(hasattr(m_optim, "conv1"))
+            self.assertFalse(hasattr(m_optim, "conv2"))
+
+            data = torch.randn(4, 1, 4, 4)
+            m_res = m(data)
+            m_optim_res = m_optim(data)
+            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
+            # generic case
+
+            m, m_optim = _quant_script_and_optimize(Parent())
+            FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
+                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .run(m_optim.graph)
+            self.assertFalse(hasattr(m_optim, "conv1"))
+            self.assertFalse(hasattr(m_optim, "child"))
+
+            data = torch.randn(4, 1, 4, 4)
+            m_res = m(data)
+            m_optim_res = m_optim(data)
+            torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
 
 if __name__ == '__main__':
     unittest.main()
