@@ -1038,6 +1038,9 @@ def __lshift_(g, self, other):
 
 
 def where(g, condition, self, other):
+    # Assumes that torch.where's first argument takes only Bool and Byte tensors.
+    if condition.type().scalarType() != 'Bool': 
+        condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     return g.op("Where", condition, self, other)
 
 
