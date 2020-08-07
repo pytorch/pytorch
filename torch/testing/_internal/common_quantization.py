@@ -185,13 +185,15 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module):
+    def checkObservers(self, module, propagate_qconfig_list=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
+        if propagate_qconfig_list is None:
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
-           and type(module) in DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST:
+           and type(module) in propagate_qconfig_list:
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
