@@ -53,7 +53,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False, update_jit_scripting_passes=True):
+                   fixed_batch_size=False):
     model.eval()
 
     if input is None:
@@ -80,7 +80,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                            dynamic_axes=dynamic_axes,
                            input_names=input_names, output_names=output_names,
                            fixed_batch_size=fixed_batch_size,
-                           update_jit_scripting_passes=update_jit_scripting_passes)
+                           use_new_jit_passes=self.use_new_jit_passes)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -104,6 +104,7 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
+    use_new_jit_passes = False  # For testing main code-path
 
     def setUp(self):
         torch.manual_seed(0)
@@ -121,7 +122,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size, update_jit_scripting_passes=True)
+                                  fixed_batch_size=fixed_batch_size)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -4079,6 +4080,20 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                          keep_initializers_as_inputs=False))
+
+# opset 12 tests, with use_new_jit_passes=True for using new jit API
+TestONNXRuntime_opset12_new_jit_API = type(str("TestONNXRuntime_opset12_new_jit_API"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=12,
+                                         use_new_jit_passes=True))
+
+# opset 12 tests, with use_new_jit_passes=True for using new jit API,
+# and keep_initializers_as_inputs=False for IR version 4 style export.
+TestONNXRuntime_opset12_IRv4_new_jit_API = type(str("TestONNXRuntime_opset12_IRv4_new_jit_API"),
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=12,
+                                         keep_initializers_as_inputs=False,
+                                         use_new_jit_passes=True))
 
 
 if __name__ == '__main__':

@@ -23,7 +23,7 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
             outputs = model(inputs)
             script_model = torch.jit.script(model)
             run_model_test(self, script_model, False, example_outputs=outputs,
-                           input=inputs, rtol=rtol, atol=atol, update_jit_scripting_passes=True)
+                           input=inputs, rtol=rtol, atol=atol, use_new_jit_passes=True)
 
 
 if __name__ == '__main__':

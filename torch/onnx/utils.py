@@ -122,13 +122,16 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None):
+                    params_dict=None, use_new_jit_passes=False):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
+
+    if not use_new_jit_passes:
+        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -152,8 +155,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
-        # _remove_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph)
+        if use_new_jit_passes:
+            torch._C._jit_pass_remove_inplace_ops(graph)
+        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
+        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -329,13 +334,13 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _model_to_jit_graph(model, args, _retain_param_name, update_jit_scripting_passes):
+def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
     torch_out = None
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
-            if not update_jit_scripting_passes:
+            if not use_new_jit_passes:
                 method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             else:
                 freezed_m = torch._C._freeze_module(model._c)
@@ -375,7 +380,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, update_jit_scripting_passes=False):
+                    training=None, use_new_jit_passes=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -384,9 +389,9 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(example_outputs, torch.Tensor):
         example_outputs = [example_outputs]
 
-    graph, params, torch_out = _model_to_jit_graph(model, args,
-                                                   _retain_param_name,
-                                                   update_jit_scripting_passes)
+    graph, params, torch_out = _create_jit_graph(model, args,
+                                                 _retain_param_name,
+                                                 use_new_jit_passes)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
@@ -394,7 +399,8 @@ def _model_to_graph(model, args, verbose=False,
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
-                            fixed_batch_size=fixed_batch_size, params_dict=params_dict)
+                            fixed_batch_size=fixed_batch_size, params_dict=params_dict,
+                            use_new_jit_passes=use_new_jit_passes)
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
@@ -498,7 +504,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
-# update_jit_scripting_passes is a flag which enables new jit scripting API for ONNX export.
+# use_new_jit_passes is a flag which enables new jit scripting API for ONNX export.
 # This purpose of this flag is to enable the new API temporarily for testing purposes.
 # Once the these jit API's are fully tested, they will become part of production code-path by
 # removing this flag.
@@ -508,7 +514,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False, update_jit_scripting_passes=False):
+            enable_onnx_checker=True, use_external_data_format=False, use_new_jit_passes=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -552,7 +558,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                update_jit_scripting_passes=update_jit_scripting_passes)
+                                use_new_jit_passes=use_new_jit_passes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

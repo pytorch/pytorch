@@ -25,7 +25,7 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    update_jit_scripting_passes = True
+    use_new_jit_passes = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -44,7 +44,7 @@ class TestUtilityFuns(TestCase):
                                      operator_export_type=operator_export_type,
                                      training=training,
                                      example_outputs=example_outputs,
-                                     update_jit_scripting_passes=self.update_jit_scripting_passes)
+                                     use_new_jit_passes=self.use_new_jit_passes)
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -818,6 +818,38 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "prim::Constant"
         assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
+
+    def test_remove_mutation_zero_fill(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                x = x / 2
+                return x.zero_ + x.fill_(2)
+
+        model = Module()
+        x = torch.randn(3, 4, 5, 5)
+        pt_output = model(x)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_output = ort_sess.run(None, ort_inputs)
+        np.testing.assert_allclose(pt_output, ort_output, atol=1e-7, rtol=1e-5)
+
+    def test_remove_mutation_on_block_inputs(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.add_(1) / x.mul_(2)
+
+        model = Module()
+        x = torch.randn(3, 4, 5, 5)
+        pt_output = model(x)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_output = ort_sess.run(None, ort_inputs)
+        np.testing.assert_allclose(pt_output, ort_output, atol=1e-7, rtol=1e-5)
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),

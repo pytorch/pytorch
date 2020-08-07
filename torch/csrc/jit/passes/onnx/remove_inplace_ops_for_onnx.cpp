@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
+#include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <limits>
 
@@ -465,14 +466,17 @@ static void PrepareForRemoveMutations(
 
 } // namespace
 
-void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  PrepareForRemoveMutations(graph, graph->block());
-  RemoveTensorMutation(graph);
-  RemoveListMutation(graph);
+void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
   PrepareListPopForONNX(graph->block());
   PrepareListAppendAndInsertForONNX(graph->block());
+}
+
+void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
+  PrepareForRemoveMutations(graph, graph->block());
+  RemoveTensorMutation(graph);
+  RemoveListMutation(graph);
 }
 
 } // namespace jit
