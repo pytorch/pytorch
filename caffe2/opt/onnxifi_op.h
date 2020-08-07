@@ -371,7 +371,9 @@ class OnnxifiOp final : public Operator<Context> {
       onnxEvent event,
       uint32_t timeoutMs,
       onnxEventState* eventState,
-      onnxStatus* eventStatus);
+      onnxStatus* eventStatus,
+      char* message,
+      size_t* messageLength);
 
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
