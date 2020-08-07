@@ -1474,6 +1474,22 @@
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
 
+# linalg namespace
+# Note [linalg namespace binding]
+# Functions in the linalg python module should have their names start with
+#   "linalg_" and be bound to the desired Python name in
+#   torch/linalg/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/linalg.h.
+#
+# See linalg_outer as an example.
+
+- func: linalg_outer(Tensor self, Tensor vec2) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+
+- func: linalg_outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
