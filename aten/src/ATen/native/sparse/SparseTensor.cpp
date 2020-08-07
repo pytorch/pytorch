@@ -157,15 +157,18 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
                                                   DispatchKeySet(dispatch_key), options.dtype());
 }
 
-Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values_, const Tensor& reduction,
+// TODO: This constructor should probably use an ATen abstract method in order to make
+// autograd dispatch available for the GCS constructor. See the relevant note in native_functions.yaml. 
+Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values, const Tensor& reduction,
                          ArrayRef<int64_t> size, Scalar fill_value, const TensorOptions& options) {
-  // Tensor values = expand_values_if_needed(values_);
-  // // make sure that indicies do not contain any entries that are greater than the dim.
-  // int64_t sparse_dim = indices.size(0)-1;
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
   
   SparseTensor self = new_gcs_tensor(options);
-  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(size);
+  int nnz_size = values.numel();
+  int ptr_size = pointers.numel();
+  int redux_size = reduction.numel();
+  
+  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size);
   return self;
 }
 
@@ -174,7 +177,6 @@ Tensor values_sparse_gcs(const Tensor& self) {
 }
 
 Tensor pointers_sparse_gcs(const Tensor& self) {
-  std::cout << "hello from pointers.\n";
   return get_sparse_impl<SparseGCSTensorImpl>(self)->pointers().alias();      
 }
 
@@ -352,11 +354,10 @@ std::vector<int> make_strides(std::vector<int> shape) {
 
   strides.insert(std::begin(strides), 1);
 
-  std::cout << "strides: " << strides << std::endl;
-  
   return strides;
 }
 
+// Not used for now. 
 SparseTensor to_sparse_gcs(const Tensor& self, const Tensor& reduction, Scalar fill_value) {
   IntArrayRef shape = self.sizes();
   int N = shape.size();

@@ -19,10 +19,24 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
   
-  void resize_and_clear_(ArrayRef<int64_t>& size) {
+  void resize_and_clear_(int nnz_size, int ptr_size, int redux_size) {
+    // TODO: perform error checking.
+
+    // call pointers().options() here since the struct contructor calls the tensor constructor
+    // with args for device specific init.
+    auto empty_pointers = at::empty(ptr_size, pointers().options());
+    auto empty_indices = at::empty(nnz_size, indices().options());
+    auto empty_values = at::empty(nnz_size, values().options());
+    auto empty_reduction = at::empty(redux_size, reduction().options());
+
+    // directly set to the member variables. there should be lots of error checking here.
+    pointers_ = empty_pointers;
+    indices_ = empty_indices;
+    values_ = empty_values;
+    reduction_ = empty_reduction;
   }
 
-  Tensor pointers() const { std::cout << "in pointers\n"; return pointers_; }
+  Tensor pointers() const { return pointers_; }
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
   Tensor reduction() const { return reduction_; }
