@@ -8,8 +8,6 @@ from torch.autograd import Variable
 from torch.testing import \
     (make_non_contiguous,
      get_common_float_types,
-     get_common_float_types_plus_half,
-     get_common_float_types_plus_bfloat16,
      get_all_float_types,
      get_common_float_and_complex_types,
      get_common_float_and_complex_types_plus_half,
@@ -25,9 +23,9 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
 # Classes and methods for the operator database
-# The OpMeta class contains metadata and helpers for acquiring properties of
-# operations, like what dtypes they support.
-class OpMeta(object):
+class OpInfo(object):
+    """Operator information and helper functions for acquiring it."""
+
     def __init__(self,
                  name,  # the string name of the function
                  *,
@@ -38,8 +36,7 @@ class OpMeta(object):
                  has_out_kwarg=None,  # whether this function has an out kwarg
                  test_autograd=True,  # whether this function's autograd should be tested
                  supports_complex_autograd=None,  # whether this function supports complex autograd
-                 decorators=None,  # decorators to apply to generated tests
-                 tests_to_skip=None):  # regular expressions describing tests to skip
+                 decorators=None):  # decorators to apply to generated tests
         self.name = name
 
         self.dtypes = dtypes
@@ -47,6 +44,7 @@ class OpMeta(object):
         self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
         self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
 
+        self.op = getattr(torch, self.name)
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
@@ -59,58 +57,46 @@ class OpMeta(object):
                                               torch.cdouble in self.dtypesIfCPU)
 
         self.decorators = decorators
-        self.tests_to_skip = tests_to_skip
 
-    # Returns the op (currently only supports torch.<op_name>)
+    #
     def getOp(self):
-        return getattr(torch, self.name)
+        """Returns the function variant of the operator, torch.<op_name>."""
+        return self.op
 
     def __call__(self, *args, **kwargs):
-        return self.getOp()(*args, **kwargs)
+        """Calls the function variant of the operator."""
+        return self.op(*args, **kwargs)
 
-    # Returns the method variant of the op (torch.Tensor.<op_name>)
-    # or None if the op has no method variant
     def getMethod(self):
+        """Returns the method variant of the operator, torch.Tensor.<op_name>.
+        Returns None if the operator has no method variant.
+        """
         return self.method_variant
 
-    # Returns the inplace variant of the op (torch.Tensor.<op_name>_)
-    # or None if the op has no inplace variant
     def getInplace(self):
+        """Returns the inplace variant of the operator, torch.Tensor.<op_name>_.
+        Returns None if the operator has no inplace variant.
+        """
         return self.inplace_variant
-
-    # Returns True if the test should be skipped and False otherwise
-    def shouldSkip(self, test_name, *, device, dtype):
-        if self.tests_to_skip is None:
-            return False
-
-        if device is None and dtype is None:
-            full_name = test_name
-        elif dtype is None:
-            assert device is not None
-            full_name = test_name + "_" + str(torch.device(device).type)
-        else:
-            assert device is not None
-            assert dtype is not None
-            full_name = test_name + "_" + str(torch.device(device).type) + "_" + str(dtype).split('.')[1]
-
-        for regex in self.tests_to_skip:
-            if re.match(regex, full_name):
-                return True
-
-        return False
 
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
-#   - they are elementwise functions
-#   - the input shape is the output shape
-#   - they typically have method and inplace variants
-#   - they typically support the out kwarg
-#   - they typically have NumPy or SciPy references
-# See NumPy's universal function documentation
-# (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
-# about the concept of ufuncs.
-class UnaryUfuncMeta(OpMeta):
+
+class UnaryUfuncInfo(OpInfo):
+    """Operator information for 'universal unary functions (unary ufuncs).'
+    These are functions of a single tensor with common properties like:
+      - they are elementwise functions
+      - the input shape is the output shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
     def __init__(self,
                  name,  # the string name of the function
                  *,
@@ -119,57 +105,29 @@ class UnaryUfuncMeta(OpMeta):
                  dtypesIfCUDA=get_common_float_and_complex_types_plus_half(),
                  dtypesIfROCM=get_all_float_types(),
                  has_out_kwarg=True,
-                 generator_override=None,  # callable(size, **kwargs) -> tensor in domain
                  **kwargs):
-        super(UnaryUfuncMeta, self).__init__(name,
+        super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCPU=dtypesIfCPU,
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              has_out_kwarg=has_out_kwarg,
                                              **kwargs)
-        self.generator_override = generator_override
 
 L = 20
 M = 10
 S = 5
 
-_domain_epsilon = 1e-3
-def domain_generator(domain):
-    def generator(size, **kwargs):
-        t = torch.randn(size, **kwargs)
-        t.add_(domain[0])
-        return t.clamp_(domain[0] + _domain_epsilon, domain[1] - _domain_epsilon)
-
-    return generator
-
 # Operator database
 op_db = [
-    OpMeta('addmm'),
-    UnaryUfuncMeta('acosh',
-                   dtypesIfCPU=get_common_float_types(),
-                   dtypesIfCUDA=get_common_float_types_plus_half(),
-                   generator_override=domain_generator((1, float('inf')))),
-    UnaryUfuncMeta('cos',
+    UnaryUfuncInfo('cos',
                    dtypesIfCUDA=get_all_float_and_complex_types()),
-    UnaryUfuncMeta('cosh',
+    UnaryUfuncInfo('cosh',
                    dtypesIfCPU=get_common_float_and_complex_types()),
-    UnaryUfuncMeta('floor',
-                   dtypesIfCPU=get_common_float_types_plus_bfloat16(),
-                   dtypesIfCUDA=get_common_float_types_plus_half(),
-                   test_autograd=False),
 ]
 
-def get_op_metadata(name):
-    for op in op_db:
-        if name == op.name:
-            return op
-
-    assert False
-
-
 # Common operator groupings
-unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncMeta)]
+unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
