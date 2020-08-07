@@ -40,6 +40,16 @@ def init_logging(level=logging.INFO):
     logging.basicConfig(level=level)
 
 
+def check_in_repo():
+    """Ensures that we are in the PyTorch repo."""
+    if not os.path.isfile("setup.py"):
+        return "Not in root-level PyTorch repo, no setup.py found"
+    with open("setup.py") as f:
+        s = f.read()
+    if "PyTorch" not in s:
+        return "Not in PyTorch repo, 'PyTorch' not found in setup.py"
+
+
 def check_branch(branch):
     """Checks that the branch name can be checked out."""
     # first make sure actual branch name was given
@@ -322,7 +332,8 @@ def main(args=None):
     p = make_parser()
     ns = p.parse_args(args)
     init_logging()
-    status = check_branch(ns.branch)
+    status = check_in_repo()
+    status = status or check_branch(ns.branch)
     if status:
         sys.exit(status)
     install(branch=ns.branch, name=ns.name, prefix=ns.prefix)
