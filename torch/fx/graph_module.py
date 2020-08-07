@@ -2,9 +2,7 @@ import torch
 import torch.overrides
 import linecache
 import inspect
-import pickle
-import sys
-import dis # or dat
+import dis  # or dat
 import operator
 from types import FunctionType, CodeType
 
@@ -57,7 +55,7 @@ def _patch_function(fn, nargs):
             co.co_varnames, co.co_filename, co.co_name,
             co.co_firstlineno, co.co_lnotab, co.co_freevars,
             co.co_cellvars
-    )
+        )
     else:
         co_args = (
             nargs, 0, co.co_nlocals,
@@ -83,9 +81,10 @@ class TraceError(ValueError):
 class Node:
     def __init__(self, graph, name, op, target, args, kwargs):
         self.graph = graph
-        self.name = name # unique name of value being created
-        self.op = op # the kind of operation = placeholder|call_method|call_module|call_function|getattr
-        self.target = target # for method/module/function, the name of the method/module/function/attr being invoked, e.g add, layer1, or torch.add
+        self.name = name  # unique name of value being created
+        self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|getattr
+        self.target = target  # for method/module/function, the name of the method/module/function/attr
+        # being invoked, e.g add, layer1, or torch.add
         self.args = args
         self.kwargs = kwargs
         self.uses = 0
@@ -104,7 +103,7 @@ class Node:
     def __iter__(self):
         frame = inspect.currentframe()
         calling_frame = frame.f_back
-        inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti//2]
+        inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))
         self._no_control_flow()
@@ -129,12 +128,13 @@ def _qualified_name(func):
         return func.__name__
     name = func.__name__
     module = _find_module_of_method(func)
-    module = module.replace('torch._ops', 'torch.ops') # WAR for bug in how torch.ops assigns module
+    module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     return f'{module}.{name}'
 
 class Attribute(Node):
     def __init__(self, node, attr):
         super().__init__(node.graph, node.graph._name(attr), 'call_function', getattr, [node, attr], {})
+
     def __call__(self, *args, **kwargs):
         return self.node.graph._create_node('call_method', self.args[1], [self.args[0]] + list(args), kwargs)
 
@@ -164,7 +164,7 @@ magic_methods = dict({
     'ge': '{} >= {}',
     'pos': '+{}',
     'neg': '-{}',
-     'invert': '~{}'}, **reflectable_magic_methods)
+    'invert': '~{}'}, **reflectable_magic_methods)
 
 for method in magic_methods:
     def scope(method):
@@ -180,6 +180,7 @@ for method in magic_methods:
 for orig_method_name in reflectable_magic_methods:
     def scope(orig_method_name):
         method_name = f'__r{orig_method_name}__'
+
         def impl(self, rhs):
             target = getattr(operator, orig_method_name)
             return self.graph._create_node('call_function', target, [rhs, self])
@@ -189,7 +190,7 @@ for orig_method_name in reflectable_magic_methods:
     scope(orig_method_name)
 
 def snake_case(s):
-    return ''.join(['_'+i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
 
 def _is_magic(x):
     return x.startswith('__') and x.endswith('__')
@@ -204,7 +205,7 @@ def _find_module(root, m):
     for n, p in root.named_modules():
         if m is p:
             return n
-    raise NameError(f'module is not installed as a submodule')
+    raise NameError('module is not installed as a submodule')
 
 def is_leaf_module(m):
     return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
@@ -214,7 +215,7 @@ def map_arg(a, fn):
     if isinstance(a, (tuple, list)):
         return type(a)(map_arg(elem, fn) for elem in a)
     elif isinstance(a, dict):
-        return { k: map_arg(v, fn) for k, v in a.items()}
+        return {k: map_arg(v, fn) for k, v in a.items()}
     elif isinstance(a, slice):
         return slice(map_arg(a.start, fn), map_arg(a.stop, fn), map_arg(a.step, fn))
     elif isinstance(a, Node):
@@ -228,12 +229,14 @@ class Graph:
         self._used_names = {}  # base name -> number
         self.arg_handler = arg_handler
 
-    def _create_node(self, op, target=None, args=[], kwargs={}, name=None):
-            args = self._create_args(args)
-            kwargs = self._create_args(kwargs)
-            n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
-            self.nodes.append(n)
-            return n
+    def _create_node(self, op, target=None, args=None, kwargs=None, name=None):
+        args = () if args is None else args
+        kwargs = {} if kwargs is None else kwargs
+        args = self._create_args(args)
+        kwargs = self._create_args(kwargs)
+        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
+        self.nodes.append(n)
+        return n
 
     def _create_args(self, a):
         # aggregates
@@ -259,7 +262,7 @@ class Graph:
                 if not _reference_is_in(a, self.nodes):
                     self.nodes.append(a)
                 r = a
-            elif isinstance(a, (str, int, float, bool, Node, torch.dtype, torch.Tensor))  or a is None:
+            elif isinstance(a, (str, int, float, bool, Node, torch.dtype, torch.Tensor)) or a is None:
                 r = a
 
         if r is NotImplemented:
@@ -271,8 +274,11 @@ class Graph:
         return r
 
     def node_copy(self, node, arg_transform=lambda x: x):
-        """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node to the graph of self"""
-        return self._create_node(node.op, node.target, map_arg(node.args, arg_transform), map_arg(node.kwargs, arg_transform), self._name(node.name))
+        """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
+            to the graph of self"""
+        return self._create_node(
+            node.op, node.target, map_arg(node.args, arg_transform), map_arg(node.kwargs, arg_transform),
+            self._name(node.name))
 
     def output(self, result):
         self.result = result
@@ -314,7 +320,8 @@ class Graph:
                 free_vars.append(node.target)
                 continue
             elif node.op == 'call_method':
-                body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.target)}({_format_args(node.args[1:], node.kwargs)})\n')
+                body.append(
+                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 # pretty print operators
@@ -362,7 +369,7 @@ def _run_symbolic_forward(root, is_leaf_module):
             for n, p in root.named_parameters():
                 if a is p:
                     return graph.get_param(n)
-            raise NameError(f'parameter is not a member of this module')
+            raise NameError('parameter is not a member of this module')
         return NotImplemented
     graph = Graph(arg_handler=_use_parameter)
     fn = type(root).forward
@@ -370,7 +377,7 @@ def _run_symbolic_forward(root, is_leaf_module):
     co = fn.__code__
     total_args = co.co_argcount + co.co_kwonlyargcount
     names_iter = iter(co.co_varnames)
-    next(names_iter) # skip self
+    next(names_iter)  # skip self
     args = [root]
     args.extend(graph.placeholder(next(names_iter)) for name in range(1, total_args))
 
@@ -383,6 +390,7 @@ def _run_symbolic_forward(root, is_leaf_module):
 
     args = tuple(args)
     orig_call = torch.nn.Module.__call__
+
     def module_call_wrapper(mod, *args, **kwargs):
         if not is_leaf_module(mod):
             return orig_call(mod, *args, **kwargs)
@@ -422,7 +430,7 @@ def forward(self, {', '.join(free_variables)}):
 {body}
     return {result}
 """
-        print(self.src)
+        # print(self.src)
         # install forward into the classes dictionary, this is what normally happens in the
         # 'class' statement
         # __new__ ensured that each instance has its own class
@@ -431,7 +439,7 @@ def forward(self, {', '.join(free_variables)}):
         }
         exec_with_source(self.src, gbls)
         cls = type(self)
-        for k,v in gbls.items():
+        for k, v in gbls.items():
             setattr(cls, k, v)
 
 # workarounds for issues in __torch_function__
