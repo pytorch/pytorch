@@ -165,6 +165,6 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 
 
 if __name__ == "__main__":
-    equalize_accuracy_demo(*imagenet_download())
+    # equalize_accuracy_demo(*imagenet_download())
     # correct_bias_demo(*imagenet_download())
-    # adaround_demo(*imagenet_download())
+    adaround_demo(*imagenet_download())
