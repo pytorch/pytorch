@@ -86,7 +86,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
-            store = dist.PrefixStore(str(_init_counter), store)
+            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
             _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all

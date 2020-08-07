@@ -22,13 +22,13 @@ void upsample_nearest2d(
     int64_t IW,
     int64_t OH,
     int64_t OW,
-    int64_t _N,
-    int64_t _C,
+    int64_t IN,
+    int64_t IC,
     float scaleH,
     float scaleW) {
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
-  int64_t C = _N * _C;
+  int64_t C = IN * IC;
   struct ConstBlock {
     int32_t IW;
     int32_t IH;
@@ -82,7 +82,6 @@ VulkanTensor reshape_copy(
   input.sync_image_to_buffer();
 
   VulkanTensor output{shape};
-  output.allocate_storage();
   copy_buffer_to_buffer(
       *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
   return output;
