@@ -177,7 +177,8 @@ Tensor _adaptive_avg_pool(const Tensor& input,
   auto osizeW = output_shape[output_shape.size() - 1];
 
   int64_t sizeB = output_shape.size() ==(kSpatialDim + 1) ? 0 : output_shape[0];
-  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast) ||
+      input.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     // Fast path for NDHWC
     output = at::_empty_affine_quantized(
         output_shape,
