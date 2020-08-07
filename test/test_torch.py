@@ -2469,13 +2469,13 @@ class AbstractTestCases:
             self.assertEqual(torch.tensor([[1, 2, 3, 4]]).unflatten(1, (2, 2)), torch.tensor([[[1, 2], [3, 4]]]))
             self.assertEqual(torch.tensor([[1, 2, 3, 4]]).unflatten(1, [2, 2]), torch.tensor([[[1, 2], [3, 4]]]))
             self.assertEqual(torch.tensor([[1, 2, 3, 4]]).unflatten(1, torch.Size((2, 2))), torch.tensor([[[1, 2], [3, 4]]]))
-            with self.assertRaisesRegex(RuntimeError, r"unflatten: sizes must be non-empty"):
+            with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
                 torch.tensor([1]).unflatten(0, [])
-            with self.assertRaisesRegex(RuntimeError, r"unflatten: Provided sizes \[2, 2\] don't multiply up to the size of dim 0 \(1\) in the input tensor"):
+            with self.assertRaisesRegex(RuntimeError, r"Provided sizes \[2, 2\] don't multiply up to the size of dim 0 \(1\)"):
                 torch.tensor([1]).unflatten(0, [2, 2])
             with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
                 torch.tensor(1).unflatten(0, [0])
-            with self.assertRaisesRegex(TypeError, r"unflatten: Expected sizes to be of type Iterable\[Tuple\[str, int\]\] but got list"):
+            with self.assertRaisesRegex(TypeError, r"Expected sizes to be of type Iterable\[Tuple\[str, int\]\] but got list"):
                 torch.tensor([1], names=("A",)).unflatten(0, [1, 1])
 
         @staticmethod
