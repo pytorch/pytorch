@@ -229,4 +229,56 @@ std::vector<Tensor> foreach_div_list__kernel_fallback(TensorList tensors1, Tenso
   return tensors1.vec();
 }
 
+std::vector<Tensor> foreach_addcdiv_fallback(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < input.size(); i++) {
+    auto temp = input[i].addcdiv(tensors1[i], tensors2[i], scalar);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_addcmul_fallback(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");
+
+  std::vector<Tensor> result;
+  for (int i = 0; i < input.size(); i++) {
+    auto temp = input[i].addcmul(tensors1[i], tensors2[i], scalar);
+    result.emplace_back(temp);
+  }
+
+  return result;
+}
+
+std::vector<Tensor> foreach_addcdiv__fallback(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");
+
+  for (int i = 0; i < input.size(); i++) {
+    input[i].addcdiv_(tensors1[i], tensors2[i], scalar);
+  }
+
+  return input.vec();
+}
+
+std::vector<Tensor> foreach_addcmul__fallback(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");
+
+  for (int i = 0; i < input.size(); i++) {
+    input[i].addcmul_(tensors1[i], tensors2[i], scalar);
+  }
+
+  return input.vec();
+}
+
 }} // namespace at::native

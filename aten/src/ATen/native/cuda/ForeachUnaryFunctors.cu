@@ -6,7 +6,7 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename x_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct UnaryOpFunctor_ {
     __device__ void operator() (
         int chunk_size,
@@ -15,12 +15,12 @@ struct UnaryOpFunctor_ {
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
+            T r_x[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x)) {
@@ -29,7 +29,7 @@ struct UnaryOpFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -48,7 +48,7 @@ struct UnaryOpFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -61,7 +61,7 @@ struct UnaryOpFunctor_ {
         }
 };
 
-template<typename x_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct UnaryOpFunctor {
     __device__ void operator() (
         int chunk_size,
@@ -70,16 +70,16 @@ struct UnaryOpFunctor {
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
-            x_t* out = (x_t*)tl.addresses[1][tensor_loc];
+            T* out = (T*)tl.addresses[1][tensor_loc];
             out += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
-            x_t r_out[kILP];
+            T r_x[kILP];
+            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
@@ -88,7 +88,7 @@ struct UnaryOpFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]));
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
                     // store
                     load_store(out, r_out, i_start, 0);
@@ -107,7 +107,7 @@ struct UnaryOpFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]));
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {

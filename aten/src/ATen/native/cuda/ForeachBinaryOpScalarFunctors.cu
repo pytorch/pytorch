@@ -6,22 +6,22 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename x_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct BinaryOpScalarFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
-        x_t scalar) {
+        T scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
+            T r_x[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x)) {
@@ -30,7 +30,7 @@ struct BinaryOpScalarFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -49,7 +49,7 @@ struct BinaryOpScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -62,26 +62,26 @@ struct BinaryOpScalarFunctor_ {
         }
 };
 
-template<typename x_t, typename out_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct BinaryOpScalarFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
-        x_t scalar) {
+        T scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
-            out_t* out = (out_t*)tl.addresses[1][tensor_loc];
+            T* out = (T*)tl.addresses[1][tensor_loc];
             out += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
-            out_t r_out[kILP];
+            T r_x[kILP];
+            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
@@ -90,7 +90,7 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
                     // store
                     load_store(out, r_out, i_start, 0);
@@ -109,7 +109,7 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<x_t>()(static_cast<x_t>(r_x[ii]), scalar);
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -142,7 +142,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, BinaryOpScalarFunctor<scalar_t, scalar_t, Op>(), scalar.to<scalar_t>());
+        multi_tensor_apply<2>(tensor_lists, BinaryOpScalarFunctor<scalar_t, Op>(), scalar.to<scalar_t>());
     });
     return tensor_lists[1];
 }
