@@ -519,7 +519,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 selfId,
                 worldSize,
                 std::move(processGroup),
-                opts,
+                std::move(opts),
                 std::make_unique<RequestCallbackImpl>());
           }),
           py::arg("store"),

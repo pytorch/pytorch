@@ -126,12 +126,10 @@ WORKFLOW_DATA = [
     WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob("-jit-profiling-tests", VcSpec(2019), CudaVersion(10, 1), master_only_pred=FalsePred),
     # VS2019 CUDA-11.0
     WindowsJob(None, VcSpec(2019), CudaVersion(11, 0)),
     WindowsJob(1, VcSpec(2019), CudaVersion(11, 0)),
     WindowsJob(2, VcSpec(2019), CudaVersion(11, 0)),
-    WindowsJob("-jit-profiling-tests", VcSpec(2019), CudaVersion(11, 0), master_only_pred=FalsePred),
     # VS2019 CPU-only
     WindowsJob(None, VcSpec(2019), None),
     WindowsJob(1, VcSpec(2019), None, master_only_pred=TruePred),

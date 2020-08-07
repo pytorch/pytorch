@@ -3,14 +3,13 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-
-#define DEBUG_PRINT 0
 
 namespace torch {
 namespace jit {
@@ -718,6 +717,19 @@ class NoThreadIdxRewriter : public IRMutator {
   bool need_rewrite_ = false;
 };
 
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<const Expr*>& exprs) {
+  size_t i = 0;
+  for (auto expr : exprs) {
+    if (i++ > 0) {
+      out << ", ";
+    }
+    out << *expr;
+  }
+  return out;
+}
+
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
@@ -805,27 +817,16 @@ void CudaCodeGen::Initialize() {
     }
   }
 
-#if DEBUG_PRINT
-  std::cout << "stmt: " << std::endl;
-  std::cout << oss_.str() << std::endl;
-  std::cout << "block(";
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
-    if (i > 0) {
-      std::cout << ", ";
-    }
-    std::cout << *gpu_block_extents[i];
-  }
-  std::cout << "), thread(";
-  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
-    if (i > 0) {
-      std::cout << ", ";
-    }
-    std::cout << *gpu_thread_extents[i];
-  }
-  std::cout << ")" << std::endl;
-  ;
-#endif
-
+  GRAPH_DEBUG(
+      "Fused TE CUDA kernel:\n",
+      oss_.str(),
+      "\n",
+      "gpu_block_extents: (",
+      printer_->gpu_block_extents(),
+      ")\n",
+      "gpu_thread_extents: (",
+      printer_->gpu_thread_extents(),
+      ")");
   CompileToNVRTC(oss_.str(), func_name);
   USE_TRIGGER(cuda_codegen_created);
 }
@@ -962,11 +963,6 @@ void CudaCodeGen::CompileToNVRTC(
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
   getMajorMinor(prop, major, minor);
-
-#if DEBUG_PRINT
-  std::cout << "major: " << major << ", "
-            << "minor: " << minor << std::endl;
-#endif
 
   // Creates the NVRTC program
   nvrtcProgram program;
