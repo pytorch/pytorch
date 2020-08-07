@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -475,17 +476,10 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
       // Bind Inputs to Reduction
-      // The computeAt is not to the inner most dimension of the rFactored
-      // tensor in order to force the creation of separate loop nests to cause
-      // Inputs to be separately read in their own loop.
-      //                       computeAt(-2)------|
-      //                                          V
-      //      [<output dims>, X-Warp, rF-Leftover,| rF-Unroll]
-      // Idx:      0 -- 1      2(-3)      3(-2)        4(-1)
-      Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
-      if (!fusion->hasInput(input)) {
-        input->as<TensorView>()->computeAt(red_tv_rf, -2);
-        input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+      for (auto input : fusion->inputsOf(red_tv_rf)) {
+        if (input->getValType().value() == ValType::TensorView) {
+          input->as<TensorView>()->computeAt(red_tv_rf, -1);
+        }
       }
       // Do a cross-warp reduction per block
     } else {
@@ -534,17 +528,10 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
-        // The computeAt is not to the inner most dimension of the rFactored
-        // tensor in order to force the creation of separate loop nests to cause
-        // Inputs to be separately read in their own loop.
-        //                                  computeAt(-2)------|
-        //                                                     V
-        //      [Outputs, X-Warp, X-Grid, X-Block, rF-Leftover,| rF-Unroll]
-        // Idx:     0     1(-5)    2(-4)   3(-3)      4(-2)        5(-1)
-        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
-        if (!fusion->hasInput(input)) {
-          input->as<TensorView>()->computeAt(red_tv_rf, -2);
-          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        for (auto input : fusion->inputsOf(red_tv_rf)) {
+          if (input->getValType().value() == ValType::TensorView) {
+            input->as<TensorView>()->computeAt(red_tv_rf, -1);
+          }
         }
       } else {
         // Reduction Splits
@@ -588,17 +575,10 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
-        // The computeAt is not to the inner most dimension of the rFactored
-        // tensor in order to force the creation of separate loop nests to cause
-        // Inputs to be separately read in their own loop.
-        //                          computeAt(-2)------|
-        //                                             V
-        //      [Outputs, X-Warp, X-Block, rF-Leftover,| rF-Unroll]
-        // Idx:     0     1(-4)    2(-3)      3(-2)        4(-1)
-        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
-        if (!fusion->hasInput(input)) {
-          input->as<TensorView>()->computeAt(red_tv_rf, -2);
-          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        for (auto input : fusion->inputsOf(red_tv_rf)) {
+          if (input->getValType().value() == ValType::TensorView) {
+            input->as<TensorView>()->computeAt(red_tv_rf, -1);
+          }
         }
       }
     }
@@ -654,17 +634,10 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::BIDy);
 
         // Bind Inputs to Reduction
-        // The computeAt is not to the inner most dimension of the rFactored
-        // tensor in order to force the creation of separate loop nests to cause
-        // Inputs to be separately read in their own loop.
-        //                                computeAt(-2)------|
-        //                                                   V
-        //      [<output dims>, X-Grid, X-Block, rF-Leftover,| rF-Unroll]
-        // Idx:      0 -- 1     2(-4)    3(-3)      4(-2)        5(-1)
-        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
-        if (!fusion->hasInput(input)) {
-          input->as<TensorView>()->computeAt(red_tv_rf, -2);
-          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        for (auto input : fusion->inputsOf(red_tv_rf)) {
+          if (input->getValType().value() == ValType::TensorView) {
+            input->as<TensorView>()->computeAt(red_tv_rf, -1);
+          }
         }
       } else {
         // Reduction Splits
@@ -714,23 +687,22 @@ c10::optional<ReductionParams> scheduleReduction(
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
         // Bind Inputs to Reduction
-        // The computeAt is not to the inner most dimension of the rFactored
-        // tensor in order to force the creation of separate loop nests to cause
-        // Inputs to be separately read in their own loop.
-        //                        computeAt(-2)------|
-        //                                           V
-        //      [<output dims>, X-Block, rF-Leftover,| rF-Unroll]
-        // Idx:      0 -- 1      2(-3)      3(-2)        4(-1)
-        Val* input = fusion->origin(red_tv_rf)->as<ReductionOp>()->in();
-        if (!fusion->hasInput(input)) {
-          input->as<TensorView>()->computeAt(red_tv_rf, -2);
-          input->as<TensorView>()->axis(-1)->parallelize(ParallelType::Unroll);
+        for (auto input : fusion->inputsOf(red_tv_rf)) {
+          if (input->getValType().value() == ValType::TensorView) {
+            input->as<TensorView>()->computeAt(red_tv_rf, -1);
+          }
         }
       }
     } else {
       red_tv->split(0, rparams.lparams.bdimx());
       red_tv->axis(0)->parallelize(ParallelType::TIDx);
       red_tv->axis(1)->parallelize(ParallelType::BIDx);
+
+      for (auto input : fusion->inputsOf(red_tv)) {
+        if (input->getValType().value() == ValType::TensorView) {
+          input->as<TensorView>()->computeAt(red_tv, -1);
+        }
+      }
     }
   }
 

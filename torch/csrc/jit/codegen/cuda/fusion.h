@@ -148,6 +148,7 @@ class TORCH_CUDA_API Fusion final {
    */
   std::vector<Expr*> exprs(bool from_outputs_only = false);
 
+  // Return a vector of fusion inputs that feed this Val
   std::unordered_set<Val*> inputsOf(Val* val);
 
   // Assert that all leaves found from outputs are registered as an input.

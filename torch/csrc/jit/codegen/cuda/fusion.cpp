@@ -48,11 +48,6 @@ void InputsOf::handle(Val* v) {
 }
 
 std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
-  TORCH_CHECK(
-      fusion->hasOutput(output_),
-      "Asked for the inputs of ",
-      output_,
-      " however, it is not an output of the provided fusion.");
   InputsOf io;
   io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
   return io.inputs;
