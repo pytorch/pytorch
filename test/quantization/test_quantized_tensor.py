@@ -131,7 +131,16 @@ class TestQuantizedTensor(TestCase):
         scale = 0.02
         zero_point = 2
         for device in get_supported_device_types():
-            r = torch.rand(3, 2, dtype=torch.float, device=device) * 4 - 2
+            r = torch.rand(3, 2, 4, 5, dtype=torch.float, device=device) * 4 - 2
+            for memory_format in [torch.contiguous_format, torch.channels_last]:
+                r = r.contiguous(memory_format=memory_format)
+                for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                    qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+                    rqr = qr.dequantize()
+                    self.assertTrue(np.allclose(r.cpu().numpy(), rqr.cpu().numpy(), atol=2 / scale))
+        # Also check 5D tensors work.
+        for device in get_supported_device_types():
+            r = torch.rand(3, 2, 4, 5, 6, dtype=torch.float, device=device) * 4 - 2
             for dtype in [torch.qint8, torch.quint8, torch.qint32]:
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
                 rqr = qr.dequantize()
@@ -231,6 +240,53 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+
+        # Check 4D tensor with 2 different memory formats.
+        r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4 - 2
+        scales = torch.tensor([0.2, 0.03], dtype=torch.double)
+        zero_points = torch.tensor([5, 10], dtype=torch.long)
+        axis = 1
+
+        def quantize_c_4d(data, scales, zero_points):
+            res = torch.empty((3, 2, 4, 5))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    for l in range(4):
+                        for m in range(5):
+                            res[i][j][l][m] = \
+                                np.clip(np.round(data[i][j][l][m] / scales[j]) + zero_points[j], quant_min, quant_max)
+            return res
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            r = r.contiguous(memory_format=memory_format)
+            qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(qr.int_repr(), quantize_c_4d(r, scales, zero_points)))
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+
+        # Check 5D tensor.
+        r = torch.rand(3, 2, 4, 5, 7, dtype=torch.float) * 4 - 2
+        scales = torch.tensor([0.2, 0.03], dtype=torch.double)
+        zero_points = torch.tensor([5, 10], dtype=torch.long)
+        axis = 1
+
+        def quantize_c_5d(data, scales, zero_points):
+            res = torch.empty((3, 2, 4, 5, 7))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    for l in range(4):
+                        for m in range(5):
+                            for o in range(7):
+                                res[i][j][l][m][o] = \
+                                    np.clip(np.round(data[i][j][l][m][o] / scales[j]) + zero_points[j], quant_min, quant_max)
+            return res
+        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+            r = r.contiguous(memory_format=memory_format)
+            qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(qr.int_repr(), quantize_c_5d(r, scales, zero_points)))
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
     def test_qtensor_permute(self):
         scale = 0.02

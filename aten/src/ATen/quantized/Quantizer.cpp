@@ -104,7 +104,9 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
       rtensor.sizes(),
-      rtensor.options().dtype(scalar_type_).memory_format(rtensor.suggest_memory_format()),
+      rtensor.options()
+          .dtype(scalar_type_)
+          .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
 
   rtensor = rtensor.contiguous(rtensor.suggest_memory_format());
@@ -114,7 +116,11 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+  Tensor rtensor = at::empty(
+      qtensor.sizes(),
+      qtensor.options()
+          .dtype(at::kFloat)
+          .memory_format(qtensor.suggest_memory_format()));
   qtensor = qtensor.contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_tensor_affine(
       qtensor, rtensor, scale_, zero_point_);
@@ -126,7 +132,9 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
       rtensor.sizes(),
-      rtensor.options().dtype(scalar_type_).memory_format(rtensor.suggest_memory_format()),
+      rtensor.options()
+          .dtype(scalar_type_)
+          .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
   rtensor = rtensor.contiguous(rtensor.suggest_memory_format());
   native::quantize_tensor_per_channel_affine(
@@ -135,7 +143,11 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
 }
 
 Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+  Tensor rtensor = at::empty(
+      qtensor.sizes(),
+      qtensor.options()
+          .dtype(at::kFloat)
+          .memory_format(qtensor.suggest_memory_format()));
   qtensor = qtensor.contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_channel_affine(
       qtensor, rtensor, scales_, zero_points_, axis_);

@@ -159,6 +159,9 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
       GetCPUCachingAllocator().free(pointer);
     } else {
       c10::free_cpu(pointer);
+      // This adds extra cost to freeing memory to the default case when
+      // caching allocator is not enabled.
+      GetCPUCachingAllocator().record_free(pointer);
     }
   }
 

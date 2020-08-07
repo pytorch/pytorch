@@ -48,18 +48,18 @@ class MobileDebugInfo : public c10::DebugInfoBase {
   // However, we cannot expect every launched thread to extract and set
   // its own thread local copy of CachingAllocatorInfo.
   // But this can be done in lite interpreter, where in the run method
-  // it can do info = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::MOBILE_RUNTIME_INFO))
+  // it can do info =
+  // c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::MOBILE_RUNTIME_INFO))
   // .get_caching_allocator_info();
   // GetThreadLocalCachingAllocatorInfo() = info;
-  // Other option is to have MobileDebugInfo itself be the place where thread local copy
-  // of CachingAllocatorInfo is stored.
-  // Then DefaultMobileCPUAllocator inspects this to decide if to use CachingAllocator.
-  // However, current lite interpreter does not support FORK, thus
-  // from the run method of lite interpreter we are not really gonna
-  // launch another instance of lite interpreter in a different thread.
-  // So for now not getting bothered about passing CachingAllocatorInfo across
-  // thread boundaries.
-  // c10::CachingAllocatorInfo caching_allocator_info;
+  // Other option is to have MobileDebugInfo itself be the place where thread
+  // local copy of CachingAllocatorInfo is stored. Then
+  // DefaultMobileCPUAllocator inspects this to decide if to use
+  // CachingAllocator. However, current lite interpreter does not support FORK,
+  // thus from the run method of lite interpreter we are not really gonna launch
+  // another instance of lite interpreter in a different thread. So for now not
+  // getting bothered about passing CachingAllocatorInfo across thread
+  // boundaries. c10::CachingAllocatorInfo caching_allocator_info;
   size_t op_idx_ = 0;
 };
 
