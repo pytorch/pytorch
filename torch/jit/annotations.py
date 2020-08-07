@@ -17,11 +17,6 @@ from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
-if torch.distributed.rpc.is_available():
-    from .._jit_internal import RRef, is_rref
-    from torch._C import RRefType
-
-
 class Module(object):
     def __init__(self, name, members):
         self.name = name
@@ -49,6 +44,7 @@ class EvalEnv(object):
     def __init__(self, rcb):
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
+            from torch.distributed.rpc import RRef
             self.env['RRef'] = RRef
 
     def __getitem__(self, name):
@@ -290,8 +286,11 @@ def try_ann_to_type(ann, loc):
             valid_type = try_ann_to_type(ann.__args__[1], loc)
         assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(ann))
         return OptionalType(valid_type)
-    if torch.distributed.rpc.is_available() and is_rref(ann):
-        return RRefType(try_ann_to_type(ann.__args__[0], loc))
+    if torch.distributed.rpc.is_available():
+        from torch.distributed.rpc import is_rref
+        from torch._C import RRefType
+        if is_rref(ann):
+            return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if ann is float:

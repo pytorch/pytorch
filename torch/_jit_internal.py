@@ -11,10 +11,6 @@ import inspect
 import weakref
 import warnings
 import torch
-# This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
-# Explicitly ask to import `torch.distributed.__init__` first.
-# Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
-import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
@@ -676,18 +672,6 @@ def is_future(ann):
             "Future[int]"
         )
     return getattr(ann, "__origin__", None) is Future
-
-if torch.distributed.rpc.is_available():
-    from torch.distributed.rpc import RRef
-
-    def is_rref(ann):
-        if ann is RRef:
-            raise RuntimeError(
-                "Attempted to use RRef without a "
-                "contained type. Please add a contained type, e.g. "
-                "RRef[int]"
-            )
-        return getattr(ann, "__origin__", None) is RRef
 
 def is_final(ann):
     return ann.__module__ == 'typing_extensions' and \
