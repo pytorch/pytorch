@@ -5,14 +5,6 @@ import torch.nn.quantized as nnq
 
 import torch.quantization
 import torch.quantization._numeric_suite as ns
-from torch.quantization import QuantStub, DeQuantStub
-# from torch.quantization import (
-#     default_eval_fn,
-#     default_qconfig,
-#     quantize,
-# )
-
-import copy
 
 _supported_modules = {nn.Linear, nn.Conv2d}
 _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
@@ -103,7 +95,7 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
                 quantized_model(data[0])
                 count += 1
                 if count % 10 == 0:
-                    print('.', end = '')  # keeps devserver open
+                    print('.', end='')  # keeps devserver open
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
@@ -112,7 +104,7 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
             quant_data = ob_dict[biased_module + '.stats']['quantized']
 
             # math for expected_error
-            quantization_error =  quant_data - float_data
+            quantization_error = quant_data - float_data
             dims = list(range(1, quantization_error.dim()))
             expected_error = torch.mean(quantization_error, dims)
 
