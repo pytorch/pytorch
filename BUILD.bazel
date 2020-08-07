@@ -186,12 +186,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
         # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_0.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_1.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_2.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_3.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_4.cpp",
-        # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
         "torch/csrc/autograd/generated/TraceType_0.cpp",
         "torch/csrc/autograd/generated/TraceType_1.cpp",
         "torch/csrc/autograd/generated/TraceType_2.cpp",
@@ -213,6 +207,8 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
         "torch/csrc/autograd/generated/python_torch_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
 ]
 
 genrule(
@@ -299,8 +295,8 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_vulkan_stub",
-    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
 
 filegroup(
@@ -651,13 +647,13 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
-        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
