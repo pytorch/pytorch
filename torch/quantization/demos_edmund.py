@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 import torch
 import torch.nn as nn
 import torch.quantization
-import torch.quantization._numeric_suite as ns
 from torch.quantization.boiler_code import evaluate, imagenet_download
 
 import _equalize
@@ -49,13 +48,13 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     results = []
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, no adaround')
 
     _adaround.learn_adaround(quantized_tensor_model, data_loader_test)
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, with adaround')
 
     print("\n\n Results reiterated here")
@@ -79,22 +78,22 @@ def correct_bias_demo(input_model, data_loader, data_loader_test):
 
     quantized_tensor_model = quantize_model(model, data_loader, True)
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, no bias correction')
 
     quantized_channel_model = quantize_model(model, data_loader, False)
     top1, top5 = evaluate(quantized_channel_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per channel quantization accuracy results, no bias correction')
 
     _correct_bias.bias_correction(model, quantized_tensor_model, data_loader_test, neval_batches=num_eval_batches)
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, with bias correction')
 
     _correct_bias.bias_correction(model, quantized_channel_model, data_loader_test, neval_batches=num_eval_batches)
     top1, top5 = evaluate(quantized_channel_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+    results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per channel quantization accuracy results, with bias correction')
 
     print("\n\n Results reiterated here")
@@ -127,6 +126,7 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
     criterion = nn.CrossEntropyLoss()
 
     results = []
+
     def eval(per_tensor=True, equalize=False):
         model = copy.deepcopy(input_model)
         input_revised = grab_names(model)
@@ -143,7 +143,7 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
                 del module.qconfig
 
         top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
-        results.append(str('Evaluation accuracy on %d images, %2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
+        results.append(str('Evaluation accuracy on % d images, % 2.2f'%(num_eval_batches * eval_batch_size, top1.avg)))
 
 
     eval(per_tensor=True, equalize=False)

@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.quantization.fake_quantize import FakeQuantize
-from torch.quantization.observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
+from torch.quantization.observer import HistogramObserver
 from torch.quantization.qconfig import *
 from torch.quantization.fake_quantize import *
 import torch.nn.qat.modules as nnqat
-import torch.quantization._numeric_suite as ns
 from torch.quantization.default_mappings import DEFAULT_QAT_MODULE_MAPPING, DEFAULT_MODULE_MAPPING
-from torchvision.models.mobilenet import ConvBNReLU
 from torch.quantization import QuantStub, DeQuantStub
 import copy
 _supported_modules = {nn.Conv2d, nn.Linear}
@@ -31,7 +29,6 @@ def modified_quantized(model, x):
     return rtn
 
 def loss_function_leaf(model, count):
-    # print("model: ", model)
     high = 4
     low = 1
     beta = count/10 * (high - low) + low
@@ -54,7 +51,6 @@ def loss_function_leaf(model, count):
     regulization = torch.sum(one_minus_beta)
 
     Frobenius_norm = torch.norm(float_weight - quantized_weight)
-    print("float size: ", float_weight.size())
 
     print("loss function break down: ", Frobenius_norm*100, _lambda * regulization)
     print("sqnr of float and quantized: ", computeSqnr(float_weight, quantized_weight))
@@ -142,7 +138,6 @@ class OuputWrapper(nn.Module):
         self.wrapped_module = model
         self.float_output = None
         self.quantized_output = None
-        # self.hacky_input = None
         self.on = False
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
