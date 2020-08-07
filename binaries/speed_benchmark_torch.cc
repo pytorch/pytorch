@@ -47,6 +47,10 @@ C10_DEFINE_bool(
   no_inputs,
   false,
   "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_bool(
+  use_caching_allocator,
+  false,
+  "Whether to cache allocations between inference iterations");
 C10_DEFINE_int(
     use_bundled_input,
     -1,
@@ -200,7 +204,7 @@ int main(int argc, char** argv) {
     std::cout << module.forward(inputs) << std::endl;
   }
 
-  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard;
+  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(FLAGS_use_caching_allocator);
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(
