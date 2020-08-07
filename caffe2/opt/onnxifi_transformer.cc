@@ -151,7 +151,7 @@ void fetchInputsToIfOpsSubnet(NetDef* net) {
   NetDef clone(*net);
   clone.clear_op();
   for (auto& op : net->op()) {
-    if (op.type() == "If") {
+    if (op.type() == "If" || op.type() == "AsyncIf") {
       OperatorDef new_op(op);
       ArgumentHelper helper(op);
       std::set<std::string> subnet_inputs, subnet_outputs;
@@ -200,6 +200,67 @@ NetDef composeResultNet(const OperatorDef& onnxifi_op) {
   NetDef net_opt;
   net_opt.add_op()->CopyFrom(onnxifi_op);
   return net_opt;
+}
+
+void enforceFp32InputsToFp16(
+    const std::unordered_set<std::string>& weights,
+    NetDef* pred_net,
+    ShapeInfoMap* shape_hints) {
+  std::unordered_map<std::string, ShapeInfo> user_input_map;
+  for (const auto& i : pred_net->external_input()) {
+    if (weights.count(i)) {
+      continue;
+    }
+    auto it = shape_hints->find(i);
+    if (it == shape_hints->end() ||
+        it->second.shape.data_type() != TensorProto_DataType_FLOAT) {
+      continue;
+    }
+    auto& shape_info = it->second;
+    user_input_map[i] = shape_info;
+    shape_info.shape.set_data_type(TensorProto_DataType_FLOAT16);
+  }
+
+  if (user_input_map.empty()) {
+    return;
+  }
+
+  std::vector<OperatorDef> ops;
+  for (const auto& op : pred_net->op()) {
+    ops.emplace_back(op);
+  }
+  pred_net->clear_op();
+  int current_pos = ops.size();
+
+  const char kBridgeTensorSuffix[] = "_to_float_bridge";
+  std::vector<OperatorDef> converts;
+  for (const auto& elem : user_input_map) {
+    const auto& name = elem.first;
+    const auto& shape_info = elem.second;
+    std::string new_name = name + kBridgeTensorSuffix;
+    shape_hints->emplace(new_name, shape_info);
+    converts.emplace_back(CreateOperatorDef(
+        "HalfToFloat",
+        "",
+        {name},
+        {new_name},
+        {MakeArgument<int>(kNetPos, current_pos++)}));
+  }
+  for (const auto& op : converts) {
+    pred_net->add_op()->CopyFrom(op);
+  }
+
+  for (auto& op : ops) {
+    for (auto& input : *op.mutable_input()) {
+      if (user_input_map.count(input)) {
+        input += kBridgeTensorSuffix;
+      }
+    }
+  }
+
+  for (const auto& op : ops) {
+    pred_net->add_op()->CopyFrom(op);
+  }
 }
 
 void mergeFp32InputsAndConvertToFp16(
@@ -1405,6 +1466,10 @@ void OnnxifiTransformer::transform(
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
 
+  if (opts_.debug) {
+    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt");
+  }
+
   // Get model id and reset Onnxifi op id to 0
   model_id_ = getModelId(*pred_net);
   onnxifi_op_id_ = 0;
@@ -1441,6 +1506,9 @@ void OnnxifiTransformer::transform(
   if (opts_.use_onnx) {
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
   }
+  if (opts_.enforce_fp32_inputs_into_fp16) {
+    enforceFp32InputsToFp16(weights, pred_net, &shape_hints);
+  }
   if (opts_.merge_fp32_inputs_into_fp16) {
     mergeFp32InputsAndConvertToFp16(
         opts_.bound_shape_spec.max_batch_size, weights, pred_net, &shape_hints);
@@ -1474,6 +1542,7 @@ void OnnxifiTransformer::transform(
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
+  net_opt.set_type(pred_net->type());
 
   pred_net->Swap(&net_opt);
 

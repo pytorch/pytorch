@@ -54,6 +54,14 @@ TupleTypePtr Tuple::type() const {
   return type_;
 }
 
+bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
+  return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
+}
+
+const std::string ivalue::EnumHolder::qualifiedClassName() const {
+  return type_->qualifiedClassName().name();
+}
+
 } // namespace ivalue
 
 TypePtr IValue::type() const {
@@ -96,9 +104,10 @@ TypePtr IValue::type() const {
       return toTuple()->type();
     case Tag::Generator:
       return GeneratorType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
     case Tag::Enum:
-      // TODO(gmagogsfm): Implement this.
-      TORCH_INTERNAL_ASSERT(false, "To be implemented");
+      return toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
@@ -266,6 +275,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::PyObject:
     case Tag::Capsule:
     case Tag::Generator:
+    case Tag::Quantizer:
       return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
@@ -439,9 +449,16 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
+    case IValue::Tag::Enum:
+      return out << v.toEnumHolder();
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
+}
+
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
@@ -500,6 +517,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
     case IValue::Tag::Generator:
       return out << "Generator";
+    case IValue::Tag::Quantizer:
+      return out << "Quantizer";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
