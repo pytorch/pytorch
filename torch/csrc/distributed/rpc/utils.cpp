@@ -561,8 +561,6 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     }
   }
 
-
-
   return std::make_tuple(std::move(tpMessage), std::move(buffers));
 }
 
@@ -606,8 +604,7 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
       "Invalid number of bytes for device index payload, total bytes: ",
       tpMessage.payloads[kTpMessageDevicesIdx].length,
       ", device index size: ",
-      deviceIndexSize
-  );
+      deviceIndexSize);
   buffers.deviceIndices.resize(
       tpMessage.payloads[kTpMessageDevicesIdx].length / deviceIndexSize);
   tpMessage.payloads[kTpMessageDevicesIdx].data = buffers.deviceIndices.data();

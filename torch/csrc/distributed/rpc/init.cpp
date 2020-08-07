@@ -772,9 +772,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             applications responsibility to make sure that the above assumption
             always holds.
       )");
-  module.def(
-      "_disable_jit_rref_pickle",
-      &disableJitRRefPickle);
+  module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
 }

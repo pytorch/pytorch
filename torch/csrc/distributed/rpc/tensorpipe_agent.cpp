@@ -37,7 +37,6 @@ std::vector<c10::DeviceIndex> mapTensorDevices(
     const std::unordered_map<
         std::string,
         std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& mapLocations) {
-
   const auto workerIter = mapLocations.find(remoteName);
   if (workerIter == mapLocations.end()) {
     return {};
@@ -444,7 +443,8 @@ void TensorPipeAgent::pipeWrite(
       rpcMessage.isRequest() ? opts_.mapLocations : reverseMapLocations_;
   std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
       std::move(rpcMessage),
-      mapTensorDevices(pipe->getRemoteName(), rpcMessage.tensors(), mapLocations));
+      mapTensorDevices(
+          pipe->getRemoteName(), rpcMessage.tensors(), mapLocations));
 
   pipe->write(
       std::move(tpMessage),
@@ -499,7 +499,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
       const auto& mapLocation = iter->second;
       for (const auto& t : responseMessage.tensors()) {
         if (!t.device().is_cpu() &&
-                mapLocation.find(t.device().index()) == mapLocation.end()) {
+            mapLocation.find(t.device().index()) == mapLocation.end()) {
           responseMessage = createExceptionResponse(
               c10::str(
                   "TensorPipe RPC backend only supports CPU tensors by default."
