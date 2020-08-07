@@ -187,9 +187,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
         lda, stridea, reinterpret_cast<const cuDoubleComplex*>(b), ldb, strideb, reinterpret_cast<const cuDoubleComplex*>(&beta),
         reinterpret_cast<cuDoubleComplex*>(c), ldc, stridec, num_batches));
   }
-#endif
 
-#ifndef __HIP_PLATFORM_HCC__
   template <>
   void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();

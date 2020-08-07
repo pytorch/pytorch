@@ -148,7 +148,7 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   TORCH_CHECK(self_sizes[2] == batch2_sizes[2], "self dim 2 must match batch2 dim 2");
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
-  if (&result != &self) {
+  if (!result.is_same(self)) {
     at::native::resize_as_(result, self);
     if (beta.to<double>() != 0.0) {
       at::native::copy_(result, self);
