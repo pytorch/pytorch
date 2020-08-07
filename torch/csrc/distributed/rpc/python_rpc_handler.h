@@ -73,6 +73,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   const RRefProxyFunctions& getRRefProxyFunctions() const;
 
  private:
+  void init();
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
@@ -105,6 +106,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
+
+  // Indicates whether or not we have properly initialized the handler.
+  std::atomic<bool> initialized_;
 };
 
 } // namespace rpc

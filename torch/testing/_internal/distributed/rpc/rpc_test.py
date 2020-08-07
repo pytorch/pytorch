@@ -3434,6 +3434,37 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(ValueError, "Expected error"):
             ret = torch.futures.wait_all(futs)
 
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_twice(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        rpc.shutdown()
+
+        initialize_pg(self.init_method, self.rank, self.world_size)
+        # Wait for all init to complete.
+        dist.barrier()
+
+        # Ensure rpc initialization works again.
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # Verify RPCs work after re-init.
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
+        rpc.rpc_sync(dst, foo_add, args=())
+
+        rpc.shutdown()
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
