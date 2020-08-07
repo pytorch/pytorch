@@ -14,7 +14,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
-                    ("vulkan", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -23,6 +22,9 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
+                ("3.6", [
+                    ("vulkan", [XImportant(True)]),
+                ]),
             ]),
         ]),
         ("cuda", [
