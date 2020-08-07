@@ -58,7 +58,6 @@ class OpInfo(object):
 
         self.decorators = decorators
 
-    #
     def getOp(self):
         """Returns the function variant of the operator, torch.<op_name>."""
         return self.op
@@ -82,7 +81,6 @@ class OpInfo(object):
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
-
 class UnaryUfuncInfo(OpInfo):
     """Operator information for 'universal unary functions (unary ufuncs).'
     These are functions of a single tensor with common properties like:
