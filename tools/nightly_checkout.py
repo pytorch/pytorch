@@ -32,7 +32,7 @@ from argparse import ArgumentParser
 LOGGER = logging.getLogger("conda-pytorch")
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
-SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "ipython", "sphinx")
+SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphinx")
 
 
 def init_logging(level=logging.INFO):
