@@ -169,6 +169,8 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   int redux_size = reduction.numel();
   
   get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size);
+  get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers, indices, values, reduction);
+    
   return self;
 }
 

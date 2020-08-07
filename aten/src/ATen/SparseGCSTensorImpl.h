@@ -36,6 +36,8 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
     reduction_ = empty_reduction;
   }
 
+  void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices, const Tensor& values, const Tensor& reduction);
+
   Tensor pointers() const { return pointers_; }
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
