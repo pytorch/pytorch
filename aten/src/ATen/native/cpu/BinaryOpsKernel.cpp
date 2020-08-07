@@ -509,7 +509,7 @@ void maximum_kernel(TensorIterator& iter) {
         return a >= b ? a : b;
       });
     });
-  } else if (isFloatingType(iter.dtype())) {
+  } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "maximum_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         if (_isnan(a)) {
@@ -519,21 +519,6 @@ void maximum_kernel(TensorIterator& iter) {
           return b;
         }
         return a >= b ? a : b;
-      });
-    });
-  } else {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "maximum_cpu", [&] {
-      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (_isnan(a.real()) || _isnan(a.imag())) {
-          return a;
-        }
-        if (_isnan(b.real()) || _isnan(b.imag())) {
-          return b;
-        }
-        if (a.real() > b.real() || (a.real() == b.real() && a.imag() >= b.imag())) {
-          return a;
-        }
-        return b;
       });
     });
   }
@@ -546,7 +531,7 @@ void minimum_kernel(TensorIterator& iter) {
         return a <= b ? a : b;
       });
     });
-  } else if (isFloatingType(iter.dtype())) {
+  } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "minimum_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         if (_isnan(a)) {
@@ -556,21 +541,6 @@ void minimum_kernel(TensorIterator& iter) {
           return b;
         }
         return a <= b ? a : b;
-      });
-    });
-  } else {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "minimum_cpu", [&] {
-      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (_isnan(a.real()) || _isnan(a.imag())) {
-          return a;
-        }
-        if (_isnan(b.real()) || _isnan(b.imag())) {
-          return b;
-        }
-        if (a.real() < b.real() || (a.real() == b.real() && a.imag() <= b.imag())) {
-          return a;
-        }
-        return b;
       });
     });
   }

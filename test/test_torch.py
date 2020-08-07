@@ -15444,32 +15444,16 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @dtypes(torch.complex64, torch.complex128)
-    def test_maximum_minimum_complex(self, device, dtype):
-        # complex NaNs are defined as at least one of the real or imaginary parts being a NaN
-        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
-        a_vals = (
-            complex(float('inf'), 1), complex(2, 2), complex(1, 10),
-            complex(float('inf'), float('inf')), complex(1, float('nan')), complex(float('nan'), float('nan'))
-        )
-        b_vals = (
-            complex(float('inf'), float('inf')), complex(2, 1), complex(2, 0),
-            complex(float('nan'), 1), complex(-float('inf'), -float('inf')), complex(float('nan'), 1)
-        )
-        for torch_op, numpy_op in ops:
-            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
-            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
-            tensor_result = torch_op(a_tensor, b_tensor)
+    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    def test_maximum_minimum_complex(self, device, dtypes):
+        for torch_op in (torch.maximum, torch.minimum):
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(torch.ones(1, device=device, dtype=dtypes[0]),
+                         torch.ones(1, device=device, dtype=dtypes[1]))
 
-            out = torch.empty_like(a_tensor)
-            torch_op(a_tensor, b_tensor, out=out)
-
-            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
-            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
-            numpy_result = numpy_op(a_np, b_np)
-
-            self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
-            self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
+                         torch.ones(1, device=device, dtype=dtypes[0]))
 
     def test_bincount(self, device):
         # negative input throws

@@ -792,6 +792,8 @@ Tensor min(const Tensor& self, const Tensor& other) {
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
+
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   maximum_stub(iter.device_type(), iter);
@@ -799,11 +801,18 @@ Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor maximum(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty(0, self.options());
-  return at::maximum_out(result, self, other);
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  maximum_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
+
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   minimum_stub(iter.device_type(), iter);
@@ -811,8 +820,13 @@ Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor minimum(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty(0, self.options());
-  return at::minimum_out(result, self, other);
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  minimum_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {
