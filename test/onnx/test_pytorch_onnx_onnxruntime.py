@@ -4156,17 +4156,17 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
 
 # opset 12 tests, with use_new_jit_passes=True for using new jit API
 TestONNXRuntime_opset12_new_jit_API = type(str("TestONNXRuntime_opset12_new_jit_API"),
-                               (unittest.TestCase,),
-                               dict(TestONNXRuntime.__dict__, opset_version=12,
-                                         use_new_jit_passes=True))
+                                           (unittest.TestCase,),
+                                           dict(TestONNXRuntime.__dict__, opset_version=12,
+                                                use_new_jit_passes=True))
 
 # opset 12 tests, with use_new_jit_passes=True for using new jit API,
 # and keep_initializers_as_inputs=False for IR version 4 style export.
 TestONNXRuntime_opset12_IRv4_new_jit_API = type(str("TestONNXRuntime_opset12_IRv4_new_jit_API"),
-                                    (unittest.TestCase,),
-                                    dict(TestONNXRuntime.__dict__, opset_version=12,
-                                         keep_initializers_as_inputs=False,
-                                         use_new_jit_passes=True))
+                                                (unittest.TestCase,),
+                                                dict(TestONNXRuntime.__dict__, opset_version=12,
+                                                     keep_initializers_as_inputs=False,
+                                                     use_new_jit_passes=True))
 
 
 if __name__ == '__main__':
