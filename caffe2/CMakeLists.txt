@@ -283,6 +283,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
     add_dependencies(tensorpipe_agent torch c10d tensorpipe)
     target_compile_definitions(tensorpipe_agent PRIVATE USE_TENSORPIPE)
+    target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
