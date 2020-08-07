@@ -71,4 +71,3 @@ conv_3d_configs_short = op_bench.config_list(
     },
     tags=['short']
 )
-
