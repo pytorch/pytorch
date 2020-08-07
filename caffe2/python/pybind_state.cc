@@ -6,7 +6,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/core/asan.h"
+#include <c10/macros/Macros.h>
+
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -1014,7 +1015,7 @@ void addObjectMethods(py::module& m) {
 }
 
 void addGlobalMethods(py::module& m) {
-  m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+  m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we

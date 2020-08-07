@@ -643,6 +643,8 @@ class ScatterAssignOp : public Operator<Context> {
                    &ScatterAssignOp::DoRun<int32_t, int32_t>},
                   {{TensorProto_DataType_INT32, TensorProto_DataType_INT64},
                    &ScatterAssignOp::DoRun<int32_t, int64_t>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_DOUBLE},
+                   &ScatterAssignOp::DoRun<int32_t, double>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT},
                    &ScatterAssignOp::DoRun<int64_t, float>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT16},
@@ -652,7 +654,9 @@ class ScatterAssignOp : public Operator<Context> {
                   {{TensorProto_DataType_INT64, TensorProto_DataType_INT32},
                    &ScatterAssignOp::DoRun<int64_t, int32_t>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_INT64},
-                   &ScatterAssignOp::DoRun<int64_t, int64_t>}}) {}
+                   &ScatterAssignOp::DoRun<int64_t, int64_t>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_DOUBLE},
+                   &ScatterAssignOp::DoRun<int64_t, double>}}) {}
 
   bool RunOnDevice() override {
     const auto& data = Input(DATA);
