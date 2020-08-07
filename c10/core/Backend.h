@@ -32,6 +32,8 @@ enum class Backend {
   FPGA,
   SparseCPU,
   SparseCUDA,
+  SparseGCS_CPU,
+  SparseGCS_CUDA,
   SparseHIP,
   MSNPU,
   XLA,
@@ -112,6 +114,10 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCUDA;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
+  } else if (t == DispatchKey::SparseGCS_CPU) {
+    return Backend::SparseGCS_CPU;
+  } else if (t == DispatchKey::SparseGCS_CUDA) {
+    return Backend::SparseGCS_CUDA;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
@@ -145,6 +151,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
+    case Backend::SparseGCS_CPU:
+      return DispatchKey::SparseGCS_CPU;
+    case Backend::SparseGCS_CUDA:
+      return DispatchKey::SparseGCS_CUDA;  
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -180,6 +190,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
+    case Backend::SparseGCS_CPU:
+      return DeviceType::CPU;
+    case Backend::SparseGCS_CUDA:
+      return DeviceType::CUDA;
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
       return DeviceType::CPU;

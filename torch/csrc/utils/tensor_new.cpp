@@ -604,17 +604,35 @@ Tensor indexing_tensor_from_data(
 }
 
 Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  // static PythonArgParser parser({
-  //     "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, int[] size, *, Scalar? fill_value=None, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False)"
-  // });
-  // ParsedArgs<10> parsed_args;
-  // auto r = parser.parse(args, kwargs, parsed_args);
+  static PythonArgParser parser({
+      "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"
+  });
+  ParsedArgs<11> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
 
-  // if (r.idx == 0) {
-    
-  // }
-  
-  return at::ones({2,3});
+  if (r.idx == 0) {
+    bool type_inference = r.isNone(6);
+    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 8, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(6, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(8));    
+
+    Tensor pointers =  internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(0),
+                                              /*copy_variables=*/false, /*copy_numpy=*/true,
+                                              /*type_inference=*/type_inference);
+    Tensor indices = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(1),
+                                              /*copy_variables=*/false, /*copy_numpy=*/true,
+                                              /*type_inference=*/type_inference);
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(2),
+                                            /*copy_variables=*/false, /*copy_numpy=*/true,
+                                            /*type_inference=*/type_inference);
+    Tensor reduction = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(3),
+                                           /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    return at::sparse_gcs_tensor(pointers, indices, values, reduction, r.intlist(4), r.scalar(5),
+                                 options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseGCS))
+                                 .set_requires_grad(r.toBool(10));
+  }
+  throw std::runtime_error("sparse_gcs_tensor(): invalid arguments");  
 }
 
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {

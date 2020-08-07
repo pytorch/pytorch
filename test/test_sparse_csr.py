@@ -47,7 +47,7 @@ class TestSparseGCS(TestCase):
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
     def test_sparse_gcs_from_dense(self):
-        def make_sparse_gcs(data, reduction=None, fill_value=None):
+        def make_sparse_gcs(data, reduction=None, fill_value=-1):
             import itertools
             from collections import defaultdict
 

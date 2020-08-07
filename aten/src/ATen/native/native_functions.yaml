@@ -3547,12 +3547,11 @@
   use_c10_dispatcher: full
   variants: method
 
-- func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: full
-
 - func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, Scalar fill_value, *,  ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
-
+  
+- func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+  use_c10_dispatcher: full
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
