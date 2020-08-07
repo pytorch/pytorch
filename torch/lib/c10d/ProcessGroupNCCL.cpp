@@ -756,6 +756,9 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
+  // FutureNCCL has a reference to WorkNCCL. Therefore, we don't store a
+  // FutureNCCL reference inside WorkNCCL and we create a new object here
+  // to avoid circular reference between WorkNCCL and FutureNCCL.
   return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
 }
 
