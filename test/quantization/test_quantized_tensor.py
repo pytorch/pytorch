@@ -248,7 +248,7 @@ class TestQuantizedTensor(TestCase):
             for i in range(3):
                 for j in range(2):
                     inv_scale = 1.0 / scales[j]
-                    res[i][j] = np.clip(np.round((data[i][j] - zero_points[j]) * inv_scale), quant_min, quant_max)
+                    res[i][j] = np.clip(np.round(data[i][j] * inv_scale + zero_points[j]), quant_min, quant_max)
             return res
 
         qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)

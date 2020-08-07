@@ -388,19 +388,21 @@ CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value) {
 
 /*
 * Quantize value based on the following equation
-* Qx = (Xf - bias) * inv_scale
-* bias and scale values are in floating point to enable higher precision computation
-* of the quantized value.
+* Xq = Round(Xf * inv_scale + zero_point)
+* where zero_point is in float.
+*
+* Note: For the case of embedding quantization we will set zero_point
+* to (-Xmin/scale), where Xmin is the min value in input tensor row.
 */
 template <typename T>
-T quantize_val_float_qparams(float scale, float bias, float value) {
+T quantize_val_float_qparams(float scale, float zero_point, float value) {
   int64_t qvalue;
 
   // TODO make sure qmax and qmin for dtypes other than int8, uint8 is correctly defined.
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
-  qvalue = lrintf((value - bias) * inv_scale);
+  qvalue = lrintf(value * inv_scale + zero_point);
   qvalue = std::max(qmin, std::min(qvalue, qmax));
   return static_cast<T>(qvalue);
 }

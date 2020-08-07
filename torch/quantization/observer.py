@@ -215,18 +215,16 @@ class _ObserverBase(ObserverBase):
             )
 
         qmin, qmax = self._calculate_qmin_qmax()
-        orig_min = min_val
-        orig_max = max_val
-        min_val = torch.min(min_val, torch.zeros_like(min_val))
-        max_val = torch.max(max_val, torch.zeros_like(max_val))
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        scale = torch.ones(min_val.size(), dtype=torch.float32)
-        zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
-        device = 'cuda' if min_val.is_cuda else 'cpu'
+        scale = torch.ones(min_val_neg.size(), dtype=torch.float32)
+        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64)
+        device = 'cuda' if min_val_neg.is_cuda else 'cpu'
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
-            max_val = torch.max(-min_val, max_val)
-            scale = max_val / (float(qmax - qmin) / 2)
+            max_val_pos = torch.max(-min_val_neg, max_val_pos)
+            scale = max_val_pos / (float(qmax - qmin) / 2)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
                 if self.is_dynamic_qrange:
@@ -235,14 +233,17 @@ class _ObserverBase(ObserverBase):
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
-            scale = (orig_max - orig_min) / float(qmax - qmin)
-            scale_ones = torch.ones_like(scale)
-            scale = torch.where(scale != 0, scale, scale_ones)
-            zero_point = orig_min
-        else:
             scale = (max_val - min_val) / float(qmax - qmin)
+            scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
+            # We use the quantize function
+            # xq = Round(Xf * inv_scale + zero_point),
+            # setting zero_point to (-1 * min *inv_scale) we get
+            # Xq = Round((Xf - min) * inv_scale)
+            zero_point = -1 * min_val / scale
+        else:
+            scale = (max_val_pos - min_val_neg) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
-            zero_point = qmin - torch.round(min_val / scale)
+            zero_point = qmin - torch.round(min_val_neg / scale)
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
@@ -250,12 +251,12 @@ class _ObserverBase(ObserverBase):
         # consistent with default values in FakeQuantize.
         if len(scale.shape) == 0:
             # TODO: switch to scale.item() after adding JIT support
-            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+            scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
         if len(zero_point.shape) == 0:
             # TODO: switch to zero_point.item() after adding JIT support
-            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype, device=device)
             if self.qscheme == torch.per_channel_affine_float_qparams:
-                zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype)
+                zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype, device=device)
 
 
         return scale, zero_point

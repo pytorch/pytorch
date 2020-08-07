@@ -287,6 +287,7 @@ class TestObserver(QuantizationTestCase):
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
     def test_per_channel_observers(self, qdtype, qscheme, ch_axis, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
+        qscheme = torch.per_channel_affine_float_qparams
         if qscheme == torch.per_channel_affine_float_qparams:
             reduce_range = False
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
@@ -356,7 +357,7 @@ class TestObserver(QuantizationTestCase):
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
             elif qscheme == torch.per_channel_affine_float_qparams:
                 ref_scales = per_channel_affine_float_qparams_ref_scales[ch_axis]
-                ref_zero_points = ref_min_vals[ch_axis]
+                ref_zero_points = [-1 * ref_min_vals[ch_axis][i] / ref_scales[i] for i in range(len(ref_scales))]
             else:
                 ref_scales = per_channel_affine_ref_scales[ch_axis]
                 ref_zero_points = (
@@ -369,7 +370,7 @@ class TestObserver(QuantizationTestCase):
                 ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
             self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
-            self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
+            self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=0.1))
 
 
             # Test for serializability
