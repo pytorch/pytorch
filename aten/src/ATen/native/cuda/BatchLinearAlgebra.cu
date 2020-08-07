@@ -666,15 +666,9 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
   int batch_size = cuda_int_cast(batchCount(self), "batchCount");
   int n = cuda_int_cast(self.size(-2), "self.size(-2)");
 
-  // int* info_array;
-  // int* ipiv_data;
-  // int** ipiv_array;
   scalar_t** self_array;
   scalar_t** self_inv_array;
 
-  // ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
-  // ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
-  // ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
   ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
   ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
 
@@ -682,25 +676,15 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
   for (int64_t i = 0; i < batch_size; i++) {
     self_array[i] = &self_data[i * self_mat_stride];
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
-    // ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  Tensor info_array = at::zeros({batch_size}, at::device(at::kCUDA).dtype(at::kInt));
-  Tensor ipiv_array = at::zeros({batch_size * n}, at::device(at::kCUDA).dtype(at::kInt));
+  Tensor ipiv_array = at::zeros({batch_size * n}, self.options().dtype(at::kInt));
 
-  cublas_LU_batched<scalar_t>(n, n, self_array, n, 
-    ipiv_array.data_ptr<int>(), info_array.data_ptr<int>(), batch_size);
+  cublas_LU_batched<scalar_t>(n, n, self_array, n,
+    ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
 
   cublas_getri_batched<scalar_t>(n, n, self_array, n,
-    ipiv_array.data_ptr<int>(), info_array.data_ptr<int>(), batch_size, self_inv_array);
-
-  /*
-  for (int64_t i = 0; i < batch_size; i++) {
-    infos[i] = info_array[i];
-  }
-  */
-  infos.copy_(info_array);
-
+    ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
 }
 
 template <typename scalar_t>
@@ -724,7 +708,7 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
     // std::vector<int> infos(batchCount(self), 0);
-    Tensor infos = at::zeros({batchCount(self)}, at::dtype(kInt));
+    Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
     auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse<scalar_t>(
