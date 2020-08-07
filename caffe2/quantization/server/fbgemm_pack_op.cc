@@ -4,6 +4,7 @@
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
+#include <fbgemm/FbgemmConvert.h>
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
@@ -187,7 +188,8 @@ void QuantizeConvBias(
     int M,
     const TensorQuantizationParams& in_qparams,
     const vector<TensorQuantizationParams>& filter_qparams,
-    vector<int32_t>& b_quantized, bool round_to_nearest_even) {
+    vector<int32_t>& b_quantized, bool use_fp16,
+    bool round_to_nearest_even) {
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
@@ -205,20 +207,29 @@ void QuantizeConvBias(
         bias.data<int32_t>(), bias.data<int32_t>() + bias.numel());
   } else {
     const float* bdata = bias.data<float>();
+    vector<float> bdata_local(bias.numel());
+    if (use_fp16) {
+      fbgemm::RoundToFloat16(
+              bdata, bdata_local.data(), bias.numel(), false);
+    } else {
+      for (int i =0; i < bias.numel(); i++) {
+        bdata_local[i] = bdata[i];
+      }
+    }
     b_quantized.resize(bias.numel());
     for (int g = 0; g < filter_qparams.size(); ++g) {
       int i_begin = g * (M / filter_qparams.size());
       int i_end = i_begin + (M / filter_qparams.size());
       for (int i = i_begin; i < i_end; ++i) {
-        if (round_to_nearest_even) {
+       if (round_to_nearest_even) {
           b_quantized[i] = fbgemm::Quantize<int32_t>(
-              bdata[i],
+              bdata_local[i],
               0,
               in_qparams.scale * filter_qparams[g].scale,
               32,
               true /* signed */);
         } else {
-          b_quantized[i] = round((1.0f / in_qparams.scale) * (1.0f / filter_qparams[g].scale) * bdata[i]);
+          b_quantized[i] = round((1.0f / in_qparams.scale) * (1.0f / filter_qparams[g].scale) * bdata_local[i]);
           b_quantized[i] = std::max(std::min(b_quantized[i], INT32_MAX), INT32_MIN);
         }
       }
