@@ -486,13 +486,15 @@ void conv2d_depthwise(
 }
 
 ImageSizes conv2d_prepack_weights_image_sizes(
-    int64_t OC,
-    int64_t C,
+    int64_t _OC,
+    int64_t _C,
     int64_t KH,
     int64_t KW) {
-  const uint32_t Cup4 = ALIGN_UP4(static_cast<uint32_t>(C));
-  const uint32_t OC_4 = UP_DIV(static_cast<uint32_t>(OC), 4);
-  const uint32_t Z = static_cast<uint32_t>(KH) * static_cast<uint32_t>(KW);
+  const int32_t C = safe_downcast<int32_t>(_C);
+  const int32_t OC = safe_downcast<int32_t>(_OC);
+  const int32_t Cup4 = ALIGN_UP4(C);
+  const int32_t OC_4 = UP_DIV(OC, 4);
+  const int32_t Z = safe_downcast<int32_t>(KH) * safe_downcast<int32_t>(KW);
   return {{Cup4, OC_4, Z}, {Cup4, OC_4, Z}};
 }
 
@@ -653,7 +655,7 @@ void conv2d(
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
-  WorkGroupSize workGroupSize{1, 1, static_cast<uint32_t>(params.OC_4)};
+  WorkGroupSize workGroupSize{1, 1, safe_downcast<uint32_t>(params.OC_4)};
   auto& computeUnit = context().computeUnitFactory().get(
       GLSL_SPV(conv2d_nogroup_clamp), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
