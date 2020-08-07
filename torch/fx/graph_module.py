@@ -4,6 +4,7 @@ import linecache
 import inspect
 import dis  # or dat
 import operator
+import builtins
 from types import FunctionType, CodeType
 
 
@@ -124,7 +125,7 @@ class Node:
 
 def _qualified_name(func):
     # things like getattr just appear in builtins
-    if getattr(__builtins__, func.__name__, None) is func:
+    if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     name = func.__name__
     module = _find_module_of_method(func)
@@ -329,7 +330,7 @@ class Graph:
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
                 qualified_name = _qualified_name(node.target)
-                if qualified_name == 'builtins.getattr' and isinstance(node.args[1], str) and node.args[1].isidentifier():
+                if qualified_name == 'getattr' and isinstance(node.args[1], str) and node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
                     continue
