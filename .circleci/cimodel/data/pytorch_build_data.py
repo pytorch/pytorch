@@ -22,9 +22,6 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("vulkan", [XImportant(True)]),
-                ]),
             ]),
         ]),
         ("cuda", [
@@ -57,6 +54,7 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
+                    ("vulkan", [XImportant(True)]),
                 ]),
             ]),
         ]),
