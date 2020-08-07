@@ -15389,8 +15389,8 @@ class TestTorchDeviceType(TestCase):
                 for perm3 in permutations:
                     input_ = torch.randn(10, 10, 10, 1, dtype=dtype, device=device).expand(10, 10, 10, 10).permute(*perm1)
                     expect1, expect2 = input_.min(dim=0, keepdim=True)
-                    out1 = expect1.permute(perm2).clone().contiguous().permute(rev_perm(perm2))
-                    out2 = expect2.permute(perm3).clone().contiguous().permute(rev_perm(perm3))
+                    out1 = torch.empty_like(expect1.permute(perm2), memory_format=torch.contiguous_format).permute(rev_perm(perm2))
+                    out2 = torch.empty_like(expect2.permute(perm3), memory_format=torch.contiguous_format).permute(rev_perm(perm3))
                     torch.min(input_, dim=0, keepdim=True, out=(out1, out2))
                     self.assertEqual(out1, expect1)
                     self.assertEqual(out2, expect2)
