@@ -3,9 +3,11 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes
+from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
+
+import torchvision
 
 import onnx
 import onnxruntime  # noqa
@@ -685,6 +687,7 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "prim::Constant"
         assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
