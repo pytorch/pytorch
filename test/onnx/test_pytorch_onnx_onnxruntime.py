@@ -2506,6 +2506,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                out1, out2, out3 = input.split([2, 1, 2])
+                return out3, out1
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(torch.jit.script(SplitModel3()), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):

@@ -486,24 +486,26 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def unsafe_chunk(g, self, chunks, dim):
+@parse_args('v', 'i', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
+    if _outputs is None:
+        return sym_help._onnx_opset_unsupported_detailed('unsafe_chunk', 9, 11, 'Dynamic number of outputs not supported')
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-def split(g, self, split_size_or_sizes, dim):
-    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
-                           .format('split_size_or_sizes', split_size_or_sizes))
+@parse_args('v', 'v', 'v', 'i')
+def split(g, self, split_size_or_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_size_or_sizes, _outputs):
+        return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Dynamic number of outputs not supported')
     split_val = split_size_or_sizes.node()['value']
     if split_val.dim() > 0:
-        return split_with_sizes(g, self, split_size_or_sizes, dim)
+        return split_with_sizes(g, self, split_size_or_sizes, dim, _outputs)
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
     dim = sym_help._get_const(dim, 'i', 'dim')
 
@@ -512,28 +514,33 @@ def split(g, self, split_size_or_sizes, dim):
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-def unsafe_split(g, self, split_size_or_sizes, dim):
-    return split(g, self, split_size_or_sizes, dim)
+def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
+    return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
-@parse_args('v', 'is', 'i')
-def split_with_sizes(g, self, split_sizes, dim):
-    return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
+@parse_args('v', 'is', 'i', 'i')
+def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_sizes, _outputs):
+        return sym_help._onnx_opset_unsupported_detailed('split_with_sizes', 9, 11, 'Dynamic number of outputs not supported')
+    return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
 
-@parse_args('v', 'is', 'i')
-def unsafe_split_with_sizes(g, self, split_sizes, dim):
-    return split_with_sizes(g, self, split_sizes, dim)
+def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
-@parse_args('v', 'i')
-def unbind(g, self, dim=0):
-    # NOTE: This conversion of this node is handled in onnx peephole pass.
-    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
-    return g.op("aten::unbind", self, axis_i=dim)
+@parse_args('v', 'i', 'i')
+def unbind(g, self, dim=0, _outputs=None):
+    if _outputs is None:
+        return sym_help._onnx_opset_unsupported_detailed('unbind', 9, 11, 'Dynamic number of outputs not supported')
+
+    outputs = g.op("Split", self, split_i=[1] * _outputs, axis_i=dim, outputs=_outputs)
+    outputs = [outputs] if _outputs == 1 else outputs
+    squeezed_outputs = [g.op("Squeeze", out, axes_i=[dim]) for out in outputs]
+    return squeezed_outputs
 
 
 @parse_args('v', 'i', 'v')
