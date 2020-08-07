@@ -1,5 +1,5 @@
 import sys
-from os import path
+import os
 import contextlib
 import textwrap
 import re
@@ -11,7 +11,7 @@ from enum import Enum
 import yaml
 
 # Reusing CodeTemplate from existing codegen
-sys.path.append(path.dirname(path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from code_template import CodeTemplate
 
 try:
@@ -746,7 +746,6 @@ native_functions = parse_native_yaml('aten/src/ATen/native/native_functions.yaml
 # do the code generation
 
 TEMPLATE_PATH = "aten/src/ATen/templates"
-TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 
 # When we interpret things as C++ types, there are a bunch of
 # different modalities we have to consider
@@ -759,7 +758,7 @@ TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 # I'm not really sure how to structure this logic yet, but here is a
 # sketch.  This function is ONLY correct for CPUType.h at the moment;
 # I bet I am going to need another parameter before I'm done
-def cpp_type(t: Type, *, mutable: bool, argument: bool) -> str:
+def cpp_type(t: Type, *, mutable: bool, argument: bool, legacy_optional: bool) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
@@ -777,7 +776,8 @@ def cpp_type(t: Type, *, mutable: bool, argument: bool) -> str:
             return 'std::string'
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                 BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
-                BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat]:
+                BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
+                BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
             # These C++ names coincidentally line up with their schema
             # names
             return t.name.name
@@ -785,12 +785,17 @@ def cpp_type(t: Type, *, mutable: bool, argument: bool) -> str:
             assert False, f"unsupported type: {t}"
     elif isinstance(t, OptionalType):
         # TODO: these arguments are smoothed over by the hacky wrapper
-        if str(t.elem) == 'Tensor' and argument:
+        if argument and legacy_optional and str(t.elem) == 'Tensor':
             if mutable:
                 return 'Tensor &'
             else:
                 return 'const Tensor &'
-        elem = cpp_type(t.elem, mutable=mutable, argument=argument)
+        if argument and str(t.elem) == 'Tensor':
+            if mutable:
+                return 'Tensor &'  # WUUUT
+            else:
+                return 'const c10::optional<Tensor>&'
+        elem = cpp_type(t.elem, mutable=mutable, argument=argument, legacy_optional=legacy_optional)
         return f"c10::optional<{elem}>"
     elif isinstance(t, ListType):
         if str(t.elem) == 'bool':
@@ -798,10 +803,14 @@ def cpp_type(t: Type, *, mutable: bool, argument: bool) -> str:
             return f"std::array<bool,{t.size}>"
         # TODO: remove this special case
         if str(t.elem) == 'int' and argument:
-            return f"IntArrayRef"
+            return "IntArrayRef"
         elif str(t.elem) == 'Tensor' and argument:
-            return f"TensorList"
-        elem = cpp_type(t.elem, mutable=mutable, argument=argument)
+            return "TensorList"
+        elif str(t.elem) == 'Tensor?' and argument and legacy_optional:
+            return "TensorList"
+        elif str(t.elem) == 'Dimname' and argument:
+            return "DimnameList"
+        elem = cpp_type(t.elem, mutable=mutable, argument=argument, legacy_optional=legacy_optional)
         if argument:
             # TODO: explicitly qualify namespace here
             return f"ArrayRef<{elem}>"
@@ -815,57 +824,130 @@ def cpp_type_return(rs: Sequence[Argument]) -> str:
     if len(rs) == 0:
         return 'void'
     elif len(rs) == 1:
-        return cpp_type(rs[0].type, mutable=rs[0].is_write, argument=False)
+        return cpp_type(rs[0].type, mutable=rs[0].is_write, argument=False, legacy_optional=False)
     else:
-        args = ','.join([cpp_type(r.type, mutable=r.is_write, argument=False) for r in rs])
+        args = ','.join([cpp_type(r.type, mutable=r.is_write, argument=False, legacy_optional=False) for r in rs])
         return f'std::tuple<{args}>'
 
 # Some simple code to exercise some of the functions we've been building
-type_derived_method_declarations: List[str] = []
-for f in native_functions:
-    if f.dispatch is None or 'CPU' not in f.dispatch:
-        continue
+def compute_type_derived_method_declarations(dispatch: str) -> List[str]:
+    type_derived_method_declarations: List[str] = []
+    for f in native_functions:
+        if f.dispatch is None or dispatch not in f.dispatch:
+            continue
 
-    name = str(f.func.name.name)
-    # TODO: delete this!
-    if f.func.is_out_fn():
-        name += '_out'
-    if f.func.name.overload_name:
-        name += f'_{f.func.name.overload_name}'
+        name = str(f.func.name.name)
+        # TODO: delete this!
+        if f.func.is_out_fn():
+            name += '_out'
+        if f.func.name.overload_name:
+            name += f'_{f.func.name.overload_name}'
 
-    cpp_return = cpp_type_return(f.func.returns)
+        cpp_return = cpp_type_return(f.func.returns)
 
-    def format_arg(a: Argument) -> str:
-        return f"{cpp_type(a.type, mutable=a.is_write, argument=True)} {a.name}"
-    cpp_args: List[str] = []
-    cpp_args.extend(map(format_arg, f.func.out_arguments))
-    cpp_args.extend(map(format_arg, f.func.arguments))
+        def format_arg(a: Argument) -> str:
+            return f"{cpp_type(a.type, mutable=a.is_write, argument=True, legacy_optional=True)} {a.name}"
+        cpp_args: List[str] = []
+        cpp_args.extend(map(format_arg, f.func.out_arguments))
+        cpp_args.extend(map(format_arg, f.func.arguments))
 
-    # Discover TensorOptions
-    topt_names = ['dtype', 'layout', 'device', 'pin_memory']
-    kwargs = list(f.func.kwarg_only_arguments)  # short name
-    i = 0
-    while i < len(kwargs):
-        if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
-            cpp_args.append('const TensorOptions & options')
-            i += len(topt_names)
-        else:
-            cpp_args.append(format_arg(kwargs[i]))
-            i += 1
+        # Discover TensorOptions
+        topt_names = ['dtype', 'layout', 'device', 'pin_memory']
+        kwargs = list(f.func.kwarg_only_arguments)  # short name
+        i = 0
+        while i < len(kwargs):
+            if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
+                cpp_args.append('const TensorOptions & options')
+                i += len(topt_names)
+            else:
+                cpp_args.append(format_arg(kwargs[i]))
+                i += 1
 
-    type_derived_method_declarations.append(f"{cpp_return} {name}({', '.join(cpp_args)});")
+        type_derived_method_declarations.append(f"{cpp_return} {name}({', '.join(cpp_args)});")
+    return type_derived_method_declarations
 
-comment = "@" + "generated by aten/src/ATen/gen.py from TypeDerived.h"
+def generated_comment(fn: str) -> str:
+    return "@" + f"generated by aten/src/ATen/gen.py from {fn}"
 
-env = {
-    'generated_comment': comment,
-    'Type': 'CPUType',
-    'Generator': 'CPUGeneratorImpl',
-    'Backend': 'CPU',  # TODO: rename this to DispatchKey
-    'extra_cuda_headers': '',
-    'legacy_th_headers': '#include <ATen/LegacyTHFunctionsCPU.h>',
-    'type_derived_method_declarations': type_derived_method_declarations,
-    'function_registrations': [],
+
+fn = "TypeDerived.h"
+TYPE_DERIVED_H = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, fn))
+for dispatch in ["CPU", "CUDA"]:
+    with open(f'build/aten/src/ATen_new/{dispatch}Type.h', 'w') as f:
+        env = {
+            'generated_comment': generated_comment(fn),
+            'Type': f'{dispatch}Type',
+            'extra_cuda_headers': '',  # TODO: remove this
+            'type_derived_method_declarations': compute_type_derived_method_declarations(dispatch),
+        }
+        f.write(TYPE_DERIVED_H.substitute(env))
+
+JIT_TO_CPP_DEFAULT = {
+    'False': 'false',
+    'True': 'true',
+    'None': 'c10::nullopt',  # UGH this one is type directed
+    'Mean': 'at::Reduction::Mean',
+    '[]': '{}',
+    '[0,1]': '{0,1}', # TODO: stop special casing
+    'contiguous_format': 'MemoryFormat::Contiguous',
 }
 
-print(TYPE_DERIVED_CPP.substitute(env))
+def cpp_default(d: str, t: Type) -> str:
+    if d == 'None' and str(t) == 'Tensor?':
+        return '{}'
+    return JIT_TO_CPP_DEFAULT.get(d, d)
+
+def compute_function_declarations() -> List[str]:
+    rs: List[str] = []
+    for f in native_functions:
+        with context(f'in {f.loc}:\n  {f.func}'):
+            if f.manual_kernel_registration:
+                continue
+            if Variant.function not in f.variants:
+                continue
+
+            # TODO: clear up naming
+            cpp_return = cpp_type_return(f.func.returns)
+            name = str(f.func.name.name)
+            if f.func.is_out_fn():
+                name += '_out'
+
+            # TODO: this was copy pasted
+            def format_arg(a: Argument) -> str:
+                # DEFAULTING IS NEW
+                default = f"={cpp_default(a.default, a.type)}" if a.default is not None else ""
+                # TODO: Always NO legacy optional
+                return f"{cpp_type(a.type, mutable=a.is_write, argument=True, legacy_optional=not f.use_c10_dispatcher_full)} {a.name}{default}"
+            cpp_args: List[str] = []
+            cpp_args.extend(map(format_arg, f.func.out_arguments))
+            cpp_args.extend(map(format_arg, f.func.arguments))
+
+            # Discover TensorOptions
+            topt_names = ['dtype', 'layout', 'device', 'pin_memory']
+            kwargs = list(f.func.kwarg_only_arguments)  # short name
+            i = 0
+            while i < len(kwargs):
+                if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
+                    if str(f.func.name) in ["_cudnn_init_dropout_state", "sparse_coo_tensor.size", "_sparse_coo_tensor_with_dims", "_sparse_coo_tensor_with_dims_and_tensors"]:
+                        # I think this is a bug in the original
+                        cpp_args.append('const TensorOptions & options')
+                    elif str(f.func.name) in ["tril_indices", "triu_indices"]:
+                        cpp_args.append('const TensorOptions & options=at::kLong')
+                    else:
+                        cpp_args.append('const TensorOptions & options={}')  # MODIFIED
+                    i += len(topt_names)
+                else:
+                    cpp_args.append(format_arg(kwargs[i]))
+                    i += 1
+
+            rs.append(f"CAFFE2_API {cpp_return} {name}({', '.join(cpp_args)});")
+    return rs
+
+fn = "Functions.h"
+FUNCTIONS_H = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, fn))
+with open(f'build/aten/src/ATen_new/{fn}', 'w') as f:
+    env = {
+        'generated_comment': generated_comment(fn),
+        'function_declarations': compute_function_declarations(),
+    }
+    f.write(FUNCTIONS_H.substitute(env))
