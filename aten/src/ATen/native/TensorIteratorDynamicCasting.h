@@ -21,24 +21,6 @@
 
 namespace at { namespace native {
 
-// this extra namespace (cppmap) is to avoid conflicting with at::detail when at:: is
-// left off in native functions.
-namespace cppmap { namespace detail {
-
-template <typename>
-struct CPPTypeToScalarType {
-};
-
-#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                               \
-  struct CPPTypeToScalarType<cpp_type> {                                       \
-    constexpr static c10::ScalarType value() { return c10::ScalarType::scalar_type; }       \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
-
-}} //namespace cppmap::detail
-
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
 // (and returns) of func_t
@@ -47,9 +29,9 @@ struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::template arg<nargs - 1>::type;
-    using cpp_map = cppmap::detail::CPPTypeToScalarType<cpp_type>;
+    using cpp_map = c10::CppTypeToScalarType<cpp_type>;
 
-    if (iter.input_dtype(nargs-1) != cpp_map::value()) {
+    if (iter.input_dtype(nargs-1) != cpp_map::value) {
       return true;
     }
     return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
@@ -61,7 +43,6 @@ struct needs_dynamic_casting<func_t, 0> {
   static bool check(TensorIterator& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::result_type;
-    using cpp_map = cppmap::detail::CPPTypeToScalarType<cpp_type>;
 
     // we could assert output numbers are correct here, but checks
     // (including arity) are currently pushed outside of this struct.
@@ -69,8 +50,8 @@ struct needs_dynamic_casting<func_t, 0> {
       return false;
     }, /* else */ [&](auto _) {
       // decltype(_) is used to delay computation
-      using dtype = typename decltype(_)::template type_identity<cpp_map>;
-      return iter.dtype(0) != dtype::value();
+      using delayed_type = typename decltype(_)::template type_identity<cpp_type>;
+      return iter.dtype(0) != c10::CppTypeToScalarType<delayed_type>::value;
     });
   }
 };

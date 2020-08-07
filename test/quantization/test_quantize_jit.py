@@ -1882,7 +1882,11 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):
-        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        bn_module = {
+            1 : torch.nn.BatchNorm1d,
+            2 : torch.nn.BatchNorm2d,
+            3 : torch.nn.BatchNorm3d,
+        }
 
         class M(torch.nn.Module):
             def __init__(self, dim):
@@ -1892,7 +1896,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        options = itertools.product([True, False], [2, 3])
+        options = itertools.product([True, False], [1, 2, 3])
         for tracing, dim in options:
             model = self.checkGraphModeOp(M(dim), self.img_data_dict[dim], "quantized::batch_norm", tracing)
 
