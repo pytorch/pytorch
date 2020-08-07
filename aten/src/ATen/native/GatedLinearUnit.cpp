@@ -11,6 +11,8 @@ namespace native {
 
 DEFINE_DISPATCH(glu_stub);
 DEFINE_DISPATCH(glu_backward_stub);
+DEFINE_DISPATCH(hardglu_stub);
+DEFINE_DISPATCH(hardglu_backward_stub);
 
 namespace {
 // Tuple, containing <new_shape, new_dimension>
@@ -84,6 +86,52 @@ Tensor& glu_backward_out(Tensor& grad_input,
 Tensor glu_backward(const Tensor& grad_output, const Tensor& input, int64_t dim) {
   auto grad_input = at::empty({0}, input.options());
   return at::glu_backward_out(grad_input, grad_output, input, dim);
+}
+
+// HardGLU is a piecewise linear approximation
+Tensor& hardglu_out(Tensor& result, const Tensor& self, int64_t dim) {
+  SizesAndDim size_dim = get_sizes_and_wrap_dim(self, dim);
+  result.resize_(size_dim.first);
+  auto half_size = size_dim.first[size_dim.second];
+  TensorPair split_self = make_split_pair(self, half_size, size_dim.second);
+
+  auto iter = TensorIterator::binary_op(result, split_self.first,
+                                        split_self.second);
+  hardglu_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor hardglu(const Tensor& self, int64_t dim) {
+  auto result = at::empty({0}, self.options());
+  return at::hardglu_out(result, self, dim);
+}
+
+Tensor& hardglu_backward_out(Tensor& grad_input,
+    const Tensor& grad_output, const Tensor& input, int64_t dim) {
+  SizesAndDim size_dim = get_sizes_and_wrap_dim(input, dim);
+  grad_input.resize_as_(input);
+  auto half_size = size_dim.first[size_dim.second];
+  TensorPair split_input = make_split_pair(input, half_size, size_dim.second);
+  TensorPair split_grad_input = make_split_pair(grad_input, half_size,
+                                                size_dim.second);
+
+  at::hardsigmoid_out(split_grad_input.first, split_input.second);
+  // for second gradinput half, can get a better performance by fusion
+  auto iter = at::TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(split_grad_input.second)
+    .add_input(split_input.second)
+    .add_input(split_input.first)
+    .add_input(grad_output)
+    .build();
+  hardglu_backward_stub(iter.device_type(), iter);
+  split_grad_input.first.mul_(grad_output);
+  return grad_input;
+}
+
+Tensor hardglu_backward(const Tensor& grad_output, const Tensor& input, int64_t dim) {
+  auto grad_input = at::empty({0}, input.options());
+  return at::hardglu_backward_out(grad_input, grad_output, input, dim);
 }
 
 } // at::native

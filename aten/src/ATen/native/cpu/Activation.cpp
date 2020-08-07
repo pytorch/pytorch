@@ -589,6 +589,54 @@ void glu_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void hardglu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardglu_cpu", [&] {
+    scalar_t zero(0.0f);
+    scalar_t one_sixth(1.0f / 6.0f);
+    scalar_t three(3.0f);
+    scalar_t six(6.0f);
+
+    using Vec = Vec256<scalar_t>;
+    const Vec zero_vec(zero);
+    const Vec one_sixth_vec(one_sixth);
+    const Vec three_vec(three);
+    const Vec six_vec(six);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t a, scalar_t b) -> scalar_t {
+        return a * std::min(std::max(b + three, zero), six) * one_sixth;
+      },
+      [&](Vec a, Vec b) -> Vec {
+        return a * vec256::minimum(
+            vec256::maximum(b + three_vec, zero_vec),
+          six_vec) * one_sixth_vec;
+      }
+    );
+  });
+}
+
+void hardglu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardglu_backward_cpu", [&] {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t neg_three(-3.0f);
+    const scalar_t one_sixth(1.0f / 6.0f);
+    using Vec = Vec256<scalar_t>;
+    Vec zero_vec(zero);
+    Vec one_sixth_vec(one_sixth);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        return (a >= neg_three && a <= three) ? one_sixth * b * c : zero;
+      },
+      [&](Vec a, Vec b, Vec c) -> Vec {
+        Vec da_mask = (a >= neg_three) & (a <= three);
+        return Vec::blendv(zero_vec, one_sixth_vec * b * c, da_mask);
+      }
+    );
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -612,6 +660,8 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+REGISTER_DISPATCH(hardglu_stub, &hardglu_kernel);
+REGISTER_DISPATCH(hardglu_backward_stub, &hardglu_backward_kernel);
 
 } // namespace native
 } // namespace at

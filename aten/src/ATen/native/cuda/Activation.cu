@@ -181,7 +181,7 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   if (numel == 0) {
     return;
   }
-  
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(iter.can_use_32bit_indexing());
 
   scalar_t *input_grad_data = static_cast<scalar_t *>(iter.data_ptr(0));
@@ -502,7 +502,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
       const scalar_t neg_three(-3.0f);
       const scalar_t one_half(0.5f);
       gpu_kernel(
-        iter, 
+        iter,
         [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
           if (self_val < neg_three) {
             return zero;
@@ -538,11 +538,41 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
       const scalar_t neg_three(-3.0f);
       const scalar_t one_sixth(1.0f / 6.0f);
       gpu_kernel(
-        iter, 
+        iter,
         [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
           return (self_val >= neg_three && self_val <= three)
             ? grad_val * one_sixth
             : zero;
+      });
+    });
+  });
+}
+
+void hardglu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      const scalar_t three(3.0f);
+      const scalar_t six(6.0f);
+      gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a * std::min(std::max(b + three, zero), six) * one_sixth;
+      });
+    });
+  });
+}
+
+void hardglu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t three(3.0f);
+      const scalar_t neg_three(-3.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      gpu_kernel(
+        iter,
+        [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+          return (a >= neg_three && a <= three) ? one_sixth * b * c : zero;
       });
     });
   });
@@ -608,6 +638,8 @@ REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
+REGISTER_DISPATCH(hardglu_stub, &hardglu_kernel);
+REGISTER_DISPATCH(hardglu_backward_stub, &hardglu_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 

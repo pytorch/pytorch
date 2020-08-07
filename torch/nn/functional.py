@@ -1162,6 +1162,35 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
+def hardglu(input, dim=-1):
+    # type: (Tensor, int) -> Tensor
+    r"""hardglu(input, dim=-1) -> Tensor
+
+    The piece-wise linear implementation of the gated linear unit. Computes:
+
+    .. math::
+        \text{HardGLU}(x) = \begin{cases}
+            0 & \text{if~} b \le -3, \\
+            a & \text{if~} b \ge +3, \\
+            a * b / 6 + 1 / 2 & \text{otherwise}
+        \end{cases}
+
+    where `input` is split in half along `dim` to form `a` and `b`.
+
+    Args:
+        input (Tensor): input tensor
+        dim (int): dimension on which to split the input. Default: -1
+
+    See :class:`~torch.nn.functional.glu` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(hardglu, (input,), input, dim=dim)
+    if input.dim() == 0:
+        raise RuntimeError("hardglu does not support scalars because halving size must be even")
+    return torch._C._nn.hardglu(input, dim)
+
+
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""
@@ -1716,11 +1745,11 @@ def silu(input, inplace=False):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     See :class:`~torch.nn.SiLU` for more details.
