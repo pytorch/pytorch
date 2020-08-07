@@ -16988,7 +16988,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(actual, expected)
 
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_nextafter(self, device, dtype):
