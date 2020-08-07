@@ -61,7 +61,7 @@ void sinc_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sinc_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        auto x = static_cast<scalar_t>(M_PI) * a;
+        auto x = scalar_t(M_PI) * a;
         return ::sin(x) / x;
       });
     });
