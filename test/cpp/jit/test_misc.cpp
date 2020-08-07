@@ -821,8 +821,6 @@ void checkScopeCallbacks() {
 }
 
 void testRecordFunction() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
@@ -1016,8 +1014,6 @@ void testRecordFunction() {
   ids.clear();
 
   auto th = std::thread([&ids]() {
-    c10::impl::IncludeDispatchKeyGuard observer_guard(
-        c10::DispatchKey::Profiler);
     addThreadLocalCallback(RecordFunctionCallback(
         [&ids](const RecordFunction& fn) { ids.push_back(2); },
         [](const RecordFunction&) {}));
@@ -1128,9 +1124,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
 }
 
 void testThreadLocalDebugInfo() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
-
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
