@@ -796,7 +796,8 @@ inline Tensor _blob_to_Tensor(
   // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), {1, blob.size()}, in.dtype());
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
+    .unsqueeze(0);
   return _move_memory_if_cuda_input(tensor, in);
 }
 
