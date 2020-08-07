@@ -1673,14 +1673,20 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(torch.tensor([self.num_gpus]), tensors[i])
 
+        for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+            with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                allreduce(tensors, op)
+
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def reduce(xs, rootRank, rootTensor):
+        def reduce(xs, rootRank, rootTensor, op=None):
             opts = c10d.ReduceOptions()
             opts.rootRank = rootRank
             opts.rootTensor = rootTensor
+            if op:
+                opts.reduceOp = op
             work = pg.reduce(xs, opts)
             work.wait()
 
@@ -1696,6 +1702,10 @@ class ProcessGroupNCCLTest(TestCase):
             self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
+
+            for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+                with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                    reduce(tensors, self.rank, rt, op)
 
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)

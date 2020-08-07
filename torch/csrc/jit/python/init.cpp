@@ -38,6 +38,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -143,6 +144,7 @@ void initJITBindings(PyObject* module) {
              bool fixed_batch_size) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
+      .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
