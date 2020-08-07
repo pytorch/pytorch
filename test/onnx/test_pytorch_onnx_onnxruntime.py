@@ -492,6 +492,47 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1, 2]})
 
+    def test_tensor(self):
+        class ScalarInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(ScalarInputModel(), x)
+
+        class TensorInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], input.shape[1]]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(TensorInputModel(), x)
+
+        class FloatInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([float(input)])
+
+        x = torch.randn(1)
+        self.run_test(FloatInputModel(), x)
+
+        class InputWithDtypeModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1], dtype=torch.long) 
+
+        x = torch.randn(3, 4)
+        self.run_test(InputWithDtypeModel(), x)
+
+        class MixedInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], int(input)]) 
+
+        x = torch.randn(1)
+        self.run_test(MixedInputModel(), x)
+
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
         x = torch.arange(-5, 5).to(dtype=torch.float32)
