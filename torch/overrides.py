@@ -519,6 +519,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
         torch.nn.functional.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.gumbel_softmax: lambda logits, tau=1, hard=False, eps=1e-10, dim=-1: -1,
+        torch.nn.functional.hardglu: lambda input, dim=-1: -1,
         torch.nn.functional.hardshrink: lambda input, lambd=0.5: -1,
         torch.nn.functional.hardtanh: lambda input, min_val=-1., max_val=1., inplace=False: -1,
         torch.nn.functional.hinge_embedding_loss: (lambda input, target, margin=1.0, size_average=None, reduce=None,
@@ -1064,7 +1065,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         for func_name in ns_funcs:
             # ignore private functions or functions that are deleted in torch.__init__
             if namespace is not torch.Tensor:
-                if func_name.startswith('_'): 
+                if func_name.startswith('_'):
                     continue
                 elif func_name.endswith('_'):
                     continue
