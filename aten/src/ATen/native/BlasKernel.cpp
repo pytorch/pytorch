@@ -6,7 +6,8 @@
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" std::complex<float> ddot_(int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
+extern "C" std::complex<double> zdotu_(int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
+extern "C" std::complex<double> cdotu_(int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -197,6 +198,16 @@ float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
 double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
   return ddot_(&n, x, &incx, y, &incy);
 }
+
+c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+  auto result = zdotu_(&n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
+  return *reinterpret_cast<c10::complex<double>*>(&result);
+}
+
+c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+  auto result = cdotu_(&n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
+  return *reinterpret_cast<c10::complex<float>*>(&result);
+}
 #endif
 
 template <typename scalar_t>
@@ -253,6 +264,16 @@ double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
+template <>
+c10::complex<double> dot_impl(int64_t n, c10::complex<double>* x, int64_t incx, c10::complex<double>* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
+}
+
+template <>
+c10::complex<float> dot_impl(int64_t n, c10::complex<float>* x, int64_t incx, c10::complex<float>* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
+}
+
 // Skip reinstantiating the explicitly specialized types `float` and `double`.
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
@@ -264,8 +285,6 @@ INSTANTIATE_DOT_IMPL(int);
 INSTANTIATE_DOT_IMPL(int64_t);
 INSTANTIATE_DOT_IMPL(c10::Half);
 INSTANTIATE_DOT_IMPL(c10::BFloat16);
-INSTANTIATE_DOT_IMPL(c10::complex<float>);
-INSTANTIATE_DOT_IMPL(c10::complex<double>);
 #undef INSTANTIATE_DOT_IMPL
 
 }} // namespace at::native
