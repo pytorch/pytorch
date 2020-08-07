@@ -426,6 +426,15 @@ struct C10_API TensorOptions {
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
+      case Layout::SparseGCS:
+        switch(device().type()) {
+          case DeviceType::CPU:
+            return DispatchKey::SparseGCS_CPU;
+          case DeviceType::CUDA:
+            return DispatchKey::SparseGCS_CUDA;
+          default:
+            AT_ERROR("Unsupported device type for sparse GCS layout: ", device().type());
+        }
       default:
         AT_ERROR("Unsupported layout: ", layout());
     }
@@ -651,6 +660,10 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;
+  } else if (tid == DispatchKey::SparseGCS_CPU) {
+    return DeviceType::CPU;
+  } else if (tid == DispatchKey::SparseGCS_CUDA) {
+    return DeviceType::CUDA;
   } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::Vulkan) {

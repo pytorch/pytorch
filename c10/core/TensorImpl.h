@@ -434,7 +434,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
            key_set_.has(DispatchKey::SparseCUDA) ||
-           key_set_.has(DispatchKey::SparseHIP);
+           key_set_.has(DispatchKey::SparseHIP) ||
+           key_set_.has(DispatchKey::SparseGCS_CPU) ||
+           key_set_.has(DispatchKey::SparseGCS_CUDA);
   }
 
   bool is_quantized() const {

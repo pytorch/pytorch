@@ -21,15 +21,18 @@ namespace {
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type)
   :   SparseGCSTensorImpl(key_set, data_type
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))) {
-  
-}
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
+      , Scalar()  ) {}
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
-                                         at::Tensor pointers, at::Tensor indices, at::Tensor values)
-  :
-  TensorImpl(key_set, data_type, values.device()) {
-}
-
+                                         at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
+                                         Scalar fill_value)
+  : TensorImpl(key_set, data_type, values.device()),
+    pointers_(std::move(pointers)),
+    indices_(std::move(indices)),
+    values_(std::move(values)),
+    reduction_(std::move(reduction)),
+    fill_value_(std::move(fill_value)) {}
 }

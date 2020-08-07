@@ -46,6 +46,13 @@ class TestSparseGCS(TestCase):
         self.assertEqual(str(torch.sparse_gcs), 'torch.sparse_gcs')
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
+    def test_sparse_coo_const(self):
+        torch.sparse_coo_tensor(
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),
+            torch.FloatTensor([3, 4, 5]),
+            torch.Size([3]),
+            device=self.device)
+
     def test_sparse_gcs_from_dense(self):
         def make_sparse_gcs(data, reduction=None, fill_value=-1):
             import itertools
@@ -110,8 +117,9 @@ class TestSparseGCS(TestCase):
                 co.extend(c)
                 values.extend(v)
 
-            print(f"{ro} {co} {values} {reduction} {shape}")
-            return torch.sparse_gcs_tensor(ro, co, values, reduction, shape, fill_value)
+            print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
+            return torch.sparse_gcs_tensor(torch.tensor(ro), torch.tensor(co), torch.tensor(values),
+                                           torch.tensor(reduction), shape, fill_value)
         
         sp = make_sparse_gcs([[1, 2], [3, 4]])
         

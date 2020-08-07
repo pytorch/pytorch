@@ -143,7 +143,8 @@ namespace {
 }
 
 SparseTensor new_gcs_tensor(const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
+  // TODO: remove this comment after enabling autograd support for GCS tensor constructor.
+  // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparseGCS);
   DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
@@ -161,7 +162,8 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   // Tensor values = expand_values_if_needed(values_);
   // // make sure that indicies do not contain any entries that are greater than the dim.
   // int64_t sparse_dim = indices.size(0)-1;
-
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
+  
   SparseTensor self = new_gcs_tensor(options);
   get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(size);
   return self;
@@ -172,6 +174,7 @@ Tensor values_sparse_gcs(const Tensor& self) {
 }
 
 Tensor pointers_sparse_gcs(const Tensor& self) {
+  std::cout << "hello from pointers.\n";
   return get_sparse_impl<SparseGCSTensorImpl>(self)->pointers().alias();      
 }
 
