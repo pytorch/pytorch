@@ -250,61 +250,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
-
-    # Export Torchvision models
-
-    def test_alexnet(self):
-        model = torchvision.models.alexnet(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,))
-
-    def test_densenets(self):
-        model = torchvision.models.densenet121(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_googlenet(self):
-        model = torchvision.models.googlenet(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_inception(self):
-        model = torchvision.models.inception_v3(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_mnasnet(self):
-        model = torchvision.models.mnasnet1_0(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_mobilenet(self):
-        model = torchvision.models.mobilenet_v2(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_resnet(self):
-        model = torchvision.models.resnet50(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,))
-
-    def test_shufflenet(self):
-        model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_squeezenet(self):
-        model = torchvision.models.squeezenet1_1(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,))
-
-    def test_vgg(self):
-        model = torchvision.models.vgg19(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-        model = torchvision.models.vgg19_bn(pretrained=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x) 
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
