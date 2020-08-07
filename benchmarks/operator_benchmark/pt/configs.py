@@ -4,6 +4,10 @@ import operator_benchmark as op_bench
 Configs shared by multiple benchmarks
 """
 
+def remove_cuda(config_list):
+    cuda_config = {'device': 'cuda'}
+    return [config for config in config_list if cuda_config not in config]
+
 # Configs for conv-1d ops
 conv_1d_configs_short = op_bench.config_list(
     attr_names=[
@@ -70,4 +74,26 @@ conv_3d_configs_short = op_bench.config_list(
         'device': ['cpu', 'cuda'],
     },
     tags=['short']
+)
+
+linear_configs_short = op_bench.config_list(
+    attr_names=["N", "IN", "OUT"],
+    attrs=[
+        [1, 1, 1],
+        [4, 256, 128],
+        [16, 512, 256],
+    ],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
+    tags=["short"]
+)
+
+
+linear_configs_long = op_bench.cross_product_configs(
+    N=[32, 64],
+    IN=[128, 512],
+    OUT=[64, 128],
+    device=['cpu', 'cuda'],
+    tags=["long"]
 )
