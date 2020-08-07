@@ -9799,18 +9799,20 @@ class TestTorchDeviceType(TestCase):
         def run_test(dims, some, compute_uv):
             x = torch.randn(*dims, dtype=dtype, device=device)
             outu = torch.tensor((), dtype=dtype, device=device)
-            outs = torch.tensor((), dtype=dtype, device=device)
+            s_dtype = x.real.dtype if dtype.is_complex else dtype
+
+            outs = torch.tensor((), dtype=s_dtype, device=device)
             outv = torch.tensor((), dtype=dtype, device=device)
             torch.svd(x, some=some, compute_uv=compute_uv, out=(outu, outs, outv))
 
             if compute_uv:
                 if some:
-                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.transpose(-2, -1)))
+                    x_recon = torch.matmul(outu, torch.matmul(outs.to(dtype).diag_embed(), outv.transpose(-2, -1)))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = outu[..., :min(*dims[-2:])]
                     narrow_v = outv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.transpose(-2, -1)))
+                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.to(dtype).diag_embed(), narrow_v.transpose(-2, -1)))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -9820,6 +9822,7 @@ class TestTorchDeviceType(TestCase):
 
             resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
             self.assertEqual(resu, outu, msg='outputs of svd and svd with out differ')
+            print(ress, outs)
             self.assertEqual(ress, outs, msg='outputs of svd and svd with out differ')
             self.assertEqual(resv, outv, msg='outputs of svd and svd with out differ')
 
@@ -9832,12 +9835,12 @@ class TestTorchDeviceType(TestCase):
             resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
             if compute_uv:
                 if some:
-                    x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
+                    x_recon = torch.matmul(resu, torch.matmul(ress.to(dtype).diag_embed(), resv.transpose(-2, -1)))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = resu[..., :min(*dims[-2:])]
                     narrow_v = resv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
+                    x_recon = torch.matmul(narrow_u, torch.matmul(ress.to(dtype).diag_embed(), narrow_v.transpose(-2, -1)))
                     self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
@@ -9849,13 +9852,15 @@ class TestTorchDeviceType(TestCase):
                   (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
                   (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
+            print(some, compute_uv)
             run_test(dims, some, compute_uv)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_svd_no_singularvectors(self, device):
+    @dtypes(torch.float, torch.cfloat)
+    def test_svd_no_singularvectors(self, device, dtype):
         for size in [(5, 5), (5, 20), (20, 5)]:
-            a = torch.randn(*size, device=device)
+            a = torch.randn(*size, device=device, dtype=dtype)
             u, s_expect, v = torch.svd(a)
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
@@ -20127,7 +20132,7 @@ class TestTensorDeviceOps(TestCase):
     exact_dtype = True
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
-        cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
+        cpu_tensor = torch.randn(shape, device='cpu', dtype=dtype)
         device_tensor = cpu_tensor.to(device=device)
         if col_maj:
             cpu_tensor = cpu_tensor.t()
@@ -20145,32 +20150,32 @@ class TestTensorDeviceOps(TestCase):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_square_col_maj(self, device, dtype):
         self._test_svd_helper((10, 10), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_tall_some(self, device, dtype):
         self._test_svd_helper((20, 5), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_tall_all(self, device, dtype):
         self._test_svd_helper((20, 5), False, False, device, dtype)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_tall_some_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
