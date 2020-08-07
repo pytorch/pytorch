@@ -3,15 +3,37 @@
 #include <atomic>
 #include <thread>
 
-#include <tensorpipe/tensorpipe.h>
-
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
+// Forward-declare the TensorPipe classes we need, to avoid including its
+// headers in PyTorch's ones and thus have it become a public dependency.
+
+namespace tensorpipe {
+
+class Context;
+class Error;
+class Listener;
+class Message;
+class Pipe;
+
+namespace transport {
+class Context;
+namespace uv {
+class Context;
+} // namespace uv
+} // namespace transport
+
+namespace channel {
+class Context;
+} // namespace channel
+
+} // namespace tensorpipe
+
+ namespace torch {
 namespace distributed {
 namespace rpc {
 
@@ -72,7 +94,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
 
   void setMapLocation(
       const std::string& workerName,
-      const std::unordered_map<int, int>& mapLocation) {
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& mapLocation) {
     auto iter = mapLocations.find(workerName);
     if (iter == mapLocations.end()) {
       mapLocations[workerName] = mapLocation;
@@ -86,7 +108,9 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   int numWorkerThreads;
   const optional<std::vector<std::string>> transports;
   const optional<std::vector<std::string>> channels;
-  std::unordered_map<std::string, std::unordered_map<int, int>> mapLocations;
+  std::unordered_map<
+      std::string,
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>> mapLocations;
 };
 
 // Struct to track the network source metrics
@@ -137,6 +161,11 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  inline void setReverseMapLocations(const std::unordered_map<
+      std::string,
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& reverseMapLocations) {
+    reverseMapLocations_ = std::move(reverseMapLocations);
+  }
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -152,10 +181,6 @@ class TensorPipeAgent : public RpcAgent {
 
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
-
-#ifdef TP_ENABLE_SHM
-  static std::string createUniqueShmAddr();
-#endif
 
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
@@ -226,6 +251,9 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
+  std::unordered_map<
+      std::string,
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>> reverseMapLocations_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;

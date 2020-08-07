@@ -14,6 +14,7 @@ from . import (
     PyRRef,
     RemoteProfilerManager,
     RpcBackendOptions,
+    TensorPipeAgent,
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
@@ -204,38 +205,70 @@ def _all_gather(obj):
 
 # detect if any worker has invalid map_location configurations, and return
 # names of failed workers
-def _check_map_locations(map_locations):
+@_require_initialized
+def _setup_map_locations(map_locations):
+    agent = _get_current_rpc_agent()
     if not map_locations:
-        return []
+        return
+    elif not isinstance(agent, TensorPipeAgent):
+        raise ValueError(
+            "map_locations attribute only works with TensorPipe RPC Backend, "
+            f"but the current agent type is {type(agent)}"
+        )
 
-    local_device_count = torch.cuda.device_count()
-    # gather device count from all ranks, valid device ids are in range
-    # [-1, torch.cuda.device_count()).
-    all_device_counts = _all_gather(local_device_count)
-    valid = True
-    for worker_name in all_device_counts:
-        remote_device_count = all_device_counts[worker_name]
-        if worker_name in map_locations:
-            map_location = map_locations[worker_name]
-            key_set = set(map_location.keys())
-            val_set = set(map_location.values())
-            if not all([
-                len(map_location) == len(key_set),
-                len(map_location) == len(val_set),  # checking 1-to-1 mapping
-                min(key_set) >= -1,
-                max(key_set) < local_device_count, # checking local range
-                min(val_set) >= -1,
-                max(val_set) < remote_device_count  # checking remote range
-            ]):
-                valid = False
-                break
+    def check_one_worker(name, map_locations, all_device_counts):
+        device_count = all_device_counts[name]
+        wrong_worker_names = set(map_locations) - set(all_device_counts)
+        if wrong_worker_names:
+            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
+        for worker_name in all_device_counts:
+            remote_device_count = all_device_counts[worker_name]
+            if worker_name in map_locations:
+                map_location = map_locations[worker_name]
+                key_set = set(map_location.keys())
+                val_set = set(map_location.values())
+                if not all([
+                    len(map_location) == len(key_set),
+                    len(map_location) == len(val_set),  # check 1-to-1 mapping
+                    min(key_set) >= -1,
+                    max(key_set) < device_count, # check local range
+                    min(val_set) >= -1,
+                    max(val_set) < remote_device_count  # check remote range
+                ]):
+                    raise ValueError(
+                        f"Invalid map_location configuration on {name}:\n"
+                        f"map_locations = {map_locations}"
+                    )
 
-    # check all worker names are valid
-    valid = valid and len(set(map_locations.keys()) - set(all_device_counts.keys())) == 0
+                if -1 not in map_location and -1 in map_location.values():
+                    raise ValueError(
+                        f"Invalid map_location configuration on {name}. "
+                        "It maps a non-CPU device to CPU, when combined with "
+                        "the default CPU-CPU mapping, device mapping for CPU "
+                        "tensors is ambiguous:\n"
+                        f"map_locations = {map_locations}"
+                    )
 
-    # gather results from all workers
-    results = _all_gather(valid)
-    return list(filter(lambda name: not results[name], results))
+
+    gathered = _all_gather([torch.cuda.device_count(), map_locations])
+    all_device_counts = {name:gathered[name][0] for name in gathered}
+    all_map_locations = {name:gathered[name][1] for name in gathered}
+    for worker_name in all_map_locations:
+        worker_map_locations = all_map_locations[worker_name]
+        check_one_worker(worker_name, worker_map_locations, all_device_counts)
+
+    # passed all checked, construct reverse mapping for return values
+    reverse_map_locations = {}
+    local_name = get_worker_info().name
+    for worker_name in all_map_locations:
+        remote_map_locations = all_map_locations[worker_name]
+        if local_name in remote_map_locations:
+            remote_map_location = remote_map_locations[local_name]
+            reverse_map_locations[worker_name] = {
+                remote_map_location[k]:k for k in remote_map_location
+            }
+
+    agent._set_reverse_map_locations(reverse_map_locations)
 
 
 @_require_initialized

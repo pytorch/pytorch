@@ -98,13 +98,15 @@ if is_available():
         # Initialize RPC.
         api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
-        failed_workers = api._check_map_locations(rpc_backend_options.map_locations)
-        if failed_workers:
-            api.shutdown()
-            raise ValueError(
-                "Invalid map_location configuration on workers "
-                f"{failed_workers}. All RPC workers are shutdown()."
-            )
+        # NB: have to compared .name field here as backend registry can
+        # dynamically modify BackendType object.
+        # Hence, backend == BackendType.TENSORPIPE does not always work.
+        if backend.name == BackendType.TENSORPIPE.name:
+            try:
+                api._setup_map_locations(rpc_backend_options.map_locations)
+            except:
+                api.shutdown()
+                raise
 
 
     @api._require_initialized

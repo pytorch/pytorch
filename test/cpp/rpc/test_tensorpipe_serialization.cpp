@@ -25,7 +25,7 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::TensorpipeWriteBuffers sendingTpBuffers;
   std::tie(sendingTpMessage, sendingTpBuffers) =
       torch::distributed::rpc::tensorpipeSerialize(
-          std::move(sendingRpcMessage));
+          std::move(sendingRpcMessage), {});
 
   // Mimic receiving message descriptor: recvingTpMessage is a copy of
   // sendingTpMessage except for the data pointers which are left null.
@@ -99,7 +99,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
   std::tie(sendingTpMessage, tpBuffers) =
       torch::distributed::rpc::tensorpipeSerialize(
-          std::move(sendingRpcMessage));
+          std::move(sendingRpcMessage), {});
 
   EXPECT_EQ(tpBuffers.tensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);
@@ -127,7 +127,7 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
   std::tie(sendingTpMessage, tpBuffers) =
       torch::distributed::rpc::tensorpipeSerialize(
-          std::move(sendingRpcMessage));
+          std::move(sendingRpcMessage), {});
 
   EXPECT_EQ(tpBuffers.copiedTensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);

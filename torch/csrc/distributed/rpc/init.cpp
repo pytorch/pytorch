@@ -549,7 +549,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_reverse_map_locations",
+          // intentionally not releasing GIL
+          &TensorPipeAgent::setReverseMapLocations);
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 

@@ -1077,8 +1077,10 @@ def create_generic(top_env, declarations):
 
     def process_native(option):
         # type: (FunctionOption) -> Optional[OutputDeclaration]
-        assert option['python_module'] == '' or option['python_module'] == 'nn', \
-            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+        valid_modules = {'nn', 'fft', 'linalg'}
+        assert (option['python_module'] == '' or
+                option['python_module'] in valid_modules), \
+            "Found python_module of {} for decl {}, but only \'\' string, \'nn\' and \'fft\' are supported".format(
                 option['python_module'], option['name'])
         use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'
         formals = native_get_formals(option, False, use_optional_tensors_in_cpp_frontend)
@@ -1578,10 +1580,15 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
+            # These type ignores arise from the fact that a nested_dict
+            # technically isn't a Mapping, as it doesn't implement
+            # enough methods.  I could fix this with a Protocol but
+            # then I need typing_extensions which isn't currently
+            # a build dep.
             legacy_th_declarations.append(
-                LEGACY_TH_DECLARATION.substitute(env))
+                LEGACY_TH_DECLARATION.substitute(env))  # type: ignore
             legacy_th_definitions.append(
-                LEGACY_TH_DEFINITION.substitute(env))
+                LEGACY_TH_DEFINITION.substitute(env))  # type: ignore
 
     def process_native(option):
         # type: (FunctionOption) -> None
