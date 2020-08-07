@@ -36,6 +36,14 @@ at::Tensor vulkan_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size);
 
+at::Tensor vulkan_max_pool2d(
+    const at::Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode);
+
 at::Tensor vulkan_reshape(at::Tensor const& input, IntArrayRef shape);
 
 } // namespace native
