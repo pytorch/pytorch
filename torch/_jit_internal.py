@@ -507,7 +507,7 @@ def is_ignored_fn(fn):
 
 
 def is_static_fn(cls, fn):
-    return isinstance(inspect.getattr_static(cls, fn), staticmethod)
+    return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
 def get_static_fn(cls, fn):
     return inspect.getattr_static(cls, fn).__func__
