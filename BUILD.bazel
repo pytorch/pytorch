@@ -294,8 +294,8 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_vulkan_stub",
-    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
 
 filegroup(
@@ -646,13 +646,13 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
-        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
