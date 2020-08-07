@@ -265,6 +265,7 @@ def _get_listing(source_dir, target_dir, platform):
     listing.extend(_find_missing_pyi(source_dir, target_dir))
     listing.append(os.path.join(source_dir, "version.py"))
     listing.append(os.path.join(source_dir, "bin"))
+    listing.append(os.path.join(source_dir, "include"))
     return listing
 
 
@@ -285,7 +286,7 @@ def _move_single(src, source_dir, target_dir, mover, verb):
     if is_dir:
         os.makedirs(trg, exist_ok=True)
         for root, dirs, files in os.walk(src):
-            relroot = root[len(src) :]
+            relroot = os.path.relpath(root, src)
             for name in files:
                 relname = os.path.join(relroot, name)
                 s = os.path.join(src, relname)
