@@ -104,7 +104,7 @@ if is_available():
         if backend.name == BackendType.TENSORPIPE.name:
             try:
                 api._setup_map_locations(rpc_backend_options.map_locations)
-            except:
+            except Exception:
                 api.shutdown()
                 raise
 

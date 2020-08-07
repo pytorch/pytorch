@@ -231,7 +231,7 @@ def _setup_map_locations(map_locations):
                     len(map_location) == len(key_set),
                     len(map_location) == len(val_set),  # check 1-to-1 mapping
                     min(key_set) >= -1,
-                    max(key_set) < device_count, # check local range
+                    max(key_set) < device_count,  # check local range
                     min(val_set) >= -1,
                     max(val_set) < remote_device_count  # check remote range
                 ]):
@@ -251,8 +251,8 @@ def _setup_map_locations(map_locations):
 
 
     gathered = _all_gather([torch.cuda.device_count(), map_locations])
-    all_device_counts = {name:gathered[name][0] for name in gathered}
-    all_map_locations = {name:gathered[name][1] for name in gathered}
+    all_device_counts = {name: gathered[name][0] for name in gathered}
+    all_map_locations = {name: gathered[name][1] for name in gathered}
     for worker_name in all_map_locations:
         worker_map_locations = all_map_locations[worker_name]
         check_one_worker(worker_name, worker_map_locations, all_device_counts)
@@ -265,7 +265,7 @@ def _setup_map_locations(map_locations):
         if local_name in remote_map_locations:
             remote_map_location = remote_map_locations[local_name]
             reverse_map_locations[worker_name] = {
-                remote_map_location[k]:k for k in remote_map_location
+                remote_map_location[k]: k for k in remote_map_location
             }
 
     agent._set_reverse_map_locations(reverse_map_locations)
