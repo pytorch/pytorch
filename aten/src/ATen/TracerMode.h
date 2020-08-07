@@ -126,7 +126,7 @@ static inline void set_dispatch_enabled(bool enabled) {
 }
 
 struct NoTracerDispatchMode {
-  c10::impl::ExcludeDispatchKeySetGuard guard_{at::DispatchKey::Tracer};
+  c10::impl::ExcludeDispatchKeyGuard guard_{at::DispatchKey::Tracer};
 };
 
 } // namespace impl

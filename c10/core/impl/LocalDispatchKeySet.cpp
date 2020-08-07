@@ -63,7 +63,7 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
 
 // RAII API
 
-IncludeDispatchKeySetGuard::IncludeDispatchKeySetGuard(DispatchKeySet include)
+IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKeySet include)
   : tls_(&raw_local_dispatch_key_set)
   , include_(include - tls_->included()) {
   if (!include_.empty()) {
@@ -71,13 +71,13 @@ IncludeDispatchKeySetGuard::IncludeDispatchKeySetGuard(DispatchKeySet include)
   }
 }
 
-IncludeDispatchKeySetGuard::~IncludeDispatchKeySetGuard() {
+IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
   if (!include_.empty()) {
     tls_->set_included(tls_->included() - include_);
   }
 }
 
-ExcludeDispatchKeySetGuard::ExcludeDispatchKeySetGuard(DispatchKeySet exclude)
+ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKeySet exclude)
   : tls_(&raw_local_dispatch_key_set)
   , exclude_(exclude - tls_->excluded()) {
   if (!exclude_.empty()) {
@@ -85,7 +85,7 @@ ExcludeDispatchKeySetGuard::ExcludeDispatchKeySetGuard(DispatchKeySet exclude)
   }
 }
 
-ExcludeDispatchKeySetGuard::~ExcludeDispatchKeySetGuard() {
+ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
   if (!exclude_.empty()) {
     tls_->set_excluded(tls_->excluded() - exclude_);
   }
