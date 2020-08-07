@@ -10,7 +10,6 @@ import torch.utils.cpp_extension
 import torchvision
 
 import onnx
-import onnxruntime  # noqa
 
 import io
 import copy
