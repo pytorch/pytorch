@@ -262,6 +262,73 @@ Tensor TransformerEncoderImpl::forward(
   return output;
 }
 
+// ========================TransformerDecoderImpl=========================
+TransformerDecoderImpl::TransformerDecoderImpl(
+  const TransformerDecoderOptions& options_ )
+  : options(options_){
+  reset();
+}
+
+void TransformerDecoderImpl::reset() {
+
+  layers = ModuleList();
+
+  for (int i = 0; i < options.num_layers(); i++){
+    layers->push_back(TransformerDecoderLayer(options.decoder_layer()));
+  }
+  ///initialize layers
+  layers = register_module("layers", layers);
+
+  ///initialize Dropout, post self attention
+  dropout1 = register_module("dropout1",
+                              Dropout(DropoutOptions().p(options.dropout())));
+
+  ///initialize Normalization, post self attention
+  norm1 = register_module(
+    "norm1",
+    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+
+  ///initialize multihed attention
+  multihead_attn = register_module(
+    "multihead_attn",
+    MultiheadAttention(
+      MultiheadAttentionOptions(options.d_model(), options.nhead())
+      .dropout(options.dropout())));
+
+  ///initialize post multi-headed attention dropout layer
+  dropout2 = register_module(
+    "dropout2", Dropout(DropoutOptions().p(options.dropout())));
+
+  ///initialize post multi-headed attention Normalization
+  norm2 = register_module(
+    "norm2", LayerNorm(
+      LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+
+  ///Initialize Feed forward first linear layer
+  linear1 = register_module(
+    "linear1",
+    Linear(LinearOptions(options.d_model(), options.dim_feedforward())));
+
+  ///initialize Feed forward dropout layer
+  dropout = register_module(
+    "dropout",
+    Dropout(DropoutOptions().p(options.dropout())));
+
+  ///initialize Feed forward second linear layer
+  linear2 = register_module(
+    "linear2",
+    Linear(LinearOptions(options.dim_feedforward(), options.d_model())));
+
+  ///initialize dropout, post feed forward
+  dropout3 = register_module(
+    "dropout3",
+    Dropout(DropoutOptions().p(options.dropout())));
+
+  ///initialize normalization, post feed forward
+  norm3 = register_module(
+    "norm3",
+    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+}
 
 } // namespace nn
 } // namespace torch
