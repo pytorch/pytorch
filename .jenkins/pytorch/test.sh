@@ -228,6 +228,20 @@ test_libtorch() {
   fi
 }
 
+test_distributed() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    echo "Testing distributed C++ tests"
+    mkdir -p test/test-reports/cpp-distributed
+    build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
+    build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
+    build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+
+    build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
+    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
+  fi
+}
+
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
@@ -371,4 +385,5 @@ else
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+  test_distributed
 fi

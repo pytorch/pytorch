@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/export.h>
 
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
@@ -65,18 +66,18 @@ class ScriptModuleSerializer {
 
 } // namespace
 
-void Module::save_data(std::ostream& out) const {
+void _save_parameters(const Module& module, std::ostream& out) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
-  serializer.serialize(this->object_);
+  serializer.serialize(module._ivalue());
 }
 
-void Module::save_data(const std::string& filename) const {
+void _save_parameters(const Module& module, const std::string& filename) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(this->object_);
+  serializer.serialize(module._ivalue());
 }
 
 } // namespace mobile
