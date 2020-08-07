@@ -16998,7 +16998,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         actual = torch.nextafter(t1, t2)
         expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
-        
+
         actual = torch.nextafter(t2, t1)
         expected = np.nextafter(t2.cpu().numpy(), t1.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
