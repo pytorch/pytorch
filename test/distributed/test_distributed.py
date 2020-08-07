@@ -2848,7 +2848,6 @@ class _DistTestBase(object):
             nn.Conv2d(32, 256, 5),
             nn.ReLU(),
         )
-        resnet_model = torchvision.models.resnet50()
         small_model = nn.Linear(dim, dim, bias=False)
         bn_net = BatchNormNet()
 
@@ -2886,11 +2885,6 @@ class _DistTestBase(object):
                 inp=torch.ones(batch, batch, dim, dim).to(rank),
             ),
             DDPUnevenTestInput(
-                name="resnet_model",
-                model=resnet_model,
-                inp=torch.ones(1, 3, 1000, 1000),
-            ),
-            DDPUnevenTestInput(
                 name="small_model",
                 model=small_model,
                 inp=torch.ones(batch, dim).to(rank),
@@ -2908,6 +2902,18 @@ class _DistTestBase(object):
                 inp=(torch.ones(batch, 2).to(rank), rank),
             ),
         ]
+
+        # Add resnet model if we have torchvision installed.
+        if HAS_TORCHVISION:
+            resnet_model = torchvision.models.resnet50()
+            models_to_test.append(
+                DDPUnevenTestInput(
+                    name="resnet_model",
+                    model=resnet_model,
+                    inp=torch.ones(1, 3, 1000, 1000),
+                ),
+            )
+
         # 0 iteration tests for when one process does not train model at all, so
         # we must shadow the broadcast calls made when rebuilding buckets.
         baseline_num_iters = [0, 5]
