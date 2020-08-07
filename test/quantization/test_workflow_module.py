@@ -1175,7 +1175,7 @@ class TestFakeQuantizePerChannel(TestCase):
                 torch.allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
                 "Expected dZeroPoint to match zero_point.grad")
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)

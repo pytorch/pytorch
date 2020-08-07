@@ -179,8 +179,6 @@ void _fake_quantize_grad_learnable_zero_point_channel_kernel_cuda(
 
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &_fake_quantize_grad_learnable_scale_channel_kernel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &_fake_quantize_grad_learnable_zero_point_channel_kernel_cuda);
 
 } // namespace native
 } // namespace at
