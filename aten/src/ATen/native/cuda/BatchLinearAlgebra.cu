@@ -700,6 +700,8 @@ static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret)
     return;
   }
   ret = at::eye(n, self.options());
+  ret.unsafeGetTensorImpl()->set_stride(0, 1);
+  ret.unsafeGetTensorImpl()->set_stride(1, n);
   cusolver_getrs<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), ret.data_ptr<scalar_t>(), n, &info_tmp);
   info = info_tmp;
 }
@@ -707,7 +709,6 @@ static void apply_single_inverse(const Tensor& self, int64_t& info, Tensor& ret)
 Tensor _inverse_helper_cuda(const Tensor& self) {
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
-    // std::vector<int> infos(batchCount(self), 0);
     Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
     auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
@@ -724,7 +725,7 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
       apply_single_inverse<scalar_t>(self_inv_working_copy, info, ret);
     });
     singleCheckErrors(info, "inverse_cuda");
-    return ret.transpose(-2, -1);
+    return ret;
   }
 }
 
