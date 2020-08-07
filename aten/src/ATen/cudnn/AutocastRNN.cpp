@@ -32,6 +32,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
                           const c10::optional<Tensor>& dropout_state) {
+  std::cout << "Calling _cudnn_rnn_cast_reflatten" << std::endl;
 #if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 

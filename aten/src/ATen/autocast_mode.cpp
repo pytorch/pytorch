@@ -59,6 +59,54 @@ int decrement_nesting() {
   return --nesting;
 }
 
+// Overload to catch Tensor args
+Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
+  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
+    // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
+    // See cached_casts declaration above for detailed strategy.
+    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
+    if (can_try_cache) {
+      auto it = cached_casts.find(arg.unsafeGetTensorImpl());
+      if (it != cached_casts.end()) {
+        return std::get<1>(it->second);
+      } else {
+        auto casted_arg = arg.to(to_type);
+        cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
+        return casted_arg;
+      }
+    } else {
+      return arg.to(to_type);
+    }
+  } else {
+    return arg;
+  }
+}
+
+// Overload to process optional<Tensor>
+c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg) {
+  if (arg.has_value()) {
+    return cached_cast(to_type, *arg);
+  } else {
+    return c10::nullopt;
+  }
+}
+
+// Overload to process TensorLists
+std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
+  std::vector<Tensor> vec;
+  vec.reserve(arg.size());
+  for (const auto& t : arg) {
+    vec.push_back(cached_cast(to_type, t));
+  }
+  return vec;
+}
+
+// Template to catch non-Tensor args.
+template<typename T>
+T cached_cast(at::ScalarType to_type, T arg) {
+  return arg;
+}
+
 // Policies correspond to op categories that need code-divergent handling.
 // Wrapper templates below are specialized based on a policy template parameter.
 enum class CastPolicy : uint8_t {
