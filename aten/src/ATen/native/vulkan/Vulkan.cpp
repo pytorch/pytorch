@@ -337,7 +337,7 @@ VBuffer::~VBuffer() {
 }
 
 void VBuffer::copy_from_device_to_host(
-    void* const outputData, const int64_t size) {
+    void* const outputData, const int64_t size) const {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
@@ -593,6 +593,11 @@ void VImage::addImageMemoryBarrier(
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+  } else if (
+      oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
   } else if (
       oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
       newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -1208,10 +1213,16 @@ class VulkanTensor::Impl final {
   }
 
   inline VBuffer* buffer() {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
   const VBuffer* buffer() const {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
@@ -1275,7 +1286,7 @@ class VulkanTensor::Impl final {
     return const_cast<VulkanTensor::Impl*>(this)->image(imageSizes);
   }
 
-  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) {
+  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
     const auto d = sizes.size();
     const auto numel = std::accumulate(
         std::begin(sizes), std::end(sizes), 1, std::multiplies<int64_t>());
@@ -1299,16 +1310,13 @@ class VulkanTensor::Impl final {
   }
 
   void set_data_from_host(const float* const inputData) {
-    if (!has_storage()) {
-      allocate_storage();
-    }
-    buffer_->copy_from_host_to_device(
+    buffer()->copy_from_host_to_device(
         (const void*)inputData, sizeof(float) * numel_);
   }
 
   void copy_data_to_host(float* const outputData) const {
     sync_image_to_buffer();
-    buffer_->copy_from_device_to_host(outputData, sizeof(float) * numel_);
+    buffer()->copy_from_device_to_host(outputData, sizeof(float) * numel_);
   }
 
   void sync_image_to_buffer() const {
@@ -1324,7 +1332,7 @@ class VulkanTensor::Impl final {
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
   int64_t numel_;
-  std::unique_ptr<VBuffer> buffer_;
+  mutable std::unique_ptr<VBuffer> buffer_;
   std::unique_ptr<VImage> image_;
 };
 
