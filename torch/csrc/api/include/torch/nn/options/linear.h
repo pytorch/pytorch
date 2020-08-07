@@ -56,6 +56,7 @@ struct TORCH_API UnflattenOptions {
   typedef std::vector<std::pair<std::string, int64_t>> namedshape_t;
 
   UnflattenOptions(int64_t dim, std::vector<int64_t> sizes);
+  UnflattenOptions(const char* dimname, namedshape_t namedshape);
   UnflattenOptions(std::string dimname, namedshape_t namedshape);
 
   /// dim to unflatten

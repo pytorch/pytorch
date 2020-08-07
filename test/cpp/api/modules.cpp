@@ -566,8 +566,8 @@ TEST_F(ModulesTest, Unflatten) {
 
   unflatten = Unflatten(UnflattenOptions(
       "B",
-      {std::tuple<std::string, int64_t>{"B1", 2},
-       std::tuple<std::string, int64_t>{"B2", 2}}));
+      {std::pair<std::string, int64_t>{"B1", 2},
+       std::pair<std::string, int64_t>{"B2", 2}}));
   output = unflatten->forward(
       torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
   expected = torch::tensor({{{1, 2}, {3, 4}}})
@@ -3542,8 +3542,8 @@ TEST_F(ModulesTest, PrettyPrintUnflatten) {
   ASSERT_EQ(
       c10::str(Unflatten(UnflattenOptions(
           "B",
-          {std::tuple<std::string, int64_t>{"B1", 2},
-           std::tuple<std::string, int64_t>{"B2", 2}}))),
+          {std::pair<std::string, int64_t>{"B1", 2},
+           std::pair<std::string, int64_t>{"B2", 2}}))),
       "torch::nn::Unflatten(dim=\"B\", unflattened_size={{\"B1\", 2}, {\"B2\", 2}})");
 }
 

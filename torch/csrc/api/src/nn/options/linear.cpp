@@ -12,8 +12,11 @@ BilinearOptions::BilinearOptions(int64_t in1_features, int64_t in2_features, int
 UnflattenOptions::UnflattenOptions(int64_t dim, std::vector<int64_t> sizes)
   : dim_(dim), sizes_(std::move(sizes)) {}
 
+UnflattenOptions::UnflattenOptions(const char* dimname, namedshape_t namedshape)
+  : dim_(0), dimname_(std::string(dimname)), namedshape_(std::move(namedshape)) {}
+
 UnflattenOptions::UnflattenOptions(std::string dimname, namedshape_t namedshape)
-  : dimname_(std::move(dimname)), namedshape_(std::move(namedshape)) {}
+  : dim_(0), dimname_(std::move(dimname)), namedshape_(std::move(namedshape)) {}
 
 } // namespace nn
 } // namespace torch
