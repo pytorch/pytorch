@@ -18358,6 +18358,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.compare_with_numpy(torch.argmax, np.argmax, t)
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
+        # Case: With single `nan` present.
+        if dtype in torch.testing.get_all_fp_dtypes():
+            t[2, 2] = float('nan')
+            self.compare_with_numpy(torch.argmax, np.argmax, t)
+            self.compare_with_numpy(torch.argmin, np.argmin, t)
+
         # Case: Randomly Generated Tensors
         for ndims in range(1, 5):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
