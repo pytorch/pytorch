@@ -6,6 +6,7 @@
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
+extern "C" std::complex<float> ddot_(int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -263,6 +264,8 @@ INSTANTIATE_DOT_IMPL(int);
 INSTANTIATE_DOT_IMPL(int64_t);
 INSTANTIATE_DOT_IMPL(c10::Half);
 INSTANTIATE_DOT_IMPL(c10::BFloat16);
+INSTANTIATE_DOT_IMPL(c10::complex<float>);
+INSTANTIATE_DOT_IMPL(c10::complex<double>);
 #undef INSTANTIATE_DOT_IMPL
 
 }} // namespace at::native
