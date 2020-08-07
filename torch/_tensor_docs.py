@@ -3720,8 +3720,7 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fft',
-               r"""
+add_docstr_all('fft', r"""
 fft(signal_ndim, normalized=False) -> Tensor
 
 See :func:`torch.fft`
