@@ -733,6 +733,7 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
@@ -1166,6 +1167,8 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+
+    pybind11::gil_scoped_release no_gil_guard;
     op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
@@ -1187,6 +1190,8 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
+
+    pybind11::gil_scoped_release no_gil_guard;
     found_op->getOperation()(&stack);
   }
 
