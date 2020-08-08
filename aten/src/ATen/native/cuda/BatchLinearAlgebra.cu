@@ -40,8 +40,8 @@ static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_
 // with use_loop_launch = True, we will loop through all batches, and launch single batch cusolver/cublas kernels
 // (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
 inline static bool use_loop_launch(int batch_size, int matrix_size) {
-  return (batch_size <= 8) || 
-         (/* batch_size > 8 && */ matrix_size >= 512)
+  return (batch_size <= 8) || \
+         (/* batch_size > 8 && */ matrix_size >= 512);
 }
 
 template<>
