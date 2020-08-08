@@ -10,9 +10,16 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+class Buffer final {
+ public:
+  Buffer(VkBuffer buffer, VmaAllocation)
+
+ private:
+};
+
 struct Resource final {
   struct Pool final {
-
+    VmaAllocator allocator_;
   };
 };
 
