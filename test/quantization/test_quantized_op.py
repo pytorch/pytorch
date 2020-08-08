@@ -376,13 +376,13 @@ class TestQuantizedOps(TestCase):
                 # In the FP kernel, mean and variance are calculated in floating point.
                 # In the quantized kernel, they are calculated in integer arithmetic.
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do two things to whitelist this failure
+                # expected and acceptable. We do two things to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1055,7 +1055,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
+                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1117,7 +1117,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, X_hat.int_repr(), qX_ref.int_repr()))
+                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
             self.assertEqual(scale, X_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1169,7 +1169,7 @@ class TestQuantizedOps(TestCase):
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
+                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1233,7 +1233,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, X_hat.int_repr(), qX_ref.int_repr()))
+                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
             self.assertEqual(scale, X_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1290,7 +1290,7 @@ class TestQuantizedOps(TestCase):
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name))
+                                       msg=error_message.format(name, X_ref, X_hat.int_repr()))
             self.assertEqual(scale, X_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1416,7 +1416,7 @@ class TestQuantizedOps(TestCase):
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name))
+                                       msg=error_message.format(name, X_ref, X_hat.int_repr()))
             self.assertEqual(scale, X_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1761,33 +1761,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
-
-    @skipIfNoFBGEMM
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=32, max_numel=10**5),
-                       qparams=hu.qparams(dtypes=(torch.quint8, torch.qint8))),
-           Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
-    def test_batch_norm2d(self, X, Y_scale, Y_zero_point):
-        with override_quantized_engine("fbgemm"):
-            X, (scale_x, zero_point_x, dtype_x) = X
-
-            X = torch.from_numpy(X)
-            c = X.shape[1]
-
-            mean = torch.rand(c).float()
-            var = torch.rand(c).float()
-            weight = torch.rand(c).float()
-            bias = torch.rand(c).float()
-            eps = 0.001
-            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-            qy = torch.ops.quantized.batch_norm2d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-
-            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
-                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
-            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
-            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
-
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
@@ -1818,13 +1791,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1905,13 +1878,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allow this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allow a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1969,9 +1942,9 @@ class TestQuantizedOps(TestCase):
                 self.assertTrue(pct_diff_off_by_one < 0.01)
 
     @skipIfNoFBGEMM
-    def test_batch_norm2d_relu(self):
+    def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (4, 5)
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -1995,7 +1968,10 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 4:
+                if len(X.shape) == 3:
+                    qy = torch.ops.quantized.batch_norm1d_relu(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                elif len(X.shape) == 4:
                     qy = torch.ops.quantized.batch_norm2d_relu(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
                 else:
@@ -2017,17 +1993,17 @@ class TestQuantizedOps(TestCase):
                     msg="{} vs {}".format(qy, quantize_ref))
 
     @skipIfNoFBGEMM
-    def test_batch_norm3d(self):
+    def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
+        max_sides = (3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
-        combined = [side_lens, torch_types]
+        combined = [max_sides, side_lens, torch_types]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
-                max_side = 5
-                side_len, torch_type = test_case
+                max_side, side_len, torch_type = test_case
                 Y_zero_point = 1
                 Y_scale = 0.5
 
@@ -2043,8 +2019,15 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                qy = torch.ops.quantized.batch_norm3d(
-                    qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 3:
+                    qy = torch.ops.quantized.batch_norm1d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 4:
+                    qy = torch.ops.quantized.batch_norm2d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+                if len(X.shape) == 5:
+                    qy = torch.ops.quantized.batch_norm3d(
+                        qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
                 float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                          running_mean=mean, running_var=var, training=False,

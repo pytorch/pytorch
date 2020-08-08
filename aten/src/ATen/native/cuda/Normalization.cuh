@@ -185,11 +185,15 @@ __global__ void batch_norm_transform_input_kernel(
   index_t fs = input.size(2);
 
   index_t bstep  = blockDim.y * gridDim.y;
+  stat_accscalar_t a = static_cast<stat_accscalar_t>(gamma * invstd);
+  stat_accscalar_t b = static_cast<stat_accscalar_t>(beta - a * mean);
   for (index_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
     auto o = output[batch][plane];
     auto i = input[batch][plane];
     for (index_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
-      o[feature] = static_cast<input_scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
+      // debug only
+      // o[feature] = static_cast<input_scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
+      o[feature] = static_cast<input_scalar_t>(i[feature] * a + b);
     }
   }
 }
@@ -302,10 +306,10 @@ __global__ void batch_norm_collect_statistics_kernel(
     }
     if (running_var.data() != NULL) {
       // debug only for now
-      // stat_accscalar_t unbiasedVar = var_n / (N - 1);
-      stat_accscalar_t biasedVar = var_n / N;
-      // running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
-      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * biasedVar);
+      stat_accscalar_t unbiasedVar = var_n / (N - 1);
+      // stat_accscalar_t biasedVar = var_n / N;
+      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      // running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * biasedVar);
     }
   }
 
@@ -421,11 +425,11 @@ __global__ void batch_norm_reduce_statistics_kernel(
       running_mean[i] = static_cast<scalar_t>((1 - momentum) * running_mean[i] + momentum * avg);
     }
     // debug only for now
-    // accscalar_t unbiasedVar = var_n / (n - 1);
-    accscalar_t biasedVar = var_n / n;
+    accscalar_t unbiasedVar = var_n / (n - 1);
+    // accscalar_t biasedVar = var_n / n;
     if (running_var.data() != NULL) {
-      // running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
-      running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * biasedVar);
+      running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
+      // running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * biasedVar);
     }
   }
 

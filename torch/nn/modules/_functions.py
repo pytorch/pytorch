@@ -14,11 +14,19 @@ class SyncBatchNorm(Function):
                             device=input.device).fill_(input.numel() // input.size(1))
 
         # calculate mean/invstd for input.
-        mean, invstd = torch.batch_norm_stats(input, eps)
+        use_new = True
+        if use_new:
+            # debug
+            mean = torch.mean(input, dim=[0, 2, 3])
+            meansqr = torch.mean(input * input, dim=[0, 2, 3])
+            var = meansqr - mean * mean
+            invstd = torch.rsqrt(var + eps)
+        else:
+            mean, invstd = torch.batch_norm_stats(input, eps)
 
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)
-        combined = torch.cat([mean, invstd, count], dim=0)
+        combined = torch.cat([mean, invstd, meansqr, count], dim=0)
         # world_size * (2C + 1)
         combined_list = [
             torch.empty_like(combined) for k in range(world_size)
@@ -27,29 +35,45 @@ class SyncBatchNorm(Function):
         dist.all_gather(combined_list, combined, async_op=False)
         combined = torch.stack(combined_list, dim=0)
         # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
-        mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
+        mean_all, invstd_all, meansqr_all, count_all = torch.split(combined, num_channels, dim=1)
 
         size = count_all.view(-1).long().sum()
         if size == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
         # calculate global mean & invstd
-        mean, invstd = torch.batch_norm_gather_stats_with_counts(
-            input,
-            mean_all,
-            invstd_all,
-            running_mean,
-            running_var,
-            momentum,
-            eps,
-            count_all.view(-1)
-        )
+        use_new_combine = True
+        if use_new_combine:
+            mean = torch.sum(mean_all, dim=0) * (1.0 / dist.get_world_size())
+            meansqr = torch.sum(meansqr_all, dim=0) * (1.0 / dist.get_world_size())
+            var = meansqr - mean * mean
+            invstd = torch.rsqrt(var + eps)
+        else:
+            mean, invstd = torch.batch_norm_gather_stats_with_counts(
+                input,
+                mean_all,
+                invstd_all,
+                running_mean,
+                running_var,
+                momentum,
+                eps,
+                count_all.view(-1)
+            )
 
         self.save_for_backward(input, weight, mean, invstd, count_all)
         self.process_group = process_group
 
-        # apply element-wise normalization
-        out = torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
+        use_new_elementwise = False
+        if use_new_elementwise:
+            scale = weight * invstd
+            bias2 = bias - mean * scale
+            scale = scale.reshape(1, -1, 1, 1)
+            bias2 = bias2.reshape(1, -1, 1, 1)
+            out = input * scale + bias2
+        else:
+            # apply element-wise normalization
+            out = torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
+
         return out
 
     @staticmethod

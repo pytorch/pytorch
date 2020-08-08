@@ -312,6 +312,34 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::EnumName(AnyEnumType enum) -> str",
+         [](Stack* stack) {
+           IValue e = pop(stack);
+           push(stack, e.toEnumHolder()->name());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::EnumValue.int(AnyEnumType enum) -> int",
+         [](Stack* stack) {
+           IValue e = pop(stack);
+           push(stack, e.toEnumHolder()->value());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::EnumValue.float(AnyEnumType enum) -> float",
+         [](Stack* stack) {
+           IValue e = pop(stack);
+           push(stack, e.toEnumHolder()->value());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::EnumValue.str(AnyEnumType enum) -> str",
+         [](Stack* stack) {
+           IValue e = pop(stack);
+           push(stack, e.toEnumHolder()->value());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          // note the compiler knows to type TupleIndex more accurately than it
          // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
@@ -525,6 +553,14 @@ RegisterOperators reg(
            IValue x = pop(stack);
            IValue y = pop(stack);
            push(stack, x == y);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::ne.enum(AnyEnumType a, AnyEnumType b) -> bool",
+         [](Stack* stack) {
+           IValue x = pop(stack);
+           IValue y = pop(stack);
+           push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
      Operator(

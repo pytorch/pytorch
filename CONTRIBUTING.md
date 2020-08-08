@@ -205,6 +205,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 
 ## Unit testing
 
+`hypothesis` is required to run the tests, `mypy` is an optional dependency,
+and `pytest` may help run tests more selectively. All these packages can be
+installed with `conda` or `pip`.
+
 PyTorch's testing is located under `test/`. Run the entire test suite with
 
 ```bash

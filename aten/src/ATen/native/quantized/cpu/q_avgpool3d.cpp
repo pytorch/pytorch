@@ -185,7 +185,7 @@ Tensor q_avg_pool3d(
 
 } // namespace
 
-Tensor quantized_avg_pool3d(
+Tensor avg_pool3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -194,7 +194,7 @@ Tensor quantized_avg_pool3d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool3d", [&]() {
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
     output = q_avg_pool3d<scalar_t>(
         input,
         kernel_size,
