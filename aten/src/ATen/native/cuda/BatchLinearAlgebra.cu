@@ -31,6 +31,19 @@ void cublas_LU_batched(int _m, int n, scalar_t** dA_array, int ldda, int* ipiv_a
 template<class scalar_t>
 void cublas_getri_batched(int _m, int n, scalar_t** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, scalar_t** dC_array);
 
+template<class scalar_t>
+static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n);
+
+// heuristic:
+//   cublas_x_batched doesn't work very well for small batchsize
+//   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
+// with use_loop_launch = True, we will loop through all batches, and launch single batch cusolver/cublas kernels
+// (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
+inline static bool use_loop_launch(int batch_size, int matrix_size) {
+  return (batch_size <= 8) || 
+         (/* batch_size > 8 && */ matrix_size >= 512)
+}
+
 template<>
 void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -658,13 +671,21 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 
 template <typename scalar_t>
 static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos) {
+  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
+  const int n = cuda_int_cast(self.size(-2), "self.size(-2)");
+
+  const bool use_loop_launch_ = use_loop_launch(batch_size, n);
+
+  if (use_loop_launch_) {
+    self_inv = at::eye({n}, self.options()).expand_as(self).clone();
+    self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
+    self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
+  }
+
   auto self_data = self.data_ptr<scalar_t>();
   auto self_mat_stride = matrixStride(self);
   auto self_inv_data = self_inv.data_ptr<scalar_t>();
   auto self_inv_mat_stride = matrixStride(self_inv);
-
-  int batch_size = cuda_int_cast(batchCount(self), "batchCount");
-  int n = cuda_int_cast(self.size(-2), "self.size(-2)");
 
   scalar_t** self_array;
   scalar_t** self_inv_array;
@@ -680,29 +701,40 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
 
   Tensor ipiv_array = at::zeros({batch_size * n}, self.options().dtype(at::kInt));
 
-  cublas_LU_batched<scalar_t>(n, n, self_array, n,
-    ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
+  if (use_loop_launch_) {
+    infos = infos.cpu();
+    int* p_ipiv_array = ipiv_array.data_ptr<int>();
+    int* p_infos = infos.data_ptr<int>();
+    for (int64_t i = 0; i < batch_size; i++) {
+      _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array+i*n, p_infos+i, n);
+    }
+  } else {
+    cublas_LU_batched<scalar_t>(n, n, self_array, n,
+      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
 
-  cublas_getri_batched<scalar_t>(n, n, self_array, n,
-    ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
+    cublas_getri_batched<scalar_t>(n, n, self_array, n,
+      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
+  }
+}
+
+template <typename scalar_t>
+inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
+  // self_inv_ptr should already be an identity matrix
+  cusolver_LU<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
 template <typename scalar_t>
 static void apply_single_inverse(const Tensor& self, Tensor& self_inv, int64_t& info) {
-  auto self_data = self.data_ptr<scalar_t>();
   int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-  int info_tmp = 0;
 
   Tensor ipiv = at::empty({n}, self.options().dtype(at::kInt));
-  cusolver_LU<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), &info_tmp);
-  if (info_tmp != 0) {
-    info = info_tmp;
-    return;
-  }
   self_inv = at::eye(n, self.options());
   self_inv.unsafeGetTensorImpl()->set_stride(0, 1); // These two lines set self_inv to column-major
   self_inv.unsafeGetTensorImpl()->set_stride(1, n);
-  cusolver_getrs<scalar_t>(n, n, self_data, n, ipiv.data_ptr<int>(), self_inv.data_ptr<scalar_t>(), n, &info_tmp);
+
+  int info_tmp = 0;
+  _apply_single_inverse_helper<scalar_t>(self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), &info_tmp, n);
   info = info_tmp;
 }
 
