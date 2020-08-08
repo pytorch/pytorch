@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn or torch._C._fft objects.
+# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
 #
 
 # Code tries to stick to the following rules:
@@ -87,6 +87,7 @@ NATIVE_NAMESPACE_MAPPING = {
     "torch": "THPVariableFunctionsModule",
     "torch.nn": "THPNNVariableFunctionsModule",
     "torch.fft": "THPFFTVariableFunctionsModule",
+    "torch.linalg": "THPLinalgVariableFunctionsModule",
 }
 
 def should_generate_python_binding(declaration):
@@ -182,6 +183,30 @@ def gen_py_fft_functions(out, declarations, template_path):
 
     write(out, 'python_fft_functions.cpp', PY_FFT_FUNCTIONS_CPP, env)
 
+def get_py_linalg_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "linalg" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_linalg_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_linalg_functions(out, declarations, template_path):
+    """
+    Generate functions in the "linalg" module.
+    """
+    PY_LINALG_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_linalg_functions.cpp')
+
+    py_linalg_functions = get_py_linalg_functions(declarations)
+
+    env = create_python_bindings(py_linalg_functions, is_python_method=False, module="torch.linalg")
+
+    write(out, 'python_linalg_functions.cpp', PY_LINALG_FUNCTIONS_CPP, env)
+
 
 def get_py_torch_functions(declarations):
     """
@@ -192,6 +217,7 @@ def get_py_torch_functions(declarations):
         return (should_generate_python_binding(declaration) and
                 not is_nn_module_function(declaration) and
                 not is_fft_module_function(declaration) and
+                not is_linalg_module_function(declaration) and
                 is_torch_function(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -1505,6 +1531,9 @@ def is_nn_module_function(declaration):
 
 def is_fft_module_function(declaration):
     return declaration.get('python_module') == 'fft'
+
+def is_linalg_module_function(declaration):
+    return declaration.get('python_module') == 'linalg'
 
 
 def function_namespace(declaration):
