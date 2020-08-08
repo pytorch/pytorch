@@ -151,6 +151,17 @@ Tensor abs(const Tensor& self) {
 }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
+// Absolute, alias for abs
+Tensor& absolute_out(Tensor& result, const Tensor& self) {
+  return at::abs_out(result, self);
+}
+Tensor absolute(const Tensor& self) {
+  return self.abs();
+}
+Tensor& absolute_(Tensor& self) {
+  return self.abs_();
+}
+
 Tensor& angle_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
 }
