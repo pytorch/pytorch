@@ -360,7 +360,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     } else {
       bucket_view.zero_();
     }
-    // The grad is not modified and dosesn't need to be written back.
+    // The grad is not modified and doesn't need to be written back.
     return false;
   });
 }
@@ -1132,6 +1132,11 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr, "register_comm_hook can only be called once.");
+  // TODO(@sinannasir): Single process multiple device mode support for DDP
+  // communication hook. Related to GH Issue #42542.
+  TORCH_CHECK(
+      replicas_.size() == 1,
+      "Communication hook does not support single process multiple device mode.");
 
   comm_hook_ = std::move(iface);
 }
