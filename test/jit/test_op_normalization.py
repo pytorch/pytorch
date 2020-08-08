@@ -9,7 +9,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, op_alias_mappings
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn
-from torch.testing._internal.common_methods_invocations import method_tests, create_input
+from torch.testing._internal.common_methods_invocations import method_tests, create_input, dont_convert
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -26,7 +26,8 @@ def get_defaults(
         skipTestIf=(),
         output_process_fn=lambda x: x,
         kwargs=None):
-    args = tuple(enumerate(args))
+    if not isinstance(args, dont_convert):
+        args = tuple(enumerate(args))
     kwargs = kwargs if kwargs else {}
     return name, self_size, args, kwargs, output_process_fn
 
