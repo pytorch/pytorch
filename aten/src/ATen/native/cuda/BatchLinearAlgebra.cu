@@ -706,7 +706,7 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
     int* p_ipiv_array = ipiv_array.data_ptr<int>();
     int* p_infos = infos.data_ptr<int>();
     for (int64_t i = 0; i < batch_size; i++) {
-      _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array+i*n, p_infos+i, n);
+      _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array + i * n, p_infos + i, n);
     }
   } else {
     cublas_LU_batched<scalar_t>(n, n, self_array, n,
@@ -715,13 +715,6 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
     cublas_getri_batched<scalar_t>(n, n, self_array, n,
       ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
   }
-}
-
-template <typename scalar_t>
-inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
-  // self_inv_ptr should already be an identity matrix
-  cusolver_LU<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
-  cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
 template <typename scalar_t>
@@ -736,6 +729,13 @@ static void apply_single_inverse(const Tensor& self, Tensor& self_inv, int64_t& 
   int info_tmp = 0;
   _apply_single_inverse_helper<scalar_t>(self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), &info_tmp, n);
   info = info_tmp;
+}
+
+template <typename scalar_t>
+inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
+  // self_inv_ptr should already be an identity matrix
+  cusolver_LU<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
