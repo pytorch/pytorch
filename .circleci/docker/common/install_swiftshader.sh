@@ -39,17 +39,19 @@ popd
 
 pushd "$_swiftshader_dir/build"
 
-_cc="$CC"
-_cxx="$CXX"
+#_cc="$CC"
+#_cxx="$CXX"
 
-export CC=/usr/bin/clang
-export CXX=/usr/bin/clang++
-echo "CC=$CC"
-echo "CXX=$CXX"
-/usr/bin/clang --version
-/usr/bin/clang++ --version
+#export CC=/usr/bin/clang
+#export CXX=/usr/bin/clang++
+#echo "CC=$CC"
+#echo "CXX=$CXX"
+#/usr/bin/clang --version
+#/usr/bin/clang++ --version
 
 $_cmake_bin_path .. \
+  -DCMAKE_C_COMPILER=/usr/bin/clang \
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_PARALLEL_LINK_JOBS=1 \
   -DLLVM_USE_LINKER=gold \
@@ -64,8 +66,8 @@ make --jobs=8
 
 ./vk-unittests
 
-export CC="$_cc"
-export CXX="$_cxx"
+#export CC="$_cc"
+#export CXX="$_cxx"
 popd
 
 export VK_ICD_FILENAMES="$_swiftshader_dir/build/Linux/vk_swiftshader_icd.json"
