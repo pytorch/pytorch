@@ -10,7 +10,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
-
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -36,7 +35,7 @@ struct AutoNcclGroup {
 };
 
 // NCCL op mapping
-std::map<ReduceOp, ncclRedOp_t> ncclOp = {
+const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
@@ -69,13 +68,30 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 }
 
 ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
-  if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
-    // For bool tensors, map sum to max, which both represent a bitwise or.
-    // This is to prevent overflow issues with sum, since we use uint8 to
-    // represent a bool (see ncclDataType mapping).
-    return ncclMax;
+  try {
+    if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+      // For bool tensors, map sum to max, which both represent a bitwise or.
+      // This is to prevent overflow issues with sum, since we use uint8 to
+      // represent a bool (see ncclDataType mapping).
+      return ncclMax;
+    }
+    return ncclOp.at(reduceOp);
+  } catch (const std::out_of_range& e) {
+    switch (reduceOp) {
+      case ReduceOp::BAND:
+        throw std::runtime_error("Cannot use ReduceOp.BAND with NCCL");
+        break;
+      case ReduceOp::BOR:
+        throw std::runtime_error("Cannot use ReduceOp.BOR with NCCL");
+        break;
+      case ReduceOp::BXOR:
+        throw std::runtime_error("Cannot use ReduceOp.BXOR with NCCL");
+        break;
+      default:
+        throw std::runtime_error("Unhandled ReduceOp");
+        break;
+    }
   }
-  return ncclOp[reduceOp];
 }
 
 // Get the deviceList String from the list of devices
