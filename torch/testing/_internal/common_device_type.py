@@ -435,8 +435,36 @@ def largeCUDATensorTest(size):
     return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
 
 
+def _has_sufficient_memory(device, size):
+    if device.startswith('cuda'):
+        return (torch.cuda.is_available() and
+                torch.cuda.get_device_properties(0).total_memory >= size)
+    if device == 'xla':
+        raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
+
+    if device != 'cpu':
+        raise unittest.SkipTest('Unknown device type')
+
+    # CPU
+    if not HAS_PSUTIL:
+        raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
+
+    # The sanitizers have significant memory overheads
+    if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+        effective_size = size * 10
+    else:
+        effective_size = size
+
+    if psutil.virtual_memory().available < effective_size:
+        gc.collect()
+    return psutil.virtual_memory().available >= effective_size
+
+
 def largeTensorTest(size):
-    """Skip test if the device has insufficient memory to run the test"""
+    """Skip test if the device has insufficient memory to run the test
+
+    size may be a number of bytes, a string of the form "N GB", or a callable
+    """
     if isinstance(size, str):
         assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
         size = 1024 ** 3 * int(size[:-2])
@@ -444,24 +472,8 @@ def largeTensorTest(size):
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
-            if self.device_type == 'cuda':
-                valid = (torch.cuda.is_available() and
-                         torch.cuda.get_device_properties(0).total_memory >= size)
-            else:
-                if not HAS_PSUTIL:
-                    raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
-
-                # The sanitizers have significant memory overheads
-                if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
-                    effective_size = size * 10
-                else:
-                    effective_size = size
-
-                if psutil.virtual_memory().available < effective_size:
-                    gc.collect()
-                valid = psutil.virtual_memory().available >= effective_size
-
-            if not valid:
+            size_bytes = size(self, *args, **kwargs) if callable(size) else size
+            if not _has_sufficient_memory(self.device_type, size_bytes):
                 raise unittest.SkipTest('Insufficient {} memory'.format(self.device_type))
 
             return fn(self, *args, **kwargs)
