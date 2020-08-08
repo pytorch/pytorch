@@ -1077,7 +1077,9 @@ def create_generic(top_env, declarations):
 
     def process_native(option):
         # type: (FunctionOption) -> Optional[OutputDeclaration]
-        assert option['python_module'] == '' or option['python_module'] == 'nn' or option['python_module'] == 'fft', \
+        valid_modules = {'nn', 'fft', 'linalg'}
+        assert (option['python_module'] == '' or
+                option['python_module'] in valid_modules), \
             "Found python_module of {} for decl {}, but only \'\' string, \'nn\' and \'fft\' are supported".format(
                 option['python_module'], option['name'])
         use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'

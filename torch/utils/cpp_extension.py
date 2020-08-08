@@ -129,7 +129,10 @@ with compiling PyTorch from source.
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
-ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip is not None else None
+ROCM_VERSION = None
+if torch.version.hip is not None:
+    ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -259,8 +262,8 @@ def check_compiler_abi_compatibility(compiler):
     try:
         if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
-            version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = version.decode().strip().split('.')
+            versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
+            version = versionstr.decode().strip().split('.')
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
@@ -316,7 +319,7 @@ class BuildExtension(build_ext, object):
         Returns a subclass with alternative constructor that extends any original keyword
         arguments to the original constructor with the given options.
         '''
-        class cls_with_options(cls):
+        class cls_with_options(cls):  # type: ignore
             def __init__(self, *args, **kwargs):
                 kwargs.update(options)
                 super().__init__(*args, **kwargs)
@@ -613,7 +616,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
-            from distutils.spawn import _nt_quote_args
+            from distutils.spawn import _nt_quote_args  # type: ignore
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
             if with_cuda:
@@ -786,6 +789,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('torch_cpu')
     libraries.append('torch_python')
     if IS_HIP_EXTENSION:
+        assert ROCM_VERSION is not None
         libraries.append('amdhip64' if ROCM_VERSION >= (3, 5) else 'hip_hcc')
         libraries.append('c10_hip')
         libraries.append('torch_hip')
@@ -1352,6 +1356,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             if CUDNN_HOME is not None:
                 extra_ldflags.append('-L{}'.format(os.path.join(CUDNN_HOME, 'lib64')))
         elif IS_HIP_EXTENSION:
+            assert ROCM_VERSION is not None
             extra_ldflags.append('-L{}'.format(_join_rocm_home('lib')))
             extra_ldflags.append('-lamdhip64' if ROCM_VERSION >= (3, 5) else '-lhip_hcc')
     return extra_ldflags
@@ -1397,20 +1402,20 @@ def _get_cuda_arch_flags(cflags=None):
     # First check for an env var (same as used by the main setup.py)
     # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
-    arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+    _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
     # If not given, determine what's needed for the GPU that can be found
-    if not arch_list:
+    if not _arch_list:
         capability = torch.cuda.get_device_capability()
         arch_list = ['{}.{}'.format(capability[0], capability[1])]
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
-        arch_list = arch_list.replace(' ', ';')
+        _arch_list = _arch_list.replace(' ', ';')
         # Expand named arches
         for named_arch, archval in named_arches.items():
-            arch_list = arch_list.replace(named_arch, archval)
+            _arch_list = _arch_list.replace(named_arch, archval)
 
-        arch_list = arch_list.split(';')
+        arch_list = _arch_list.split(';')
 
     flags = []
     for arch in arch_list:
@@ -1528,8 +1533,10 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
         message = error_prefix
-        if hasattr(error, 'output') and error.output:
-            message += ": {}".format(error.output.decode())
+        # `error` is a CalledProcessError (which has an `ouput`) attribute, but
+        # mypy thinks it's Optional[BaseException] and doesn't narrow
+        if hasattr(error, 'output') and error.output:  # type: ignore
+            message += ": {}".format(error.output.decode())  # type: ignore
         raise RuntimeError(message)
 
 
@@ -1580,7 +1587,7 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
-        from distutils.spawn import _nt_quote_args
+        from distutils.spawn import _nt_quote_args  # type: ignore
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags

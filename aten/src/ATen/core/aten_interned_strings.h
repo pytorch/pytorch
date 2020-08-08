@@ -713,6 +713,9 @@ _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
