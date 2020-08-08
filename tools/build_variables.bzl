@@ -18,6 +18,7 @@ GENERATED_CPP = [
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
+    "autograd/generated/python_linalg_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -398,6 +399,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/modules/pooling.cpp",
     "torch/csrc/api/src/nn/modules/rnn.cpp",
     "torch/csrc/api/src/nn/modules/upsampling.cpp",
+    "torch/csrc/api/src/nn/modules/transformer.cpp",
     "torch/csrc/api/src/nn/modules/container/functional.cpp",
     "torch/csrc/api/src/nn/options/activation.cpp",
     "torch/csrc/api/src/nn/options/adaptive.cpp",
@@ -412,6 +414,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/options/pooling.cpp",
     "torch/csrc/api/src/nn/options/rnn.cpp",
     "torch/csrc/api/src/nn/options/vision.cpp",
+    "torch/csrc/api/src/nn/options/transformer.cpp",
     "torch/csrc/api/src/optim/adagrad.cpp",
     "torch/csrc/api/src/optim/adam.cpp",
     "torch/csrc/api/src/optim/adamw.cpp",
@@ -544,6 +547,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_functions.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
+        "autograd/generated/python_linalg_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]

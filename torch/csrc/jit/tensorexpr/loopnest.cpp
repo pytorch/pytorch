@@ -568,9 +568,16 @@ class RandomInliner : public FunctionInliner {
       b = new Block({s});
     }
 
+    // Make sure theres something in the block, will be simplified out later.
+    if (b->empty()) {
+      b->append_stmt(new Block({}));
+    }
+
+    Stmt* first = b->stmts().front();
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
+      b->insert_stmt_before(
+          new Let(v, new Intrinsics(kRand, v->dtype())), first);
     }
     random_vars_.clear();
     return b;
@@ -1084,7 +1091,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block(inner->body()->varBindings(), {});
+  Block* body = new Block({});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
@@ -1191,7 +1198,7 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
           {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
     }
   }
-  *unrolled = new Block(f->body()->varBindings(), unrolled_stmts);
+  *unrolled = new Block(unrolled_stmts);
   *unrolled = IRSimplifier::simplify(*unrolled);
 
   p->replace_stmt(f, *unrolled);
