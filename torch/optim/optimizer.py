@@ -176,7 +176,7 @@ class Optimizer(object):
                     p.grad.zero_()
 
     @torch.no_grad()
-    def step(self, closure):
+    def step(self, closure=None):
         r"""Performs a single optimization step (parameter update).
 
         Arguments:
