@@ -1,11 +1,13 @@
 import unittest
 import torch
+import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
+from torch.testing._internal.common_quantized import override_quantized_engine
 
 FileCheck = torch._C.FileCheck
 
@@ -155,6 +157,52 @@ class TestOptimizer(unittest.TestCase):
         preserveThis = getattr(opt_m, "preserveThis", None)
         self.assertNotEqual(preserveThis, None)
 
+    @unittest.skipUnless(torch.backends.xnnpack.enabled,
+                         " XNNPACK must be enabled for these tests."
+                         " Please build with USE_XNNPACK=1.")
+    def test_quantized_conv_no_asan_failures(self):
+        # There were ASAN failures when fold_conv_bn was run on
+        # already quantized conv modules. Verifying that this does
+        # not happen again.
+
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+
+        class Child(nn.Module):
+            def __init__(self):
+                super(Child, self).__init__()
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv2(x)
+                return x
+
+        class Parent(nn.Module):
+            def __init__(self):
+                super(Parent, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.child = Child()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.child(x)
+                x = self.dequant(x)
+                return x
+
+        with override_quantized_engine('qnnpack'):
+            model = Parent()
+            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            torch.quantization.prepare(model, inplace=True)
+            model(torch.randn(4, 1, 4, 4))
+            torch.quantization.convert(model, inplace=True)
+            model = torch.jit.script(model)
+            # this line should not have ASAN failures
+            model_optim = optimize_for_mobile(model)
+            self.assertFalse(hasattr(model_optim.conv1, "bias"))
+            self.assertFalse(hasattr(model_optim.child.conv2, "bias"))
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
