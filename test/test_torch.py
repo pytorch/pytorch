@@ -18390,10 +18390,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
                     self.compare_with_numpy(torch.argmax, np.argmax, x, device=None, dtype=None)
                     self.compare_with_numpy(torch.argmin, np.argmin, x, device=None, dtype=None)
+
+                    # Verify indices returned by max and min.
                     if dtype != torch.half:
                         rand_dim = random.randint(0, ndims - 1)
-                        self.compare_with_numpy(lambda x: torch.max(x, dim=rand_dim)[1], lambda x: np.argmax(x, axis=rand_dim), x, device=None, dtype=None)
-                        self.compare_with_numpy(lambda x: torch.min(x, dim=rand_dim)[1], lambda x: np.argmin(x, axis=rand_dim), x, device=None, dtype=None)
+                        self.compare_with_numpy(lambda x: torch.max(x, dim=rand_dim)[1],
+                                                lambda x: np.argmax(x, axis=rand_dim), x, device=None, dtype=None)
+                        self.compare_with_numpy(lambda x: torch.min(x, dim=rand_dim)[1],
+                                                lambda x: np.argmin(x, axis=rand_dim), x, device=None, dtype=None)
 
         def verify_against_numpy(t):
             # Argmax
@@ -18403,6 +18407,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Non-contiguous input
             self.compare_with_numpy(torch_fn, np_fn, t.T)
 
+            # Verify indices returned by max.
             if dtype != torch.half:
                 self.compare_with_numpy(lambda x: torch.max(x, dim=1)[1], np_fn, x, device=None, dtype=None)
                 self.compare_with_numpy(lambda x: torch.max(x, dim=1)[1], np_fn, x.T, device=None, dtype=None)
@@ -18414,6 +18419,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Non-contiguous input
             self.compare_with_numpy(torch_fn, np_fn, t.T)
 
+            # Verify indices returned by min.
             if dtype != torch.half:
                 self.compare_with_numpy(lambda x: torch.min(x, dim=1)[1], np_fn, x, device=None, dtype=None)
                 self.compare_with_numpy(lambda x: torch.min(x, dim=1)[1], np_fn, x.T, device=None, dtype=None)
