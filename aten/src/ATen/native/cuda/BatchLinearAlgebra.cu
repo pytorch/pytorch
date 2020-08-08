@@ -34,16 +34,6 @@ void cublas_getri_batched(int _m, int n, scalar_t** dA_array, int ldda, int* ipi
 template<class scalar_t>
 static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n);
 
-// heuristic:
-//   cublas_x_batched doesn't work very well for small batchsize
-//   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
-// with use_loop_launch = True, we will loop through all batches, and launch single batch cusolver/cublas kernels
-// (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
-inline static bool use_loop_launch(int batch_size, int matrix_size) {
-  return (batch_size <= 8) || \
-         (/* batch_size > 8 && */ matrix_size >= 512);
-}
-
 template<>
 void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
