@@ -158,6 +158,13 @@ def register_module_backward_hook(
     return handle
 
 
+# Trick mypy into not applying contravariance rules to inputs by defining
+# forward as a value, rather than a function.  See also
+# https://github.com/python/mypy/issues/8795
+def _forward_unimplemented(self, *input: Any) -> None:
+    raise NotImplementedError
+
+
 class Module:
     r"""Base class for all neural network modules.
 
@@ -219,12 +226,6 @@ class Module:
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-
-    # Trick mypy into not applying contravariance rules to inputs by defining
-    # forward as a value, rather than a function.  See also
-    # https://github.com/python/mypy/issues/8795
-    def _forward_unimplemented(self, *input: Any) -> None:
-        raise NotImplementedError
 
     r"""Defines the computation performed at every call.
 
