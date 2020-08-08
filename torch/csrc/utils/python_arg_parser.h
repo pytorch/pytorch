@@ -60,6 +60,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -97,16 +98,21 @@ struct PythonArgParser {
 
   // meant only for `torch` functions.
   template<int N>
+  inline PythonArgs parse(PyObject* self, PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  inline PythonArgs parse(PyObject* self, ParsedArgs<0>& dst);
 
   // Formatted strings of non-hidden signatures
   std::vector<std::string> get_signatures() const;
 
 private:
   [[noreturn]]
-  void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
   void check_deprecated(const FunctionSignature & signature);
-  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  PythonArgs raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -117,7 +123,7 @@ private:
 struct PYBIND11_EXPORT FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+  bool parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
 
   std::string toString() const;
 
@@ -130,6 +136,7 @@ struct PYBIND11_EXPORT FunctionSignature {
   int index;
   bool hidden;
   bool deprecated;
+  bool disable_torch_function;
 };
 
 struct PythonArgs {
@@ -227,12 +234,21 @@ struct FunctionParameter {
 };
 
 template<int N>
-inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+inline PythonArgs PythonArgParser::parse(PyObject* self, PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
     throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
-  return raw_parse(args, kwargs, dst.args);
+  return raw_parse(self, args, kwargs, dst.args);
+}
+
+template<int N>
+inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+  return parse(nullptr, args, kwargs, dst);
+}
+
+inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
+  return parse(self, nullptr, nullptr, dst);
 }
 
 inline bool PythonArgs::has_torch_function(){
@@ -683,10 +699,10 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 
 static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
-  PyTypeObject *tp = Py_TYPE(obj);
   if (THPVariable_CheckExact(obj)) {
       return py::object();
   }
+  PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
     return py::object();
   }
@@ -704,8 +720,11 @@ static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
  */
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
+  if (!torch_function_enabled()) {
+    return false;
+  }
   py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method.ptr() != nullptr){
+  if(method.ptr() != nullptr && method.ptr() != disabled_torch_function_impl()){
     return true;
   }
   return false;
@@ -751,7 +770,19 @@ static auto check_has_torch_function(PyObject* obj) -> bool
  * 'torch_api' is a reference to a python torch API namespace.
  *
  */
+// Used for Tensor methods with arguments.
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
+// Used fpr functions.
 auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+
+// Used for functions that accept no keyword arguments and have no argument parsing
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
+
+// Used for getters of Tensor properties
+auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;
+
+// Used for setters of Tensor properties.
+auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int;
 
 } // namespace torch
