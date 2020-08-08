@@ -51,38 +51,6 @@ class AdamW(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                # Perform stepweight decay
-                p.mul_(1 - group['lr'] * group['weight_decay'])
-
-                # Perform optimization step
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('AdamW does not support sparse gradients')
-
-                state = self.state[p]
-                update = self.get_update(p, state, group)
-                p.add_(-group['lr'], update)
-
-        return loss
-
     def get_update(self, p, state, group):
         amsgrad = group['amsgrad']
 
@@ -116,4 +84,5 @@ class AdamW(Optimizer):
         else:
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
 
-        return (exp_avg / bias_correction1) / denom
+        regular_update = (exp_avg / bias_correction1) / denom
+        return regular_update + group['weight_decay'] * p

@@ -175,6 +175,7 @@ class Optimizer(object):
                         p.grad.requires_grad_(False)
                     p.grad.zero_()
 
+    @torch.no_grad()
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
 
@@ -186,7 +187,34 @@ class Optimizer(object):
             Unless otherwise specified, this function should not modify the
             ``.grad`` field of the parameters.
         """
-        raise NotImplementedError
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+
+                if p.grad.is_sparse:
+                    update = self.get_sparse_update(p, state, group)
+                else:
+                    update = self.get_update(p, state, group)
+
+                p.add_(-group['lr'], update)
+
+        return loss
+
+    def get_update(self, par, state, group):
+        msg = "{} does not implement update for dense gradients"
+        raise NotImplementedError(msg.format(self.__class__.__name__))
+
+    def get_sparse_update(self, par, state, group):
+        msg = "{} does not implement update for sparse gradients"
+        raise NotImplementedError(msg.format(self.__class__.__name__))
 
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.

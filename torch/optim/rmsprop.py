@@ -52,32 +52,6 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
 
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('RMSprop does not support sparse gradients')
-                state = self.state[p]
-                update = self.get_update(p, state, group)
-                p.add_(update, alpha=-group['lr'])
-
-        return loss
-
     def get_update(self, p, state, group):
         # State initialization
         if len(state) == 0:

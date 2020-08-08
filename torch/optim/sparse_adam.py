@@ -34,34 +34,7 @@ class SparseAdam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps)
         super(SparseAdam, self).__init__(params, defaults)
 
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if not grad.is_sparse:
-                    raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
-
-                state = self.state[p]
-                update = self.get_update(p, state, group)
-                p.add_(update)
-
-        return loss
-
-    def get_update(self, p, state, group):
+    def get_sparse_update(self, p, state, group):
         # State initialization
         if len(state) == 0:
             state['step'] = 0
