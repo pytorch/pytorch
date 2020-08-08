@@ -123,7 +123,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size)
-        if self.is_script_test_enabled:
+        if self.is_script_test_enabled and self.use_new_jit_passes:
             script_model = torch.jit.script(model)
             _run_test(script_model)
 

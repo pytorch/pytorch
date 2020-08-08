@@ -823,17 +823,18 @@ class TestUtilityFuns(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x):
                 x = x / 2
-                return x.zero_ + x.fill_(2)
+                return x.zero_() + x.fill_(2)
 
         model = Module()
+        model.eval()
         x = torch.randn(3, 4, 5, 5)
         pt_output = model(x)
         f = io.BytesIO()
-        torch.onnx.export(model, (x,), f)
+        torch.onnx._export(model, (x,), f, use_new_jit_passes=True)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
         ort_output = ort_sess.run(None, ort_inputs)
-        np.testing.assert_allclose(pt_output, ort_output, atol=1e-7, rtol=1e-5)
+        np.testing.assert_allclose(pt_output, ort_output[0], atol=1e-7, rtol=1e-5)
 
     def test_remove_mutation_on_block_inputs(self):
         class Module(torch.nn.Module):
@@ -841,14 +842,15 @@ class TestUtilityFuns(TestCase):
                 return x.add_(1) / x.mul_(2)
 
         model = Module()
+        model.eval()
         x = torch.randn(3, 4, 5, 5)
         pt_output = model(x)
         f = io.BytesIO()
-        torch.onnx.export(model, (x,), f)
+        torch.onnx._export(model, (x,), f, use_new_jit_passes=True)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
         ort_output = ort_sess.run(None, ort_inputs)
-        np.testing.assert_allclose(pt_output, ort_output, atol=1e-7, rtol=1e-5)
+        np.testing.assert_allclose(pt_output, ort_output[0], atol=1e-7, rtol=1e-5)
 
 
 # opset 10 tests
