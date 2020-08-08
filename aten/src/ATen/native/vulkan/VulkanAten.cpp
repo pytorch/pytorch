@@ -248,8 +248,8 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor convolution(
-    const at::Tensor& input, // Vulkan
-    const at::Tensor& weight, // CPU
+    const Tensor& input, // Vulkan
+    const Tensor& weight, // CPU
     const c10::optional<Tensor>& bias, // CPU
     const IntArrayRef stride,
     const IntArrayRef padding,
