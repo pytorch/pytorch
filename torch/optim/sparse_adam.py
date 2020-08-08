@@ -56,51 +56,49 @@ class SparseAdam(Optimizer):
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
 
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                state['step'] += 1
-
-                grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                grad_indices = grad._indices()
-                grad_values = grad._values()
-                size = grad.size()
-
-                def make_sparse(values):
-                    constructor = grad.new
-                    if grad_indices.dim() == 0 or values.dim() == 0:
-                        return constructor().resize_as_(grad)
-                    return constructor(grad_indices, values, size)
-
-                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                beta1, beta2 = group['betas']
-
-                # Decay the first and second moment running average coefficient
-                #      old <- b * old + (1 - b) * new
-                # <==> old += (1 - b) * (new - old)
-                old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
-                exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
-                exp_avg.add_(make_sparse(exp_avg_update_values))
-                old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
-                exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
-                exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
-
-                # Dense addition again is intended, avoiding another sparse_mask
-                numer = exp_avg_update_values.add_(old_exp_avg_values)
-                exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
-                denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
-                del exp_avg_update_values, exp_avg_sq_update_values
-
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
-                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
-
-                p.add_(make_sparse(-step_size * numer.div_(denom)))
+                update = self.get_update(p, state, group)
+                p.add_(update)
 
         return loss
+
+    def get_update(self, p, state, group):
+        # State initialization
+        if len(state) == 0:
+            state['step'] = 0
+            # Exponential moving average of gradient values
+            state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+            # Exponential moving average of squared gradient values
+            state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+        state['step'] += 1
+        grad = p.grad.coalesce()  # the update is non-linear so indices must be unique
+        grad_indices = grad._indices()
+        grad_values = grad._values()
+        size = grad.size()
+
+        def make_sparse(values):
+            constructor = grad.new
+            if grad_indices.dim() == 0 or values.dim() == 0:
+                return constructor().resize_as_(grad)
+            return constructor(grad_indices, values, size)
+
+        exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+        beta1, beta2 = group['betas']
+        # Decay the first and second moment running average coefficient
+        #      old <- b * old + (1 - b) * new
+        # <==> old += (1 - b) * (new - old)
+        old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
+        exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
+        exp_avg.add_(make_sparse(exp_avg_update_values))
+        old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
+        exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
+        exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
+        # Dense addition again is intended, avoiding another sparse_mask
+        numer = exp_avg_update_values.add_(old_exp_avg_values)
+        exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
+        denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
+        del exp_avg_update_values, exp_avg_sq_update_values
+        bias_correction1 = 1 - beta1 ** state['step']
+        bias_correction2 = 1 - beta2 ** state['step']
+        step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+        return make_sparse(-step_size * numer.div_(denom))
