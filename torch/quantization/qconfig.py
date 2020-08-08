@@ -2,6 +2,8 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
+from .fake_quantize_backward import _FakeQuantizeWithBackward
+import torch
 import torch.nn as nn
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -76,6 +78,7 @@ default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
 
+
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
@@ -104,3 +107,28 @@ def get_default_qat_qconfig(backend='fbgemm'):
     else:
         qconfig = default_qat_qconfig
     return qconfig
+
+def _get_default_qat_qconfig_backward(quant_forward, quant_backward):
+    fake_quant = _FakeQuantizeWithBackward.with_args(
+        observer=MovingAverageMinMaxObserver,
+        quant_min=0,
+        quant_max=255,
+        dtype=torch.quint8,
+        qscheme=torch.per_tensor_affine,
+        quant_forward=quant_forward,
+        quant_backward=quant_backward,
+        reduce_range=True,
+    )
+
+    weight_fake_quant = _FakeQuantizeWithBackward.with_args(
+        observer=MovingAverageMinMaxObserver,
+        quant_min=-128,
+        quant_max=127,
+        dtype=torch.qint8,
+        qscheme=torch.per_tensor_symmetric,
+        quant_forward=quant_forward,
+        quant_backward=quant_backward,
+        reduce_range=False,
+    )
+
+    return QConfig(activation=fake_quant, weight=weight_fake_quant)

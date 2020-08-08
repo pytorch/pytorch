@@ -69,5 +69,8 @@ from quantization.test_backward_compatibility import TestSerialization  # noqa: 
 # Equalization
 from quantization.test_equalize import TestEqualizeEager  # noqa: F401
 
+# Experimental QAT backward tests
+from quantization.test_qat_backward import TestQATBackward  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()
