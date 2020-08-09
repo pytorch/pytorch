@@ -74,9 +74,6 @@ Tensor TransformerEncoderLayerImpl::forward(
 }
 
 
-
-// ============================================================================
-
   // ========================TransformerDecoderLayerImpl=========================
   TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
     const TransformerDecoderLayerOptions& options_ )
@@ -144,20 +141,26 @@ Tensor TransformerEncoderLayerImpl::forward(
   }
 
   void TransformerDecoderLayerImpl::reset_parameters() {
-    self_attn->reset();
-    dropout1->reset();
-    norm1->reset();
-    multihead_attn->reset();
-    dropout2->reset();
-    norm2->reset();
-    linear1->reset();
-    dropout->reset();
-    linear2->reset();
-    dropout3->reset();
-    norm3->reset();
+
+    // TODO xinyu: standardrize reset_parameters virtual funcs
+    self_attn->_reset_parameters();
+    // dropout1->reset_parameters();
+    norm1->reset_parameters();
+    // TODO xinyu: standardrize reset_parameters virtual funcs
+    multihead_attn->_reset_parameters();
+    // dropout2->reset_parameters();
+    norm2->reset_parameters();
+    linear1->reset_parameters();
+    // dropout->reset_paramteres();
+    linear2->reset_parameters();
+    // dropout3->reset_paramteres();
+    norm3->reset_parameters();
   }
 
-  void TransformerDecoderLayerImpl::pretty_print(std::ostream& stream) const {
+  //By default contained sub-modules are printed.
+  //TODO: The pretty print needs to be implemented along with python
+  //implementation, currently using the default print.
+    void TransformerDecoderLayerImpl::pretty_print(std::ostream& stream) const {
     // stream << "(d_model=" << options.d_model()
     //    << ", nhead=" << options.nhead()
     //    << ", dim_feedforward=" << options.dim_feedforward()

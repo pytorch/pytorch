@@ -318,11 +318,8 @@ TEST_F(TransformerTest, TransformerDecoderLayer){
   transformer_decoder_layer_test_helper(false);
 }
 
-TEST_F(TransformerTest, TransformerDecoderLayerCUDA){
-  // Check to prevent execution on non CUDA devices
-  if (torch::cuda::is_available()){
+TEST_F(TransformerTest, TransformerDecoderLayer_CUDA){
     transformer_decoder_layer_test_helper(true);
-  }
 }
 
 void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
@@ -437,12 +434,8 @@ TEST_F(TransformerTest, TransformerDecoderLayer_gelu) {
   transformer_decoder_layer_test_helper_gelu(false);
 }
 
-TEST_F(TransformerTest, TransformerDecoderLayer_geluCUDA) {
-  // Check to prevent execution on non CUDA devices
-  if (torch::cuda::is_available()){
+TEST_F(TransformerTest, TransformerDecoderLayer_gelu_CUDA) {
     transformer_decoder_layer_test_helper_gelu(true);
-  }
-
 }
 
 TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
