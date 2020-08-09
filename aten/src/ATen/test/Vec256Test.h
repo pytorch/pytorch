@@ -28,6 +28,17 @@ CACHE_ALIGN #define
     return __VA_ARGS__(std::forward<decltype(args)>(args)...); \
   }
 
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) && (defined(__GNUC__) || defined(__GNUG__))
+#undef CHECK_DEQUANT_WITH_LOW_PRECISION 
+#define CHECK_WITH_FMA 1
+#elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
+#undef CHECK_DEQUANT_WITH_LOW_PRECISION
+#undef CHECK_WITH_FMA
+#else
+#define CHECK_DEQUANT_WITH_LOW_PRECISION 1
+#undef CHECK_WITH_FMA
+#endif
+
 template<typename T>
 using Complex = typename c10::complex<T>;
 
@@ -125,9 +136,9 @@ struct DomainRange {
 };
 
 template <typename T>
-struct SpecArg {
+struct CustomCheck {
     std::vector<T> Args;
-    T expected;
+    T expectedResult;
 };
 
 template <typename T>
@@ -135,8 +146,8 @@ struct CheckWithinDomains {
     // each argument takes domain Range
     std::vector<DomainRange<T>> ArgsDomain;
     // check with error tolerance
-    bool CheckWithAcceptance = false;
-    T AcceptedError = (T)0;
+    bool CheckWithTolerance = false;
+    T ToleranceError = (T)0;
 };
 
 template <typename T>
@@ -155,8 +166,8 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
     else {
         stream << "default range";
     }
-    if (dmn.CheckWithAcceptance) {
-        stream << "\nError epsilon: " << dmn.AcceptedError;
+    if (dmn.CheckWithTolerance) {
+        stream << "\nError tolerance: " << dmn.ToleranceError;
     }
     return stream;
 }
@@ -197,21 +208,37 @@ std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_nan(T x,
 template<class T> struct is_complex : std::false_type {};
 template<class T> struct is_complex<Complex<T>> : std::true_type {};
 
+
+template<typename T>
+inline T
+safe_fpt_division(T f1, T f2)
+{
+    //code was taken from boost
+    // Avoid overflow.
+    if (f2 < static_cast<T>(1) && f1 > f2 * std::numeric_limits<T>::max())
+        return std::numeric_limits<T>::max();
+
+    // Avoid underflow.
+    if (f1 == static_cast<T>(0) ||
+        f2 > static_cast<T>(1) && f1 < f2 * std::numeric_limits<T>::min())
+        return static_cast<T>(0);
+
+    return f1 / f2;
+}
+
 template<class T>
-bool nearlyEqual(T a, T b, T max_diff) {
+bool nearlyEqual(T a, T b, T tolerance) {
     if (isinf(a) && isinf(b)) return true;
     T absA = std::abs(a);
     T absB = std::abs(b);
     T diff = std::abs(a - b);
 
-    if (diff <= max_diff)
+    if (diff <= tolerance)
         return true;
+    T d1 = safe_fpt_division(diff, absB);
+    T d2 = safe_fpt_division(diff, absA);
 
-    T largest = std::max(absA, absB);
-
-    if (diff <= largest * max_diff)
-        return true;
-    return false;
+    return   (d1 <= tolerance || d2 <= tolerance);
 }
 
 
@@ -673,29 +700,32 @@ template <typename T, typename U = UvalueType<T>>
 class TestingCase {
 public:
     friend class TestCaseBuilder<T, U>;
+
     static TestCaseBuilder<T, U> getBuilder() { return TestCaseBuilder<T, U>{}; }
 
-    bool checkDefaultSpecials() const { return defaultSpecials; }
+    bool checkSpecialValues() const {
+        //this will be used to check nan, infs, and other special cases
+        return specialCheck;
+    }
 
-    bool checkNansAndInfinities() const { return test_nan_inf; }
 
     size_t getTrialCount() const { return trials; }
 
     bool isBitwise() const { return bitwise; }
+
     const std::vector<CheckWithinDomains<U>>& getDomains() const {
         return domains;
     }
 
-    const std::vector<SpecArg<T>>& getCustomSpecials() const {
-        return customSpecialCheck;
+    const std::vector<CustomCheck<T>>& getCustomChecks() const {
+        return customCheck;
     }
 
 private:
     // if domains is empty we will test default
     std::vector<CheckWithinDomains<U>> domains;
-    bool defaultSpecials = false;
-    std::vector<SpecArg<T>> customSpecialCheck;
-    bool test_nan_inf = false;
+    std::vector<CustomCheck<T>> customCheck;
+    bool specialCheck = false;
     bool bitwise = false;  // test bitlevel
     size_t trials = 0;
 };
@@ -703,56 +733,49 @@ private:
 template <typename T, typename U >
 class TestCaseBuilder {
 private:
-    TestingCase<T, U> t_case;
+    TestingCase<T, U> _case;
 
 public:
-    TestCaseBuilder<T, U>& set(bool bitwise, bool allow_specials,
-        bool test_nan_inf) {
-        t_case.bitwise = bitwise;
-        t_case.test_nan_inf = test_nan_inf;
-        t_case.defaultSpecials = allow_specials;
+    TestCaseBuilder<T, U>& set(bool bitwise, bool checkSpecialValues) {
+        _case.bitwise = bitwise;
+        _case.specialCheck = checkSpecialValues;
         return *this;
     }
 
     TestCaseBuilder<T, U>& setTrialCount(size_t trial_count) {
-        t_case.trials = trial_count;
+        _case.trials = trial_count;
         return *this;
     }
 
     TestCaseBuilder<T, U>& addDomain(const CheckWithinDomains<U>& domainCheck) {
-        t_case.domains.emplace_back(domainCheck);
+        _case.domains.emplace_back(domainCheck);
         return *this;
     }
 
-    TestCaseBuilder<T, U>& addSpecial(const SpecArg<T>& specialArg) {
-        t_case.customSpecialCheck.emplace_back(specialArg);
+    TestCaseBuilder<T, U>& addCustom(const CustomCheck<T>& customArgs) {
+        _case.customCheck.emplace_back(customArgs);
         return *this;
     }
 
-    TestCaseBuilder<T, U>& testNansAndInfinities() {
-        t_case.test_nan_inf = true & std::is_floating_point<T>::value;
-        return *this;
-    }
-
-    TestCaseBuilder<T, U>& checkDefaultSpecials() {
-        t_case.defaultSpecials = true;
+    TestCaseBuilder<T, U>& checkSpecialValues() {
+        _case.specialCheck = true;
         return *this;
     }
 
     TestCaseBuilder<T, U>& compareBitwise() {
-        t_case.bitwise = true;
+        _case.bitwise = true;
         return *this;
     }
 
-    operator TestingCase<T, U> && () { return std::move(t_case); }
+    operator TestingCase<T, U> && () { return std::move(_case); }
 };
 
 
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void test_unary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, const TestingCase<T>& test_case, Filter filter = {}) {
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
 
     using vec_type = T;
     using VT = ValueType<T>;
@@ -760,13 +783,13 @@ void test_unary(
     constexpr int el_count = vec_type::size();
     CACHE_ALIGN VT vals[el_count];
     CACHE_ALIGN VT expected[el_count];
-    bool bitwise = test_case.isBitwise();
+    bool bitwise = testCase.isBitwise();
 
     UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
-    auto domains = test_case.getDomains();
+    auto domains = testCase.getDomains();
     auto domains_size = domains.size();
-    auto test_trials = test_case.getTrialCount();
+    auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     for (const CheckWithinDomains<UVT>& dmn : domains) {
 
@@ -781,33 +804,33 @@ void test_unary(
                 vals[k] = generator.get();
                 call_filter(filter, vals[k]);
                 //map operator
-                expected[k] = expected_f(vals[k]);
+                expected[k] = expectedFunction(vals[k]);
             }
             // test
             auto input = vec_type::loadu(vals);
-            auto actual = actual_f(input);
+            auto actual = actualFunction(input);
             auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [test_name, input, actual, vec_expected](int i) {
+            std::function<std::string(int i)> detail = [testName, input, actual, vec_expected](int i) {
                 std::stringstream stream;
-                stream << test_name << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
+                stream << testName << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
                 return stream.str();
             };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithAcceptance, dmn.AcceptedError);
+            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
             if (::testing::Test::HasFailure()) {
                 return;
             }
         }// trial 
     }
 
-    for (auto& custom_specials : test_case.getCustomSpecials()) {
-        auto args = custom_specials.Args;
+    for (auto& custom : testCase.getCustomChecks()) {
+        auto args = custom.Args;
         if (args.size() > 0) {
             auto input = vec_type{ args[0] };
-            auto actual = actual_f(input);
-            auto vec_expected = vec_type{ custom_specials.expected };
-            std::function<std::string(int i)> detail = [test_name, input, actual, vec_expected](int i) {
+            auto actual = actualFunction(input);
+            auto vec_expected = vec_type{ custom.expectedResult };
+            std::function<std::string(int i)> detail = [testName, input, actual, vec_expected](int i) {
                 std::stringstream stream;
-                stream << test_name << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
+                stream << testName << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
                 return stream.str();
             };
             AssertVec256(vec_expected, actual, detail);
@@ -817,37 +840,52 @@ void test_unary(
 
 }
 
+template<typename T>
+T getDefaultTolerance() {
+    return static_cast<T>(0.0);
+}
+
+template<>
+float getDefaultTolerance() {
+    return 1.e-5f;
+}
+
+template<>
+double getDefaultTolerance() {
+    return 1.e-9;
+}
+
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void
 test_unary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, bool bitwise = false,
-    Filter filter = {}, bool checkRelativeErr = false, bool allow_specials = false, bool test_nan_inf = false, size_t trials = 0) {
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, bool bitwise = false,
+    Filter filter = {}, bool checkWithTolerance = false, bool testSpecialValues = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
-    TestingCase<T> test_case;
+    TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {
         //for float types lets add manual ranges  
-        UVT generalRelErr = (UVT)(1.e-5f);
+        UVT tolerance = getDefaultTolerance<UVT>();
 
-        test_case = TestingCase<T>::getBuilder()
-            .set(bitwise, allow_specials, test_nan_inf)
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ {}, checkRelativeErr, generalRelErr})
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, testSpecialValues)
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
             .setTrialCount(trials);
 
     }
     else {
-        test_case = TestingCase<T>::getBuilder()
-            .set(bitwise, allow_specials, test_nan_inf)
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, testSpecialValues)
             .addDomain(CheckWithinDomains<UVT>{})
             .setTrialCount(trials);
     }
-    test_unary<T, Op1, Op2, Filter>(test_name, expected_f, actual_f, test_case, filter);
+    test_unary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
 }
 
 
@@ -855,9 +893,9 @@ test_unary(
 
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void test_binary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, const TestingCase<T>& test_case, Filter filter = {}) {
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
 
     using vec_type = T;
     using VT = ValueType<T>;
@@ -866,14 +904,14 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
-    bool bitwise = test_case.isBitwise();
+    bool bitwise = testCase.isBitwise();
     UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
-    auto domains = test_case.getDomains();
+    auto domains = testCase.getDomains();
     auto domains_size = domains.size();
-    auto test_trials = test_case.getTrialCount();
+    auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
-    for (const CheckWithinDomains<UVT>& dmn : test_case.getDomains()) {
+    for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -890,34 +928,34 @@ void test_binary(
                 vals1[k] = generator1.get();
                 call_filter(filter, vals0[k], vals1[k]);
                 //map operator
-                expected[k] = expected_f(vals0[k], vals1[k]);
+                expected[k] = expectedFunction(vals0[k], vals1[k]);
             }
             // test
             auto input0 = vec_type::loadu(vals0);
             auto input1 = vec_type::loadu(vals1);
-            auto actual = actual_f(input0, input1);
+            auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [test_name, input0, input1, actual, vec_expected](int i) {
+            std::function<std::string(int i)> detail = [testName, input0, input1, actual, vec_expected](int i) {
                 std::stringstream stream;
-                stream << test_name << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
+                stream << testName << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
                 return stream.str();
             };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithAcceptance, dmn.AcceptedError);
+            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
             if (::testing::Test::HasFailure()) {
                 return;
             }
         }// trial 
     }
-    for (auto& custom_specials : test_case.getCustomSpecials()) {
-        auto args = custom_specials.Args;
+    for (auto& custom : testCase.getCustomChecks()) {
+        auto args = custom.Args;
         if (args.size() > 0) {
             auto input0 = vec_type{ args[0] };
             auto input1 = args.size() > 1 ? vec_type{ args[1] } : vec_type{ args[0] };
-            auto actual = actual_f(input0, input1);
-            auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [test_name, input0, input1, actual, vec_expected](int i) {
+            auto actual = actualFunction(input0, input1);
+            auto vec_expected = vec_type(custom.expectedResult);
+            std::function<std::string(int i)> detail = [testName, input0, input1, actual, vec_expected](int i) {
                 std::stringstream stream;
-                stream << test_name << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
+                stream << testName << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
                 return stream.str();
             };
             AssertVec256(vec_expected, actual, detail);
@@ -930,41 +968,41 @@ void test_binary(
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void
 test_binary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, bool bitwise = false,
-    Filter filter = {}, bool checkRelativeErr = false, bool allow_specials = false, bool test_nan_inf = false, size_t trials = 0) {
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, bool bitwise = false,
+    Filter filter = {}, bool checkWithTolerance = false, bool testSpecialValues = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
-    TestingCase<T> test_case;
+    TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {
         //for float types lets add manual ranges  
-        UVT generalRelErr = (UVT)(1.e-5f);
+        UVT tolerance = getDefaultTolerance<UVT>();
 
-        test_case = TestingCase<T>::getBuilder()
-            .set(bitwise, allow_specials, test_nan_inf)
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}, { (UVT)-10, (UVT)10 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }, { (UVT)-10, (UVT)100 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }, { (UVT)-100, (UVT)1000 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }, { (UVT)-100, (UVT)10 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }, { (UVT)-1000, (UVT)100 }}, checkRelativeErr, generalRelErr})
-            .addDomain(CheckWithinDomains<UVT>{ {}, checkRelativeErr, generalRelErr})
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, testSpecialValues)
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}, { (UVT)-10, (UVT)10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }, { (UVT)-10, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }, { (UVT)-100, (UVT)1000 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }, { (UVT)-100, (UVT)10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }, { (UVT)-1000, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
             .setTrialCount(trials);
 
     }
     else {
-        test_case = TestingCase<T>::getBuilder()
-            .set(bitwise, allow_specials, test_nan_inf)
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, testSpecialValues)
             .addDomain(CheckWithinDomains<UVT>{})
             .setTrialCount(trials);
     }
-    test_binary<T, Op1, Op2, Filter>(test_name, expected_f, actual_f, test_case, filter);
+    test_binary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
 }
 
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void test_ternary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, const TestingCase<T>& test_case, Filter filter = {}) {
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
 
     using vec_type = T;
     using VT = ValueType<T>;
@@ -974,14 +1012,14 @@ void test_ternary(
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT vals2[el_count];
     CACHE_ALIGN VT expected[el_count];
-    bool bitwise = test_case.isBitwise();
+    bool bitwise = testCase.isBitwise();
     UVT default_start = std::is_floating_point<UVT>::value ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
-    auto domains = test_case.getDomains();
+    auto domains = testCase.getDomains();
     auto domains_size = domains.size();
-    auto test_trials = test_case.getTrialCount();
+    auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
-    for (const CheckWithinDomains<UVT>& dmn : test_case.getDomains()) {
+    for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -1002,21 +1040,21 @@ void test_ternary(
                 vals2[k] = generator2.get();
                 call_filter(filter, vals0[k], vals1[k], vals2[k]);
                 //map operator
-                expected[k] = expected_f(vals0[k], vals1[k], vals2[k]);
+                expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
             }
             // test
             auto input0 = vec_type::loadu(vals0);
             auto input1 = vec_type::loadu(vals1);
             auto input2 = vec_type::loadu(vals2);
-            auto actual = actual_f(input0, input1, input2);
+            auto actual = actualFunction(input0, input1, input2);
             auto vec_expected = vec_type::loadu(expected);
 
-            std::function<std::string(int i)> detail = [test_name, input0, input1, input2, actual, vec_expected](int i) {
+            std::function<std::string(int i)> detail = [testName, input0, input1, input2, actual, vec_expected](int i) {
                 std::stringstream stream;
-                stream << test_name << ": {\n" << input0 << "," << input1 << "," << input2 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
+                stream << testName << ": {\n" << input0 << "," << input1 << "," << input2 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
                 return stream.str();
             };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithAcceptance, dmn.AcceptedError);
+            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
             if (::testing::Test::HasFailure()) {
                 return;
             }
@@ -1028,15 +1066,15 @@ void test_ternary(
 template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
 void
 test_ternary(
-    std::string test_name,
-    Op1 expected_f,
-    Op2 actual_f, bool bitwise = false,
-    Filter filter = {}, bool allow_specials = false, bool test_nan_inf = false, size_t trials = 0) {
-    TestingCase<T> test_case = TestingCase<T>::getBuilder()
-        .set(bitwise, allow_specials, test_nan_inf)
+    std::string testName,
+    Op1 expectedFunction,
+    Op2 actualFunction, bool bitwise = false,
+    Filter filter = {}, bool testSpecialValues = false, size_t trials = 0) {
+    TestingCase<T> testCase = TestingCase<T>::getBuilder()
+        .set(bitwise, testSpecialValues)
         .addDomain(CheckWithinDomains<UvalueType<T>>{})
         .setTrialCount(trials);
-    test_ternary<T, Op1, Op2, Filter>(test_name, expected_f, actual_f, test_case, filter);
+    test_ternary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
 }
 
 template <typename T, typename Op>
@@ -1074,7 +1112,41 @@ std::enable_if_t<is_complex<T>::value, T> local_abs(T x) {
     UnitType<T> imag = x.imag();
     UnitType<T> rr = real * real;
     UnitType<T> ii = imag * imag;
-    return T{ std::sqrt(rr + ii), 0 }; 
+    return T{ std::sqrt(rr + ii), 0 };
+#endif
+}
+
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_multiply(T x, T y) {
+    return x * y;
+}
+
+
+
+template <typename T>
+std::enable_if_t<is_complex<T>::value, T> local_multiply(T x, T y) {
+#if defined(CPU_CAPABILITY_DEFAULT)
+    return x * y;
+#else
+    //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
+    UnitType<T> x_real = x.real();
+    UnitType<T> x_imag = x.imag();
+    UnitType<T> y_real = y.real();
+    UnitType<T> y_imag = y.imag();
+#if defined(CPU_CAPABILITY_VSX)
+    //check multiplication considerin swap and fma
+    UnitType<T> rr = x_real * y_real;
+    UnitType<T> ii = x_imag * y_real;
+    UnitType<T> neg_imag = -y_imag;
+    rr = fma(x_imag, neg_imag, rr);
+    ii = fma(x_real, y_imag, ii);
+
+#else
+    UnitType<T> rr = x_real * y_real - x_imag * y_imag;
+    UnitType<T> ii = x_real * y_imag + x_imag * y_real;
+#endif
+    return T{ rr, ii };
 #endif
 }
 
@@ -1169,25 +1241,13 @@ T requantize_from_int(float multiplier, int64_t zero_point, int64_t src) {
     return ret;
 }
 
-#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) && (defined(__GNUC__) || defined(__GNUG__))
-#undef CHECK_DEQUANT_WITH_LOW_PRECISION 
-#define USE_BUILTIN_FMA 1
-#elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
-#undef CHECK_DEQUANT_WITH_LOW_PRECISION
-#undef USE_BUILTIN_FMA
-#else
-#define CHECK_DEQUANT_WITH_LOW_PRECISION 1
-#undef USE_BUILTIN_FMA
-#endif
-
 template <typename T>
 float dequantize_val(float scale, int64_t zero_point, T value) {
     //when negated scale is used as addition
-#if defined(USE_BUILTIN_FMA)
+#if defined(CHECK_WITH_FMA)
     float neg_p = -(zero_point * scale);
     float v = static_cast<float>(value);
-   // float ret =  v * scale + neg_p;
-    float ret = __builtin_fmaf(v, scale, neg_p);
+    float ret = fma(v, scale, neg_p);
 #else 
     float ret = (static_cast<float>(value) - zero_point) * scale;
 #endif   

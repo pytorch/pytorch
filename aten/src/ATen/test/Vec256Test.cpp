@@ -202,8 +202,8 @@ namespace {
         auto test_case =
             TestingCase<vec_type>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {-1000, 1000}} })
-            .addSpecial({ {case1},exp1 })
-            .addSpecial({ {case2},exp2 })
+            .addCustom({ {case1},exp1 })
+            .addCustom({ {case2},exp2 })
             .setTrialCount(64000);
         test_unary<vec_type>(
             "round", RESOLVE_OVERLOAD(at::native::round_impl),
@@ -318,7 +318,7 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec_type>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, 1.e-5f})
+            .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, getDefaultTolerance<UVT>()})
             .setTrialCount(65536);
         test_unary<vec_type>(
             "sinh", RESOLVE_OVERLOAD(std::sinh),
@@ -330,7 +330,7 @@ namespace {
         using UVT = UvalueType<TypeParam>;
         auto test_case =
             TestingCase<vec_type>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, 1.e-5f})
+            .addDomain(CheckWithinDomains<UVT>{ { {-88, 88}}, true, getDefaultTolerance<UVT>()})
             .setTrialCount(65536);
         test_unary<vec_type>(
             "cosh", RESOLVE_OVERLOAD(std::cosh),
@@ -527,23 +527,10 @@ namespace {
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec_type = TypeParam;
         using VT = ValueType<TypeParam>;
-        if (is_complex<VT>()) {
-            using UVT = UvalueType<TypeParam>;
-            auto test_case =
-                TestingCase<vec_type>::getBuilder()
-                .addDomain(CheckWithinDomains<UVT>{ { DomainRange<UVT>{(UVT)-100, (UVT)100}, DomainRange<UVT>{(UVT)-100, (UVT)100}}, true, (UVT)(1.e-5) });
-            test_binary<vec_type>(
-                "mult",
-                std::multiplies<VT>(),
-                [](const vec_type& v0, const vec_type& v1) { return v0 * v1; },
-                test_case, RESOLVE_OVERLOAD(filter_mult_overflow));
-        }
-        else {
-            test_binary<vec_type>(
-                "mult", std::multiplies<VT>(),
-                [](const vec_type& v0, const vec_type& v1) { return v0 * v1; },
-                false, RESOLVE_OVERLOAD(filter_mult_overflow), false);
-        }
+        test_binary<vec_type>(
+            "mult", RESOLVE_OVERLOAD(local_multiply),
+            [](const vec_type& v0, const vec_type& v1) { return v0 * v1; },
+            false, RESOLVE_OVERLOAD(filter_mult_overflow), true);
     }
 
 
