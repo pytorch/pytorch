@@ -343,44 +343,69 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=device), torch.tensor(0., device=device))
 
-    @float_double_default_dtype
-    def test_result_type(self, device):
-        # Tensor against tensor
-        for dtypea in torch.testing.get_all_dtypes():
-            for dtypeb in torch.testing.get_all_dtypes():
-                try:
-                    promoted_dtype = torch.promote_types(dtypea, dtypeb)
-                except RuntimeError:  # undefined promoted type
-                    with self.assertRaises(RuntimeError):
-                        torch.result_type(torch.tensor([0, 1], dtype=dtypea, device=device),
-                                          torch.tensor([1, 0], dtype=dtypeb, device=device))
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_result_type(self, device, dtypes):
+        "Test result_type for tensor vs tensor and scalar vs scalar."
+
+        def _get_dtype(x):
+            "Get the dtype of x if x is a tensor. If x is a scalar, get its corresponding dtype if it were a tensor."
+            if torch.is_tensor(x):
+                return x.dtype
+            elif isinstance(x, bool):
+                return torch.bool
+            elif isinstance(x, int):
+                return torch.int64
+            elif isinstance(x, float):
+                return torch.float32
+            elif isinstance(x, complex):
+                return torch.complex64
+            else:
+                raise AssertionError(f"Unkonwn type {x}")
+
+        # tensor against tensor
+        a_tensor = torch.tensor((0, 1), device=device, dtype=dtypes[0])
+        a_single_tensor = torch.tensor(1, device=device, dtype=dtypes[0])
+        a_scalar = a_single_tensor.item()
+        b_tensor = torch.tensor((1, 0), device=device, dtype=dtypes[1])
+        b_single_tensor = torch.tensor(1, device=device, dtype=dtypes[1])
+        b_scalar = b_single_tensor.item()
+        for a, b in ((a_tensor, b_tensor), (a_single_tensor, b_single_tensor), (a_scalar, b_scalar)):
+            dtype_a = _get_dtype(a)
+            dtype_b = _get_dtype(b)
+            try:
+                result = a + b
+            except RuntimeError:
+                with self.assertRaises(RuntimeError):
+                    torch.promote_types(dtype_a, dtype_b)
+                with self.assertRaises(RuntimeError):
+                    torch.result_type(a, b)
+            else:
+                dtype_res = _get_dtype(result)
+                if a is a_scalar and b is b_scalar and dtype_a == torch.bool and dtype_b == torch.bool:
+                    # special case: in Python, True + True is an integer
+                    self.assertEqual(dtype_res, torch.int64, f"a == {a}, b == {b}")
+                else:
+                    self.assertEqual(dtype_res, torch.result_type(a, b), f"a == {a}, b == {b}")
+                if a is a_scalar and b is b_scalar:  # Python internal type determination is good enough in this case
                     continue
-                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtypea, device=device),
-                                                   torch.tensor([1, 0], dtype=dtypeb, device=device)), promoted_dtype)
+                self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), f"a == {a}, b == {b}")
 
-        # Tensor against scalar
-        for dtype in torch.testing.get_all_dtypes():
-            # int scalar
-            if dtype == torch.bool:
-                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1), torch.int64)
-                self.assertEqual(torch.result_type(1, torch.tensor([0, 1], dtype=dtype, device=device)), torch.int64)
-            else:
-                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1), dtype)
-                self.assertEqual(torch.result_type(1, torch.tensor([0, 1], dtype=dtype, device=device)), dtype)
+    @float_double_default_dtype
+    def test_result_type_tensor_vs_scalar(self, device):
+        "Spot check some result type for tensor against scalar (including single-element tensor)."
 
-            # float scalar
-            if torch.testing.is_integral(dtype):
-                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1.),
-                                 torch.get_default_dtype())
-                self.assertEqual(torch.result_type(1., torch.tensor([0, 1], dtype=dtype, device=device)),
-                                 torch.get_default_dtype())
-            else:
-                self.assertEqual(torch.result_type(torch.tensor([0, 1], dtype=dtype, device=device), 1.), dtype)
-                self.assertEqual(torch.result_type(1., torch.tensor([0, 1], dtype=dtype, device=device)), dtype)
+        def _test_spot(a, b, res_dtype):
+            self.assertEqual(torch.result_type(a, b), res_dtype)
+            self.assertEqual(torch.result_type(b, a), res_dtype)
 
-        self.assertEqual(torch.result_type(1, 1.), torch.get_default_dtype())
-        self.assertEqual(torch.result_type(1., 1.), torch.get_default_dtype())
-        self.assertEqual(torch.result_type(1, 1), torch.int64)
+        _test_spot(torch.tensor(1, dtype=torch.int, device=device), 1, torch.int)
+        _test_spot(torch.tensor(1, device=device), 1., torch.get_default_dtype())
+        _test_spot(torch.tensor(1, dtype=torch.long, device=device),
+                   torch.tensor([1, 1], dtype=torch.int, device=device), torch.int)
+        _test_spot(torch.tensor([1., 1.], dtype=torch.float, device=device), 1., torch.float)
+        _test_spot(torch.tensor([1., 1.], dtype=torch.complex64, device=device),
+                   torch.tensor(1., dtype=torch.complex128, device=device), torch.complex64)
+        _test_spot(torch.tensor([1, 1], dtype=torch.bool, device=device), 1., torch.get_default_dtype())
 
     @float_double_default_dtype
     def test_can_cast(self, device):
