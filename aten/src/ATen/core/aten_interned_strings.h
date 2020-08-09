@@ -619,6 +619,7 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, signbit) \
 _(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
@@ -714,6 +715,9 @@ _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \

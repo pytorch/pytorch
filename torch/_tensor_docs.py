@@ -2832,6 +2832,13 @@ sign_() -> Tensor
 In-place version of :meth:`~Tensor.sign`
 """)
 
+add_docstr_all('signbit',
+               r"""
+signbit() -> Tensor
+
+See :func:`torch.signbit`
+""")
+
 add_docstr_all('sin',
                r"""
 sin() -> Tensor
@@ -3720,8 +3727,7 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fft',
-               r"""
+add_docstr_all('fft', r"""
 fft(signal_ndim, normalized=False) -> Tensor
 
 See :func:`torch.fft`
