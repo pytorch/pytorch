@@ -74,16 +74,32 @@ inline bool is_eligible(const Tensor& arg) {
 }
 
 // Overload to catch Tensor args
-Tensor cached_cast(at::ScalarType to_type, const Tensor& arg);
+TORCH_API Tensor cached_cast(at::ScalarType to_type, const Tensor& arg);
 
 // Overload to process optional<Tensor>
-c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg);
+inline c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg) {
+  if (arg.has_value()) {
+    return cached_cast(to_type, *arg);
+  } else {
+    return c10::nullopt;
+  }
+}
 
 // Overload to process TensorLists
-std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg);
+inline std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
+  std::vector<Tensor> vec;
+  vec.reserve(arg.size());
+  for (const auto& t : arg) {
+    vec.push_back(cached_cast(to_type, t));
+  }
+  return vec;
+}
 
 // Template to catch non-Tensor args.
-template<typename T> T cached_cast(at::ScalarType to_type, T arg);
+template<typename T>
+inline T cached_cast(at::ScalarType to_type, T arg) {
+  return arg;
+}
 
 /*******************************************************
 Logic to flip an output dtype flag.

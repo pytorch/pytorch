@@ -1,4 +1,6 @@
+#include <ATen/ATen.h>
 #include <ATen/autocast_mode.h>
+#include <torch/library.h>
 
 // pulls in AT_CUDNN_ENABLED() as defined by cmake
 #include <ATen/cuda/CUDAConfig.h>
@@ -10,9 +12,9 @@
 namespace at {
 namespace autocast {
 
-/***********************************************************
-CuDNN RNNs (the weight reflattening needs special attention)
-***********************************************************/
+/********************************************************************************
+Autocast wrapper for CuDNN RNNs (the weight reflattening needs special attention)
+********************************************************************************/
 
 // To be registered for the "_cudnn_rnn(...)" schema.
 // _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
@@ -32,7 +34,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
                           const c10::optional<Tensor>& dropout_state) {
-  std::cout << "Calling _cudnn_rnn_cast_reflatten" << std::endl;
 #if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 

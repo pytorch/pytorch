@@ -60,6 +60,9 @@ int decrement_nesting() {
 }
 
 // Overload to catch Tensor args
+// TODO (possible optimization): Move cast_cache to an inline function in a header
+// (+ refactor the can_try_cache branch to call a small non-inline helper function.
+// can_try_cache branch is the only part that's hard to inline in other files).
 Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
   if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
@@ -80,31 +83,6 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
   } else {
     return arg;
   }
-}
-
-// Overload to process optional<Tensor>
-c10::optional<Tensor> cached_cast(at::ScalarType to_type, const c10::optional<Tensor>& arg) {
-  if (arg.has_value()) {
-    return cached_cast(to_type, *arg);
-  } else {
-    return c10::nullopt;
-  }
-}
-
-// Overload to process TensorLists
-std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
-  std::vector<Tensor> vec;
-  vec.reserve(arg.size());
-  for (const auto& t : arg) {
-    vec.push_back(cached_cast(to_type, t));
-  }
-  return vec;
-}
-
-// Template to catch non-Tensor args.
-template<typename T>
-T cached_cast(at::ScalarType to_type, T arg) {
-  return arg;
 }
 
 // Policies correspond to op categories that need code-divergent handling.
