@@ -72,9 +72,10 @@ struct curand_uniform_wrapper {
     auto val = curand_uniform(&state);
     // val is from 0.0 to 1.0, where 1.0 is included and 0.0 is excluded
     // We want 1.0 excluded and 0.0 included
-    if (val == 1.0F) {
-        val = 0.0F;
-    }
+    // Use the same trick as in uniform_real to rescale val
+    constexpr auto MASK = (static_cast<uint64_t>(1) << std::numeric_limits<float>::digits) - 1;
+    constexpr auto DIVISOR = static_cast<float>(1) / (static_cast<uint64_t>(1) << std::numeric_limits<float>::digits);
+    val = (static_cast<uint64_t>(val) & MASK) * DIVISOR;
     return val;
   }
 };
