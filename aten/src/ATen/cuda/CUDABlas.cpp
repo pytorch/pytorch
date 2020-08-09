@@ -519,6 +519,9 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 #endif
 }
 
+// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+#ifdef CUDART_VERSION
+
 template <>
 void getrfBatched<double>(
     int _m, int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
@@ -550,6 +553,8 @@ void getriBatched<float>(
   TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
       handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
 }
+
+#endif // CUDART_VERSION
 
 } // namespace blas
 } // namespace cuda

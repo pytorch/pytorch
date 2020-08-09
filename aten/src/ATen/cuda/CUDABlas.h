@@ -128,6 +128,9 @@ template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half));
 
 
+// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+#ifdef CUDART_VERSION
+
 #define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
   int _m, int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
 
@@ -152,6 +155,8 @@ template<>
 void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
 template<>
 void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
+
+#endif // CUDART_VERSION
 
 } // namespace blas
 } // namespace cuda
