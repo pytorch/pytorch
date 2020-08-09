@@ -5,6 +5,8 @@
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/CUDASolver.h>
+#include <ATen/cuda/CUDABlas.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -14,74 +16,6 @@
 
 namespace at {
 namespace native {
-
-template<>
-void cusolver_getrf<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
-  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kDouble));
-  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf(handle, m, n, dA, ldda, buffer.data_ptr<double>(), ipiv, devInfo.data_ptr<int>()));
-  *info = devInfo.item<int>();
-}
-
-template<>
-void cusolver_getrf<float>(int m, int n, float* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
-  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kFloat));
-  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf(handle, m, n, dA, ldda, buffer.data_ptr<float>(), ipiv, devInfo.data_ptr<int>()));
-  *info = devInfo.item<int>();
-}
-
-template<>
-void cusolver_getrs<double>(int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
-  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
-  *info = dinfo.item<int>();
-}
-
-template<>
-void cusolver_getrs<float>(int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
-  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
-  *info = dinfo.item<int>();
-}
-
-template<>
-void cublas_getrf_batched<double>(
-    int _m, int n, double** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
-}
-
-template<>
-void cublas_getrf_batched<float>(
-    int _m, int n, float** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
-}
-
-template<>
-void cublas_getri_batched<double>(
-    int _m, int n, double** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize, double** dC_array){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
-}
-
-template<>
-void cublas_getri_batched<float>(
-    int _m, int n, float** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize, float** dC_array){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
-}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -118,17 +52,16 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   Tensor ipiv_array = at::zeros({batch_size * n}, self.options().dtype(at::kInt));
 
   if (use_loop_launch_) {
-    infos = infos.cpu();
     int* p_ipiv_array = ipiv_array.data_ptr<int>();
     int* p_infos = infos.data_ptr<int>();
     for (int64_t i = 0; i < batch_size; i++) {
       _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array + i * n, p_infos + i, n);
     }
   } else {
-    cublas_getrf_batched<scalar_t>(n, n, self_array, n,
+    at::cuda::blas::getrfBatched<scalar_t>(n, n, self_array, n,
       ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
 
-    cublas_getri_batched<scalar_t>(n, n, self_array, n,
+    at::cuda::blas::getriBatched<scalar_t>(n, n, self_array, n,
       ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
   }
 }
@@ -142,16 +75,18 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, int64
   self_inv.unsafeGetTensorImpl()->set_stride(0, 1); // These two lines set self_inv to column-major
   self_inv.unsafeGetTensorImpl()->set_stride(1, n);
 
-  int info_tmp = 0;
-  _apply_single_inverse_helper<scalar_t>(self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), &info_tmp, n);
-  info = info_tmp;
+  Tensor info_tmp = at::zeros({1}, self.options().dtype(at::kInt));
+  _apply_single_inverse_helper<scalar_t>(
+    self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(),
+    ipiv.data_ptr<int>(), info_tmp.data_ptr<int>(), n);
+  info = info_tmp.item<int>();
 }
 
 template <typename scalar_t>
 inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
   // self_inv_ptr should already be an identity matrix
-  cusolver_getrf<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
-  cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
+  at::cuda::solver::getrf<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  at::cuda::solver::getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {

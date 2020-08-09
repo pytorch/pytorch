@@ -519,6 +519,38 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 #endif
 }
 
+template <>
+void getrfBatched<double>(
+    int _m, int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getrfBatched<float>(
+    int _m, int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getriBatched<double>(
+    int _m, int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+}
+
+template <>
+void getriBatched<float>(
+    int _m, int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+}
+
 } // namespace blas
 } // namespace cuda
 } // namespace at
