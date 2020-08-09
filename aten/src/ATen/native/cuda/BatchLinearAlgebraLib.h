@@ -6,8 +6,8 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#define ALLOCATE_ARRAY(name, type, size) \
-  auto storage_##name = pin_memory<type>(size); \
+#define ALLOCATE_ARRAY(name, type, size)            \
+  auto storage_##name = pin_memory<type>(size);     \
   name = static_cast<type*>(storage_##name.data());
 
 #ifdef USE_CUSOLVER
