@@ -231,10 +231,17 @@
 #      original function's name with their own.
 # 2) Implement the corresponding functions and have them redispatch to the
 #      original function.
-# 3) Add docstrings to the new functions that reference the original function.
-# 4) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 5) Update the op_alias_mappings in torch/testing/_internal/jit_utils.py.
-# 6) Add a test validating the alias's behavior is the same as the original
+# 3) Add entries for the alias (and original function, if needed) to
+#      aten/src/ATen/interned_strings.h
+# 4) Add docstrings to the new functions that reference the original function.
+# 5) Update torch/overrides.py consistent with the original function.
+# 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
+# 7) Update the op_alias_mappings in torch/testing/_internal/jit_utils.py.
+# 8) Add entries in
+#      torch/testing/_internal/common_method_invocations.py's method_tests
+#      for both the alias and the in-place version of the alias, with
+#      should_check_autodiff=False.
+# 9) Add a test validating the alias's behavior is the same as the original
 #      function's.
 #
 # See torch.absolute, an alias for torch.abs, as an example.
@@ -797,6 +804,16 @@
   variants: function, method
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
+
+# clip is an alias for clamp
+- func: clip(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
+  variants: function, method
+
+- func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   use_c10_dispatcher: full
